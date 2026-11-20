@@ -76,11 +76,16 @@ function foldScore(env, P, bins = 48) {
   return { score: mx / (sum / bins + 1e-9), phase: (mi + 0.5) / bins };
 }
 
+const MIN_ONSET = 0.03; // mean onset strength below which a signal has no beat (see test/qa-regressions)
 export function detectBpm(mono, sr, { min = 70, max = 180 } = {}) {
   const hop = 256;
   const env = onsetEnvelope(mono, sr, hop);
   const fps = sr / hop;
   if (env.length < fps * 4) return { bpm: null, offset: 0, confidence: 0 };
+  // no onsets at all (digital silence, a steady tone): there is no tempo to find, don't invent one
+  let onsetMean = 0; for (let k = 0; k < env.length; k++) onsetMean += env[k];
+  onsetMean /= env.length;
+  if (!(onsetMean > MIN_ONSET)) return { bpm: null, offset: 0, confidence: 0 };
   // 1) autocorrelation over the tempo range
   const minLag = Math.floor(fps * 60 / max), maxLag = Math.ceil(fps * 60 / min);
   const N = Math.min(env.length, Math.floor(fps * 120)); // first 2 minutes is plenty for ACF

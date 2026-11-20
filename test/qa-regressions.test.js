@@ -207,3 +207,14 @@ test('m7/m10: media server errors are readable; a failed stream marks the file m
     assert.equal((await req('GET', 'api/tracks')).j.find((x) => x.id === t.id).missing, true, 'flagged without waiting for the cache TTL');
   } finally { app.shutdown(); app.server.close(); }
 });
+
+test('m12: no BPM is invented for digital silence or a steady tone; beats are still found', async () => {
+  const { detectBpm } = await import('../public/js/audio/analysis-core.js');
+  const sr = 44100, n = sr * 20;
+  const gen = (f) => Float32Array.from({ length: n }, (_, i) => f(i / sr));
+  assert.equal(detectBpm(gen(() => 0), sr).bpm, null);
+  assert.equal(detectBpm(gen((t) => 0.5 * Math.sin(2 * Math.PI * 440 * t)), sr).bpm, null);
+  const beat = 60 / 124;
+  const clicks = gen((t) => { const tb = (t - 0.1) % beat; let v = 0.25 * Math.sin(2 * Math.PI * 220 * t); if (t > 0.1 && tb < 0.15) v += 0.8 * Math.sin(2 * Math.PI * (50 + 100 * Math.exp(-tb * 40)) * tb) * Math.exp(-tb * 18); return v * 0.7; });
+  assert.equal(detectBpm(clicks, sr).bpm, 124);
+});
