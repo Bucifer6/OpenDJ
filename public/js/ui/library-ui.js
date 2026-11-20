@@ -1,5 +1,7 @@
 import { el, fmtDur, escapeHtml } from '../util.js';
 import { uploadButton } from './upload.js';
+import { openCdjExport } from '../cdj/export-dialog.js';
+import { stemsMenuItems } from '../stems/stems-ui.js';
 import { api } from '../api.js';
 import { toCamelot, camelotCompatible } from '../audio/analysis-core.js';
 import { LibraryDialogs, TRACK_COLORS, colorName, flipSubmenus } from './library-dialogs.js';
@@ -298,6 +300,7 @@ export class LibraryUI {
     items.push({ label: 'Add to automix queue', action: () => this.app.queueAdd(tracks) });
     if (remote.length) items.push({ label: `Download ${remote.length > 1 ? remote.length + ' tracks' : 'for offline use'}`, action: () => this.download(remote.map((t) => t.id)) });
     items.push({ label: 'Re-analyse (BPM, key, waveform)', action: async () => { for (const t of tracks) { await api.updateTrack(t.id, { analyzed: false }); t.analyzed = false; } this.app.toast('Tracks will be re-analysed when loaded'); } });
+    items.push(...stemsMenuItems(this.app, tracks));
     if (window.opendjNative && tracks[0] && (tracks[0].localPath || tracks[0].path)) items.push({ label: 'Show in folder', action: () => window.opendjNative.reveal(tracks[0].localPath || tracks[0].path) });
     items.push('-');
     const curPl = this.view.kind === 'playlist' && this.playlists.find((p) => p.id === this.view.id);
@@ -435,6 +438,8 @@ export class LibraryUI {
       { label: 'Download all for offline use', action: () => this.download(p.trackIds.filter((i) => { const t = this.tracks.get(i); return t?.sourceType === 'remote' && !t.localPath; })) },
       { label: 'Export as M3U8', action: () => { location.href = api.m3uUrl(p.id); } },
       { label: 'Export to USB / folder…', action: () => this.app.dialogs.exportUsb([p.id]) },
+      { label: 'Export to CDJ USB (rekordbox)…', action: () => openCdjExport(this.app, [p.id]) },
+      { label: 'Prepare AI stems for playlist', action: () => this.app.stems?.enqueue(p.trackIds).catch((e) => this.app.toast(e.message)) },
     ];
     if (p.smart) {
       items.push('-',

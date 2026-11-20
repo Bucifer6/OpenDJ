@@ -5,6 +5,7 @@ import { EFFECTS, BEAT_DIVISIONS } from '../audio/effects.js';
 import { api } from '../api.js';
 import { cssVar } from './themes.js';
 import { dvsModeIndicator } from '../dvs/dvs-ui.js';
+import { buildStemControls } from '../stems/stems-ui.js';
 import { HOTCUE_COLORS } from '../audio/deck.js';
 import { camelotCompatible, toCamelot } from '../audio/analysis-core.js';
 
@@ -203,7 +204,7 @@ export function buildDeck(app, deck) {
       ),
       el('div', { class: 'deck-mid' },
         el('div', { class: 'sync-row' }, syncBtn, masterBtn),
-        toggles, keyRow,
+        toggles, keyRow, buildStemControls(app, deck),
         loopRow, jumpRow,
         modeBar, padGrid,
         fxUnit,

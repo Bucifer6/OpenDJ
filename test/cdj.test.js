@@ -402,6 +402,23 @@ test('incremental update keeps track IDs, adds playlists, replaces same-name pla
   assert.equal(db4.tracks.length, 4);
 });
 
+test('edge cases: same-name playlists, "/" inside folder names, very long titles, smart playlists via playlistTrackIds', async () => {
+  const { dir, lib, ids } = makeLibrary({ n: 3, waveforms: false });
+  lib.updateTrack(ids[1], { title: 'T'.repeat(500), artist: 'Ä'.repeat(500) });
+  const usb = path.join(dir, 'usb'); fs.mkdirSync(usb);
+  const p1 = lib.createPlaylist('Set', [ids[0]], { folder: 'AC/DC / Live' });
+  const p2 = lib.createPlaylist('Set', [ids[1]], { folder: 'AC/DC / Live' });
+  const smart = lib.createPlaylist('Smart', [], { smart: { match: 'all', rules: [] } });
+  const r = await exportToCdj({ library: lib, playlistTrackIds: (p) => (p.smart ? [ids[2]] : p.trackIds) }, { targetDir: usb, playlistIds: [p1.id, p2.id, smart.id] });
+  assert.equal(r.skipped.length, 0);
+  const db = readExportDb(fs.readFileSync(path.join(usb, 'PIONEER/rekordbox/export.pdb')), { strict: true });
+  const names = db.playlistTree.map((p) => p.name).sort();
+  assert.deepEqual(names, ['AC/DC', 'Live', 'Set', 'Set (2)', 'Smart']);
+  assert.equal(db.tracks.find((t) => t.title.startsWith('TTT')).title.length, 255);
+  const smartNode = db.playlistTree.find((p) => p.name === 'Smart');
+  assert.equal(db.playlistEntries.filter((e) => e.playlistId === smartNode.id).length, 1);
+});
+
 test('dry run writes nothing; bad requests are rejected', async () => {
   const { dir, lib, ids } = makeLibrary({ n: 2, waveforms: false });
   const usb = path.join(dir, 'usb'); fs.mkdirSync(usb);

@@ -497,7 +497,8 @@ export function registerBroadcastRoutes({ route, library, emit = () => {}, pathA
     if (!ff()) throw httpError(415, 'Broadcasting needs FFmpeg, which is not installed on the server.', 'needs-ffmpeg');
     const cfg = store.get();
     const ids = Array.isArray(body.targetIds) && body.targetIds.length ? body.targetIds : (cfg.targets || []).filter((t) => t.enabled).map((t) => t.id);
-    const targets = (cfg.targets || []).filter((t) => ids.includes(t.id));
+    // re-validated here too: settings.json can be edited by hand or through PUT /api/settings
+    const targets = (cfg.targets || []).filter((t) => ids.includes(t.id)).map((t) => normTarget(t, {}));
     if (!targets.length) throw httpError(400, 'Add and enable a stream target first');
     if ([...sessions.values()].some((s) => s.outputs.some((o) => ids.includes(o.t.id)))) throw httpError(409, 'Already broadcasting to this target');
     const inRate = Math.round(Number(body.sampleRate));

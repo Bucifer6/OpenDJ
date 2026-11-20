@@ -81,8 +81,17 @@ export function buildTargets(app) {
     add(`${P}.keyKnob`, `Deck ${n} Key knob (±12 semitones)`, 'abs', (v) => { const s = Math.round(v * 24 - 12); if (s !== deck.keyShift) deck.setKeyShift(s); }, null, () => ((deck.keyShift || 0) + 12) / 24);
     for (let p = 0; p < 8; p++) add(`${P}.slice${p + 1}`, `Deck ${n} Slicer pad ${p + 1}`, 'button', (down) => (down ? deck.sliceDown(p) : deck.sliceUp()));
     add(`${P}.instantDouble`, `Deck ${n} Instant double from other deck`, 'button', (down) => down && deck.cloneFrom(eng.decks[d % 2 === 0 ? d + 1 : d - 1]));
-    add(`${M}.vocal`, `Channel ${n} Vocal level (quick stems)`, 'abs', (v) => ch.set('vocal', v), null, () => ch.state.vocal);
-    add(`${M}.inst`, `Channel ${n} Instrumental level (quick stems)`, 'abs', (v) => ch.set('inst', v), null, () => ch.state.inst);
+    const STEM_LBL = ['Vocals', 'Drums', 'Bass', 'Melody'];
+    for (let s = 0; s < 4; s++) {
+      add(`${P}.stem${s + 1}Mute`, `Deck ${n} Stem ${STEM_LBL[s]} on/off`, 'button', (down) => down && deck.toggleStem(s), () => deck.stemsReady && !deck.stemMute[s]);
+      add(`${P}.stem${s + 1}Level`, `Deck ${n} Stem ${STEM_LBL[s]} level`, 'abs', (v) => deck.setStemLevel(s, v), null, () => deck.stemLevels[s]);
+    }
+    add(`${P}.stemAcapella`, `Deck ${n} Stems: acapella`, 'button', (down) => down && deck.stemAcapella(), () => deck.isAcapella);
+    add(`${P}.stemInstrumental`, `Deck ${n} Stems: instrumental`, 'button', (down) => down && deck.stemInstrumental(), () => deck.isInstrumental);
+    add(`${P}.stemFx`, `Deck ${n} Stem FX (vocal echo)`, 'button', (down) => down && deck.setStemFx(!deck.stemFxOn), () => deck.stemFxOn);
+    add(`${P}.prepareStems`, `Deck ${n} Prepare AI stems`, 'button', (down) => down && deck.track && app.stems?.enqueue([deck.track.id]).catch(() => {}));
+    add(`${M}.vocal`, `Channel ${n} Vocal level (AI stems or quick stems)`, 'abs', (v) => ch.set('vocal', v), null, () => ch.state.vocal);
+    add(`${M}.inst`, `Channel ${n} Instrumental level (AI stems or quick stems)`, 'abs', (v) => ch.set('inst', v), null, () => ch.state.inst);
     add(`${M}.volume`, `Channel ${n} Fader`, 'abs', (v) => ch.set('volume', v), null, () => ch.state.volume);
     add(`${M}.trim`, `Channel ${n} Trim`, 'abs', (v) => ch.set('trim', v * 2 - 1), null, bi('trim'));
     add(`${M}.eqHigh`, `Channel ${n} EQ High`, 'abs', (v) => ch.set('eqHigh', v * 2 - 1), null, bi('eqHigh'));

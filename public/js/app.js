@@ -15,6 +15,8 @@ import { setupVideo } from './video/video-ui.js';
 import { setupUpload } from './ui/upload.js';
 import { DvsManager } from './dvs/dvs.js';
 import { setupLink } from './link/link.js';
+import { setupStems } from './stems/stems-ui.js';
+import { setupRecording } from './recording/index.js';
 import { setupLyrics } from './lyrics/lyrics.js';
 import { dvsButton } from './dvs/dvs-ui.js';
 
@@ -36,6 +38,8 @@ class App {
     this.midi = new MidiManager(this);
     this.sequencer = new Sequencer(this.engine);
     this.buildLayout();
+    setupStems(this);
+    this.recording = setupRecording(this); this.engine.attachRecorder(this.recording.recorder);
     this.wireEvents(); // subscribe to server events before loading the library so no change is missed
     setupLink(this);
     setupLyrics(this);
@@ -242,14 +246,8 @@ class App {
     this.amInfo.textContent = a.enabled ? (a.transition ? 'Mixing…' : next ? `Next: ${next.artist ? next.artist + ' – ' : ''}${next.title}` : 'Last track') : (a.queue.length ? `${a.queue.length - a.idx} queued` : '');
   }
 
-  async toggleRecord() {
-    if (!this.engine.recording) { await this.engine.resume(); this.engine.startRecording(); this.toast('Recording started'); return; }
-    const blob = await this.engine.stopRecording();
-    const name = `OpenDJ mix ${new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '-')}.wav`;
-    const a = el('a', { href: URL.createObjectURL(blob), download: name }); document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
-    this.toast(`Saved recording "${name}" (${(blob.size / 1048576).toFixed(1)} MB)`);
-  }
+  toggleRecord() { return this.recording.toggle(); }
+
 
   /** Pad FX mode actions */
   padFx(deck, fx, down) {
@@ -333,7 +331,7 @@ class App {
       if (keyDeck[k]?.[1] === 'cue') this.engine.decks[keyDeck[k][0]].cueUp();
       if (/^Digit/.test(e.code) && hot[e.code.replace('Digit', '')]) { const [di, n] = hot[e.code.replace('Digit', '')]; this.engine.decks[di].hotCueUp(n); }
     });
-    window.addEventListener('beforeunload', (e) => { if (this.engine.decks.some((d) => d.playing) || this.engine.recording) { e.preventDefault(); e.returnValue = ''; } });
+    window.addEventListener('beforeunload', (e) => { if (this.engine.decks.some((d) => d.playing) || this.engine.recording || this.recording?.broadcaster?.live) { e.preventDefault(); e.returnValue = ''; } });
   }
 
   frame(now) {

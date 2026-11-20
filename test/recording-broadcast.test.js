@@ -149,7 +149,10 @@ test('secrets stay server-side: config GET never returns passwords; secrets.json
     const sf = path.join(dataDir, 'secrets.json');
     if (process.platform !== 'win32') assert.equal(fs.statSync(sf).mode & 0o777, 0o600);
     assert.equal(new SecretStore(dataDir).get('broadcast', ids[0], 'password'), 'TOPSECRET1');
-    assert.ok(!fs.readFileSync(path.join(dataDir, 'broadcast.json'), 'utf8').includes('TOPSECRET1'), 'not in the config file');
+    // the stored config (settings.json via the library, or broadcast.json before the key exists) never holds secrets
+    const cfgFile = path.join(dataDir, 'broadcast.json');
+    const stored = fs.existsSync(cfgFile) ? fs.readFileSync(cfgFile, 'utf8') : JSON.stringify(lib.settings.broadcast || {});
+    assert.ok(!stored.includes('TOPSECRET1') && !stored.includes('live_KEY_123'), 'not in the stored config');
     // editing without a password keeps it; clearPassword removes it; removing a target removes its secrets
     r = await j('PUT', '/api/broadcast/config', { targets: [{ ...r.config.targets[0], password: '', stationName: 'New' }, r.config.targets[1]] });
     assert.equal(r.config.targets[0].hasPassword, true); assert.equal(r.config.targets[0].stationName, 'New');

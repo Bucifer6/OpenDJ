@@ -35,6 +35,9 @@ export const DEFAULT_SETTINGS = {
   sequencer: null,            // object; replaced wholesale on update (not merged)
   link: { enabled: false, quantum: 4, startStopSync: false },
   lyrics: { online: false, writeLrc: false },
+  stemsModelUrl: '', stemsModelSha256: '', stemsBackend: 'auto', stemsAutoLoad: true, stemsOverlap: 0.25,
+  recording: null,
+  broadcast: null,
   lighting: null,             // lighting rig + outputs (server/lighting); replaced wholesale on update
   transcodeCacheGB: 4,        // FFmpeg transcode cache cap (data dir/transcode-cache), LRU
   uploadDir: '',              // browser uploads land here ('' = <data dir>/Uploads, or OPENDJ_UPLOAD_DIR)

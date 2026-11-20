@@ -86,6 +86,8 @@ class Channel extends Emitter {
     this.apply();
   }
   setAutoGain(db) { this.state.autoGain = db; this.apply(); }
+  /** AI stems loaded on this channel's deck: VOC / INST then drive the stems and the DSP quick-stems chain is bypassed. */
+  setAiStems(on) { if (this.aiStems === !!on) return; this.aiStems = !!on; this.apply(); this.emit('change', 'aiStems', this.aiStems); }
   apply() {
     const s = this.state, t = this.ctx.currentTime, k = 0.012;
     this.trimNode.gain.setTargetAtTime(dbToGain(s.trim * 12 + s.autoGain), t, k);
@@ -93,10 +95,13 @@ class Channel extends Emitter {
     this.mid.gain.setTargetAtTime(knobToDb(s.eqMid), t, k);
     this.low.gain.setTargetAtTime(knobToDb(s.eqLow), t, k);
     const db = (v) => 20 * Math.log10(Math.max(0.01, v));
-    this.vocBand.gain.setTargetAtTime(db(s.vocal) - (s.inst < 1 ? db(s.inst) * 0.6 : 0), t, k); // keep vocals up when inst is cut
-    this.instLow.gain.setTargetAtTime(db(s.inst), t, k);
-    this.instHigh.gain.setTargetAtTime(db(s.inst), t, k);
-    this.sideGain.gain.setTargetAtTime(s.inst, t, k);
+    // AI stems (deck worklet) when the track has them, else the DSP "quick stems" approximation (fallback)
+    const ai = !!this.aiStems, vocal = ai ? 1 : s.vocal, inst = ai ? 1 : s.inst;
+    this.engine.decks?.[this.index]?.applyStemMacro?.(ai ? s.vocal : 1, ai ? s.inst : 1);
+    this.vocBand.gain.setTargetAtTime(db(vocal) - (inst < 1 ? db(inst) * 0.6 : 0), t, k); // keep vocals up when inst is cut
+    this.instLow.gain.setTargetAtTime(db(inst), t, k);
+    this.instHigh.gain.setTargetAtTime(db(inst), t, k);
+    this.sideGain.gain.setTargetAtTime(inst, t, k);
     // Color FX amount follows the filter knob; the filter itself is gentler in colour modes
     const amt = Math.abs(s.filter) < 0.03 ? 0 : Math.abs(s.filter);
     if (this.colorFx) {
@@ -160,11 +165,6 @@ export class Engine extends Emitter {
     this.setCueMix(0); this.hpOut.gain.value = 0.8;
     // sampler -> master
     this.sampler = new Sampler(ctx, this.masterBus);
-    // recorder tap
-    this.recNode = new AudioWorkletNode(ctx, 'recorder-processor', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
-    const sink = ctx.createGain(); sink.gain.value = 0;
-    this.masterOut.connect(this.recNode); this.recNode.connect(sink); sink.connect(ctx.destination);
-    this.recNode.port.onmessage = (e) => this.onRecChunk(e.data);
 
     for (let i = 0; i < 4; i++) {
       const ch = new Channel(this, i); this.channels.push(ch);
@@ -251,7 +251,7 @@ export class Engine extends Emitter {
     // reconnect internal taps removed by disconnect()
     const split = ctx.createChannelSplitter(2);
     this.masterOut.connect(split); split.connect(this.masterMeterL, 0); split.connect(this.masterMeterR, 1);
-    this.masterOut.connect(this.hpMaster); this.masterOut.connect(this.recNode);
+    this.masterOut.connect(this.hpMaster);
     if (this.hpAudio) { this.hpAudio.pause(); this.hpAudio.srcObject = null; this.hpAudio = null; }
     try {
       const sink = s.masterDeviceId && s.masterDeviceId !== 'default' ? s.masterDeviceId : '';
@@ -340,35 +340,11 @@ export class Engine extends Emitter {
     return [peak(this.masterMeterL), peak(this.masterMeterR)];
   }
 
-  // ---------- recording ----------
-  startRecording() {
-    if (this.recording) return;
-    this.recChunks = []; this.recFrames = 0; this.recording = true; this.recStarted = Date.now();
-    this.recNode.port.postMessage({ record: true });
-    this.emit('recording', true);
-  }
-  onRecChunk({ l, r, flush }) {
-    if (!this.recChunks) return;
-    const n = l.length, pcm = new Int16Array(n * 2);
-    for (let i = 0; i < n; i++) { pcm[2 * i] = clamp(l[i], -1, 1) * 32767; pcm[2 * i + 1] = clamp(r[i], -1, 1) * 32767; }
-    this.recChunks.push(pcm); this.recFrames += n;
-    if (flush && this._recResolve) { this._recResolve(); this._recResolve = null; }
-  }
-  async stopRecording() {
-    if (!this.recording) return null;
-    this.recording = false;
-    const flushed = new Promise((res) => { this._recResolve = res; setTimeout(res, 500); });
-    this.recNode.port.postMessage({ record: false });
-    await flushed;
-    const sr = this.ctx.sampleRate, dataLen = this.recFrames * 4;
-    const hdr = new DataView(new ArrayBuffer(44));
-    const w = (o, s) => { for (let i = 0; i < s.length; i++) hdr.setUint8(o + i, s.charCodeAt(i)); };
-    w(0, 'RIFF'); hdr.setUint32(4, 36 + dataLen, true); w(8, 'WAVE'); w(12, 'fmt ');
-    hdr.setUint32(16, 16, true); hdr.setUint16(20, 1, true); hdr.setUint16(22, 2, true); hdr.setUint32(24, sr, true);
-    hdr.setUint32(28, sr * 4, true); hdr.setUint16(32, 4, true); hdr.setUint16(34, 16, true); w(36, 'data'); hdr.setUint32(40, dataLen, true);
-    const blob = new Blob([hdr, ...this.recChunks], { type: 'audio/wav' });
-    this.recChunks = null;
-    this.emit('recording', false);
-    return blob;
-  }
+  // ---------- recording (streamed to disk by public/js/recording) ----------
+  attachRecorder(rec) { this.recorder = rec; }
+  get recording() { return !!this.recorder?.recording; }
+  get recStarted() { return Date.now() - (this.recorder?.elapsed || 0) * 1000; }
+  startRecording(opts) { return this.recorder?.start(opts); }
+  async stopRecording() { await this.recorder?.stop(); return null; }
+
 }

@@ -27,3 +27,9 @@ include the following third-party software.
 - [fast-xml-parser](https://github.com/NaturalIntelligence/fast-xml-parser) — MIT
 - [Electron](https://github.com/electron/electron) — MIT (includes Chromium, whose licences are listed in the app's
   `LICENSES.chromium.html`)
+
+## ONNX Runtime Web (onnxruntime-web)
+Used to run the AI stem-separation model in the app. MIT License, © Microsoft Corporation. https://github.com/microsoft/onnxruntime
+
+## HT-Demucs model (downloaded on first use, not bundled)
+Stem separation model from Meta's Demucs (https://github.com/facebookresearch/demucs, MIT License). OpenDJ downloads an ONNX export (npm package `demucs@1.0.0`) only after you agree in the app. That package's packager describes the weights as being for personal and research use. Check the terms before commercial use, or point *stemsModelUrl* at a model whose licence suits you.

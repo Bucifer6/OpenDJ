@@ -10,7 +10,7 @@
     "start": "electron .",
     "web": "node server/cli.js",
     "test": "node --test test/*.test.js",
-    "test:e2e": "node scripts/e2e-smoke.mjs && node scripts/e2e-performance.mjs && node scripts/e2e-regressions.mjs && node scripts/e2e-controllers.mjs && node scripts/e2e-lighting.mjs && node scripts/e2e-video.mjs && node scripts/e2e-webapp.mjs",
+    "test:e2e": "node scripts/e2e-smoke.mjs && node scripts/e2e-performance.mjs && node scripts/e2e-regressions.mjs && node scripts/e2e-controllers.mjs && node scripts/e2e-lighting.mjs && node scripts/e2e-video.mjs && node scripts/e2e-webapp.mjs && node scripts/e2e-dvs.mjs && node scripts/e2e-link-lyrics.mjs && node scripts/e2e-recording.mjs && node scripts/e2e-stems.mjs",
     "dist": "electron-builder --publish never",
     "dist:win": "electron-builder --win --publish never",
     "dist:mac": "electron-builder --mac --publish never",
@@ -19,7 +19,8 @@
   },
   "dependencies": {
     "fast-xml-parser": "^4.5.0",
-    "music-metadata": "^10.6.0"
+    "music-metadata": "^10.6.0",
+    "onnxruntime-web": "1.23.2"
   },
   "devDependencies": {
     "electron": "^33.2.0",
@@ -39,7 +40,10 @@
       "public/**",
       "package.json",
       "THIRD_PARTY_NOTICES.md",
-      "!**/*.map"
+      "!**/*.map",
+      "!node_modules/onnxruntime-web/dist/*.map",
+      "!node_modules/onnxruntime-web/dist/*.js",
+      "!node_modules/onnxruntime-web/lib/**"
     ],
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "win": {

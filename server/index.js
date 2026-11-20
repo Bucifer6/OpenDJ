@@ -29,6 +29,10 @@ import { parseTraktorNml, readSeratoCrates, parseVirtualDjXml, importParsed } fr
 import { registerLightingRoutes } from './lighting/routes.js';
 import { registerLinkRoutes } from './link/index.js';
 import { registerLyricsRoutes } from './lyrics.js';
+import { registerRecordingRoutes } from './recorder.js';
+import { registerBroadcastRoutes } from './broadcast.js';
+import { registerCdjRoutes } from './cdj/routes.js';
+import { registerStemRoutes } from './stems.js';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const MIME = {
@@ -284,6 +288,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   route('POST', '/api/tracks/delete', async ({ body }) => {
     const ids = Array.isArray(body.ids) ? body.ids.filter((x) => typeof x === 'string') : [];
     library.removeTracks(ids);
+    for (const id of ids) stems.evict(id).catch(() => {});
     for (const id of ids) transcoder.evict(id).catch(() => {});
     return { ok: true };
   });
@@ -682,6 +687,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   route('PUT', '/api/settings', async ({ body }) => {
     const patch = { ...body };
     delete patch.allowedRoots; // set in settings.json or OPENDJ_MUSIC_ROOTS, never from the web UI
+    delete patch.recording; delete patch.broadcast; // only via their own validated endpoints
     for (const k of ['downloadDir', 'uploadDir']) if (k in patch && patch[k]) allowPath(String(patch[k]), 'This folder');
     const hue = patch.lighting?.outputs?.hue;
     if (hue?.username === REDACTED) hue.username = library.settings.lighting?.outputs?.hue?.username || '';
@@ -692,7 +698,11 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   // ---------------- lighting (DMX / Art-Net / sACN / WLED / Hue / OSC) ----------------
   const lighting = registerLightingRoutes({ route, library, emit });
   const link = registerLinkRoutes({ route, library, emit, log });
+  const stems = registerStemRoutes({ route, library, emit });
   registerLyricsRoutes({ route, library, emit, dataDir, canRead: readable, canWrite: readable });
+  const recording = registerRecordingRoutes({ route, library, emit, pathAllowed, allowedRoots });
+  const broadcast = registerBroadcastRoutes({ route, library, emit, pathAllowed: readable, log });
+  registerCdjRoutes({ route, library, emit, allowPath, readable });
 
   route('GET', '/api/events', ({ req, res }) => {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -793,10 +803,13 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     for (const r of sse) r.end();
     try { lighting?.close?.(); } catch { /* already closed */ }
     try { link?.close?.(); } catch { /* already closed */ }
+    try { stems?.close?.(); } catch { /* already closed */ }
+    try { recording?.close?.(); } catch { /* already closed */ }
+    try { broadcast?.close?.(); } catch { /* already closed */ }
     downloads.queue = [];
     for (const j of downloads.active.values()) j.ctrl.abort();
   };
-  return { server, library, history, downloads, transcoder, auth, lighting, link, ffmpegReady: ffReady, shutdown, newId };
+  return { server, library, history, downloads, transcoder, auth, lighting, link, stems, recording, broadcast, ffmpegReady: ffReady, shutdown, newId };
 }
 
 /**

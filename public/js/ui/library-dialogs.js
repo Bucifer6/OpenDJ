@@ -1,5 +1,6 @@
 // Library & prep dialogs: track info editor, smart playlist builder, importers, relocate, duplicates, backup/restore.
 import { el } from '../util.js';
+import { openCdjExport } from '../cdj/export-dialog.js';
 import { api } from '../api.js';
 
 // rekordbox's 8 track colour labels (tracks store the hex value).
@@ -355,6 +356,7 @@ export class LibraryDialogs {
         { label: 'M3U / M3U8 playlist…', action: () => this.importFrom('m3u') },
       ] },
       { label: 'Export', sub: [
+        { label: 'Playlists to CDJ USB (rekordbox device library)…', action: () => openCdjExport(this.app, []) },
         { label: 'Collection as rekordbox XML', action: () => download(api.rekordboxExportUrl()) },
         { label: 'Playlists to USB / folder…', action: () => this.dialogs.exportUsb([]) },
       ] },

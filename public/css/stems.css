@@ -1,0 +1,36 @@
+/* AI stems: deck stem controls, preparation progress panel, consent dialog, settings */
+.deck-stems { display: flex; flex-direction: column; gap: 3px; padding: 3px 0; }
+.deck-stems .stems-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.deck-stems .stem-cell { display: flex; align-items: center; gap: 2px; flex: 1 1 0; min-width: 0; }
+.deck-stems .stem-btn { flex: 1 1 auto; min-width: 0; font-family: var(--mono); letter-spacing: .02em; }
+.deck-stems .stem-btn.active { color: var(--on-accent); }
+.deck-stems .stem-btn.stem-0.active { background: var(--purple); border-color: var(--purple); }
+.deck-stems .stem-btn.stem-1.active { background: var(--amber); border-color: var(--amber); }
+.deck-stems .stem-btn.stem-2.active { background: var(--red); border-color: var(--red); }
+.deck-stems .stem-btn.stem-3.active { background: var(--green); border-color: var(--green); }
+.deck-stems .stem-btn:not(.active):not(:disabled) { opacity: .75; text-decoration: line-through; }
+.deck-stems .stem-macro.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.deck-stems.no-stems .stem-btn, .deck-stems.no-stems .stem-macro { opacity: .35; text-decoration: none; }
+.deck-stems.no-stems .knob-wrap { opacity: .35; pointer-events: none; }
+.deck-stems .stems-status { flex: 1 1 auto; min-width: 0; font-size: 9px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.deck-stems.ready .stems-status { color: var(--green); }
+.deck-stems .stems-prep[hidden] { display: none; }
+
+.stems-panel { position: fixed; left: 16px; bottom: 16px; z-index: 290; width: min(380px, calc(100vw - 32px)); background: var(--panel, #1f252e); border: 1px solid var(--line-2); border-left: 3px solid var(--purple, var(--accent)); border-radius: 6px; padding: 8px 10px; box-shadow: 0 6px 20px rgba(0, 0, 0, .5); font-size: 11.5px; }
+.stems-panel[hidden] { display: none; }
+.stems-panel-row { display: flex; align-items: center; gap: 8px; }
+.stems-panel-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stems-panel-queue { color: var(--text-3); font-size: 10.5px; margin-top: 3px; }
+.stems-panel-queue:empty { display: none; }
+.stems-bar { height: 4px; border-radius: 2px; background: var(--inset, rgba(255, 255, 255, .08)); margin-top: 6px; overflow: hidden; }
+.stems-bar-fill { height: 100%; width: 0; background: var(--purple, var(--accent)); transition: width .3s; }
+.stems-bar-fill.indeterminate { width: 30% !important; animation: stems-indet 1.2s linear infinite; }
+@keyframes stems-indet { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+@media (prefers-reduced-motion: reduce) { .stems-bar-fill.indeterminate { animation: none; width: 100% !important; opacity: .4; } }
+
+.stems-consent dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 10px 0; }
+.stems-consent dt { color: var(--text-3); }
+.stems-consent dd { margin: 0; overflow-wrap: anywhere; }
+.stems-consent .muted, .stems-settings .muted { color: var(--text-3); font-size: 11px; }
+.stems-settings { display: flex; flex-direction: column; gap: 8px; }
+.stems-settings-actions { margin-top: 6px; }

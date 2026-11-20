@@ -36,7 +36,12 @@ export async function dispatch(routes, req, res) {
   }
 }
 
-export const fakeLibrary = (dataDir, ff = null) => ({ dataDir, settings: {}, updateSettings() {}, media: { ffmpeg: () => ff, ready: Promise.resolve(ff) } });
+export const fakeLibrary = (dataDir, ff = null) => ({
+  dataDir, settings: {},
+  // behaves like Library.updateSettings (objects are merged) so config stores work whether or not their key is in DEFAULT_SETTINGS
+  updateSettings(patch) { for (const [k, v] of Object.entries(patch || {})) this.settings[k] = v && typeof v === 'object' && !Array.isArray(v) ? { ...(this.settings[k] || {}), ...v } : v; return this.settings; },
+  media: { ffmpeg: () => ff, ready: Promise.resolve(ff) },
+});
 
 /**
  * Mock Icecast 2 server on one port: source logins (PUT with 100-continue, or SOURCE), /admin/metadata and

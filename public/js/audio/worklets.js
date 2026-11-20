@@ -1,5 +1,6 @@
 // AudioWorklet processors: the deck player and the mix recorder.
 // Loaded with audioWorklet.addModule(); runs on the real-time audio thread.
+import { readStemMix, stemCoefficients, smoothGains, isUnity, isSilent } from '../stems/stem-mix.js';
 
 const GRAIN = 2048; // key-lock grain size (source frames)
 
@@ -23,6 +24,12 @@ class DeckProcessor extends AudioWorkletProcessor {
     this.brake = 0;           // brake deceleration per frame (0 = off)
     this.grains = [{ p: 0, age: 0 }, { p: 0, age: GRAIN / 2 }];
     this.counter = 0;
+    // AI stems: original + vocals/drums/bass (Int16), "other" = residual (see stems/stem-mix.js)
+    this.stems = null;
+    this.stemTarget = new Float32Array([1, 1, 1, 1]); this.stemCur = new Float32Array([1, 1, 1, 1]); this.stemCoef = stemCoefficients(this.stemCur);
+    this.sendTarget = new Float32Array(4); this.sendCur = new Float32Array(4); this.sendCoef = stemCoefficients(this.sendCur); // stem FX send (output 1)
+    this.stemK = 1 - Math.exp(-1 / (0.005 * sampleRate)); // ~5 ms gain smoothing: click-free, still sample accurate
+    this.mo = new Float32Array(2); this.so = new Float32Array(2);
     this.port.onmessage = (e) => this.onMessage(e.data);
   }
 
@@ -32,9 +39,16 @@ class DeckProcessor extends AudioWorkletProcessor {
         this.L = m.left; this.R = m.right || m.left; this.len = this.L.length;
         this.step = m.sampleRate / sampleRate;
         this.pos = this.shadow = 0; this.playing = false; this.curRate = 0; this.loop = null; this.brake = 0;
-        this.scratch = null; this.dir = 1; this.slip = false; this.endedSent = false;
+        this.scratch = null; this.dir = 1; this.slip = false; this.endedSent = false; this.stems = null;
         break;
-      case 'unload': this.L = this.R = null; this.len = 0; this.playing = false; this.scratch = null; this.dir = 1; this.slip = false; break;
+      case 'unload': this.L = this.R = null; this.len = 0; this.playing = false; this.scratch = null; this.dir = 1; this.slip = false; this.stems = null; break;
+      case 'stems': // [{ L, R }] Int16 vocals, drums, bass with exactly the original's length (else ignored: stale load)
+        this.stems = Array.isArray(m.value) && m.value.length && m.value.every((x) => x.L.length === this.len && x.R.length === this.len) ? m.value : null;
+        this.port.postMessage({ type: 'stems', loaded: !!this.stems, rejected: !!m.value && !this.stems, seq: m.seq });
+        break;
+      case 'ext-port': m.port.onmessage = (e) => this.onMessage(e.data); break; // DVS decoder -> deck, audio thread to audio thread
+      case 'stemGains': this.stemTarget.set(m.value); break;
+      case 'stemSend': this.sendTarget.set(m.value); break;
       case 'play': this.playing = m.value; if (m.value) this.brake = 0; break;
       case 'rate': this.rate = m.value; break;
       case 'seek': {
@@ -88,7 +102,10 @@ class DeckProcessor extends AudioWorkletProcessor {
     const out = outputs[0];
     const oL = out[0], oR = out[1] || out[0];
     const frames = oL.length;
+    const fx = outputs[1], fL = fx?.[0], fR = fx?.[1] || fL; // stem FX send
+    if (fL) { fL.fill(0); if (fR !== fL) fR.fill(0); }
     if (!this.L) { oL.fill(0); if (oR !== oL) oR.fill(0); return true; }
+    const stems = this.stems, mo = this.mo, so = this.so;
 
     for (let n = 0; n < frames; n++) {
       // --- determine the instantaneous speed ---
@@ -108,8 +125,16 @@ class DeckProcessor extends AudioWorkletProcessor {
         this.curRate += Math.max(-k, Math.min(k, target - this.curRate)) * 4;
       } else this.curRate = target;
 
+      // stem gains: per-sample smoothing; the plain original path is used whenever every stem is at unity
+      let useMix = false, useSend = false;
+      if (stems) {
+        if (smoothGains(this.stemCur, this.stemTarget, this.stemK)) stemCoefficients(this.stemCur, this.stemCoef);
+        if (smoothGains(this.sendCur, this.sendTarget, this.stemK)) stemCoefficients(this.sendCur, this.sendCoef);
+        useMix = !isUnity(this.stemCur);
+        useSend = !!fL && !isSilent(this.sendCur);
+      }
       const speed = this.curRate * this.step;
-      let l = 0, r = 0;
+      let l = 0, r = 0, sl = 0, sr = 0;
       if (speed !== 0 && this.pos >= 0 && this.pos < this.len) {
         // grains read at the speed that gives the wanted pitch; the play head moves at the tempo rate
         const readSpeed = (this.keyLock ? 1 : Math.abs(this.curRate)) * this.pitch;
@@ -118,16 +143,21 @@ class DeckProcessor extends AudioWorkletProcessor {
           // granular time-stretch / pitch-shift, re-seeded from the (rate-scaled) play head
           for (const g of this.grains) {
             const w = Math.sin(Math.PI * g.age / GRAIN); const ww = w * w;
-            l += this.sample(this.L, g.p) * ww; r += this.sample(this.R, g.p) * ww;
+            if (useMix) { readStemMix(this.L, this.R, stems, this.stemCoef, g.p, this.len, mo); l += mo[0] * ww; r += mo[1] * ww; }
+            else { l += this.sample(this.L, g.p) * ww; r += this.sample(this.R, g.p) * ww; }
+            if (useSend) { readStemMix(this.L, this.R, stems, this.sendCoef, g.p, this.len, so); sl += so[0] * ww; sr += so[1] * ww; }
             g.p += this.step * this.dir * readSpeed; g.age++;
             if (g.age >= GRAIN) { g.age = 0; g.p = this.wsolaSeed(g === this.grains[0] ? this.grains[1] : this.grains[0], readSpeed); }
           }
         } else {
-          l = this.sample(this.L, this.pos); r = this.sample(this.R, this.pos);
+          if (useMix) { readStemMix(this.L, this.R, stems, this.stemCoef, this.pos, this.len, mo); l = mo[0]; r = mo[1]; }
+          else { l = this.sample(this.L, this.pos); r = this.sample(this.R, this.pos); }
+          if (useSend) { readStemMix(this.L, this.R, stems, this.sendCoef, this.pos, this.len, so); sl = so[0]; sr = so[1]; }
           this.grains[0].p = this.grains[1].p = this.pos;
         }
       }
       oL[n] = l; if (oR !== oL) oR[n] = r;
+      if (useSend) { fL[n] = sl; if (fR !== fL) fR[n] = sr; }
 
       this.pos += speed;
       if (this.slip) this.shadow += this.playing ? this.rate * this.step : 0;

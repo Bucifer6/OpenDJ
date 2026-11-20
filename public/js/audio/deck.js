@@ -2,17 +2,27 @@
 import { Emitter, clamp } from '../util.js';
 import { api } from '../api.js';
 import { decodeWaveform, toCamelot, camelotCompatible, analyzeStructure } from './analysis-core.js';
+import { effectiveGains, LOADED_STEMS } from '../stems/stem-mix.js';
+import { floatToInt16 } from '../stems/stem-dsp.js';
+import { StemEcho } from '../stems/stem-fx.js';
+
+export const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'];
+export const stemUrl = (id, stem) => `/api/stems/${encodeURIComponent(id)}/${stem}`;
 
 export class Deck extends Emitter {
   constructor(engine, index) {
     super();
     this.engine = engine; this.ctx = engine.ctx; this.index = index;
-    this.node = new AudioWorkletNode(this.ctx, 'deck-processor', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
+    // output 0: deck audio; output 1: stem FX send (e.g. vocal echo), see setStemFx()
+    this.node = new AudioWorkletNode(this.ctx, 'deck-processor', { numberOfInputs: 0, numberOfOutputs: 2, outputChannelCount: [2, 2] });
     this.node.port.onmessage = (e) => this.onWorklet(e.data);
     this.reset();
     this.tempoRange = 8; this.tempo = 0; this.bend = 0; this.keyLock = true;
     this.quantize = true; this.slip = false; this.reverse = false; this.syncOn = false; this.isMaster = false;
     this.vinylMode = true; this.keyShift = 0; this._loadSeq = 0;
+    this.stemMacro = [1, 1]; // channel VOC / INST knobs (they drive the AI stems once loaded)
+    this.stemFxOn = false; this.stemFx = null;
+    this.resetStemControls();
   }
 
   reset() {
@@ -21,6 +31,10 @@ export class Deck extends Emitter {
     this.cuePoint = 0; this.loop = null; this.loopIn = null; this.waveform = null;
     this.bpm = 0; this.gridOffset = 0; this.loading = false; this.error = null;
     this._countedPlay = false;
+    this.frames = 0; this._stemSeq = (this._stemSeq || 0) + 1;
+    if (this.stemsReady || this.stemsLoading) { this.stemsReady = false; this.engine.channels?.[this.index]?.setAiStems?.(false); }
+    this.stemsReady = false; this.stemsLoading = false; this.stemsError = null;
+    this.external = false;
     this.scratching = false; this._slicing = false; this.rolling = false; this.cuePreview = false; this.hotPreview = null;
     clearTimeout(this._scratchIdle);
     if (this.node) this.post('scratch', { value: null });
@@ -35,6 +49,13 @@ export class Deck extends Emitter {
       if (this.playing !== m.playing && !this._pendingPlay) { this.playing = m.playing; this.emit('state'); }
     } else if (m.type === 'ended') { this.playing = false; this.emit('state'); this.emit('ended'); }
     else if (m.type === 'stopped') { this.playing = false; this.emit('state'); }
+    else if (m.type === 'stems') {
+      if (m.seq !== this._stemSeq) return; // answer to an older load/unload
+      this.stemsReady = m.loaded; this.stemsLoading = false;
+      if (!m.loaded && m.rejected) this.stemsError = 'Stems do not match this track';
+      this.engine.channels[this.index]?.setAiStems?.(m.loaded);
+      this.emit('stems');
+    }
   }
 
   // ---------- derived state ----------
@@ -103,7 +124,9 @@ export class Deck extends Emitter {
       this.waveform = wave;
       this.bpm = track.bpm || 0; this.gridOffset = track.gridOffset || 0;
       if (!track.phrases && wave && this.bpm) this.refreshStructure(false); // tracks analysed before phrase detection existed
+      this.frames = left.length;
       this.node.port.postMessage({ type: 'load', left, right, sampleRate: buf.sampleRate }, right ? [left.buffer, right.buffer] : [left.buffer]);
+      this.resetStemControls(); this.postStemGains();
       this.post('rate', { value: this.rate }); this.post('keylock', { value: this.keyLock });
       this.keyShift = 0; this.post('pitch', { value: 1 });
       // first memory cue, else first beat, becomes the cue point
@@ -115,6 +138,8 @@ export class Deck extends Emitter {
       this.loading = false;
       if (this.syncOn) this.matchTempo();
       this.emit('loaded', track); this.emit('state');
+      // AI stems prepared for this track: attach them in the background (the deck already plays the original)
+      if (track.stems?.ready && this.engine.settings.stemsAutoLoad !== false) this.loadStems().catch((e) => console.warn('stems', e));
       return true;
     } catch (e) {
       if (stale()) return false;
@@ -262,7 +287,10 @@ export class Deck extends Emitter {
   }
 
   // ---------- tempo / sync ----------
-  setTempo(pct) { this.tempo = clamp(pct, -100, 100); this.post('rate', { value: this.rate }); this.emit('tempo'); this.engine.onTempoChange(this); }
+  setTempo(pct) {
+    this.tempo = clamp(pct, -100, 100); this.post('rate', { value: this.rate }); this.emit('tempo'); this.engine.onTempoChange(this);
+    if (this.stemFxOn && this.effectiveBpm) this.stemFx?.setBeat(60 / this.effectiveBpm);
+  }
   setTempoFader(v) { this.setTempo(v * this.tempoRange); if (this.syncOn && !this.isMaster) { this.syncOn = false; this.emit('state'); } } // -1..1
   setTempoRange(r) { const f = this.tempo / this.tempoRange; this.tempoRange = r; this.emit('tempo'); return f; }
   resetTempo() { this.setTempo(0); }
@@ -315,7 +343,7 @@ export class Deck extends Emitter {
   jogRelease() {
     if (!this.scratching) return;
     this.scratching = false; clearTimeout(this._scratchIdle);
-    this.post('scratch', { value: null });
+    if (!this.external) this.post('scratch', { value: null });
   }
   /** Outer-ring nudge (pitch bend) or seek when paused */
   jogNudge(deltaRot) {
@@ -324,6 +352,92 @@ export class Deck extends Emitter {
     this.setBend(clamp(deltaRot * 4, -0.25, 0.25));
     clearTimeout(this._bendT); this._bendT = setTimeout(() => this.setBend(0), 70);
   }
+
+  // ---------- AI stems (vocals / drums / bass / other) ----------
+  resetStemControls() { this.stemLevels = [1, 1, 1, 1]; this.stemMute = [false, false, false, false]; this.emit('stems'); }
+  /** Fetch the prepared stems, decode, keep them as Int16 and hand them to the worklet (sample-locked to the track). */
+  async loadStems() {
+    const track = this.track;
+    if (!track || this.loading || this.stemsReady || this.stemsLoading) return this.stemsReady;
+    const seq = this._stemSeq, frames = this.frames;
+    const stale = () => seq !== this._stemSeq || this.track !== track;
+    this.stemsLoading = true; this.stemsError = null; this.emit('stems');
+    try {
+      const out = [];
+      for (const name of STEM_NAMES.slice(0, LOADED_STEMS)) { // "other" is the residual, computed in the worklet
+        const res = await fetch(stemUrl(track.id, name), { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`stem ${name}: HTTP ${res.status}`);
+        const ab = await res.arrayBuffer();
+        if (stale()) return false;
+        const buf = await this.ctx.decodeAudioData(ab);
+        if (stale()) return false;
+        if (Math.abs(buf.length - frames) > this.ctx.sampleRate * 0.5) throw new Error('Stems do not match this file (prepare them again)');
+        const pair = {};
+        for (const [k, c] of [['L', 0], ['R', Math.min(1, buf.numberOfChannels - 1)]]) {
+          const src = buf.getChannelData(c), dst = new Int16Array(frames);
+          floatToInt16(src.length > frames ? src.subarray(0, frames) : src, dst);
+          pair[k] = dst;
+        }
+        out.push(pair);
+      }
+      if (stale()) return false;
+      this.node.port.postMessage({ type: 'stems', value: out, seq }, out.flatMap((p) => [p.L.buffer, p.R.buffer]));
+      return true; // stemsReady is set when the worklet confirms
+    } catch (e) {
+      if (!stale()) { this.stemsLoading = false; this.stemsError = e.message; this.emit('stems'); }
+      throw e;
+    }
+  }
+  unloadStems() {
+    const seq = ++this._stemSeq;
+    this.post('stems', { value: null, seq });
+    this.stemsLoading = false;
+    if (this.stemsReady) { this.stemsReady = false; this.engine.channels[this.index]?.setAiStems?.(false); }
+    this.emit('stems');
+  }
+  get stemsActive() { return this.stemsReady; }
+  setStemMute(i, on) { this.stemMute[i] = !!on; this.postStemGains(); }
+  toggleStem(i) { this.setStemMute(i, !this.stemMute[i]); }
+  setStemLevel(i, v) { this.stemLevels[i] = Math.max(0, Math.min(1, v)); this.postStemGains(); }
+  /** Acapella: vocals only (press again for all stems). */
+  stemAcapella() { const on = this.isAcapella; this.stemMute = on ? [false, false, false, false] : [false, true, true, true]; this.postStemGains(); }
+  /** Instrumental: everything but vocals (press again for all stems). */
+  stemInstrumental() { const on = this.isInstrumental; this.stemMute = on ? [false, false, false, false] : [true, false, false, false]; this.postStemGains(); }
+  get isAcapella() { const m = this.stemMute; return !m[0] && m[1] && m[2] && m[3]; }
+  get isInstrumental() { const m = this.stemMute; return m[0] && !m[1] && !m[2] && !m[3]; }
+  /** Channel VOC / INST knobs (called by the mixer channel). */
+  applyStemMacro(vocal, inst) { if (this.stemMacro[0] === vocal && this.stemMacro[1] === inst) return; this.stemMacro = [vocal, inst]; this.postStemGains(); }
+  get stemGains() { return [...effectiveGains({ levels: this.stemLevels, mute: this.stemMute }, this.stemMacro[0], this.stemMacro[1])]; }
+  postStemGains() {
+    const g = this.stemGains;
+    this.post('stemGains', { value: g });
+    this.post('stemSend', { value: this.stemFxOn ? [g[0], 0, 0, 0] : [0, 0, 0, 0] });
+    if (this.stemFxOn) this.stemFx?.setBeat(this.effectiveBpm ? 60 / this.effectiveBpm : 0.5);
+    this.emit('stems');
+  }
+  /** Stem FX: beat-synced echo on the vocal stem only (send from worklet output 1 into this channel). */
+  setStemFx(on) {
+    if (on && !this.stemFx) {
+      this.stemFx = new StemEcho(this.ctx);
+      this.node.connect(this.stemFx.input, 1);
+      this.stemFx.output.connect(this.engine.channels[this.index].trimNode);
+    }
+    this.stemFxOn = !!on; this.postStemGains();
+  }
+
+  // ---------- external control (DVS) ----------
+  /** v: playback speed (1 = normal, <0 = reverse) from an external source; null hands control back.
+   *  viaPort: the speed already reaches the worklet directly (attachExternalPort); only update transport state. */
+  setExternalSpeed(v, viaPort = false) {
+    if (v == null) { if (!this.external) return; this.external = false; if (!viaPort) this.post('scratch', { value: null }); return; }
+    if (!this.track || this.loading) return;
+    this.external = true;
+    if (!viaPort) this.post('scratch', { value: { velocity: clamp(v, -16, 16) } });
+    const moving = Math.abs(v) > 0.05;
+    if (moving !== this.playing) { this.playing = moving; this.post('play', { value: moving }); if (moving) this.engine.onDeckPlay(this); this.emit('state'); }
+  }
+  /** Let the DVS decoder worklet post 'scratch' messages straight to this deck's processor (audio thread -> audio thread). */
+  attachExternalPort(port) { this.node.port.postMessage({ type: 'ext-port', port }, [port]); }
 
   // ---------- performance effects ----------
   brake(seconds = 1.2) { if (!this.playing) return; this.post('brake', { value: 1 / (seconds * this.ctx.sampleRate) }); }
@@ -417,6 +531,7 @@ export class Deck extends Emitter {
     if (!src?.track || src === this) return;
     if ((await this.load({ ...src.track })) === false) return;
     this.setTempo(src.tempo); this.setKeyLock(src.keyLock); this.setKeyShift(src.keyShift);
+    this.stemMute = [...src.stemMute]; this.stemLevels = [...src.stemLevels]; this.postStemGains();
     if (src.loop?.active) this.setLoop(src.loop.start, src.loop.end);
     this.seek(src.position);
     if (src.playing) this.play();

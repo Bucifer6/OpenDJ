@@ -87,7 +87,7 @@ export async function openCdjExport(app, playlistIds = []) {
       const r = await call('GET', `/api/cdj/inspect?targetDir=${encodeURIComponent(target.value.trim())}`);
       if (!r.exists) { existing.textContent = 'No rekordbox export on this stick yet: a new one will be created.'; return; }
       if (r.error) { existing.textContent = `There is an export.pdb on this stick, but it could not be read (${r.error}). It will be replaced.`; return; }
-      existing.textContent = `This stick already has a ${r.byOpenDJ ? 'OpenDJ' : 'rekordbox'} export: ${plural(r.tracks, 'track')}, ${plural(r.playlists.length, 'playlist')}.`;
+      existing.textContent = `This stick already has ${r.byOpenDJ ? 'an OpenDJ' : 'a rekordbox'} export: ${plural(r.tracks, 'track')}, ${plural(r.playlists.length, 'playlist')}.`;
       modeRow.hidden = false;
     } catch (e) { existing.textContent = e.message; }
   }
@@ -102,9 +102,9 @@ export async function openCdjExport(app, playlistIds = []) {
         `${plural(r.tracks, 'track')}: ${r.copy} to copy, ${r.convert} to convert, ${r.reuse} already on the stick.`,
         `Needs about ${fmtBytes(r.bytesNeeded)}${r.freeBytes != null ? `, ${fmtBytes(r.freeBytes)} free` : ''}.`,
       ];
-      estimateBox.replaceChildren(el('div', {}, ...lines.map((l) => el('div', {}, l))),
+      estimateBox.replaceChildren(...[el('div', {}, ...lines.map((l) => el('div', {}, l))),
         ...(r.warnings || []).map((w) => el('div', { class: 'cdj-warn' }, w)),
-        r.skipped?.length ? skippedList(r.skipped) : null);
+        r.skipped?.length ? skippedList(r.skipped) : null].filter(Boolean));
       return r;
     } catch (e) { estimateBox.replaceChildren(el('div', { class: 'cdj-warn' }, e.message)); return null; }
   }
@@ -120,7 +120,7 @@ export async function openCdjExport(app, playlistIds = []) {
     if (primary) { primary.textContent = busy ? 'Cancel export' : 'Export'; primary.classList.toggle('danger', busy); }
   };
   const showProgress = (p) => {
-    if (!p || (running && p.jobId && p.jobId !== running)) return;
+    if (!p || !running || (p.jobId && p.jobId !== running)) return; // only the job this dialog started
     progress.hidden = false;
     const pct = p.total ? Math.round((100 * (p.done || 0)) / p.total) : 0;
     progressBar.style.width = `${p.phase === 'done' ? 100 : pct}%`;
@@ -132,13 +132,15 @@ export async function openCdjExport(app, playlistIds = []) {
   function finish(result, error) {
     if (!running) return;
     running = null; clearInterval(pollTimer); setBusy(false);
+    progressBar.style.width = error ? progressBar.style.width : '100%';
+    progressText.textContent = error ? 'Stopped' : 'Done';
     if (error) { resultBox.replaceChildren(el('div', { class: 'cdj-warn' }, error)); return; }
     const r = result || {};
-    resultBox.replaceChildren(
+    resultBox.replaceChildren(...[
       el('div', { class: 'cdj-ok' }, `Exported ${plural(r.exported?.length || 0, 'playlist')} (${plural(r.written || 0, 'track')}; ${r.copied || 0} copied, ${r.converted || 0} converted). The stick now holds ${plural(r.totalTracksOnDevice || 0, 'track')}.`),
       el('div', { class: 'hint' }, 'Eject the stick safely before unplugging it.'),
       ...(r.warnings || []).map((w) => el('div', { class: 'cdj-warn' }, w)),
-      r.skipped?.length ? skippedList(r.skipped) : null);
+      r.skipped?.length ? skippedList(r.skipped) : null].filter(Boolean));
     app.toast?.('CDJ export finished');
   }
 
@@ -150,7 +152,7 @@ export async function openCdjExport(app, playlistIds = []) {
     try {
       es ||= api.events({ 'cdj-export': showProgress });
       const r = await call('POST', '/api/cdj/export', b);
-      running = r.jobId; setBusy(true); showProgress({ phase: 'start', jobId: r.jobId });
+      running = r.jobId; setBusy(true); progressBar.style.width = '0%'; showProgress({ phase: 'start', jobId: r.jobId });
       // fallback when the event stream is unavailable (proxies, hosted mode)
       pollTimer = setInterval(async () => {
         try {
