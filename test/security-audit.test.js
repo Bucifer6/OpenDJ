@@ -151,3 +151,88 @@ test('#2 body limits: 16 KiB for the public login routes, 1 MiB by default, expl
   app.library.upsertTrack({ id: 'w1', sourceType: 'local', path: '/nowhere.wav', title: 'w' });
   assert.equal((await c('PUT', '/api/tracks/w1/waveform', Buffer.alloc(4 * 2 ** 20))).status, 200);
 }));
+
+// ---------------------------------------------------------------- #3 login rate limit
+test('#3 trust-proxy: the right-most X-Forwarded-For hop is used; a proxy list is only trusted from those peers', async () => {
+  const { Auth } = await import('../server/auth.js');
+  const dir = tmpdir();
+  const req = (peer, xff, extra = {}) => ({ socket: { remoteAddress: peer }, headers: { 'x-forwarded-for': xff, ...extra } });
+  const a1 = new Auth({ dataDir: dir, enabled: true, password: PW, trustProxy: '1', log: {} });
+  assert.equal(a1.clientIp(req('10.0.0.1', '6.6.6.6, 203.0.113.9')), '203.0.113.9', 'client-supplied left hops are ignored');
+  assert.equal(a1.clientIp(req('10.0.0.1', '')), '10.0.0.1');
+  const a2 = new Auth({ dataDir: dir, enabled: true, password: PW, trustProxy: '10.0.0.1, 10.0.0.2', log: {} });
+  assert.equal(a2.clientIp(req('10.0.0.1', '6.6.6.6, 203.0.113.9, 10.0.0.2')), '203.0.113.9', 'chained trusted proxies are skipped');
+  assert.equal(a2.clientIp(req('::ffff:10.0.0.1', '203.0.113.9')), '203.0.113.9');
+  assert.equal(a2.clientIp(req('198.51.100.7', '1.2.3.4')), '198.51.100.7', 'XFF from an untrusted peer is ignored');
+  assert.equal(a2.isSecure(req('198.51.100.7', '', { 'x-forwarded-proto': 'https' })), false);
+  assert.equal(a2.isSecure(req('10.0.0.1', '', { 'x-forwarded-proto': 'http, https' })), true);
+  const a3 = new Auth({ dataDir: dir, enabled: true, password: PW, trustProxy: undefined, log: {} });
+  assert.equal(a3.clientIp(req('198.51.100.7', '1.2.3.4')), '198.51.100.7');
+});
+
+test('#3 rotating X-Forwarded-For does not escape the per-client lock (trust-proxy=1)', () => hosted(async ({ app }) => {
+  let locked = false;
+  for (let i = 0; i < 8; i++) {
+    const r = await raw(app.port, 'POST', '/api/auth/login', { 'Content-Type': 'application/json', 'X-Forwarded-For': `9.9.9.${i}, 203.0.113.5` }, JSON.stringify({ password: 'bad' }));
+    if (r.status === 429) locked = true;
+  }
+  assert.ok(locked, 'the proxy-added (right-most) hop is the same for every attempt');
+}, { login: false, trustProxy: '1' }));
+
+test('#3 an attacker on the same address cannot lock out a browser that signed in before; global budget slows, never locks', async () => {
+  const { Auth } = await import('../server/auth.js');
+  const auth = new Auth({ dataDir: tmpdir(), enabled: true, password: PW, log: {} });
+  const res = () => { const h = {}; return { setHeader: (k, v) => { h[k] = v; }, h }; };
+  const owner = { socket: { remoteAddress: '192.0.2.1' }, headers: {} };
+  const r0 = res();
+  await auth.login(owner, r0, PW);
+  const dev = r0.h['Set-Cookie'].find((c) => c.startsWith('opendj_device=')).split(';')[0];
+  assert.match(r0.h['Set-Cookie'].find((c) => c.startsWith('opendj_device=')), /HttpOnly; SameSite=Strict/);
+  const attacker = { socket: { remoteAddress: '192.0.2.1' }, headers: {} };
+  for (let i = 0; i < 6; i++) await auth.login(attacker, res(), 'wrong').catch(() => {});
+  await assert.rejects(auth.login(attacker, res(), PW), (e) => e.status === 429, 'that address is locked');
+  await auth.login({ ...owner, headers: { cookie: dev } }, res(), PW); // the known device still gets in
+  // forged device cookies are not honoured
+  await assert.rejects(auth.login({ ...owner, headers: { cookie: 'opendj_device=AAAAAAAAAAAAAAAAAAAAAA.' + 'A'.repeat(43) } }, res(), PW), (e) => e.status === 429);
+  // global budget: many addresses failing slows every attempt down, but the right password still works
+  for (let i = 0; i < 24; i++) await auth.login({ socket: { remoteAddress: `198.51.100.${i}` }, headers: {} }, res(), 'wrong').catch(() => {});
+  assert.ok(auth.globalDelay() > 0);
+  const t0 = Date.now();
+  await auth.login({ socket: { remoteAddress: '203.0.113.50' }, headers: {} }, res(), PW);
+  assert.ok(Date.now() - t0 >= auth.globalDelay() - 300, 'attempt was delayed');
+});
+
+test('#3 scrypt does not block the event loop; setup code shares the limits', async () => {
+  const { Auth } = await import('../server/auth.js');
+  const auth = new Auth({ dataDir: tmpdir(), enabled: true, password: PW, log: {} });
+  let ticks = 0;
+  const iv = setInterval(() => ticks++, 1);
+  await Promise.all(Array.from({ length: 6 }, () => auth.login({ socket: { remoteAddress: '192.0.2.9' }, headers: {} }, { setHeader() {} }, 'wrong').catch(() => {})));
+  clearInterval(iv);
+  assert.ok(ticks > 5, `timers kept running during scrypt (${ticks})`);
+  const lines = [];
+  const s = new Auth({ dataDir: tmpdir(), enabled: true, password: '', log: { log: (m) => lines.push(m) } });
+  const who = { socket: { remoteAddress: '192.0.2.10' }, headers: {} };
+  for (let i = 0; i < 5; i++) await s.setup(who, { setHeader() {} }, { code: 'NOPE', password: PW }).catch(() => {});
+  await assert.rejects(s.setup(who, { setHeader() {} }, { code: s.setupCode, password: PW }), (e) => e.status === 429);
+});
+
+// ---------------------------------------------------------------- #4 weak env password
+test('#4 a short or example OPENDJ_PASSWORD refuses to start', async () => {
+  const { Auth } = await import('../server/auth.js');
+  for (const pw of ['change-me', 'CHANGE-ME', 'choose-a-password', 'password', 'opendj', 'short', '1234567']) {
+    assert.throws(() => new Auth({ dataDir: tmpdir(), enabled: true, password: pw, log: {} }), /OPENDJ_PASSWORD is too weak/, pw);
+  }
+  await assert.rejects(start({ port: 0, host: '127.0.0.1', auth: true, dataDir: tmpdir(), password: 'change-me', ffmpeg: false, log: {} }), /too weak/);
+  assert.ok(new Auth({ dataDir: tmpdir(), enabled: true, password: 'e2e-web-password', log: {} }).envPassword);
+  assert.ok(new Auth({ dataDir: tmpdir(), enabled: false, password: 'x', log: {} }), 'ignored when login is off');
+  const compose = fs.readFileSync(new URL('../docker-compose.yml', import.meta.url), 'utf8');
+  assert.doesNotMatch(compose, /^\s*OPENDJ_PASSWORD:\s*"?change-me/m, 'compose ships no default password');
+  for (const f of ['../README.md', '../Dockerfile', '../docker-compose.yml']) {
+    const txt = fs.readFileSync(new URL(f, import.meta.url), 'utf8');
+    for (const m of txt.matchAll(/OPENDJ_PASSWORD[=:]\s*['"]?([^'"\s]+)/g)) {
+      if (m[1].startsWith('$')) continue;
+      assert.ok(m[1].length >= 8 && !/^(change-me|choose-a-password|password|opendj)$/i.test(m[1]), `${f}: example password "${m[1]}" would be refused`);
+    }
+  }
+});

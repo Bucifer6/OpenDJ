@@ -2,7 +2,9 @@
 # streams/transcodes files (FFmpeg) and stores the library data.
 #
 #   docker build -t opendj .
-#   docker run -d -p 7380:7380 -v opendj-data:/data -v /path/to/music:/music:ro -e OPENDJ_PASSWORD=change-me opendj
+#   docker run -d -p 7380:7380 -v opendj-data:/data -v /path/to/music:/music:ro opendj
+#   docker logs <container>   # one-time setup code: choose the password on first visit
+# Or pass OPENDJ_PASSWORD (8+ characters; example values like "change-me" are refused at startup).
 FROM node:22-slim
 
 RUN apt-get update \

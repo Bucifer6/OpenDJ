@@ -9,12 +9,15 @@ services:
     ports:
       - "7380:7380"
     environment:
-      # Password for the login page. Leave it out to choose one on first visit (the setup code is in `docker logs opendj`).
-      OPENDJ_PASSWORD: "change-me"
+      # Login password. Not set here on purpose: on the first visit you choose one with the one-time setup code
+      # printed in `docker logs opendj`. To fix it instead, set OPENDJ_PASSWORD in a `.env` file next to this file
+      # (8+ characters; example values like "change-me" are refused at startup) and uncomment:
+      # OPENDJ_PASSWORD: "${OPENDJ_PASSWORD}"
       # Several music folders: mount each one and list them separated by ':'.
       OPENDJ_MUSIC_ROOTS: "/music"
-      # Behind a reverse proxy that sets X-Forwarded-For / X-Forwarded-Proto (Caddy, nginx, Traefik):
-      # OPENDJ_TRUST_PROXY: "1"
+      # Behind a reverse proxy that sets X-Forwarded-For / X-Forwarded-Proto (Caddy, nginx, Traefik): its address,
+      # or "1" to trust whatever connects (then OpenDJ must only be reachable through the proxy):
+      # OPENDJ_TRUST_PROXY: "172.18.0.1"
       # Only answer to these host names (optional, recommended when exposed):
       # OPENDJ_ALLOWED_HOSTS: "dj.example.com"
     volumes:

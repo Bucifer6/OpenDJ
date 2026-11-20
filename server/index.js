@@ -167,8 +167,9 @@ async function proxy(req, res, { url, headers = {} }, { connectTimeout = 15000 }
  * @param {string|false} [o.ffmpeg]  ffmpeg path, or false to disable (default: OPENDJ_FFMPEG / bundled / PATH)
  * @param {string[]} [o.allowedHosts]  extra Host names accepted (OPENDJ_ALLOWED_HOSTS)
  * @param {string[]} [o.roots]   folders the UI may browse/add (OPENDJ_MUSIC_ROOTS); setting them turns the restriction on
+ * @param {string|boolean} [o.trustProxy]  reverse proxy trust (OPENDJ_TRUST_PROXY): '1' or a list of proxy addresses
  */
-export function createServer({ dataDir = defaultDataDir(), log = console, auth: authOpt, ffmpeg: ffmpegOpt, allowedHosts, roots: rootsOpt, password } = {}) {
+export function createServer({ dataDir = defaultDataDir(), log = console, auth: authOpt, ffmpeg: ffmpegOpt, allowedHosts, roots: rootsOpt, password, trustProxy } = {}) {
   const library = new Library(dataDir);
   const sse = new Set();
   const emit = (type, payload) => {
@@ -183,7 +184,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
 
   // ---------------- hosting / security config ----------------
   const authEnabled = authOpt ?? process.env.OPENDJ_AUTH === '1';
-  const auth = new Auth({ dataDir, enabled: authEnabled, password: password ?? process.env.OPENDJ_PASSWORD, log });
+  const auth = new Auth({ dataDir, enabled: authEnabled, password: password ?? process.env.OPENDJ_PASSWORD, trustProxy: trustProxy ?? process.env.OPENDJ_TRUST_PROXY, log });
   const extraHosts = new Set((allowedHosts || csv(process.env.OPENDJ_ALLOWED_HOSTS)).map((h) => h.toLowerCase()));
   const envRoots = rootsOpt || (process.env.OPENDJ_MUSIC_ROOTS ? process.env.OPENDJ_MUSIC_ROOTS.split(path.delimiter).filter(Boolean) : null);
   const restricted = authEnabled || !!envRoots; // hosted mode: never expose the whole filesystem
@@ -260,10 +261,10 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   route('GET', '/api/health', () => ({ ok: true }), { public: true });
   route('GET', '/api/auth/status', ({ req }) => ({ enabled: auth.enabled, authenticated: auth.check(req), setupRequired: auth.setupRequired }), { public: true });
   const authRoute = { public: true, bodyLimit: AUTH_BODY_LIMIT };
-  route('POST', '/api/auth/login', async ({ req, res, body }) => { auth.login(req, res, body.password); return { ok: true }; }, authRoute);
-  route('POST', '/api/auth/setup', async ({ req, res, body }) => { auth.setup(req, res, body); return { ok: true }; }, authRoute);
+  route('POST', '/api/auth/login', async ({ req, res, body }) => { await auth.login(req, res, body.password); return { ok: true }; }, authRoute);
+  route('POST', '/api/auth/setup', async ({ req, res, body }) => { await auth.setup(req, res, body); return { ok: true }; }, authRoute);
   route('POST', '/api/auth/logout', async ({ req, res }) => { auth.logout(req, res); return { ok: true }; }, authRoute);
-  route('POST', '/api/auth/password', async ({ req, res, body }) => { if (!auth.enabled) throw new HttpError(400, 'Login is not enabled'); auth.changePassword(req, res, body); return { ok: true }; }, { bodyLimit: AUTH_BODY_LIMIT });
+  route('POST', '/api/auth/password', async ({ req, res, body }) => { if (!auth.enabled) throw new HttpError(400, 'Login is not enabled'); await auth.changePassword(req, res, body); return { ok: true }; }, { bodyLimit: AUTH_BODY_LIMIT });
   route('GET', '/api/capabilities', async () => {
     await ffReady;
     return {
@@ -740,7 +741,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     if (auth.enabled) return extraHosts.size === 0 || LOCAL_NAMES.has(h.name); // hosted: password protects; optional allowlist
     return LOCAL_NAMES.has(h.name) && (boundPort == null || h.port === boundPort);
   };
-  const publicHost = (req) => (auth.trustProxy && req.headers['x-forwarded-host'] ? String(req.headers['x-forwarded-host']).split(',')[0].trim() : req.headers.host);
+  const publicHost = (req) => auth.forwarded(req, 'x-forwarded-host') || req.headers.host;
   /** CSRF guard: a browser Origin must be this very server (exact match; "null" and other sites are refused). */
   const originOk = (req) => {
     const site = req.headers['sec-fetch-site'];
