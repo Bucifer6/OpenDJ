@@ -20,6 +20,19 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **macOS:** right-click the app → *Open*.
 - **Linux AppImage:** `chmod +x` the file, then run it.
 
+### New in 0.2
+- **AI stems:** right-click a track → *Prepare AI stems*. Decks get vocals/drums/bass/melody mute and level, acapella, instrumental and vocal echo. The model (HT-Demucs, ~98 MB) downloads on first use after you agree.
+- **Recording straight to disk:** WAV, FLAC, MP3, AAC or Opus, with no memory limit. Auto-split option, plus `.cue`/`.txt` tracklists.
+- **Live broadcasting:** stream to Icecast, Shoutcast or RTMP (Twitch, YouTube, Mixcloud) with now-playing titles.
+- **Export to CDJ USB:** writes a rekordbox device library (beat grids, cues, loops, colours, waveforms) for Pioneer CDJ/XDJ players.
+- **DVS:** control decks with Serato or Traktor timecode vinyl/CDs (*Settings → DVS*).
+- **Ableton Link:** follow or lead the session tempo with bar-phase lock.
+- **Lyrics & karaoke:** lyric line under each deck, karaoke mode, karaoke layer in the video output, sync editor.
+- **Lower memory use:** loaded tracks use half the RAM. 32-bit audio is optional.
+- **Fixes:** controller panel and settings polish; Link follow/lead race fixed.
+
+**Please test on real gear:** DVS absolute mode, CDJ export on a player, and Link with Ableton Live haven't been verified on hardware yet. Feedback is very welcome.
+
 ### Highlights
 - **Decks:**
   - key lock (WSOLA), key shift and Key Sync

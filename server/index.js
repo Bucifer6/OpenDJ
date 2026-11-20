@@ -43,7 +43,7 @@ const MIME = {
   '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.webm': 'audio/webm', '.aif': 'audio/wav', '.aiff': 'audio/wav', '.m4b': 'audio/mp4',
   '.m4v': 'video/mp4', '.mov': 'video/mp4',
 };
-const VERSION = '0.1.0';
+const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 export function isLoopback(host) {
   const h = String(host || '').replace(/^\[|\]$/g, '').toLowerCase();
