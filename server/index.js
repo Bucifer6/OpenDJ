@@ -194,8 +194,11 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     return path.resolve(p);
   };
   const pathAllowed = (p) => !restricted || within(p, allowedRoots());
-  /** Local files that may be served: allowed roots + library folders + download/upload folders. */
-  const readable = (file) => !restricted || within(file, [...allowedRoots(), ...library.data.folders.map((f) => realish(f.path)), realish(library.settings.downloadDir), realish(uploadDir())]);
+  /**
+   * Local files that may be served / written next to (lyrics): allowed roots + download/upload folders. Library
+   * folders are NOT trusted on their own: they come from library.json, which a restored backup can rewrite.
+   */
+  const readable = (file) => !restricted || within(file, [...allowedRoots(), realish(library.settings.downloadDir), realish(uploadDir())]);
   // imports only add media files inside the allowed roots
   const addFileChecked = (lib, file, ...a) => (pathAllowed(file) ? addFile(lib, file, ...a) : Promise.resolve(null));
 
@@ -622,7 +625,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     attachment(res, 'application/json', `opendj-backup-${d}.json`, JSON.stringify(buildBackup(library, history)));
   });
   route('POST', '/api/restore', async ({ body }) => {
-    const r = restoreBackup(library, history, body);
+    const r = restoreBackup(library, history, body, { pathAllowed: readable });
     missing.invalidate();
     return r;
   }, { bodyLimit: 200 * 1024 * 1024 });
@@ -638,6 +641,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   });
   route('POST', '/api/folders/:id/scan', async ({ params }) => {
     const f = library.data.folders.find((x) => x.id === params.id); if (!f) throw new HttpError(404, 'No folder');
+    if (!readable(f.path)) throw new HttpError(403, 'This folder is outside the allowed music folders');
     runJob('scan:' + f.id, () => scanFolder(library, f, { onProgress: (p) => emit('scan', p) }));
     return { started: true };
   });

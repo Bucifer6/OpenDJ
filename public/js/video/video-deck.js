@@ -3,8 +3,8 @@
 import { isVideoCandidate, syncDecision } from './video-core.js';
 import { Visualizer } from './visualizer.js';
 
-export const videoUrl = (id) => `/api/tracks/${id}/video`;
-export const streamUrl = (id) => `/api/tracks/${id}/stream`;
+export const videoUrl = (id) => `/api/tracks/${encodeURIComponent(id)}/video`;
+export const streamUrl = (id) => `/api/tracks/${encodeURIComponent(id)}/stream`;
 
 export class VideoDeckLayer {
   /** @param {HTMLElement} host hidden on-screen container that keeps the <video> elements decoding */

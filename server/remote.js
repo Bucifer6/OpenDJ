@@ -157,7 +157,8 @@ export class DownloadManager {
     await fs.promises.mkdir(dir, { recursive: true });
     const stem = `${t.trackNumber ? String(t.trackNumber).padStart(2, '0') + ' ' : ''}${safe(t.artist)} - ${safe(t.title)}`.slice(0, 200);
     // per-track temp file: two tracks with the same name never write the same .part
-    const tmp = path.join(dir, `.${t.id}.part`);
+    const tmp = path.join(dir, `.${String(t.id).replace(/[^\w-]/g, '_')}.part`);
+    if (!isInside(dir, tmp)) throw new Error('Refusing to download outside the download folder');
     let last = 0;
     const body = Readable.fromWeb(res.body);
     body.on('data', (chunk) => {
