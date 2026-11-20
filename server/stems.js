@@ -247,7 +247,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
       emit('stems-model', { error: lastError });
       throw e;
     } finally {
-      fs.promises.rm(part, { force: true }).catch(() => {});
+      await fs.promises.rm(part, { force: true }).catch(() => {}); // before the status stops saying "downloading"
       download = null;
     }
   }
