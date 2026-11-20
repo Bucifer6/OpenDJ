@@ -82,7 +82,8 @@ async function setupLibrary() {
     'Iron Meridian': { rating: 3, color: '#ff0000', tags: ['Dark'] },
     'Static Bloom': { rating: 4, color: '#ff0000', tags: ['Dark', 'Peak'] },
     'Signal Fire': { rating: 5, color: '#00ff00', tags: ['Energy'] },
-    'Liquid Coastline': { rating: 3, color: '#0000ff', tags: ['Rollers'] },
+    // the analyser hears this one half-time (86): lock the tagged tempo like a DJ would in the beat grid editor
+    'Liquid Coastline': { rating: 3, color: '#0000ff', tags: ['Rollers'], bpm: 172, bpmLocked: true },
     'Saturday Satellite': { rating: 4, color: '#ffff00', tags: ['Warm-up', 'Classic feel'] },
     'Golden Hour Fever': { rating: 5, color: '#ffff00', tags: ['Sunset'] },
     'Concrete Lullaby': { rating: 3, color: '#660099', tags: ['Chill'] },
@@ -99,17 +100,21 @@ async function setupLibrary() {
   const tracks = await ev(() => [...window.opendj.library.tracks.values()]);
   const byTitle = Object.fromEntries(tracks.map((t) => [t.title, t]));
   const sat = new Date(); sat.setDate(sat.getDate() - ((sat.getDay() + 1) % 7 || 7)); sat.setHours(22, 4, 0, 0);
-  let at = sat.getTime();
+  // the older session first: a play is appended to the latest session unless it starts 2 h after it
+  let at = sat.getTime() - 6 * 864e5 + 2 * 3600e3;
+  for (const title of ['Saturday Satellite', 'Golden Hour Fever', 'Glass Horizon', 'Midnight Transit']) { app.history.record(byTitle[title], at); at += 4 * 60e3; }
+  app.history.rename(app.history.list()[0].id, 'Rooftop Sunset');
+  at = sat.getTime();
   for (const title of ['Glass Horizon', 'Copper Skyline', 'Pressure Index', 'Midnight Transit', 'Static Bloom', 'Iron Meridian', 'Signal Fire']) { app.history.record(byTitle[title], at); at += 4 * 60e3 + Math.round(Math.random() * 60e3); }
-  const s1 = app.history.list()[0]; app.history.rename(s1.id, 'Warehouse Party · Sat 22:04');
-  at = sat.getTime() - 6 * 864e5 + 2 * 3600e3;
-  for (const title of ['Saturday Satellite', 'Golden Hour Fever', 'Glass Horizon']) { app.history.record(byTitle[title], at); at += 4 * 60e3; }
+  app.history.rename(app.history.list()[0].id, 'Warehouse Party');
   app.history.flush();
   await ev(() => window.opendj.library.refresh());
   return { ids, T };
 }
 
 async function loadDeck(i, id) {
+  if (await ev(([i, id]) => window.opendj.engine.decks[i].track?.id === id, [i, id])) return;
+  await ev((i) => window.opendj.engine.decks[i].pause(), i); // loading onto a playing deck asks for confirmation
   await ev(([i, id]) => window.opendj.loadTrack(i, id), [i, id]);
   await page.waitForFunction((i) => !!window.opendj.engine.decks[i].waveform, i, { timeout: 60000 });
 }
@@ -122,7 +127,8 @@ for (const title of Object.keys(TRACKS.reduce((a, t) => ({ ...a, [t.title]: 1 })
 log('all tracks analysed');
 
 async function heroState() {
-  await ev(() => window.opendj.setDeckCount(2, false));
+  await closeOverlays();
+  await ev(() => { const a = window.opendj; a.engine.decks.forEach((d) => { d.pause(); d.exitLoop?.(); }); a.setDeckCount(2, false); a.engine.channels.forEach((c) => { for (const k of ['eqLow', 'eqMid', 'eqHigh', 'filter']) c.set(k, 0); c.set('fxOn', false); }); });
   await loadDeck(0, T('Pressure Index'));
   await loadDeck(1, T('Copper Skyline'));
   await ev(() => {
@@ -144,11 +150,222 @@ async function heroState() {
   await ev(() => { window.opendj.mixer.renderAll?.(); window.opendj.library.select?.('playlist'); });
 }
 
+const deckArea = () => ev(() => { const r = document.querySelector('.deck-area').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; });
+const setBrowserHeight = (px) => ev((px) => document.documentElement.style.setProperty('--browser-h', px ? `${px}px` : ''), px);
+const setTheme = (id) => ev(async (id) => { const { applyTheme } = await import('/js/ui/themes.js'); await window.opendj.setSetting('theme', id); applyTheme(window.opendj.settings); }, id);
+const view = (kind, name) => ev(([kind, name]) => {
+  const L = window.opendj.library;
+  const p = name ? (kind === 'session' ? L.sessions.find((s) => (s.name || '') === name) : L.playlists.find((x) => x.name === name)) : null;
+  return L.setView(p ? { kind, id: p.id } : { kind }, p?.name || name || 'Collection');
+}, [kind, name]);
+
 const shots = {
   async hero() {
     await heroState();
     await sleep(1500);
     await save('hero', { type: 'jpeg' });
+  },
+
+  async 'four-decks'() {
+    await heroState();
+    await ev(() => window.opendj.setDeckCount(4, false));
+    await loadDeck(2, T('Static Bloom'));
+    await loadDeck(3, T('Midnight Transit'));
+    await ev(() => {
+      const E = window.opendj.engine, [, , d3, d4] = E.decks;
+      d3.seek(d3.beatLen * 4 * 24); d4.seek(d4.beatLen * 4 * 56);
+      d3.play(); d3.sync(); E.channels[2].set('volume', 0.6); E.channels[2].set('eqHigh', -0.4);
+      d4.sync(); E.channels[3].set('volume', 0);
+    });
+    await sleep(1200);
+    await save('four-decks', { type: 'jpeg' });
+    await ev(() => { const E = window.opendj.engine; E.decks[2].pause(); E.decks[3].pause(); window.opendj.setDeckCount(2, false); });
+  },
+
+  async library() {
+    await heroState();
+    await setBrowserHeight(470);
+    await view('all');
+    await sleep(600);
+    await sleep(300);
+    const r = await ev(() => { const b = document.querySelector('.library, .browser, #library') || window.opendj.library.root; const x = b.getBoundingClientRect(); return { x: 0, y: x.y - 2, width: innerWidth, height: innerHeight - x.y + 2 }; });
+    await save('library', { clip: r, type: 'jpeg' });
+    await setBrowserHeight(0);
+    await view('all');
+  },
+
+  async stems() {
+    await heroState();
+    await ev(() => { window.opendj.engine.decks.forEach((d) => d.pause()); });
+    await ev(async (id) => { const a = window.opendj; a.stems.useStub('bands'); await a.stems.enqueue([id], { interactive: false }); }, T('Midnight Transit'));
+    await page.waitForFunction((id) => window.opendj.library.track(id)?.stems?.ready, T('Midnight Transit'), { timeout: 300000 });
+    await loadDeck(0, T('Midnight Transit'));
+    await page.waitForFunction(() => window.opendj.engine.decks[0].stemsReady, null, { timeout: 60000 });
+    await ev(() => {
+      const a = window.opendj, E = a.engine, d = E.decks[0];
+      d.seek(d.beatLen * 4 * 72); d.play(); d.sync?.();
+      d.setStemMute(1, true); // drums out
+      d.setStemLevel(2, 0.6);
+      E.channels[0].set('volume', 1);
+    });
+    await sleep(1500);
+    const r = await deckArea();
+    const right = await ev(() => document.querySelector('.deck-area .mixer, .deck-area > :nth-child(2)').getBoundingClientRect().right);
+    await save('stems', { clip: { x: 0, y: r.y - 170, width: right + 4, height: r.height + 170 }, type: 'jpeg' });
+    await ev(() => { const d = window.opendj.engine.decks[0]; d.setStemMute(1, false); d.setStemLevel(2, 1); });
+  },
+
+  async video() {
+    await heroState();
+    await ev(async () => {
+      const a = window.opendj;
+      const api = (a.videoUi ||= (await import('/js/video/video-ui.js')).setupVideo(a));
+      api.openPanel();
+      const m = a.video.mixer; m.setFx(0, 'kaleido', true); m.setOverlay({ text: 'WAREHOUSE · SAT' });
+      m.showNowPlaying('Kairo Vance – Pressure Index');
+    });
+    await sleep(2500);
+    await save('video', { type: 'jpeg' });
+    await ev(() => { const a = window.opendj; a.video.mixer.setFx(0, 'kaleido', false); a.video.mixer.setOverlay({ text: '' }); a.video.api.closePanel(); });
+  },
+
+  async lighting() {
+    await heroState();
+    await ev(async () => {
+      const L = window.opendj.lighting;
+      await L.saveConfig({
+        enabled: true,
+        fixtures: [
+          ...[1, 2, 3, 4].map((n) => ({ id: `par${n}`, name: `Par ${n}`, type: 'rgb', channels: ['dim', 'r', 'g', 'b', 'strobe'], universe: 1, address: 1 + (n - 1) * 5, group: n <= 2 ? 'left' : 'right' })),
+          { id: 'mh1', name: 'Wash L', type: 'rgb', channels: ['dim', 'r', 'g', 'b'], universe: 1, address: 21, group: 'left' },
+          { id: 'mh2', name: 'Wash R', type: 'rgb', channels: ['dim', 'r', 'g', 'b'], universe: 1, address: 25, group: 'right' },
+          { id: 'strobe1', name: 'Strobe', type: 'strobe', channels: ['dim', 'rate'], universe: 1, address: 29 },
+          { id: 'strip1', name: 'Bar strip', type: 'wled-strip', host: '', pixels: 60 },
+        ],
+        show: { auto: true, colorMode: 'key' },
+        outputs: {},
+      });
+      L.setLive({ auto: true });
+      L.openPanel();
+    });
+    await page.waitForSelector('.lt-stage .lt-node', { timeout: 10000 }).catch(() => {});
+    await sleep(1800);
+    await save('lighting', { type: 'jpeg' });
+  },
+
+  async controllers() {
+    await ev(() => {
+      const m = window.opendj.midi;
+      const input = { id: 'in1', name: 'DDJ-FLX4', state: 'connected' };
+      const output = { id: 'out1', name: 'DDJ-FLX4', state: 'connected', send: () => {} };
+      m.access = { inputs: new Map([['in1', input]]), outputs: new Map([['out1', output]]), onstatechange: null };
+      m.unsupported = false; m.error = undefined; m.onUnmappedDevice = null;
+      m.bind();
+      document.querySelectorAll('.toast').forEach((t) => t.remove());
+      window.opendj.dialogs.settings('controllers'); // resolves on close: not awaited
+    });
+    await sleep(1200);
+    await ev(() => document.querySelectorAll('.toast').forEach((t) => t.remove()));
+    await save('controllers', { locator: page.locator('.overlay .modal').last() });
+  },
+
+  async 'cdj-export'() {
+    const usb = path.join(tmp, 'USB-STICK'); fs.mkdirSync(usb, { recursive: true });
+    await ev(async () => {
+      const a = window.opendj; const ids = a.library.playlists.filter((p) => p.folder === 'Gigs').map((p) => p.id);
+      (await import('/js/cdj/export-dialog.js')).openCdjExport(a, ids);
+    });
+    await page.waitForSelector('.cdj-target', { timeout: 10000 });
+    await page.locator('.cdj-target').fill(usb);
+    await page.locator('.cdj-target').dispatchEvent('change');
+    await sleep(1500);
+    await save('cdj-export', { locator: page.locator('.overlay .modal').last() });
+  },
+
+  async recording() {
+    await heroState();
+    await ev((folder) => fetch('/api/recording/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, format: 'flac', splitTracks: true }) }), path.join(tmp, 'Recordings'));
+    await ev(() => fetch('/api/broadcast/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targets: [{ type: 'icecast', name: 'Home radio', host: 'radio.example.org', port: 8000, mount: '/live', password: 'demo', format: 'mp3', bitrate: 192, enabled: true }, { type: 'rtmp', name: 'Stream (RTMP)', url: 'rtmp://live.example.com/app', key: 'demo', enabled: false }] }) }));
+    await ev(() => window.opendj.recording.openPanel('record'));
+    await sleep(1200);
+    await save('recording', { locator: page.locator('.overlay .modal').last() });
+    await closeOverlays();
+    await ev(() => window.opendj.recording.openPanel('broadcast'));
+    await sleep(1000);
+    await save('broadcast', { locator: page.locator('.overlay .modal').last() });
+  },
+
+  async automix() {
+    await heroState();
+    await ev(() => { window.opendj.engine.decks.forEach((d) => d.pause()); });
+    await view('playlist', 'Friday — Warehouse');
+    await ev(() => window.opendj.dialogs.automixQueue(window.opendj.library.rows));
+    await sleep(800);
+    await save('automix', { type: 'jpeg' });
+  },
+
+  async 'settings-appearance'() {
+    await ev(() => window.opendj.dialogs.settings('appearance'));
+    await sleep(800);
+    await save('settings-appearance', { locator: page.locator('.overlay .modal').last() });
+  },
+
+  async themes() {
+    await heroState();
+    const list = [['midnight', 'Midnight'], ['neon', 'Neon'], ['club', 'Club Red'], ['light', 'Daylight'], ['gold', 'Black & Gold'], ['contrast', 'High Contrast']];
+    const files = [];
+    for (const [id, name] of list) {
+      await setTheme(id);
+      await sleep(900);
+      const f = path.join(tmp, `theme-${id}.jpg`);
+      await page.screenshot({ path: f, type: 'jpeg', quality: 92, scale: 'css' });
+      files.push([f, name]);
+    }
+    await setTheme('midnight');
+    const p2 = await context.newPage();
+    await p2.setViewportSize({ width: 2400, height: 1000 });
+    const imgs = files.map(([f, n]) => `<figure><img src="data:image/jpeg;base64,${fs.readFileSync(f).toString('base64')}"><figcaption>${n}</figcaption></figure>`).join('');
+    await p2.setContent(`<!doctype html><style>body{margin:0;background:#0b0d10;font:600 22px Inter,sans-serif;color:#e8edf3}main{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;padding:24px}figure{margin:0}img{width:100%;display:block;border-radius:10px;box-shadow:0 6px 24px #0008}figcaption{padding:10px 4px 0;text-align:center}</style><main>${imgs}</main>`);
+    await p2.waitForTimeout(300);
+    const file = path.join(OUT, 'themes.jpg');
+    await p2.locator('main').screenshot({ path: file, type: 'jpeg', quality: 86, scale: 'css' });
+    sizes.push(['themes.jpg', Math.round(fs.statSync(file).size / 1024)]); log(`themes.jpg ${sizes.at(-1)[1]} KB`);
+    await p2.close();
+  },
+
+  async gif() {
+    await heroState();
+    await ev(() => { const E = window.opendj.engine; E.setCrossfader(-0.9); E.channels[1].set('eqLow', -1); window.opendj.mixer.renderAll?.(); });
+    await sleep(500);
+    const dir = path.join(tmp, 'frames'); fs.mkdirSync(dir, { recursive: true });
+    const clip = await ev(() => { const r = document.querySelector('.deck-area').getBoundingClientRect(); return { x: 0, y: 0, width: innerWidth, height: r.bottom + 4 }; });
+    const N = 84, t0 = Date.now();
+    for (let i = 0; i < N; i++) {
+      const k = i / (N - 1);
+      await ev((k) => { const E = window.opendj.engine, a = window.opendj; E.setCrossfader(-0.9 + 1.8 * Math.min(1, k * 1.25)); if (k > 0.45) E.channels[1].set('eqLow', Math.min(0, -1 + (k - 0.45) * 4)); if (k > 0.45) E.channels[0].set('eqLow', Math.max(-1, -(k - 0.45) * 4)); a.mixer.renderAll?.(); }, k);
+      await page.screenshot({ path: path.join(dir, `f${String(i).padStart(3, '0')}.jpg`), type: 'jpeg', quality: 92, clip, scale: 'css' });
+    }
+    const fps = N / ((Date.now() - t0) / 1000);
+    log(`captured ${N} frames at ${fps.toFixed(1)} fps`);
+    const file = path.join(OUT, 'demo.gif');
+    const r = spawnSync(ffmpegPath(), ['-hide_banner', '-loglevel', 'error', '-y', '-framerate', fps.toFixed(2), '-i', path.join(dir, 'f%03d.jpg'), '-vf', 'fps=10,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128[p];[b][p]paletteuse=dither=bayer:bayer_scale=4', file], { stdio: 'inherit' });
+    if (r.status !== 0) throw new Error('ffmpeg gif failed');
+    sizes.push(['demo.gif', Math.round(fs.statSync(file).size / 1024)]); log(`demo.gif ${sizes.at(-1)[1]} KB`);
+    await ev(() => { const E = window.opendj.engine; E.channels[0].set('eqLow', 0); });
+  },
+
+  async dvs() { // last: DVS takes over deck 1
+    await heroState();
+    await ev(async () => {
+      const a = window.opendj; const s = a.dvs.settings;
+      s.enabled = true; s.channelCount = 2; s.decks[0] = { ...s.decks[0], mode: 'rel', pair: 0, timecode: 'serato_2a', rpm: 33 };
+      await a.dvs.save(s);
+      await a.dvs.start();
+      (await import('/js/dvs/dvs-ui.js')).openDvsPanel(a);
+    });
+    await page.waitForSelector('.dvs-panel .dvs-scope', { timeout: 10000 });
+    await sleep(2000);
+    await save('dvs', { type: 'jpeg' });
   },
 };
 

@@ -25,7 +25,7 @@ export const TRACKS = [
   { artist: 'Hollow Atlas', title: 'Iron Meridian', album: 'Meridian', genre: 'Techno', year: 2026, bpm: 130, key: [4, 'minor'], style: 'techno', seed: 53 },
   { artist: 'Vexa Moreau', title: 'Static Bloom', album: 'Static Bloom', genre: 'Techno', year: 2025, bpm: 132, key: [0, 'minor'], style: 'techno', seed: 67 },
   { artist: 'Orbital Fern', title: 'Signal Fire', album: 'Signal Fire / Undertow', genre: 'Drum & Bass', year: 2025, bpm: 174, key: [6, 'minor'], style: 'dnb', seed: 71 },
-  { artist: 'Rhea Calder', title: 'Liquid Coastline', album: 'Tidal Memory', genre: 'Drum & Bass', year: 2024, bpm: 172, key: [11, 'minor'], style: 'dnb', seed: 84 },
+  { artist: 'Rhea Calder', title: 'Liquid Coastline', album: 'Tidal Memory', genre: 'Drum & Bass', year: 2024, bpm: 172, key: [11, 'minor'], style: 'dnb', seed: 83 },
   { artist: 'The Velvet Arcade', title: 'Saturday Satellite', album: 'Mirrorball Stories', genre: 'Disco', year: 2024, bpm: 118, key: [5, 'major'], style: 'disco', seed: 97 },
   { artist: 'Marisol Vega & The Neon Choir', title: 'Golden Hour Fever', album: 'Golden Hour', genre: 'Disco', year: 2026, bpm: 116, key: [7, 'major'], style: 'disco', seed: 101 },
   { artist: 'Dex Halloway', title: 'Concrete Lullaby', album: 'Paper Streetlights', genre: 'Hip-Hop', year: 2025, bpm: 100, key: [1, 'minor'], style: 'hiphop', seed: 113 },

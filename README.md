@@ -1,175 +1,194 @@
+<div align="center">
+
+<img src="public/icon-512.png" alt="OpenDJ logo" width="112">
+
 # OpenDJ
 
-**Free, open-source DJ software.** Two or four decks, a full mixer, beat-synced effects, a sampler, auto-mix and MIDI controller support. Your library can come from local folders, USB sticks, NAS shares, or your **Plex, Jellyfin, Emby, Subsonic/Navidrome and MediaMax** servers. Stream from them or download tracks for offline gigs.
+**Free, open-source DJ software for your own music.**
+Decks, mixer, AI stems, automix, controllers, video and lights, with a library that pulls from your folders, USB sticks, NAS and media servers.
 
-Runs as a desktop app (Windows, macOS, Linux via Electron) or in Chrome/Edge.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/Bucifer6/OpenDJ?include_prereleases&sort=semver)](https://github.com/Bucifer6/OpenDJ/releases/latest)
+[![Build](https://github.com/Bucifer6/OpenDJ/actions/workflows/build.yml/badge.svg)](https://github.com/Bucifer6/OpenDJ/actions/workflows/build.yml)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Web%2FDocker-informational)
+
+[**Download**](https://github.com/Bucifer6/OpenDJ/releases/latest) · [Features](#features) · [Quick start](#quick-start) · [Comparison](docs/GAP_ANALYSIS.md) · [Contributing](CONTRIBUTING.md)
+
+<img src="docs/images/hero.jpg" alt="OpenDJ mid-set: two decks in sync with scrolling 3-band waveforms, phrase markers, hot cues, mixer and library" width="100%">
+
+</div>
+
+<sub>All screenshots use a fictional demo library (invented artists, titles and cover art) synthesised by [`scripts/demo/make-demo-library.mjs`](scripts/demo/make-demo-library.mjs).</sub>
+
+## Why OpenDJ
+
+- **Free and open source.** MIT licensed. No subscription, no account, no feature locked behind a paywall.
+- **Your music, wherever it lives.** Local folders, USB sticks and NAS shares, plus your own **Plex, Jellyfin, Emby, Subsonic/Navidrome and MediaMax** servers. Stream from them or download tracks for offline gigs.
+- **Runs everywhere.** Desktop app for Windows, macOS and Linux, or a self-hosted web app (Docker / NAS) you open in Chrome or Edge.
+- **Plays nicely with your other tools.** Imports rekordbox, Traktor, Serato and VirtualDJ libraries; exports rekordbox XML, M3U and CDJ-ready USB sticks.
+
+<p align="center"><img src="docs/images/demo.gif" alt="Animated demo: waveforms scrolling while the crossfader and EQs mix from deck 1 to deck 2" width="90%"></p>
 
 ## Features
 
-### Decks
-- 2 or 4 decks, sample-accurate AudioWorklet playback engine
-- **Key lock** (master tempo) using WSOLA time-stretching; tempo ranges ±6/8/10/16/25/50/100 %, pitch bend, nudge
-- **Key shift** (±12 semitones) and **Key Sync**: shifts to the nearest harmonically compatible key of the master deck
-- **Phase meter**, phase-locked (quantized) hot cue jumps, and **instant doubles** (drag a deck header onto another deck)
-- **Sync** (tempo + phase, half/double-time aware) with master deck
-- CDJ-style **cue** (set / return / hold-to-preview)
-- 8 **hot cues** per deck (colour coded, saved with the track), memory cues, and **saved loops**: press an empty hot cue pad while a loop is active, or press MEM
-- Pad modes: Hot Cue, Roll, **Slicer**, Beat Jump, **Pitch Play** (play a hot cue at different pitches), Sampler, Pad FX
-- **Loops**: auto beat loops (⅛ to 64 beats), loop in/out, reloop, halve/double, **loop roll**
-- **Beat jump**, quantize, **slip mode**, reverse, censor
-- Jog wheels: scratch (vinyl mode) or nudge (outer ring), with motor brake and **backspin**
-- Scrolling 3-band colour waveforms with beat grid, cue and loop markers, plus a full-track overview
-- **Beat grid editor**: tap tempo, ×2/÷2, shift grid, set downbeat, lock BPM
+### Decks & mixer
 
-### Mixer
-- Per channel: trim, 3-band isolator-style EQ (with full kill), one-knob low/high-pass filter, headphone cue, fader and VU meter
-- Crossfader with A/THRU/B assign and smooth/linear/scratch curves
-- Master volume with limiter, headphone cue/master blend and volume
-- **Headphone cueing** three ways:
-  - a separate sound card
-  - channels 3-4 of a 4-channel controller interface
-  - split cue on a single stereo jack
-- Auto-gain level matching
+<img src="docs/images/four-decks.jpg" alt="Four-deck mode with the 4-channel mixer" width="100%">
 
-### Effects, stems & sampler
-- **Color FX** on the filter knob: Filter, Space, Dub Echo, Noise, Crush, Jet
-- **Quick stems**: VOC / INST knobs per channel. This is DSP mid/side vocal isolation, not AI separation (see docs/GAP_ANALYSIS.md).
-- **Step sequencer**: 16 steps × 8 sampler sounds, locked to the master deck's beat grid, with swing
-- **Microphone / aux input** with EQ, compressor and **talkover** ducking
-- **MIDI clock out**, phase-locked to the master deck (drives drum machines, lighting software and DAWs)
-- Per-channel beat-synced FX: Echo, Ping Pong, Reverb, Flanger, Phaser, Auto Filter, Trans (gate), Bit Crusher, Distortion, Noise Sweep
-- Pad FX: vinyl brake, tape stop, backspin, censor, echo out, filter sweep, loop rolls
-- 8-slot sampler with synthesised built-in sounds (air horn, siren, riser…). Right-click a slot to load your own sample.
-- **Mix recording** to WAV
+- 2 or 4 decks on a sample-accurate AudioWorklet engine
+- **Key lock** (WSOLA time-stretching), tempo ranges ±6 % to ±100 %, pitch bend and nudge
+- **Key shift** (±12 semitones) and **Key Sync** to the nearest harmonically compatible key of the master deck
+- **Sync** (tempo + phase, half/double-time aware) with a **phase meter**; phase-locked hot cue jumps; **instant doubles** (drag a deck header onto another deck)
+- CDJ-style cue, 8 colour-coded **hot cues**, memory cues and **saved loops**
+- Pad modes: Hot Cue, Roll, **Slicer**, Beat Jump, **Pitch Play**, Sampler, Pad FX
+- Auto loops (⅛ to 64 beats), loop roll, beat jump, quantize, **slip**, reverse, censor
+- Jog wheels with vinyl scratch, nudge, motor brake and backspin
+- Scrolling 3-band colour waveforms with beat grid, cue, loop and **phrase** markers, plus a full-track overview; beat grid editor with tap tempo
+- Mixer: trim, 3-band isolator EQ with kill, one-knob filter / **Color FX** (Filter, Space, Dub Echo, Noise, Crush, Jet), headphone cue, VU meters, crossfader curves, master limiter, auto-gain
+- 10 beat-synced effects per channel (Echo, Ping Pong, Reverb, Flanger, Phaser, Auto Filter, Trans, Bit Crusher, Distortion, Noise Sweep) and pad FX (brake, tape stop, backspin, echo out, filter sweep, rolls)
+- 8-slot sampler with a **16-step sequencer** locked to the master deck, microphone / aux input with **talkover**, MIDI clock out
+- Headphone cueing on a second sound card, on channels 3-4 of a 4-channel controller interface, or as split cue on one stereo jack
 
-### Library
-- Folders on any drive. **USB sticks and NAS shares (SMB/NFS/AFP/SSHFS mounts) are detected automatically**: one click adds and scans them.
-- **Media servers**:
-  - Plex
-  - Jellyfin
-  - Emby
-  - Subsonic-compatible (Navidrome, Airsonic, Gonic…)
-  - **MediaMax**: also imports its DJ-mode BPM, key and energy analysis
-- Remote playlists are imported; tracks stream through a local proxy with seeking support.
-- **Download** any remote track, playlist or entire server to a local folder for offline use.
-- Automatic analysis: BPM + beat grid, musical key (Camelot), energy, loudness, silence trimming. Results are cached.
-- Playlists (with folders), drag & drop, ratings, play history, smart views:
-  - recently added
-  - most played
-  - **tracks matching the master deck** (harmonic key + tempo)
-- Search with filters: `bpm:120-128`, `key:8A`, `genre:house`
-- Import **rekordbox XML** (cues, grids, playlists) and **M3U**
-- Export to rekordbox XML and M3U8, or **export playlists to a USB stick**
-- AIFF support (converted on the fly)
+### AI stems
 
-### Auto-mix
-- Non-stop mixing of any playlist or library view on decks 1 & 2
-- Beat-matched, phrase-aligned transitions: EQ bass-swap, crossfade, filter fade or echo-out
-- Optional **smart ordering** by harmonic key, tempo and energy; skip-to-next; queue tracks from the browser
+<img src="docs/images/stems.jpg" alt="Deck with AI stem controls: vocals, drums, bass and melody" width="100%">
 
-### Lighting
-Lights follow the music automatically. The show changes with each phrase:
-- **intro**: colour wash
-- **build-up**: accelerating chase
-- **drop**: full chase with strobe accents
-- **breakdown**: dim fade
+- Right-click a track → **Prepare AI stems**. Separation runs on your computer with HT-Demucs (ONNX Runtime; WebGPU when available) and is cached per track.
+- Each deck gets **vocals / drums / bass / melody** mute and level, **acapella**, **instrumental** and **vocal echo**.
+- The model (~98 MB) is downloaded only after you agree; see [the licence note](#licence). Separation on the CPU is slow (roughly 2.5× the track length), so prepare tracks before the gig.
+- Without prepared stems, the VOC / INST knobs use fast DSP vocal isolation (quick stems).
 
-Colours come from the track's key or energy.
+### Library & media servers
 
-Outputs:
-- **Art-Net** and **sACN (E1.31)** for DMX nodes and lighting desks
-- **USB DMX** with Enttec DMX USB Pro-compatible widgets
-- **WLED** LED strips
-- **Philips Hue**
-- **OSC** for QLC+, Resolume, TouchDesigner and similar
-- **MIDI** notes and MIDI clock
+<img src="docs/images/library.jpg" alt="Library browser with smart playlists, play history, playlist folders, colours, tags and ratings" width="100%">
 
-You can patch fixtures from templates. Live pads cover blackout, strobe, full, freeze, colour, intensity and speed. Open the panel with **💡 LIGHTS** in the top bar.
+- Folders on any drive; **USB sticks and NAS shares** (SMB/NFS/AFP/SSHFS mounts) are detected and added with one click
+- **Media servers**: Plex, Jellyfin, Emby, Subsonic-compatible (Navidrome, Airsonic, Gonic…) and MediaMax (including its DJ analysis). Remote playlists are imported; tracks stream through a local proxy with seeking, or **download** them for offline use.
+- Automatic analysis: BPM + beat grid, key (Camelot), energy, loudness, silence trimming, **phrases** and automatic cues
+- Playlists with folders, **smart playlists** (rules for BPM, key compatibility, genre, tags, colour, rating, energy, dates…), track **colours**, **My Tags**, ratings, **play history sessions** with setlist export (TXT/CSV/M3U)
+- Track info editor (single and multi-track), duplicate finder, missing-file relocate, library backup / restore
+- Search with filters such as `bpm:120-128`, `key:8A`, `genre:house`, and a *Matching master deck* view (harmonic key + tempo)
+- Import **rekordbox XML**, **Traktor NML**, **Serato crates**, **VirtualDJ database** and M3U; export rekordbox XML, M3U8 or playlists to a USB folder
+
+### Automix
+
+<img src="docs/images/automix.jpg" alt="Automix dialog with smart ordering, energy curve and transition options" width="100%">
+
+- Non-stop mixing of any playlist or library view on decks 1 and 2
+- Beat-matched, **phrase-aligned** transitions: bass swap, crossfade, filter fade or echo out
+- **Smart ordering** by key, tempo and an energy curve (harmonic, build up, peak, waves), optional Key Sync to fix key clashes, skip to next, queue tracks from the browser
+
+### Controllers, DVS & Ableton Link
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/controllers.png" alt="Settings → Controllers with a connected MIDI controller"></td>
+<td width="50%"><img src="docs/images/dvs.jpg" alt="DVS setup with the timecode scope"></td>
+</tr>
+</table>
+
+- Any class-compliant **MIDI controller** (Web MIDI) with **MIDI Learn**: 14-bit faders, relative jogs and encoders, LED feedback and a shift layer
+- Import **Mixxx community mappings** (hundreds of controllers) with online search, a **guided mapping wizard**, generic **HID** devices and gamepads; mappings auto-load per device and export as JSON
+- Includes a best-effort Pioneer DDJ-400 / DDJ-FLX4 preset; if a control doesn't respond, fix it with Learn
+- **DVS**: control decks with Serato CV02 or Traktor MK1/MK2 timecode vinyl and CDs (relative, absolute and internal modes, auto-calibration). *Absolute mode has not been verified with real timecode media yet.*
+- **Ableton Link**: follow or lead the session tempo with bar-phase lock (own protocol implementation). *Not yet tested against Ableton Live itself.*
+
+### Video & lighting
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/video.jpg" alt="Video mixer with the audio-reactive visualizer and overlays"></td>
+<td width="50%"><img src="docs/images/lighting.jpg" alt="Lighting panel with the live fixture preview"></td>
+</tr>
+</table>
+
+- **Video mixing**: music videos play in sync with the decks; audio-only tracks get an audio-reactive visualizer with their cover art. Transitions, video FX, text / logo / now-playing overlays, and a projector or second-screen output window. YouTube visuals through the official embedded player.
+- **Lyrics & karaoke**: LRC files, embedded tags, media servers or opt-in LRCLIB; a lyric line under each deck, karaoke mode, karaoke layer in the video output and a sync editor.
+- **Lighting**: automatic beat- and phrase-synced light shows (intro wash, build-up chase, drop chase with strobe accents, breakdown fade), coloured from the track's key or energy. Outputs: **Art-Net**, **sACN (E1.31)**, **USB DMX** (Enttec DMX USB Pro-compatible), **WLED**, **Philips Hue**, **OSC** and **MIDI**. Fixtures are patched from templates; live pads for blackout, strobe, full, freeze, colour, intensity and speed.
+
+### Recording & broadcasting
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/recording.png" alt="Recording panel: format, folder and track splitting"></td>
+<td width="50%"><img src="docs/images/broadcast.png" alt="Broadcast panel: Icecast, Shoutcast and RTMP targets"></td>
+</tr>
+</table>
+
+- Record your mix **straight to disk** as WAV, FLAC, MP3, AAC or Opus with no memory limit, optional auto-split per track, and `.cue` / `.txt` tracklists
+- **Go live** to Icecast, Shoutcast or RTMP (Twitch, YouTube, Mixcloud) with now-playing titles
+
+### CDJ export
+
+<img src="docs/images/cdj-export.png" alt="Export to CDJ USB dialog" width="70%">
+
+- Writes a rekordbox-style **device library** (`export.pdb` + ANLZ files) to a USB stick: beat grids, hot cues, memory cues, loops, colours, waveforms, phrases and artwork, so Pioneer CDJ / XDJ players can browse your playlists
+- Validated against rekordbox's own files and three independent parsers. *It has not been tested on a player yet: feedback from CDJ owners is very welcome.*
+
+### Web app / NAS
+
+Run OpenDJ on a NAS or home server and open it from any computer's browser: password login, browser uploads, an installable PWA and a Docker image. The server holds the library and streams the files; **the audio is mixed and played in the browser**, so headphones and controllers plug into the computer you browse from. See [Run as a web app](#run-as-a-web-app--on-a-nas).
 
 ### Themes
-Nine themes in *Settings → Appearance*:
-- Midnight, Graphite, Club Red, Neon, Ocean, Black & Gold, Forest
-- **Daylight**, a light theme for outdoor gigs
-- **High Contrast**
 
-You can also set a custom accent colour and scale the interface from 80% to 150% for laptops or touchscreens.
+<img src="docs/images/themes.jpg" alt="Six of the nine themes: Midnight, Neon, Club Red, Daylight, Black & Gold and High Contrast" width="100%">
 
-### Controllers
-- Any class-compliant **MIDI controller** via Web MIDI
-- **MIDI Learn** for every function, including:
-  - 14-bit faders
-  - relative jog wheels and encoders
-  - **LED feedback**
-  - a shift layer
-- Mappings auto-load per device and can be exported and imported as JSON
-- Includes a best-effort Pioneer DDJ-400 / DDJ-FLX4 preset. If a control doesn't respond, fix it with Learn.
+Nine themes in *Settings → Appearance*: Midnight, Graphite, Club Red, Neon, Ocean, Black & Gold, Forest, **Daylight** (a light theme for outdoor gigs) and **High Contrast**. Pick a custom accent colour, a waveform colour scheme, and scale the interface from 80 % to 150 % for small laptops or touchscreens.
 
-## How OpenDJ compares
-See **[docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md)** for a feature-by-feature comparison with rekordbox, Serato, Traktor, VirtualDJ, djay Pro and Engine DJ. It also lists what is still missing and why.
+<p align="center"><img src="docs/images/settings-appearance.png" alt="Settings → Appearance" width="70%"></p>
 
-## Download & install
+## Download
 
-| Platform | Files | Notes |
-|---|---|---|
-| **Windows 10/11** (x64, ARM64) | `OpenDJ-Setup-<version>-x64.exe` (installer), `OpenDJ-Portable-<version>.exe` (no install) | Unsigned build: on the SmartScreen prompt choose *More info → Run anyway* |
-| **macOS 11+** (Apple Silicon & Intel) | `OpenDJ-<version>-mac-arm64.dmg` / `-x64.dmg` | Unsigned build: the first time, right-click the app → *Open* (or *System Settings → Privacy & Security → Open Anyway*) |
-| **Linux** (x64, ARM64) | `.AppImage` (any distro), `.deb` (Debian/Ubuntu/Mint), `.rpm` (Fedora/openSUSE, x64), `.tar.gz` | AppImage: `chmod +x OpenDJ-*.AppImage` and run it |
-| **ChromeOS / any OS with Chrome or Edge** | Browser mode | Run `npm run web` on a computer and open it in Chrome or Edge; you can install it as an app from the address bar |
+Get the latest version from **[GitHub Releases](https://github.com/Bucifer6/OpenDJ/releases/latest)**.
 
-Installers are built automatically by GitHub Actions (`.github/workflows/build.yml`) on Windows, macOS and Linux. Push a tag like `v0.2.0` to publish them as a GitHub Release. You can also download them from the run's *Artifacts* on any branch build.
+| System | File |
+|---|---|
+| Windows 10/11 (x64) | `OpenDJ-Setup-<version>-x64.exe` (installer) or `OpenDJ-Portable-<version>.exe` (no install) |
+| Windows on ARM | `OpenDJ-Setup-<version>-arm64.exe` |
+| macOS 11+, Apple Silicon | `OpenDJ-<version>-mac-arm64.dmg` |
+| macOS 11+, Intel | `OpenDJ-<version>-mac-x64.dmg` |
+| Linux, any distro (x64 / ARM64) | `OpenDJ-<version>-linux-x86_64.AppImage` / `-arm64.AppImage`, or `.tar.gz` |
+| Debian / Ubuntu / Mint | `OpenDJ-<version>-linux-amd64.deb` / `-arm64.deb` |
+| Fedora / openSUSE (x64) | `.rpm` (when present) |
+| NAS / server | Docker, see [below](#docker-recommended) |
+| ChromeOS / anything with Chrome or Edge | Browser mode: run `npm run web` on a computer, or use the Docker image |
 
-## Getting started
+**First launch: the builds are not code-signed yet.**
+- **Windows:** on the SmartScreen prompt choose *More info → Run anyway*.
+- **macOS:** right-click the app → *Open* (or *System Settings → Privacy & Security → Open Anyway*).
+- **Linux AppImage:** `chmod +x OpenDJ-*.AppImage`, then run it.
+
+Installers are built by GitHub Actions ([`build.yml`](.github/workflows/build.yml)) on Windows, macOS and Linux; pushing a tag like `v0.2.0` publishes a release, and every branch build has the installers under the run's *Artifacts*.
+
+## Quick start
+
+### Desktop app
+
+Install from the [download table](#download), start OpenDJ, then add music:
+
+- **Folders, USB and NAS**: in the browser's left panel, click a detected drive or use **+ Folder**. NAS shares must be mounted by your OS first (Windows: map a network drive or use `\\nas\music`; macOS: Finder → Go → Connect to Server; Linux: an SMB/NFS mount).
+- **Media servers**: click **+ Media server** and pick the type. Plex: server URL plus an X-Plex-Token, or your plex.tv login. Jellyfin, Emby, Subsonic: URL, username and password. MediaMax: URL plus username and password, or an API key (`mmk_…`). Passwords are exchanged for a token where the server supports it.
+- **rekordbox users**: in rekordbox use *File → Export Collection in xml format*, then *Settings → Library → Import rekordbox XML* in OpenDJ. Traktor, Serato and VirtualDJ libraries import from the same tab.
+
+### Browser mode (from source)
 
 Requires **Node.js 20+**.
 
 ```bash
 npm install
+npm run web        # then open http://localhost:7380 in Chrome or Edge
 ```
 
-Desktop app:
+### Docker
 
 ```bash
-npm start
+docker build -t opendj .
+docker run -d --name opendj -p 7380:7380 \
+  -v opendj-data:/data -v /path/to/music:/music:ro \
+  -e OPENDJ_PASSWORD='choose-a-password' opendj
 ```
 
-Browser mode: start the server below, then open http://localhost:7380 in Chrome or Edge.
-
-```bash
-npm run web
-```
-
-Build installers for the computer you're on. Windows and macOS installers must be built on those systems; CI does that for you:
-
-```bash
-npm run dist
-```
-
-### Adding music
-- **Folders, USB and NAS**: in the browser's left panel, click a detected drive or use **+ Folder**. NAS shares must be mounted by your OS first:
-  - Windows: map a network drive or use `\\nas\music`
-  - macOS: Finder → Go → Connect to Server
-  - Linux: an SMB/NFS mount
-- **Media servers**: click **+ Media server** and pick the type.
-  - Plex: server URL plus an X-Plex-Token, or your plex.tv login.
-  - Jellyfin, Emby, Subsonic: URL, username and password.
-  - MediaMax: URL plus username and password, or an API key (`mmk_…`).
-  - Passwords are exchanged for a token where the server supports it.
-- **rekordbox users**: in rekordbox, use *File → Export Collection in xml format*, then go to OpenDJ *Settings → Library → Import rekordbox XML*.
-
-### Keyboard shortcuts
-| Keys | Action |
-|---|---|
-| Space | Play/pause deck 1 |
-| Z / X / C | Deck 1 cue / play / sync |
-| M / , / . | Deck 2 cue / play / sync |
-| 1–4, 7–0 | Hot cues A–D on deck 1 / deck 2 (hold Shift to delete) |
-| Q / W, O / P | Loop 4 beats / exit, deck 1 / deck 2 |
-| ← / → | Crossfader |
-| ↑ / ↓ | Browse tracks |
-| Shift + ← / → | Load to deck 1 / 2 |
-| R | Record |
-| A | Automix |
-| Ctrl+F | Search |
+Then open `http://<server-address>:7380`. Details in [Run as a web app](#run-as-a-web-app--on-a-nas).
 
 ## Supported formats
 
@@ -257,6 +276,56 @@ https://opendj.lan {
 
 Then start OpenDJ with `OPENDJ_TRUST_PROXY=1`. Sessions use an HttpOnly, SameSite=Strict cookie (marked Secure over HTTPS); failed logins are slowed down per address.
 
+## How OpenDJ compares
+
+OpenDJ covers the core of what rekordbox, Serato, Traktor, VirtualDJ, djay Pro and Engine DJ do for library-based DJing: sync and key tools, hot cues and loops, Color/Beat FX, AI stems, phrase analysis, smart playlists, automix, DVS, Link, video, lighting, recording and broadcasting. Its own strengths are media-server libraries (Plex, Jellyfin, Emby, Subsonic, MediaMax) and self-hosting as a web app.
+
+What's missing, and why:
+- **Streaming services** (Beatport, Beatsource, TIDAL, SoundCloud, Apple Music, Spotify) need commercial agreements and DRM.
+- **Proprietary hardware protocols** (Pro DJ Link, vendor HID) are not available; controllers work over MIDI, with a starter preset plus MIDI Learn and Mixxx mapping import rather than official plug-and-play mappings.
+- **ASIO** is not available; audio goes through WASAPI / CoreAudio / ALSA.
+- **Needs testing on real hardware:** DVS absolute mode, CDJ export on a player, and Link with Ableton Live.
+
+The full feature-by-feature table is in **[docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md)**.
+
+## Keyboard shortcuts
+
+| Keys | Action |
+|---|---|
+| Space | Play/pause deck 1 |
+| Z / X / C | Deck 1 cue / play / sync |
+| M / , / . | Deck 2 cue / play / sync |
+| 1–4, 7–0 | Hot cues A–D on deck 1 / deck 2 (hold Shift to delete) |
+| Q / W, O / P | Loop 4 beats / exit, deck 1 / deck 2 |
+| ← / → | Crossfader |
+| ↑ / ↓ | Browse tracks |
+| Shift + ← / → | Load to deck 1 / 2 |
+| R | Record |
+| A | Automix |
+| Ctrl+F | Search |
+
+## Building from source & tests
+
+Requires **Node.js 20+**.
+
+```bash
+npm install
+npm start          # desktop app (Electron)
+npm run web        # browser mode on http://localhost:7380
+npm run dist       # installers for the OS you're on (Windows/macOS installers must be built on those systems; CI does that)
+```
+
+Tests:
+
+```bash
+npm test            # unit tests: analysis, media-server clients against mock servers, rekordbox round trip, CDJ export, DVS, Link…
+npm run test:e2e    # end-to-end checks in headless Chromium (smoke, performance, controllers, lighting, video, web app, DVS, Link/lyrics, recording, stems)
+```
+
+The smoke test covers scan → load → analyse → play → sync → FX → record → automix; `node scripts/e2e-performance.mjs` measures pitch for key shift and key lock and checks key sync, quantized cues, saved loops, slicer, instant doubles, stems, Color FX, mic/talkover and the sequencer.
+
+README screenshots are reproducible: `node scripts/demo/make-demo-library.mjs` synthesises the fictional demo library and `node scripts/demo/screenshots.mjs` captures everything in `docs/images/`.
+
 ## Architecture
 
 ```
@@ -268,35 +337,32 @@ server/             Node backend (127.0.0.1 by default; password login when host
   drives.js           USB / NAS / drive detection
   remote.js           media-server sync, streaming proxy, download manager
   sources/            Plex, Jellyfin, Emby, Subsonic, MediaMax clients
+  smart.js history.js library-tools.js importers.js   smart playlists, history, prep tools, Traktor/Serato/VirtualDJ import
+  stems.js recorder.js broadcast.js lyrics.js transcode.js
+  cdj/ lighting/ link/   CDJ device-library export, lighting outputs, Ableton Link
   rekordbox.js m3u.js aiff.js
 public/             UI (vanilla ES modules, no build step)
-  js/audio/           engine (mixer graph, routing, recorder), deck, AudioWorklets, effects, sampler, analysis
-  js/ui/              deck, mixer, waveform, library, dialogs, controls
-  js/midi/            MIDI learn/mapping engine + presets
+  js/audio/           engine (mixer graph, routing), deck, AudioWorklets, effects, sampler, sequencer, analysis
+  js/ui/              deck, mixer, waveform, library, dialogs, controls, controllers panel
+  js/midi/            MIDI learn/mapping engine, presets, Mixxx import, wizard
+  js/stems/ js/dvs/ js/video/ js/lighting/ js/recording/ js/cdj/ js/link/ js/lyrics/
   js/automix.js
+scripts/            end-to-end tests (e2e-*.mjs) and README demo tooling (demo/)
 ```
 
 Library data lives in your OS app-data folder (`%APPDATA%\OpenDJ`, `~/Library/Application Support/OpenDJ`, `~/.config/opendj`), or in `OPENDJ_DATA` if set.
 
-## Tests
+## Contributing
 
-Unit tests (analysis, the media-server clients against mock servers, rekordbox round trip):
-
-```bash
-npm test
-```
-
-End-to-end checks in headless Chromium. The first covers scan → load → analyse → play → sync → FX → record → automix:
-
-```bash
-npm run test:e2e
-```
-
-The second measures pitch for key shift and key lock, and checks key sync, quantized cues, saved loops, slicer, instant doubles, stems, Color FX, mic/talkover and the sequencer:
-
-```bash
-node scripts/e2e-performance.mjs
-```
+Bug reports, pull requests, controller mappings and tests on real gear are all welcome. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for setup, tests, code style and the PR process. Reports from DVS, CDJ and Ableton Link users are especially useful right now.
 
 ## Licence
-MIT
+
+OpenDJ is released under the **[MIT licence](LICENSE)**.
+
+- Third-party components (FFmpeg via `ffmpeg-static` under GPL-3.0 as a separate executable, Electron, ONNX Runtime Web, music-metadata, fast-xml-parser) are listed in **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)**.
+- **AI stems model:** the HT-Demucs model is **not bundled**. It is downloaded on demand, only after you agree in the app. Demucs code and weights are released by Meta under the MIT licence, but the packager of the ONNX export used by default describes the weights as being for personal and research use, so check the terms before commercial use, or point the app at a model whose licence suits you.
+
+## Trademarks
+
+rekordbox, CDJ, XDJ and Pioneer DJ are trademarks of AlphaTheta Corporation; Serato is a trademark of Serato Limited; Traktor is a trademark of Native Instruments; Ableton and Ableton Link are trademarks of Ableton AG; VirtualDJ, djay, Engine DJ, Plex, Jellyfin, Emby and other names are trademarks of their respective owners. They are used only to describe compatibility. OpenDJ is an independent project and is not affiliated with, endorsed by or sponsored by any of them.
