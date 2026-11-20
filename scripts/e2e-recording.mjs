@@ -63,7 +63,7 @@ const errors = [];
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 page.on('pageerror', (e) => errors.push(String(e)));
 let ice = null;
-const finish = async (code) => { await browser.close(); for (const m of mounted || []) await m.close(); await ice?.close(); app.shutdown(); app.server.closeAllConnections?.(); app.server.close(); process.exit(code); };
+const finish = async (code) => { setTimeout(() => process.exit(code), 8000).unref(); await browser.close(); for (const m of mounted || []) await m.close(); await ice?.close(); app.shutdown(); app.server.closeAllConnections?.(); app.server.close(); process.exit(code); };
 class CheckError extends Error {}
 const check = (cond, msg) => { if (!cond) throw new CheckError(msg); console.log('ok -', msg); };
 const run = (args) => new Promise((r) => { let e = ''; const p = spawn(ff.path, ['-hide_banner', '-nostdin', ...args]); p.stderr.on('data', (d) => { e += d; }); p.on('close', () => r(e)); });
@@ -112,7 +112,7 @@ try {
   }
   const list = await page.evaluate(async () => (await fetch('/api/recordings')).json());
   check(list.recordings.length === 2, 'recordings list shows both files');
-  await page.evaluate(() => window.rec.openPanel('recordings'));
+  await page.evaluate(() => { window.rec.openPanel('recordings'); }); // the modal promise resolves on close
   await page.waitForSelector('.rec-row');
   check(await page.locator('.rec-row').count() === 2, 'Recordings tab lists them');
   await page.keyboard.press('Escape');

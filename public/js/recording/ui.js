@@ -7,6 +7,7 @@ import { recApi, castApi } from './http.js';
 
 const mb = (n) => (n >= 1073741824 ? `${(n / 1073741824).toFixed(2)} GB` : `${(n / 1048576).toFixed(1)} MB`);
 const hms = (s) => { s = Math.max(0, Math.floor(s || 0)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return `${h ? h + ':' : ''}${String(m).padStart(h ? 2 : 1, '0')}:${String(x).padStart(2, '0')}`; };
+const fill = (node, ...kids) => node.replaceChildren(...kids.flat().filter((k) => k != null && k !== false));
 const field = (label, input, hint) => el('label', { class: 'field' }, el('span', {}, label), input, hint ? el('p', { class: 'hint' }, hint) : null);
 const sel = (value, options, onchange) => { const s = el('select', { class: 'sel', onchange: () => onchange(s.value) }, ...options.map(([v, l]) => el('option', { value: v }, l))); s.value = String(value ?? ''); return s; };
 const inp = (value, onchange, attrs = {}) => { const i = el('input', { class: 'inp', value: value ?? '', ...attrs }); i.addEventListener('change', () => onchange(attrs.type === 'number' ? Number(i.value) : i.value)); return i; };
@@ -88,8 +89,8 @@ function openPanel(app, ctl, tab = 'record') {
   const show = async (k) => {
     clearInterval(timer); timer = null;
     for (const b of tabBar.children) b.classList.toggle('active', b.dataset.k === k);
-    pane.replaceChildren(el('p', { class: 'hint' }, 'Loading…'));
-    try { await builders[k](); } catch (e) { pane.replaceChildren(el('p', { class: 'rec-error' }, e.message)); }
+    fill(pane, el('p', { class: 'hint' }, 'Loading…'));
+    try { await builders[k](); } catch (e) { fill(pane, el('p', { class: 'rec-error' }, e.message)); }
   };
   for (const [k, label] of Object.entries(tabs)) tabBar.append(el('button', { class: 'tab', 'data-k': k, onclick: () => show(k) }, label));
   const live = (fn, ms = 500) => { fn(); timer = setInterval(() => { if (!pane.isConnected) { clearInterval(timer); return; } fn(); }, ms); };
@@ -104,7 +105,7 @@ function openPanel(app, ctl, tab = 'record') {
       const brWrap = el('div');
       const renderFmt = () => {
         const f = info.formats.find((x) => x.id === cfg.format);
-        brWrap.replaceChildren(f?.bitrates
+        fill(brWrap, f?.bitrates
           ? field('Bitrate', sel(f.bitrates.includes(Number(cfg.bitrate)) ? cfg.bitrate : f.bitrate, f.bitrates.map((b) => [b, `${b} kbps`]), (v) => save({ bitrate: Number(v) })))
           : field('Bit depth', sel(cfg.bits, [[16, '16-bit'], [24, '24-bit']], (v) => save({ bits: Number(v) }))));
       };
@@ -115,7 +116,7 @@ function openPanel(app, ctl, tab = 'record') {
       const tracks = el('ol', { class: 'rec-tracks' });
       const btn = el('button', { class: 'btn primary rec-go', onclick: async () => { btn.disabled = true; try { await ctl.toggle(); } finally { btn.disabled = false; } } });
       const meterL = el('div', { class: 'rec-meter-bar' }), meterR = el('div', { class: 'rec-meter-bar' });
-      pane.replaceChildren(
+      fill(pane, 
         el('div', { class: 'rec-grid' },
           field('Format', fmtSel, info.ffmpeg ? null : 'FFmpeg was not found: only WAV is available.'),
           brWrap,
@@ -134,7 +135,7 @@ function openPanel(app, ctl, tab = 'record') {
         btn.textContent = on ? '■ Stop recording' : '● Start recording';
         btn.classList.toggle('danger', on); btn.classList.toggle('primary', !on);
         const s = recorder.server;
-        status.replaceChildren(on
+        fill(status, on
           ? el('div', {}, el('b', { class: 'rec-dot' }, '● REC '), `${hms(recorder.elapsed)} · ${mb(recorder.bytes)}`, s?.name ? el('div', { class: 'hint' }, s.name) : null,
             recorder.backlog > 4 * 1048576 ? el('div', { class: 'rec-error' }, `Upload backlog ${mb(recorder.backlog)}`) : null, s?.gaps ? el('div', { class: 'rec-error' }, `${s.gaps} lost chunk(s) filled with silence`) : null)
           : el('div', { class: 'hint' }, s?.name ? `Last: ${s.name} (${hms(s.seconds)}, ${mb(s.bytes || 0)})` : 'Not recording'));
@@ -142,8 +143,8 @@ function openPanel(app, ctl, tab = 'record') {
         meterL.style.width = `${Math.min(100, l * 100)}%`; meterR.style.width = `${Math.min(100, r * 100)}%`;
         meterL.classList.toggle('clip', l >= 0.99); meterR.classList.toggle('clip', r >= 0.99);
         const list = recorder.tracker?.logged || [];
-        if (tracks.childElementCount !== list.length) tracks.replaceChildren(...list.map((t) => el('li', {}, el('span', { class: 'rec-t' }, hms(t.t)), ` ${t.artist ? t.artist + ' – ' : ''}${t.title}`)));
-        if (!list.length && !tracks.childElementCount) tracks.replaceChildren(el('li', { class: 'hint' }, on ? 'Tracks appear here once they are audible on the master.' : 'Start a recording to build a tracklist.'));
+        if (tracks.childElementCount !== list.length) fill(tracks, ...list.map((t) => el('li', {}, el('span', { class: 'rec-t' }, hms(t.t)), ` ${t.artist ? t.artist + ' – ' : ''}${t.title}`)));
+        if (!list.length && !tracks.childElementCount) fill(tracks, el('li', { class: 'hint' }, on ? 'Tracks appear here once they are audible on the master.' : 'Start a recording to build a tracklist.'));
       });
     },
 
@@ -162,7 +163,7 @@ function openPanel(app, ctl, tab = 'record') {
           try { await recApi.remove(x.name); } catch (e) { app.toast?.(`⚠ ${e.message}`); }
           builders.recordings();
         } }, '🗑')));
-      pane.replaceChildren(el('p', { class: 'hint' }, `Folder: ${r.folder}`), audio, ...(rows.length ? rows : [el('p', { class: 'hint' }, 'No recordings yet.')]));
+      fill(pane, el('p', { class: 'hint' }, `Folder: ${r.folder}`), audio, ...(rows.length ? rows : [el('p', { class: 'hint' }, 'No recordings yet.')]));
     },
 
     async broadcast() {
@@ -178,10 +179,10 @@ function openPanel(app, ctl, tab = 'record') {
       const saveBtn = el('button', { class: 'btn', onclick: async () => { try { await persist(); app.toast?.('Stream settings saved'); } catch (e) { app.toast?.(`⚠ ${e.message}`); } } }, 'Save');
       const metaChk = chk('Send "now playing" (artist – title) to the server', info.config.updateMetadata !== false, () => {});
       const add = (type) => { targets.push({ type, enabled: true, name: type === 'rtmp' ? 'RTMP stream' : type === 'shoutcast' ? 'Shoutcast' : 'Icecast', port: 8000, mount: '/live', format: 'mp3', bitrate: 128 }); render(); };
-      const render = () => list.replaceChildren(...targets.map((t, i) => targetForm(t, () => { targets.splice(i, 1); render(); }, render)),
+      const render = () => fill(list, ...targets.map((t, i) => targetForm(t, () => { targets.splice(i, 1); render(); }, render, info.formats)),
         targets.length ? null : el('p', { class: 'hint' }, 'Add a stream target: an Icecast or Shoutcast radio server, or an RTMP service (Twitch, YouTube Live, Mixcloud Live) — audio with a still image.'));
       render();
-      pane.replaceChildren(
+      fill(pane, 
         info.ffmpeg ? null : el('p', { class: 'rec-error' }, 'Broadcasting needs FFmpeg, which was not found on the server.'),
         list,
         el('div', { class: 'row bc-add' }, el('span', { class: 'hint' }, 'Add:'), ...[['icecast', '+ Icecast'], ['shoutcast', '+ Shoutcast'], ['rtmp', '+ RTMP (Twitch / YouTube / Mixcloud)']].map(([k, l]) => el('button', { class: 'btn sm', onclick: () => add(k) }, l))),
@@ -194,7 +195,7 @@ function openPanel(app, ctl, tab = 'record') {
         goBtn.textContent = broadcaster.live ? '■ Stop broadcast' : '● Go live';
         goBtn.classList.toggle('danger', broadcaster.live); goBtn.classList.toggle('primary', !broadcaster.live);
         const outs = broadcaster.live ? broadcaster.status?.outputs || [] : [];
-        statusBox.replaceChildren(...outs.map((o) => el('div', { class: `bc-out bc-${o.state}` },
+        fill(statusBox, ...outs.map((o) => el('div', { class: `bc-out bc-${o.state}` },
           el('b', {}, o.name), ` ${STATE_LABEL[o.state] || o.state}`,
           o.state === 'live' ? ` · ${hms(o.uptime)} · ${o.kbps} kbps${o.listeners != null ? ` · ${o.listeners} listener${o.listeners === 1 ? '' : 's'}` : ''}` : '',
           o.reconnects ? ` · ${o.reconnects} reconnect(s)` : '',
@@ -204,7 +205,7 @@ function openPanel(app, ctl, tab = 'record') {
     },
   };
 
-  function targetForm(t, remove, rerender) {
+  function targetForm(t, remove, rerender, formats) {
     const set = (k) => (v) => { t[k] = v; };
     const secretIn = (key, has, label) => inp('', (v) => { t[key] = v; }, { type: 'password', autocomplete: 'new-password', placeholder: has ? '•••••• (saved — type to replace)' : label });
     const head = el('div', { class: 'row bc-head' },
@@ -230,7 +231,7 @@ function openPanel(app, ctl, tab = 'record') {
         ice ? field('Mount point', inp(t.mount || '/live', set('mount'))) : field('Server version', sel(t.shoutcastVersion || 1, [[1, 'Shoutcast v1 (source port = port + 1)'], [2, 'Shoutcast v2 (stream ID)']], (v) => { t.shoutcastVersion = Number(v); rerender(); })),
         ice ? field('User', inp(t.username || 'source', set('username'))) : (Number(t.shoutcastVersion) === 2 ? field('Stream ID (sid)', inp(t.sid || 1, set('sid'), { type: 'number', min: 1 })) : field('Source port', inp(t.sourcePort || '', set('sourcePort'), { type: 'number', placeholder: 'port + 1' }))),
         field('Password', secretIn('password', t.hasPassword, 'source password')),
-        field('Format', sel(t.format || 'mp3', info.formats.filter((f) => ice || f.id !== 'opus').map((f) => [f.id, f.label]), set('format'))),
+        field('Format', sel(t.format || 'mp3', formats.filter((f) => ice || f.id !== 'opus').map((f) => [f.id, f.label]), set('format'))),
         field('Bitrate', sel(t.bitrate || 128, [64, 96, 128, 160, 192, 256, 320].map((b) => [b, `${b} kbps`]), (v) => { t.bitrate = Number(v); })),
         field('Station name', inp(t.stationName, set('stationName'), { placeholder: 'OpenDJ live' })),
         field('Genre', inp(t.genre, set('genre'))),

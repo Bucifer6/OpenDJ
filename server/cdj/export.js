@@ -33,7 +33,10 @@ async function writeAtomic(file, data) {
 }
 
 /** Folder path + name of an OpenDJ playlist ("Gigs / 2026" folder -> ['Gigs', '2026']). */
-const playlistPath = (p) => (p.folder ? String(p.folder).split('/').map((s) => s.trim()).filter(Boolean) : []);
+const playlistPath = (p) => (p.folder ? String(p.folder).split(' / ').map((s) => s.trim().slice(0, 255)).filter(Boolean) : []);
+
+/** Identifies a conversion, so a changed target format is converted again. */
+const convKey = (plan) => `${plan.to}/${plan.rate || 0}/${plan.bits || 0}/${plan.copyAudio ? 'copy' : 'enc'}`;
 
 class IdPool {
   constructor(rows, key = (r) => r.name) {
@@ -87,7 +90,12 @@ export async function exportToCdj(ctx, req) {
     if (!readable(src)) { skipped.push({ id: tid, title: label, reason: 'file is outside the allowed music folders' }); continue; }
     const sst = await statOk(src);
     if (!sst?.isFile()) { skipped.push({ id: tid, title: label, reason: 'file missing (drive disconnected?)' }); continue; }
-    const plan = planFormat({ file: src, codec: t.codec, sampleRate: t.sampleRate, hasVideo: t.hasVideo }, { profile: opts.profile, ffmpeg: ff });
+    const fmt = { file: src, codec: t.codec, sampleRate: t.sampleRate, hasVideo: t.hasVideo };
+    if (/\.(wav|aiff?|flac|m4a|alac|ape|wv|dsf|dff)$/i.test(src)) { // bit depth decides copy vs convert (and 16 vs 24-bit AIFF)
+      const mm = await parseFile(src, { duration: false, skipCovers: true }).catch(() => null);
+      if (mm?.format) Object.assign(fmt, { bitsPerSample: mm.format.bitsPerSample || 0, sampleRate: mm.format.sampleRate || fmt.sampleRate });
+    }
+    const plan = planFormat(fmt, { profile: opts.profile, ffmpeg: ff });
     if (plan.action === 'skip') { skipped.push({ id: tid, title: label, reason: plan.reason }); continue; }
     items.push({ t, src, sst, plan, label });
   }
@@ -134,18 +142,20 @@ export async function exportToCdj(ctx, req) {
   }
 
   // ---------------------------------------------------------------- dry run
-  const existingSize = async (it) => { const s = await statOk(fromDevice(root, it.devPath)); return s?.isFile() ? s.size : -1; };
+  const existingFile = async (it) => { const s = await statOk(fromDevice(root, it.devPath)); return s?.isFile() ? s : null; };
   let bytesAudio = 0, bytesReused = 0, anlzBytes = 0;
   for (const it of items) {
     const dur = Number(it.t.duration) || 0;
     const est = it.plan.action === 'copy' ? it.sst.size
       : it.plan.to === 'aiff' ? Math.round(dur * (it.plan.rate || it.t.sampleRate || 44100) * 2 * (it.plan.bits === 24 ? 3 : 2))
         : Math.round(dur * (it.plan.to === 'mp3' ? 40000 : 32000)) || it.sst.size;
-    const have = await existingSize(it);
+    const have = await existingFile(it);
     const prev = sidecar.tracks[it.t.id];
-    it.reuse = have >= 0 && (it.plan.action === 'copy' ? have === it.sst.size : prev && prev.srcSize === it.sst.size && prev.srcMtime === Math.round(it.sst.mtimeMs) && prev.filePath === it.devPath);
+    // copies are current when size and mtime match (FAT keeps mtimes to 2 s); conversions when the source is unchanged
+    it.reuse = !!have && (it.plan.action === 'copy' ? have.size === it.sst.size && Math.abs(have.mtimeMs - it.sst.mtimeMs) <= 2000
+      : !!prev && prev.srcSize === it.sst.size && prev.srcMtime === Math.round(it.sst.mtimeMs) && prev.filePath === it.devPath && prev.conv === convKey(it.plan));
     it.estimate = est;
-    if (it.reuse) bytesReused += have; else bytesAudio += est;
+    if (it.reuse) bytesReused += have.size; else bytesAudio += est;
     anlzBytes += 12000 + Math.round(dur * 150 * (opts.threeBand ? 7 : 4));
   }
   const pdbEstimate = 4096 * (45 + Math.ceil(((keep ? old.tracks.length : 0) + items.length) / 9) + Math.ceil(order.length / 250));
@@ -253,13 +263,13 @@ export async function exportToCdj(ctx, req) {
       // database row
       const prevRow = tracksByPath.get(it.devPath) || (sidecar.tracks[t.id] && keep && oldById.get(sidecar.tracks[t.id].pdbId));
       const id = prevRow?.id ?? ++trackMax;
-      const artistId = pools.artists.get(t.artist || '');
+      const artistId = pools.artists.get(String(t.artist || '').slice(0, 255));
       const fmt = mm?.format || {};
       rows.set(id, {
         ...(prevRow || {}),
-        id, title: t.title || path.basename(it.devPath, path.extname(it.devPath)),
-        artistId, albumId: t.album ? pools.albums.get(t.album, { artistId: t.albumArtist ? pools.artists.get(t.albumArtist) : artistId }) : 0,
-        genreId: pools.genres.get(t.genre || ''), labelId: pools.labels.get(t.label || ''), keyId: pools.keys.get(keyName(t.key)),
+        id, title: String(t.title || path.basename(it.devPath, path.extname(it.devPath))).slice(0, 255),
+        artistId, albumId: t.album ? pools.albums.get(String(t.album).slice(0, 255), { artistId: t.albumArtist ? pools.artists.get(String(t.albumArtist).slice(0, 255)) : artistId }) : 0,
+        genreId: pools.genres.get(String(t.genre || '').slice(0, 255)), labelId: pools.labels.get(String(t.label || '').slice(0, 255)), keyId: pools.keys.get(keyName(t.key)),
         composerId: 0, remixerId: 0, originalArtistId: 0, artworkId: artworkId || (prevRow?.artworkId && artwork.some((x) => x.id === prevRow.artworkId) ? prevRow.artworkId : 0),
         colorId: colorId(t.color), rating: Math.max(0, Math.min(5, Math.round(Number(t.rating) || 0))),
         tempo: Math.round((bpm || 0) * 100), duration: Math.round(duration), year: Number(t.year) || 0, trackNumber: Number(t.trackNumber) || 0, discNumber: 0,
@@ -274,7 +284,7 @@ export async function exportToCdj(ctx, req) {
         filename: path.posix.basename(it.devPath), filePath: it.devPath, mixName: '', message: '', autoloadHotcues: 'ON',
       });
       tidToPdb.set(t.id, id);
-      sidecar.tracks[t.id] = { pdbId: id, filePath: it.devPath, srcSize: sst.size, srcMtime: Math.round(sst.mtimeMs) };
+      sidecar.tracks[t.id] = { pdbId: id, filePath: it.devPath, srcSize: sst.size, srcMtime: Math.round(sst.mtimeMs), ...(plan.action === 'convert' ? { conv: convKey(plan) } : {}) };
     } catch (e) {
       if (e.name === 'AbortError') throw e;
       skipped.push({ id: t.id, title: it.label, reason: e.message });
@@ -292,6 +302,7 @@ export async function exportToCdj(ctx, req) {
   const child = (parentId, name, isFolder) => tree.find((r) => r.parentId === parentId && r.name === name && !!r.isFolder === isFolder);
   const nextSort = (parentId) => tree.filter((r) => r.parentId === parentId).reduce((m, r) => Math.max(m, r.sortOrder), 0) + 1;
   const exportedPlaylists = [];
+  const usedNodes = new Set();
   for (const p of playlists) {
     let parent = 0;
     for (const f of playlistPath(p)) {
@@ -299,10 +310,13 @@ export async function exportToCdj(ctx, req) {
       if (!node) { node = { id: ++treeMax, parentId: parent, sortOrder: nextSort(parent), isFolder: true, name: f }; tree.push(node); }
       parent = node.id;
     }
-    const name = String(p.name || 'Playlist');
+    let name = String(p.name || 'Playlist').slice(0, 255);
+    // two exported playlists with the same name in the same folder: keep both
+    for (let i = 2; usedNodes.has(child(parent, name, false)?.id); i++) name = `${String(p.name || 'Playlist').slice(0, 250)} (${i})`;
     let node = child(parent, name, false);
     if (!node) { node = { id: ++treeMax, parentId: parent, sortOrder: nextSort(parent), isFolder: false, name }; tree.push(node); }
     const ids = trackIdsOf(p).map((tid) => tidToPdb.get(tid)).filter(Boolean);
+    usedNodes.add(node.id);
     entries = entries.filter((e) => e.playlistId !== node.id);
     ids.forEach((trackId, i) => entries.push({ entryIndex: i + 1, trackId, playlistId: node.id }));
     exportedPlaylists.push({ name, folder: playlistPath(p).join(' / '), tracks: ids.length });
