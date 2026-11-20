@@ -330,3 +330,56 @@ test('#5 (suspected) RTMP stream key is redacted from FFmpeg errors', async () =
   assert.equal(redactKey('Error opening output rtmp://live.twitch.tv/app/live_KEY_123: I/O error', 'live_KEY_123'), 'Error opening output rtmp://live.twitch.tv/app/***: I/O error');
   assert.doesNotMatch(redactKey('rtmp://a.example/app/sk_abcdefghijklmnop failed', ''), /abcdefghijklmnop/);
 });
+
+// ---------------------------------------------------------------- #6 active content on the app origin / #11 framing
+const id3WithCover = (mime, data) => {
+  const body = Buffer.concat([Buffer.from([0]), Buffer.from(mime + '\0'), Buffer.from([3]), Buffer.from('\0'), data]);
+  const fh = Buffer.alloc(10); fh.write('APIC', 0); fh.writeUInt32BE(body.length, 4);
+  const frames = Buffer.concat([fh, body]), n = frames.length;
+  return Buffer.concat([Buffer.from('ID3'), Buffer.from([3, 0, 0, (n >> 21) & 0x7f, (n >> 14) & 0x7f, (n >> 7) & 0x7f, n & 0x7f]), frames, Buffer.alloc(2048)]);
+};
+
+test('#6 embedded SVG covers and HTML from media servers are never served as active content', () => desktop(async ({ app, c, dir }) => {
+  const svg = path.join(dir, 'svg.mp3'), jpg = path.join(dir, 'jpg.mp3');
+  fs.writeFileSync(svg, id3WithCover('image/svg+xml', Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')));
+  fs.writeFileSync(jpg, id3WithCover('image/jpg', Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3])));
+  app.library.upsertTrack({ id: 'svg', sourceType: 'local', path: svg, title: 's' });
+  app.library.upsertTrack({ id: 'jpg', sourceType: 'local', path: jpg, title: 'j' });
+  const s = await c('GET', '/api/tracks/svg/cover');
+  assert.equal(s.status, 200);
+  assert.equal(s.headers['content-type'], 'application/octet-stream');
+  assert.equal((await c('GET', '/api/tracks/jpg/cover')).headers['content-type'], 'image/jpeg');
+  // a media server answering text/html for a stream or a cover
+  const up = http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end('<script>alert(document.domain)</script>'); });
+  await new Promise((r) => up.listen(0, '127.0.0.1', r));
+  try {
+    app.library.saveSource({ id: 'ss', type: 'subsonic', name: 'S', url: `http://127.0.0.1:${up.address().port}`, username: 'u', password: 'p' });
+    app.library.upsertTrack({ id: 'rem', sourceType: 'remote', sourceId: 'ss', remoteId: '42', format: 'mp3', hasCover: true, title: 'r' });
+    for (const p of ['/api/tracks/rem/cover', '/api/tracks/rem/stream']) {
+      const r = await c('GET', p);
+      assert.equal(r.status, 200, p);
+      assert.equal(r.headers['content-type'], 'application/octet-stream', p);
+      assert.equal(r.headers['content-security-policy'], "default-src 'none'; sandbox", p);
+      assert.equal(r.headers['x-content-type-options'], 'nosniff');
+    }
+  } finally { up.close(); }
+  const { safeMediaType } = await import('../server/index.js');
+  assert.equal(safeMediaType('audio/flac'), 'audio/flac');
+  assert.equal(safeMediaType('video/mp4; codecs=x'), 'video/mp4');
+  assert.equal(safeMediaType('image/svg+xml', 'image'), 'application/octet-stream');
+  assert.equal(safeMediaType('image/png', 'audio'), 'application/octet-stream');
+  // every API response carries the sandbox CSP; JSON and SSE still work
+  const j = await c('GET', '/api/settings');
+  assert.equal(j.headers['content-security-policy'], "default-src 'none'; sandbox");
+  assert.equal(j.headers['content-type'], 'application/json');
+}));
+
+test('#11 frames are refused in every mode (X-Frame-Options + frame-ancestors on HTML)', () => desktop(async ({ c }) => {
+  for (const p of ['/', '/index.html', '/login.html', '/video.html']) {
+    const r = await c('GET', p);
+    assert.equal(r.status, 200, p);
+    assert.equal(r.headers['x-frame-options'], 'DENY', p);
+    assert.equal(r.headers['content-security-policy'], "frame-ancestors 'none'", p);
+  }
+  assert.equal((await c('GET', '/api/info')).headers['x-frame-options'], 'DENY');
+}));

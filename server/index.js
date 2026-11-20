@@ -43,6 +43,18 @@ const MIME = {
   '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.webm': 'audio/webm', '.aif': 'audio/wav', '.aiff': 'audio/wav', '.m4b': 'audio/mp4',
   '.m4v': 'video/mp4', '.mov': 'video/mp4',
 };
+// Content types we pass on for media from files / media servers. Anything else (text/html, image/svg+xml, XML…)
+// could run script on the app's origin if opened directly, so it is sent as application/octet-stream.
+const SAFE_IMAGE = /^image\/(jpeg|png|gif|webp|bmp|avif)$/;
+export function safeMediaType(type, kind = 'audio') {
+  let t = String(type || '').split(';')[0].trim().toLowerCase();
+  if (t === 'image/jpg' || t === 'image/pjpeg') t = 'image/jpeg';
+  if (kind === 'image') return SAFE_IMAGE.test(t) ? t : 'application/octet-stream';
+  if (/^(audio|video)\/[\w.+-]+$/.test(t) || t === 'application/ogg') return t;
+  return 'application/octet-stream';
+}
+// Every API response: never rendered as a document with scripts, even when opened directly in a tab.
+const API_CSP = "default-src 'none'; sandbox";
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 export function isLoopback(host) {
@@ -132,7 +144,7 @@ function sendPlaceholder(res) {
 }
 
 /** Stream a remote media-server URL to the client (Range passed through). Aborts upstream when the client leaves. */
-async function proxy(req, res, { url, headers = {} }, { connectTimeout = 15000 } = {}) {
+async function proxy(req, res, { url, headers = {} }, { connectTimeout = 15000, kind = 'audio' } = {}) {
   const h = { ...headers };
   if (req.headers.range) h.Range = req.headers.range;
   const ctrl = new AbortController();
@@ -150,8 +162,8 @@ async function proxy(req, res, { url, headers = {} }, { connectTimeout = 15000 }
     res.off('close', onClose);
     throw new HttpError(502, `Media server answered HTTP ${up.status}`);
   }
-  const out = {};
-  for (const k of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+  const out = { 'content-type': safeMediaType(up.headers.get('content-type'), kind) };
+  for (const k of ['content-length', 'content-range', 'accept-ranges']) {
     const v = up.headers.get(k); if (v) out[k] = v;
   }
   res.writeHead(up.status, out);
@@ -412,12 +424,12 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       const mm = await parseFile(file, { duration: false }).catch(() => null);
       const pic = mm?.common.picture?.[0];
       if (!pic) return sendPlaceholder(res);
-      res.writeHead(200, { 'Content-Type': /^image\/[\w.+-]+$/.test(pic.format) ? pic.format : 'application/octet-stream', 'Cache-Control': 'max-age=86400' });
+      res.writeHead(200, { 'Content-Type': safeMediaType(pic.format, 'image'), 'Cache-Control': 'max-age=86400' });
       return res.end(Buffer.from(pic.data));
     }
     const r = t.sourceType === 'remote' ? remoteCover(library, t) : null;
     if (!r) return sendPlaceholder(res);
-    return proxy(req, res, r).catch(() => sendPlaceholder(res));
+    return proxy(req, res, r, { kind: 'image' }).catch(() => sendPlaceholder(res));
   });
   route('GET', '/api/tracks/:id/waveform', async ({ params, req, res }) => {
     const f = library.waveformPath(track(params.id).id);
@@ -764,9 +776,11 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     try { url = new URL(req.url, 'http://localhost'); } catch { res.writeHead(400); return res.end('Bad request'); }
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
-    if (auth.enabled) res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-Frame-Options', 'DENY'); // no clickjacking, desktop mode included (frame-ancestors below)
     if (!hostOk(req)) { res.writeHead(421, { 'Content-Type': 'text/plain' }); return res.end('Misdirected request: unknown Host'); }
     const isApi = url.pathname.startsWith('/api/');
+    // onnxruntime-web's own module files (node_modules, not user data) may need to run as a worker script
+    if (isApi && !url.pathname.startsWith('/api/stems/ort/')) res.setHeader('Content-Security-Policy', API_CSP);
     const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
     // Block cross-site requests from web pages to this API (state-changing ones, and any API read a page attempts).
     if ((mutating || isApi) && !originOk(req)) { res.writeHead(403, { 'Content-Type': 'text/plain' }); return res.end('Forbidden origin'); }
@@ -803,6 +817,8 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       if (!st?.isFile()) throw new HttpError(404, 'Not found');
       const headers = { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' };
       if (rel === 'sw.js') headers['Service-Worker-Allowed'] = '/';
+      // frame-ancestors only works as a header (the pages' own CSP is a <meta> tag); both policies apply
+      if (path.extname(file) === '.html') headers['Content-Security-Policy'] = "frame-ancestors 'none'";
       res.writeHead(200, headers);
       if (req.method === 'HEAD') return res.end();
       await pipeQuiet(fs.createReadStream(file), res);
