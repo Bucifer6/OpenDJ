@@ -174,7 +174,7 @@ Install from the [download table](#download), start OpenDJ, then add music:
 
 ### Browser mode (from source)
 
-Requires **Node.js 20+**.
+Requires **Node.js 22+** (music-metadata 12 needs it).
 
 ```bash
 npm install
@@ -308,7 +308,7 @@ The full feature-by-feature table is in **[docs/GAP_ANALYSIS.md](docs/GAP_ANALYS
 
 ## Building from source & tests
 
-Requires **Node.js 20+**.
+Requires **Node.js 22+** (music-metadata 12 needs it).
 
 ```bash
 npm install
