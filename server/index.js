@@ -1,16 +1,24 @@
-// Local HTTP API + static UI server. Bound to 127.0.0.1 only.
+// HTTP API + static UI server.
+// Desktop / `npm run web`: bound to 127.0.0.1, no password, Host + Origin checked (DNS rebinding / CSRF).
+// Hosted (HOST=0.0.0.0, e.g. on a NAS): password login required (auth.js), file access limited to allowed roots.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { parseFile } from 'music-metadata';
 import { Library, newId } from './library.js';
-import { scanFolder, addFile, walk, AUDIO_EXT } from './scanner.js';
+import { scanFolder, addFile, walk, AUDIO_EXT, isMediaPath } from './scanner.js';
 import { listDrives, browseDir } from './drives.js';
 import { aiffToWav } from './aiff.js';
-import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clientFor } from './remote.js';
+import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clientFor, isInside, uniqueName, safe } from './remote.js';
+import { findFfmpeg, needsTranscode, remoteBrowserDecodable, browserPlayableVideo, formatList, DSD_EXT, VIDEO_MIME, extOf, probe, isVideoByName, BROWSER_VIDEO_EXT } from './media.js';
+import { Transcoder } from './transcode.js';
+import { Auth } from './auth.js';
+import { redactSettings, REDACTED } from './library-tools.js';
 import { SOURCE_TYPES } from './sources/index.js';
 import { parseRekordboxXml, buildRekordboxXml } from './rekordbox.js';
 import { parseM3U, buildM3U } from './m3u.js';
@@ -26,8 +34,16 @@ const MIME = {
   '.css': 'text/css; charset=utf-8', '.webmanifest': 'application/manifest+json', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png',
   '.ico': 'image/x-icon', '.woff2': 'font/woff2',
   '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.flac': 'audio/flac', '.m4a': 'audio/mp4', '.mp4': 'audio/mp4', '.aac': 'audio/aac',
-  '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.webm': 'audio/webm', '.aif': 'audio/wav', '.aiff': 'audio/wav',
+  '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.webm': 'audio/webm', '.aif': 'audio/wav', '.aiff': 'audio/wav', '.m4b': 'audio/mp4',
+  '.m4v': 'video/mp4', '.mov': 'video/mp4',
 };
+const VERSION = '0.1.0';
+
+export function isLoopback(host) {
+  const h = String(host || '').replace(/^\[|\]$/g, '').toLowerCase();
+  return h === 'localhost' || h === '::1' || /^127\.\d+\.\d+\.\d+$/.test(h) || h === '::ffff:127.0.0.1';
+}
+const csv = (v) => String(v || '').split(/[,\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
 
 export function defaultDataDir() {
   if (process.env.OPENDJ_DATA) return process.env.OPENDJ_DATA;
@@ -39,13 +55,22 @@ export function defaultDataDir() {
 
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 
+const mimeOf = (req) => String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+
 async function readBody(req, limit = 50 * 1024 * 1024) {
+  if (Number(req.headers['content-length']) > limit) throw new HttpError(413, 'Body too large');
   const chunks = []; let n = 0;
   for await (const c of req) { n += c.length; if (n > limit) throw new HttpError(413, 'Body too large'); chunks.push(c); }
   const raw = Buffer.concat(chunks);
   if (!raw.length) return {};
-  if ((req.headers['content-type'] || '').includes('json')) return JSON.parse(raw.toString('utf8'));
-  return raw;
+  // JSON only with exactly `application/json` (not a CORS-safelisted type, so cross-site pages need a preflight).
+  if (mimeOf(req) === 'application/json') {
+    let v;
+    try { v = JSON.parse(raw.toString('utf8')); } catch { throw new HttpError(400, 'Invalid JSON'); }
+    return v && typeof v === 'object' ? v : {};
+  }
+  if (mimeOf(req) === 'application/octet-stream') return raw;
+  throw new HttpError(415, 'Send JSON (Content-Type: application/json)');
 }
 
 function sendJson(res, status, obj) {
@@ -54,21 +79,35 @@ function sendJson(res, status, obj) {
   res.end(body);
 }
 
-function sendFileRange(req, res, file, mime) {
-  const st = fs.statSync(file);
-  const range = req.headers.range && /bytes=(\d*)-(\d*)/.exec(req.headers.range);
+/** Parse a Range header against a size: { start, end } | 'invalid' | null (no/ignored range -> full body). */
+export function parseRange(header, size) {
+  if (!header) return null;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(header).trim());
+  if (!m) return null; // multi-range or unknown unit: answer with the full file
+  if (m[1] === '' && m[2] === '') return 'invalid';
+  let start, end;
+  if (m[1] === '') { const n = Number(m[2]); if (!n) return 'invalid'; start = Math.max(0, size - n); end = size - 1; }
+  else { start = Number(m[1]); end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1); }
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= size) return 'invalid';
+  return { start, end };
+}
+
+const pipeQuiet = (src, res) => pipeline(src, res).catch(() => { if (!res.destroyed) res.destroy(); });
+
+async function sendFileRange(req, res, file, mime) {
+  const st = await fs.promises.stat(file).catch(() => null);
+  if (!st || !st.isFile()) throw new HttpError(404, 'File missing (drive disconnected?)');
+  const range = parseRange(req.headers.range, st.size);
   const headers = { 'Content-Type': mime, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache' };
+  if (range === 'invalid') { res.writeHead(416, { 'Content-Range': `bytes */${st.size}` }); return res.end(); }
   if (range) {
-    const start = range[1] ? Number(range[1]) : Math.max(0, st.size - Number(range[2]));
-    const end = range[1] && range[2] ? Math.min(Number(range[2]), st.size - 1) : st.size - 1;
-    if (start >= st.size) { res.writeHead(416, { 'Content-Range': `bytes */${st.size}` }); return res.end(); }
-    res.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${st.size}`, 'Content-Length': end - start + 1 });
-    fs.createReadStream(file, { start, end }).pipe(res);
-  } else {
-    res.writeHead(200, { ...headers, 'Content-Length': st.size });
+    res.writeHead(206, { ...headers, 'Content-Range': `bytes ${range.start}-${range.end}/${st.size}`, 'Content-Length': range.end - range.start + 1 });
     if (req.method === 'HEAD') return res.end();
-    fs.createReadStream(file).pipe(res);
+    return pipeQuiet(fs.createReadStream(file, { start: range.start, end: range.end }), res);
   }
+  res.writeHead(200, { ...headers, 'Content-Length': st.size });
+  if (req.method === 'HEAD') return res.end();
+  return pipeQuiet(fs.createReadStream(file), res);
 }
 
 const PLACEHOLDER = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" fill="#20252d"/><path d="M24 11v13.5a4 4 0 1 1-2-3.46V15l-6 1.5v10a4 4 0 1 1-2-3.46V13z" fill="#4a5361"/></svg>';
@@ -78,17 +117,33 @@ function sendPlaceholder(res) {
   res.end(PLACEHOLDER);
 }
 
-async function proxy(req, res, { url, headers = {} }) {
+/** Stream a remote media-server URL to the client (Range passed through). Aborts upstream when the client leaves. */
+async function proxy(req, res, { url, headers = {} }, { connectTimeout = 15000 } = {}) {
   const h = { ...headers };
   if (req.headers.range) h.Range = req.headers.range;
-  const up = await fetch(url, { headers: h });
+  const ctrl = new AbortController();
+  const onClose = () => ctrl.abort();
+  res.on('close', onClose);
+  const timer = setTimeout(() => ctrl.abort(), connectTimeout);
+  let up;
+  try { up = await fetch(url, { headers: h, signal: ctrl.signal }); } catch (e) {
+    res.off('close', onClose);
+    if (res.destroyed) return;
+    throw new HttpError(502, ctrl.signal.aborted ? 'Media server did not answer in time' : `Media server unreachable: ${e.message}`);
+  } finally { clearTimeout(timer); }
+  if (![200, 206, 416].includes(up.status)) {
+    ctrl.abort();
+    res.off('close', onClose);
+    throw new HttpError(502, `Media server answered HTTP ${up.status}`);
+  }
   const out = {};
   for (const k of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
     const v = up.headers.get(k); if (v) out[k] = v;
   }
   res.writeHead(up.status, out);
-  if (!up.body) return res.end();
-  Readable.fromWeb(up.body).on('error', () => res.destroy()).pipe(res);
+  if (!up.body || req.method === 'HEAD') { ctrl.abort(); return res.end(); }
+  await pipeline(Readable.fromWeb(up.body), res).catch(() => { ctrl.abort(); if (!res.destroyed) res.destroy(); });
+  res.off('close', onClose);
 }
 
 export function createServer({ dataDir = defaultDataDir(), log = console } = {}) {

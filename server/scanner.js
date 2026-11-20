@@ -9,17 +9,36 @@ import { MEDIA_EXT, VIDEO_EXT, needsTranscode, normCodec, mmVideoInfo, isVideoBy
 export const AUDIO_EXT = MEDIA_EXT;
 export { VIDEO_EXT };
 
-export async function* walk(dir, { signal } = {}) {
+/**
+ * Media files under `dir`. Symlinked folders/files are followed (common for music collections), with a guard
+ * against loops (each real directory is visited once) and a depth cap.
+ */
+export async function* walk(dir, { signal, depth = 0, seen = new Set() } = {}) {
+  if (depth > 40) return;
+  try {
+    const real = await fs.promises.realpath(dir);
+    if (seen.has(real)) return;
+    seen.add(real);
+  } catch { return; }
   let entries;
   try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
   for (const e of entries) {
     if (signal?.aborted) return;
     if (e.name.startsWith('.') || e.name === '$RECYCLE.BIN' || e.name === 'System Volume Information') continue;
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) yield* walk(p, { signal });
-    else if (e.isFile() && AUDIO_EXT.has(path.extname(e.name).toLowerCase())) yield p;
+    let isDir = e.isDirectory(), isFile = e.isFile();
+    if (e.isSymbolicLink()) {
+      const st = await fs.promises.stat(p).catch(() => null);
+      if (!st) continue; // dangling link
+      isDir = st.isDirectory(); isFile = st.isFile();
+    }
+    if (isDir) yield* walk(p, { signal, depth: depth + 1, seen });
+    else if (isFile && AUDIO_EXT.has(path.extname(e.name).toLowerCase())) yield p;
   }
 }
+
+/** Only regular files with a media extension can become tracks (imports must not turn /etc/passwd into one). */
+export function isMediaPath(file) { return AUDIO_EXT.has(path.extname(String(file || '')).toLowerCase()); }
 
 const parseTitleFromName = (file) => {
   const base = path.basename(file, path.extname(file));
@@ -76,8 +95,9 @@ export async function readTags(file, { ffmpeg } = {}) {
 export async function addFile(library, file, sourceId = 'files') {
   const tid = library.trackIdForPath ? library.trackIdForPath(file) : Library.localId(file);
   const prev = library.getTrack(tid);
+  if (!isMediaPath(file)) return null;
   const st = await fs.promises.stat(file).catch(() => null);
-  if (!st) return null;
+  if (!st || !st.isFile()) return null;
   if (prev && prev.mtime === st.mtimeMs && 'needsTranscode' in prev) return prev; // unchanged (and has format info)
   const tags = await readTags(file, { ffmpeg: library.media?.ffmpeg()?.path });
   return library.upsertTrack({ id: tid, sourceType: 'local', sourceId, path: path.resolve(file), ...tags });

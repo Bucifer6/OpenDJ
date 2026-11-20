@@ -8,6 +8,8 @@ import { Library } from './library.js';
 import { addFile } from './scanner.js';
 
 const clients = new Map();
+const TOKEN_ONLY = new Set(['plex', 'jellyfin', 'emby']);
+const USER_DATA = (t) => t.analyzed || t.cues?.length || t.loops?.length || t.hotLoops?.length || t.rating || t.playCount || t.comment || t.tags?.length || t.color;
 
 export function clientFor(library, sourceId) {
   const cfg = library.getSource(sourceId);
@@ -26,6 +28,9 @@ export async function addSource(library, cfg) {
   const client = createClient(cfg);
   const info = await client.connect();
   const saved = library.saveSource({ ...cfg, ...client.persistable(), serverName: info?.serverName || cfg.name });
+  // Plex/Jellyfin/Emby never sign in again once they have a token: don't keep the raw password around.
+  // (Subsonic signs every request with it; MediaMax re-logs in when its session expires.)
+  if (TOKEN_ONLY.has(saved.type) && saved.token) delete saved.password;
   clients.delete(saved.id);
   return { source: library.publicSource(saved), info };
 }
@@ -44,10 +49,24 @@ export async function syncSource(library, sourceId, { onProgress } = {}) {
     const { coverUrl, ...rest } = rt;
     library.upsertTrack({ ...rest, id: tid, sourceType: 'remote', sourceId, sourceKind: cfg.type, hasCover: !!coverUrl });
   }
-  // remove tracks deleted on the server (keep downloaded ones as local files)
+  // Tracks no longer on the server. A server that suddenly lists nothing (or less than half of what it had) is
+  // more likely broken or half-indexed than emptied, so nothing is pruned then. Tracks with the user's work on
+  // them (cues, analysis, ratings, plays…) are kept and flagged `remoteMissing` instead of deleted.
+  const prevCount = library.allTracks().filter((t) => t.sourceId === sourceId && t.sourceType === 'remote').length;
   const gone = library.allTracks().filter((t) => t.sourceId === sourceId && !seen.has(t.id));
-  for (const t of gone) { if (t.localPath) { t.sourceType = 'local'; t.path = t.localPath; } }
-  library.removeTracks(gone.filter((t) => !t.localPath).map((t) => t.id));
+  let pruned = 0, kept = 0;
+  const suspicious = gone.length && (tracks.length === 0 || (prevCount >= 10 && tracks.length < prevCount * 0.5));
+  if (!suspicious) {
+    for (const t of gone) { if (t.localPath) { t.sourceType = 'local'; t.path = t.localPath; } }
+    const drop = [];
+    for (const t of gone) {
+      if (t.localPath) continue;
+      if (USER_DATA(t)) { t.remoteMissing = true; kept++; } else drop.push(t.id);
+    }
+    pruned = drop.length;
+    library.removeTracks(drop);
+  }
+  for (const rt of tracks) { const t = library.getTrack(Library.remoteId(sourceId, rt.remoteId)); if (t?.remoteMissing) delete t.remoteMissing; }
 
   let playlists = [];
   try { playlists = await client.listPlaylists(); } catch { /* playlists optional */ }
@@ -61,7 +80,7 @@ export async function syncSource(library, sourceId, { onProgress } = {}) {
   cfg.trackCount = tracks.length;
   library.changed('tracks');
   onProgress?.({ source: sourceId, done: tracks.length, total: tracks.length, finished: true });
-  return { tracks: tracks.length, playlists: playlists.length };
+  return { tracks: tracks.length, playlists: playlists.length, pruned, keptMissing: kept, skippedPrune: !!suspicious };
 }
 
 /** Request info for streaming a remote track through our local proxy. */
@@ -72,7 +91,13 @@ export function remoteCover(library, track) {
   return clientFor(library, track.sourceId).coverRequest(track.remoteId, track);
 }
 
-const safe = (s) => String(s || 'Unknown').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Unknown';
+export const safe = (s) => {
+  const v = String(s || 'Unknown').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Unknown';
+  return /^\.+$/.test(v) ? '_' : v.replace(/^\.+/, '_'); // no '.', '..' or hidden names
+};
+/** A file extension from a (server-controlled) string: 1-5 alphanumerics, else the fallback. */
+export const safeExt = (e, fallback = 'mp3') => { const v = String(e || '').replace(/^\./, '').toLowerCase(); return /^[a-z0-9]{1,5}$/.test(v) ? v : fallback; };
+const DONE_CAP = 200;
 
 export class DownloadManager {
   constructor(library, emit) {
@@ -114,7 +139,8 @@ export class DownloadManager {
       this.run(job).then(
         (file) => this.done.push({ trackId: tid, ok: true, file }),
         (err) => this.done.push({ trackId: tid, ok: false, error: err.message }),
-      ).finally(() => { this.active.delete(tid); this.emit('downloads', this.list()); this.pump(); });
+      ).finally(() => {
+        if (this.done.length > DONE_CAP) this.done.splice(0, this.done.length - DONE_CAP); this.active.delete(tid); this.emit('downloads', this.list()); this.pump(); });
     }
   }
   async run(job) {
@@ -124,25 +150,36 @@ export class DownloadManager {
     const res = await fetch(req.url, { headers: req.headers || {}, signal: job.ctrl.signal });
     if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
     job.total = Number(res.headers.get('content-length')) || t.size || 0;
-    const ext = (req.ext || t.format || 'mp3').replace(/^\./, '');
-    const dir = path.join(this.library.settings.downloadDir, safe(t.albumArtist || t.artist), safe(t.album || 'Singles'));
+    const ext = safeExt(req.ext, safeExt(t.format));
+    const root = path.resolve(this.library.settings.downloadDir);
+    const dir = path.join(root, safe(t.albumArtist || t.artist), safe(t.album || 'Singles'));
+    if (!isInside(root, dir)) throw new Error('Refusing to download outside the download folder');
     await fs.promises.mkdir(dir, { recursive: true });
-    const file = path.join(dir, `${t.trackNumber ? String(t.trackNumber).padStart(2, '0') + ' ' : ''}${safe(t.artist)} - ${safe(t.title)}.${ext}`);
-    const tmp = file + '.part';
+    const stem = `${t.trackNumber ? String(t.trackNumber).padStart(2, '0') + ' ' : ''}${safe(t.artist)} - ${safe(t.title)}`.slice(0, 200);
+    // per-track temp file: two tracks with the same name never write the same .part
+    const tmp = path.join(dir, `.${t.id}.part`);
     let last = 0;
     const body = Readable.fromWeb(res.body);
     body.on('data', (chunk) => {
       job.received += chunk.length;
       if (Date.now() - last > 250) { last = Date.now(); this.emit('downloads', this.list()); }
     });
-    await pipeline(body, fs.createWriteStream(tmp));
-    await fs.promises.rename(tmp, file);
+    let file;
+    try {
+      await pipeline(body, fs.createWriteStream(tmp));
+      file = await uniqueName(dir, stem, ext);
+      if (!isInside(root, file)) throw new Error('Refusing to download outside the download folder');
+      await fs.promises.link(tmp, file).catch(async (e) => { // link fails if the name was taken meanwhile: never overwrite
+        if (e.code === 'EEXIST') { file = await uniqueName(dir, stem, ext); await fs.promises.link(tmp, file); } else await fs.promises.copyFile(tmp, file, fs.constants.COPYFILE_EXCL);
+      });
+    } finally { await fs.promises.rm(tmp, { force: true }).catch(() => {}); }
     t.localPath = file;
     t.downloadedAt = Date.now();
     // Pick up any embedded tags we didn't get from the server (e.g. BPM/key written by other DJ software).
     try {
       const { readTags } = await import('./scanner.js');
-      const tags = await readTags(file);
+      const tags = await readTags(file, { ffmpeg: this.library.media?.ffmpeg()?.path });
+      t.codec = tags.codec; t.hasVideo = tags.hasVideo; t.needsTranscode = tags.needsTranscode;
       if (!t.bpm && tags.bpm) t.bpm = tags.bpm;
       if (!t.key && tags.key) t.key = tags.key;
       if (!t.duration && tags.duration) t.duration = tags.duration;
@@ -150,6 +187,20 @@ export class DownloadManager {
     this.library.changed('tracks');
     return file;
   }
+}
+
+export function isInside(root, p) {
+  const rel = path.relative(path.resolve(root), path.resolve(p));
+  return rel === '' || (!!rel && !rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+/** `<dir>/<stem>.<ext>`, or `<stem> (2).<ext>`… when taken. */
+export async function uniqueName(dir, stem, ext) {
+  for (let i = 1; i < 1000; i++) {
+    const f = path.join(dir, `${stem}${i > 1 ? ` (${i})` : ''}.${ext}`);
+    try { await fs.promises.access(f); } catch { return f; }
+  }
+  throw new Error('Too many files with the same name');
 }
 
 export { addFile };

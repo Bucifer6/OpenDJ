@@ -10,7 +10,7 @@ export function toCamelot(k) {
   if (!k) return null;
   const s = String(k).trim();
   if (/^(1[0-2]|[1-9])[AB]$/i.test(s)) return s.toUpperCase();
-  const m = /^([A-G])\s*([#b♯♭]?)\s*(m|min|minor|maj|major)?/i.exec(s);
+  const m = /^([A-G])\s*([#b♯♭]?)\s*(minor|min|major|maj|m)?(?![a-z])/i.exec(s);
   if (!m) return null;
   const enh = { 'C#': 'Db', 'D#': 'Eb', 'G#': 'Ab', 'A#': 'Bb', Gb: 'F#', Cb: 'B', Fb: 'E', 'E#': 'F', 'B#': 'C' };
   let name = m[1].toUpperCase() + (m[2] || '').replace('♯', '#').replace('♭', 'b');

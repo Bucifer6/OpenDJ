@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { readJsonSafe, writeJsonAtomic } from './jsonstore.js';
 
 export const SESSION_GAP_MS = 2 * 3600 * 1000;
 
@@ -9,15 +10,25 @@ export class History {
   constructor(dataDir) {
     this.file = path.join(dataDir, 'history.json');
     this.data = { version: 1, sessions: [] };
-    try { const d = JSON.parse(fs.readFileSync(this.file, 'utf8')); if (Array.isArray(d.sessions)) this.data = d; } catch { /* none yet */ }
+    this.loadErrors = [];
+    const r = readJsonSafe(this.file);
+    if (r.error) { this.loadErrors.push(r.error); console.error('[opendj]', r.error); }
+    if (Array.isArray(r.data?.sessions)) this.data = { ...r.data, sessions: r.data.sessions.filter((s) => s && Array.isArray(s.entries)) };
   }
 
-  save() { clearTimeout(this._t); this._t = setTimeout(() => this.flush(), 400); }
+  save() {
+    clearTimeout(this._t);
+    this._t = setTimeout(() => {
+      try { this.flush(); } catch (e) {
+        console.error('[opendj] saving play history failed:', e.message);
+        this.onError?.(e);
+        this._t = setTimeout(() => this.save(), 5000);
+      }
+    }, 400);
+  }
   flush() {
     clearTimeout(this._t);
-    const tmp = this.file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(this.data));
-    fs.renameSync(tmp, this.file);
+    writeJsonAtomic(this.file, this.data);
   }
 
   /** Record a play. Returns the session it was added to. */
