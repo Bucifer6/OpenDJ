@@ -117,6 +117,55 @@ try {
   const clean = stopMid.ch.every((c) => c.low === 0 && c.v >= 0.79);
   check(oneDeck && clean, `stopping automix mid-transition leaves one deck playing and EQs reset (${JSON.stringify(stopMid)})`);
 
+  // ---- pre-release QA pass ----
+  await page.evaluate(() => { const a = window.opendj; a.automix.stop?.(); a.engine.decks.forEach((d) => d.pause()); });
+  // M1: playlists show in their own order with a # column, and can be reordered by dragging
+  const order = [ids.Third, ids.Long, ids.Short];
+  const pl = await page.evaluate((o) => fetch('/api/playlists', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'QA order', trackIds: o }) }).then((r) => r.json()), order);
+  await page.evaluate(async (id) => { const L = window.opendj.library; await L.refresh(); await L.setView({ kind: 'playlist', id }, 'QA order'); }, pl.id);
+  await page.waitForTimeout(300);
+  const shown = await page.evaluate(() => ({ ids: window.opendj.library.rows.map((t) => t.id), hash: [...document.querySelectorAll('.lib-header .lh')][0]?.textContent }));
+  check(JSON.stringify(shown.ids) === JSON.stringify(order) && /#/.test(shown.hash), `a playlist opens in its own order with a # column (${JSON.stringify(shown)})`);
+  await page.locator('.lr').nth(2).dragTo(page.locator('.lr').nth(0), { targetPosition: { x: 200, y: 3 } });
+  await page.waitForTimeout(600);
+  const after = await page.evaluate((id) => window.opendj.library.playlists.find((p) => p.id === id).trackIds, pl.id);
+  check(JSON.stringify(after) === JSON.stringify([ids.Short, ids.Third, ids.Long]), `dragging a row reorders the playlist (${JSON.stringify(after)})`);
+  await page.evaluate(() => window.opendj.library.setView({ kind: 'all' }, 'Collection'));
+  await page.waitForTimeout(300);
+  // M6: Esc closes a dialog opened from a context-menu item (the menu's Esc listener used to leak)
+  await page.locator('.lr').nth(0).click({ button: 'right' });
+  await page.locator('.ctx-item', { hasText: /Edit track info/ }).click();
+  await page.waitForTimeout(300); await page.keyboard.press('Escape'); await page.waitForTimeout(200);
+  check(!(await page.evaluate(() => !!document.querySelector('.overlay'))), 'the first Esc closes a dialog opened from a context menu');
+  // M2: the context menu opens at the pointer under Interface size 150 %
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.evaluate(async () => { const { applyTheme } = await import('/js/ui/themes.js'); await window.opendj.setSetting('uiScale', 150); applyTheme(window.opendj.settings); });
+  await page.waitForTimeout(400);
+  const rb = await page.locator('.lr').nth(1).boundingBox();
+  const cx = Math.round(rb.x + 150), cy = Math.round(rb.y + rb.height / 2);
+  await page.mouse.click(cx, cy, { button: 'right' }); await page.waitForTimeout(200);
+  const mr = await page.evaluate(() => { const r = document.querySelector('.ctx-menu').getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; });
+  check(Math.abs(mr.l - cx) < 4 && mr.b <= 1080 && mr.r <= 1920 && mr.t >= 0, `context menu at the pointer and on screen at 150 % (${cx},${cy} -> ${JSON.stringify(mr)})`);
+  await page.keyboard.press('Escape');
+  await page.evaluate(async () => { const { applyTheme } = await import('/js/ui/themes.js'); await window.opendj.setSetting('uiScale', 100); applyTheme(window.opendj.settings); });
+  // m5: key:<unknown> matches nothing
+  const keyless = await page.evaluate(async () => { const L = window.opendj.library; L.query = 'key:xyz'; L.applyView(); const n = L.rows.length; L.query = ''; L.applyView(); return n; });
+  check(keyless === 0, `search key:xyz matches nothing (${keyless})`);
+  // M5 / M4: all 8 hot-cue pads visible and the 4-deck master column unclipped on short screens
+  await page.evaluate(async (id) => { await window.opendj.loadTrack(0, id); }, ids.Third);
+  for (const [w, h] of [[1280, 800], [1600, 900], [1366, 768]]) {
+    await page.setViewportSize({ width: w, height: h }); await page.waitForTimeout(400);
+    const vis = await page.evaluate(() => { const dk = document.querySelector('.deck'), mid = dk.querySelector('.deck-mid').getBoundingClientRect(); return [...dk.querySelectorAll('.pad')].filter((p) => { const r = p.getBoundingClientRect(); return r.height > 0 && r.bottom <= mid.bottom + 1; }).length; });
+    check(vis === 8, `2 decks at ${w}x${h}: all 8 hot-cue pads visible (${vis})`);
+  }
+  await page.evaluate(() => window.opendj.setDeckCount(4, false)); await page.setViewportSize({ width: 1280, height: 800 }); await page.waitForTimeout(400);
+  const clip = await page.evaluate(() => { const m = document.querySelector('.mixer-master'), r = m.getBoundingClientRect(); return [...m.querySelectorAll('.knob-wrap, .btn')].filter((e) => { const x = e.getBoundingClientRect(); return x.width && (x.right > r.right + 1 || x.left < r.left - 1); }).length; });
+  check(clip === 0, `4 decks at 1280x800: nothing clipped in the MASTER column (${clip})`);
+  await page.evaluate(() => window.opendj.setDeckCount(2, false)); await page.setViewportSize({ width: 1600, height: 960 });
+  // m1: the loop size label is a clean number
+  const lbl = await page.evaluate(async () => { const d = window.opendj.engine.decks[0]; d.autoLoop(4); await new Promise((r) => setTimeout(r, 100)); const t = document.querySelector('.loop-size').textContent; d.exitLoop(); return t; });
+  check(lbl === '4', `loop size label reads "4" (${lbl})`);
+
   check(errors.length === 0, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
 } catch (e) { console.error(e); failed = true; }
 await browser.close(); app.server.close();
