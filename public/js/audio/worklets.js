@@ -7,7 +7,7 @@ const GRAIN = 2048; // key-lock grain size (source frames)
 class DeckProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.L = null; this.R = null; this.len = 0;
+    this.L = null; this.R = null; this.len = 0; this.k = 1;
     this.step = 1;            // source frames per output frame at rate 1 (resample ratio)
     this.pos = 0;             // play head in source frames
     this.shadow = 0;          // slip-mode shadow position
@@ -37,6 +37,9 @@ class DeckProcessor extends AudioWorkletProcessor {
     switch (m.type) {
       case 'load':
         this.L = m.left; this.R = m.right || m.left; this.len = this.L.length;
+        this.k = this.L instanceof Int16Array ? 1 / 32768 : 1; // sample scale (16-bit decks use half the memory)
+        stemCoefficients(this.stemCur, this.stemCoef); this.stemCoef[0] *= this.k;
+        stemCoefficients(this.sendCur, this.sendCoef); this.sendCoef[0] *= this.k;
         this.step = m.sampleRate / sampleRate;
         this.pos = this.shadow = 0; this.playing = false; this.curRate = 0; this.loop = null; this.brake = 0;
         this.scratch = null; this.dir = 1; this.slip = false; this.endedSent = false; this.stems = null;
@@ -92,10 +95,11 @@ class DeckProcessor extends AudioWorkletProcessor {
   // 4-point Hermite interpolation
   sample(buf, x) {
     const i = Math.floor(x); const f = x - i; const n = this.len;
-    if (i < 1 || i + 2 >= n) return (i >= 0 && i < n) ? buf[i] : 0;
+    const k = this.k;
+    if (i < 1 || i + 2 >= n) return (i >= 0 && i < n) ? buf[i] * k : 0;
     const y0 = buf[i - 1], y1 = buf[i], y2 = buf[i + 1], y3 = buf[i + 2];
     const c1 = 0.5 * (y2 - y0), c2 = y0 - 2.5 * y1 + 2 * y2 - 0.5 * y3, c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2);
-    return ((c3 * f + c2) * f + c1) * f + y1;
+    return (((c3 * f + c2) * f + c1) * f + y1) * k;
   }
 
   process(_inputs, outputs) {
@@ -128,8 +132,8 @@ class DeckProcessor extends AudioWorkletProcessor {
       // stem gains: per-sample smoothing; the plain original path is used whenever every stem is at unity
       let useMix = false, useSend = false;
       if (stems) {
-        if (smoothGains(this.stemCur, this.stemTarget, this.stemK)) stemCoefficients(this.stemCur, this.stemCoef);
-        if (smoothGains(this.sendCur, this.sendTarget, this.stemK)) stemCoefficients(this.sendCur, this.sendCoef);
+        if (smoothGains(this.stemCur, this.stemTarget, this.stemK)) { stemCoefficients(this.stemCur, this.stemCoef); this.stemCoef[0] *= this.k; }
+        if (smoothGains(this.sendCur, this.sendTarget, this.stemK)) { stemCoefficients(this.sendCur, this.sendCoef); this.sendCoef[0] *= this.k; }
         useMix = !isUnity(this.stemCur);
         useSend = !!fL && !isSilent(this.sendCur);
       }

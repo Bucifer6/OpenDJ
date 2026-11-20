@@ -50,7 +50,9 @@ export class LinkClient {
       d.on('tempo', () => this.onDeckTempo(d));
       d.on('state', () => this.onDeckState(d));
     }
-    this.engine.on('master-deck', () => { if (this.prefs.lead) this.onDeckTempo(this.engine.master); });
+    // a newly chosen master deck only pushes its tempo when we're not following: with Follow on it adopts the
+    // session tempo instead (otherwise picking a master would overwrite tempo changes made by other Link apps)
+    this.engine.on('master-deck', () => { if (this.prefs.lead && !this.prefs.follow) this.onDeckTempo(this.engine.master); });
     return this;
   }
 

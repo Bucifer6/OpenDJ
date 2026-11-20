@@ -197,9 +197,9 @@ try {
   await page.waitForFunction(() => window.opendj.link.state.peers === 1, null, { timeout: 8000 });
   check((await page.textContent('.link-btn .link-peers')).trim() === '1', 'LINK button shows 1 peer');
   peer.setTempo(133);
-  await page.waitForFunction(() => Math.abs(window.opendj.link.state.bpm - 133) < 0.01, null, { timeout: 5000 });
+  await page.waitForFunction(() => Math.abs(window.opendj.link.state.bpm - 133) < 0.01, null, { timeout: 5000 }).catch(async (e) => { console.log('DIAG session bpm wait', JSON.stringify(await page.evaluate(() => ({ st: window.opendj.link.state, follow: window.opendj.link.follow, lead: window.opendj.link.lead })))); throw e; });
   await page.evaluate(() => { const d = window.opendj.engine.decks[0]; d.setMaster(); d.play(); });
-  await page.waitForFunction(() => Math.abs(window.opendj.engine.decks[0].effectiveBpm - 133) < 0.05, null, { timeout: 5000 });
+  await page.waitForFunction(() => Math.abs(window.opendj.engine.decks[0].effectiveBpm - 133) < 0.05, null, { timeout: 5000 }).catch(async (e) => { console.log('DIAG deck follow wait', JSON.stringify(await page.evaluate(() => { const d = window.opendj.engine.decks[0]; return { bpm: d.effectiveBpm, tempo: d.tempo, playing: d.playing, master: d.isMaster, st: window.opendj.link.state, follow: window.opendj.link.follow, lead: window.opendj.link.lead }; }))); throw e; });
   check(true, 'master deck follows the Link tempo (120 → 133 BPM)');
   await new Promise((r) => setTimeout(r, 1500));
   const phase = await page.evaluate(() => window.opendj.link.lastError);

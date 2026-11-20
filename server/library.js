@@ -36,6 +36,7 @@ export const DEFAULT_SETTINGS = {
   link: { enabled: false, quantum: 4, startStopSync: false },
   lyrics: { online: false, writeLrc: false },
   stemsModelUrl: '', stemsModelSha256: '', stemsBackend: 'auto', stemsAutoLoad: true, stemsOverlap: 0.25,
+  highPrecisionAudio: false,  // decks keep 32-bit float audio (2x RAM) instead of 16-bit
   recording: null,
   broadcast: null,
   lighting: null,             // lighting rig + outputs (server/lighting); replaced wholesale on update

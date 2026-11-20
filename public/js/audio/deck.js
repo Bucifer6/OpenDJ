@@ -96,14 +96,14 @@ export class Deck extends Emitter {
       const buf = await this.ctx.decodeAudioData(ab);
       if (stale()) return false;
       this.sr = buf.sampleRate; this.duration = buf.duration;
-      const left = new Float32Array(buf.getChannelData(0));
-      const right = buf.numberOfChannels > 1 ? new Float32Array(buf.getChannelData(1)) : null;
       // waveform + analysis (cached on the server after the first time)
       let wave = track.analyzed ? decodeWaveform(await api.waveform(track.id) || new ArrayBuffer(0)) : null;
       if (stale()) return false;
       if (!wave) { // analyse once; tracks whose BPM can't be detected aren't re-analysed on every load
-        const mono = new Float32Array(left.length);
-        if (right) for (let i = 0; i < mono.length; i++) mono[i] = (left[i] + right[i]) * 0.5; else mono.set(left);
+        // analysis copy straight from the decoded audio (no intermediate full-length float copies)
+        const c0 = buf.getChannelData(0), c1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : null;
+        const mono = new Float32Array(c0.length);
+        if (c1) for (let i = 0; i < mono.length; i++) mono[i] = (c0[i] + c1[i]) * 0.5; else mono.set(c0);
         const r = await this.engine.analyze(mono, buf.sampleRate);
         if (stale()) return false;
         wave = decodeWaveform(r.wave.buffer);
@@ -124,6 +124,10 @@ export class Deck extends Emitter {
       this.waveform = wave;
       this.bpm = track.bpm || 0; this.gridOffset = track.gridOffset || 0;
       if (!track.phrases && wave && this.bpm) this.refreshStructure(false); // tracks analysed before phrase detection existed
+      // Deck memory: 16-bit samples by default (CD resolution, half the RAM of float); 32-bit float on request.
+      const hiPrec = !!this.engine.settings.highPrecisionAudio;
+      const left = deckChannel(buf.getChannelData(0), hiPrec);
+      const right = buf.numberOfChannels > 1 ? deckChannel(buf.getChannelData(1), hiPrec) : null;
       this.frames = left.length;
       this.node.port.postMessage({ type: 'load', left, right, sampleRate: buf.sampleRate }, right ? [left.buffer, right.buffer] : [left.buffer]);
       this.resetStemControls(); this.postStemGains();
@@ -545,4 +549,18 @@ export function shiftCamelot(cam, n) {
   const m = /^(\d+)([AB])$/.exec(cam || '');
   if (!m) return null;
   return `${((((+m[1] - 1 + 7 * n) % 12) + 12) % 12) + 1}${m[2]}`;
+}
+
+/** Copy one decoded channel for the deck worklet: Int16 with TPDF dither (default) or Float32 (high precision). */
+export function deckChannel(src, highPrecision = false) {
+  if (highPrecision) return new Float32Array(src);
+  const out = new Int16Array(src.length);
+  let seed = 22222;
+  for (let i = 0; i < src.length; i++) {
+    seed = (seed * 1664525 + 1013904223) >>> 0; const r1 = seed / 4294967296;
+    seed = (seed * 1664525 + 1013904223) >>> 0; const r2 = seed / 4294967296;
+    const v = Math.round(src[i] * 32767 + (r1 - r2)); // ±1 LSB triangular dither
+    out[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
+  }
+  return out;
 }
