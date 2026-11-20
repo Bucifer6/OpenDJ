@@ -65,7 +65,7 @@ export class BackgroundAnalyser extends Emitter {
   }
 
   status() {
-    return { running: this.running && (this.queue.size > 0 || !!this.current), remaining: this.queue.size + (this.current ? 1 : 0), label: this.current ? this.queue.label() : '', paused: this.paused };
+    return { running: this.running && (this.queue.size > 0 || !!this.current), remaining: this.queue.size + (this.current ? 1 : 0), label: this.queue.total ? this.queue.label() : '', paused: this.paused };
   }
 
   start() {
