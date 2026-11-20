@@ -5,7 +5,9 @@
 #   docker run -d -p 7380:7380 -v opendj-data:/data -v /path/to/music:/music:ro opendj
 #   docker logs <container>   # one-time setup code: choose the password on first visit
 # Or pass OPENDJ_PASSWORD (8+ characters; example values like "change-me" are refused at startup).
-FROM node:22-slim
+# Pinned by digest (multi-arch index of node:22-slim, looked up 2026-11-20). To update:
+#   docker buildx imagetools inspect node:22-slim   (and replace the sha256 below)
+FROM node:22-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg tini \

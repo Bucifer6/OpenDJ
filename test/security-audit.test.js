@@ -474,3 +474,21 @@ test('#14 electron/main.js applies the pop-up / navigation / webview policy to e
   assert.ok(src.indexOf('cookies.set(') < src.indexOf('win.loadURL('), 'cookie before loadURL');
 });
 
+// ---------------------------------------------------------------- #15 supply chain
+test('#15 Dockerfile base image pinned by digest; ffmpeg download location cannot be redirected and is hash-checked', async () => {
+  const docker = fs.readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
+  assert.match(docker, /^FROM node:22-slim@sha256:[0-9a-f]{64}$/m);
+  const { createRequire } = await import('node:module');
+  const bp = createRequire(import.meta.url)('../build/before-pack.cjs');
+  process.env.FFMPEG_BINARIES_URL = 'https://evil.example'; process.env.FFMPEG_BINARY_RELEASE = 'x'; process.env.FFMPEG_BIN = '/tmp/x';
+  try {
+    const env = bp.installEnv({ npm_config_arch: 'arm64' });
+    for (const k of ['FFMPEG_BINARIES_URL', 'FFMPEG_BINARY_RELEASE', 'FFMPEG_BIN']) assert.equal(k in env, false, k);
+    assert.equal(env.npm_config_arch, 'arm64');
+  } finally { delete process.env.FFMPEG_BINARIES_URL; delete process.env.FFMPEG_BINARY_RELEASE; delete process.env.FFMPEG_BIN; }
+  const dir = tmpdir(); // never the real node_modules: a mismatch deletes the binary
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ 'ffmpeg-static': { 'binary-release-tag': 'b6.1.1' } }));
+  fs.writeFileSync(path.join(dir, 'ffmpeg'), 'not the real ffmpeg');
+  assert.throws(() => bp.verifyFfmpeg(dir, 'linux-x64'), /does not match/);
+  assert.equal(fs.existsSync(path.join(dir, 'ffmpeg')), false, 'rejected binary removed');
+});
