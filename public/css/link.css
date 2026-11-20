@@ -1,0 +1,18 @@
+/* Ableton Link: top-bar button, beat dots and options popover */
+.link-wrap { display: inline-flex; align-items: center; gap: 4px; }
+.link-btn { --deck-color: var(--green); font-weight: 800; letter-spacing: .06em; }
+.link-btn .link-peers { min-width: 15px; padding: 0 4px; border-radius: 8px; background: var(--panel); color: var(--text-2); font-size: 9.5px; line-height: 14px; text-align: center; }
+.link-btn.active .link-peers { background: var(--green); color: #032; }
+.link-more { padding: 4px 5px; }
+.link-beats { display: none; gap: 2px; }
+.link-wrap.on .link-beats { display: inline-flex; }
+.link-beats i { width: 6px; height: 10px; border-radius: 2px; background: var(--panel-3); border: 1px solid var(--line-2); }
+.link-beats i.on { background: var(--green); border-color: var(--green); }
+.link-beats i:first-child.on { background: var(--amber); border-color: var(--amber); }
+.link-pop { position: fixed; z-index: 90; width: 290px; padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 14px 40px var(--shadow); }
+.link-pop-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.link-pop-st { color: var(--text-2); font-size: 11px; }
+.link-chk { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.link-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.link-row .inp.tiny { width: 76px; padding: 3px 6px; }
+.link-pop .hint { margin: 0; color: var(--text-3); font-size: 10.5px; }

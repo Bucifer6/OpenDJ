@@ -8,31 +8,56 @@ import { LibraryUI } from './ui/library-ui.js';
 import { Dialogs } from './ui/dialogs.js';
 import { AutoMix } from './automix.js';
 import { MidiManager } from './midi/midi.js';
+import { Sequencer } from './audio/sequencer.js';
+import { applyTheme } from './ui/themes.js';
+import { Lighting } from './lighting/lighting.js';
+import { setupVideo } from './video/video-ui.js';
+import { setupUpload } from './ui/upload.js';
+import { DvsManager } from './dvs/dvs.js';
+import { setupLink } from './link/link.js';
+import { setupStems } from './stems/stems-ui.js';
+import { setupRecording } from './recording/index.js';
+import { setupLyrics } from './lyrics/lyrics.js';
+import { dvsButton } from './dvs/dvs-ui.js';
 
 class App {
   constructor() { this.shift = false; this._shiftKey = false; }
 
   async init() {
     this.settings = await api.settings();
+    applyTheme(this.settings);
     this.deckCount = this.settings.deckCount || 2;
     this.engine = new Engine(this.settings);
     await this.engine.init();
+    this.dvs = new DvsManager(this);
     this.dialogs = new Dialogs(this);
     this.library = new LibraryUI(this);
+    this.upload = setupUpload(this);
+    if ('serviceWorker' in navigator && !/Electron/.test(navigator.userAgent)) navigator.serviceWorker.register('/sw.js').catch(() => {});
     this.automix = new AutoMix(this);
     this.midi = new MidiManager(this);
+    this.sequencer = new Sequencer(this.engine);
     this.buildLayout();
+    setupStems(this);
+    this.recording = setupRecording(this); this.engine.attachRecorder(this.recording.recorder);
+    this.wireEvents(); // subscribe to server events before loading the library so no change is missed
+    setupLink(this);
+    setupLyrics(this);
     await this.midi.init();
+    if (this.settings.midiClockOutput) this.midi.setClockOutput(this.settings.midiClockOutput);
+    this.lighting = new Lighting(this);
+    try { await this.lighting.init(); } catch (e) { console.warn('lighting init failed', e); }
     await this.library.refresh();
     this.library.refreshDrives();
     setInterval(() => this.library.refreshDrives(), 15000); // notice USB sticks being plugged in
-    this.wireEvents();
     this.setDeckCount(this.deckCount, false);
+    this.dvs.init().catch((e) => console.warn('DVS init failed', e));
     this.engine.setMasterVolume(0.8); this.engine.setHeadphoneVolume(0.8);
     if (this.engine.ctx.state !== 'running') this.showStartOverlay();
     const frame = (now) => { this.frame(now); requestAnimationFrame(frame); };
     requestAnimationFrame(frame);
     document.getElementById('boot')?.remove();
+    this.ready = true;
   }
 
   async setSetting(k, v) { this.settings[k] = v; try { this.settings = { ...this.settings, ...(await api.saveSettings({ [k]: v })) }; this.engine.settings = this.settings; } catch (e) { this.toast(e.message); } }
@@ -45,7 +70,7 @@ class App {
   async loadTrack(deckIndex, trackId) {
     const t = this.library.track(trackId);
     const deck = this.engine.decks[deckIndex];
-    if (!t) return;
+    if (!t) { this.toast('That track is no longer in the library'); throw new Error('Track not found in the library'); }
     if (deck.playing && !this.automix.enabled && !(await this.dialogs.confirm(`Deck ${deckIndex + 1} is playing. Load "${t.title}" anyway?`))) return;
     try { await deck.load({ ...t }); this.library.renderRows(true); }
     catch (e) { this.toast(`Could not load "${t.title}": ${e.message}`); throw e; }
@@ -83,6 +108,9 @@ class App {
       el('div', { class: 'tb-spacer' }),
       el('div', { class: 'tb-group' }, this.recBtn, this.recTime),
       this.midiDot, this.cpu, this.clock,
+      dvsButton(this),
+      el('button', { class: 'btn sm video-btn', title: 'Video mixer, visuals, YouTube & projector output', onclick: () => (this.videoUi ||= setupVideo(this)).toggleMixer() }, '🎬 VIDEO'),
+      el('button', { class: 'btn sm light-btn', title: 'Lighting (DMX, Art-Net, sACN, WLED, Hue, OSC)', onclick: () => this.lighting?.openPanel() }, '💡 LIGHTS'),
       el('button', { class: 'btn icon', title: 'Settings', onclick: () => this.dialogs.settings() }, '⚙'),
       el('button', { class: 'btn icon', title: 'Full screen', onclick: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()) }, '⛶'),
     );
@@ -110,8 +138,9 @@ class App {
     const handle = el('div', { class: 'resize-handle', title: 'Drag to resize the browser' });
     let startY, startH;
     handle.addEventListener('pointerdown', (e) => { handle.setPointerCapture(e.pointerId); startY = e.clientY; startH = this.library.root.getBoundingClientRect().height; });
-    handle.addEventListener('pointermove', (e) => { if (startY == null) return; const h = Math.max(120, Math.min(innerHeight - 260, startH - (e.clientY - startY))); document.documentElement.style.setProperty('--browser-h', `${h}px`); });
-    handle.addEventListener('pointerup', () => { startY = null; });
+    handle.addEventListener('pointermove', (e) => { if (startY == null) return; const z = (this.settings.uiScale || 100) / 100, room = innerHeight / z - (this.deckCount === 4 ? 560 : 420); // always leave room for waveforms + decks
+      const h = Math.max(120, Math.min(Math.max(120, room), startH - (e.clientY - startY))); document.documentElement.style.setProperty('--browser-h', `${h}px`); });
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) handle.addEventListener(ev, () => { startY = null; });
     root.replaceChildren(topbar, this.waveArea, this.deckArea, this.samplerBar, handle, this.library.root, this.toasts);
   }
 
@@ -127,13 +156,67 @@ class App {
       b.addEventListener('contextmenu', (e) => { e.preventDefault(); target = i; fileIn.click(); });
       return b;
     });
-    const render = () => pads.forEach((b, i) => { b.textContent = s.slots[i]?.name || '—'; });
+    const render = () => { pads.forEach((b, i) => { b.textContent = s.slots[i]?.name || '—'; }); this.seqPanel?.renderNames?.(); };
     render();
-    bar.append(...pads, fileIn);
+    const seqBtn = el('button', { class: 'btn sm seq-btn', title: 'Step sequencer (synced to the master deck)', onclick: () => this.toggleSequencer() }, 'SEQ');
+    bar.append(...pads, seqBtn, fileIn);
     return bar;
   }
 
-  setDeckCount(n, save = true) {
+  toggleSequencer() {
+    if (this.seqPanel) { this.seqPanel.remove(); this.seqPanel = null; return; }
+    const seq = this.sequencer, sampler = this.engine.sampler;
+    const cells = [];
+    const grid = el('div', { class: 'seq-grid' });
+    const names = [];
+    for (let r = 0; r < seq.rows; r++) {
+      const name = el('button', { class: 'seq-name', title: 'Click: mute row', onclick: () => { seq.mute[r] = !seq.mute[r]; name.classList.toggle('muted', seq.mute[r]); } });
+      names.push(name);
+      const row = el('div', { class: 'seq-row' }, name);
+      cells[r] = [];
+      for (let c = 0; c < seq.steps; c++) {
+        const cell = el('button', { class: `seq-cell ${c % 4 === 0 ? 'beat' : ''}`, onclick: () => { seq.toggle(r, c); } });
+        cells[r][c] = cell; row.append(cell);
+      }
+      grid.append(row);
+    }
+    const paint = () => { for (let r = 0; r < seq.rows; r++) for (let c = 0; c < seq.steps; c++) cells[r][c].classList.toggle('on', !!seq.pattern[r][c]); };
+    const playBtn = el('button', { class: 'btn sm', onclick: () => (seq.running ? seq.stop() : (this.engine.resume(), seq.start())) }, 'PLAY');
+    const bpmIn = el('input', { class: 'inp seq-bpm', type: 'number', min: 60, max: 200, value: seq.bpm, title: 'Tempo when no deck is playing' });
+    bpmIn.addEventListener('change', () => { seq.bpm = Number(bpmIn.value) || 120; });
+    const swing = el('input', { type: 'range', min: 0, max: 0.6, step: 0.05, value: seq.swing, title: 'Swing' });
+    swing.addEventListener('input', () => { seq.swing = Number(swing.value); seq.save(); });
+    const panel = el('div', { class: 'seq-panel' },
+      el('div', { class: 'seq-head' }, el('b', {}, 'SEQUENCER'), playBtn, el('span', { class: 'hint' }, 'Follows the master deck tempo & beat grid · free BPM'), bpmIn, el('span', { class: 'hint' }, 'Swing'), swing,
+        el('button', { class: 'btn sm', onclick: () => seq.clear() }, 'Clear'), el('button', { class: 'btn sm', onclick: () => this.toggleSequencer() }, '✕')),
+      grid);
+    panel.renderNames = () => names.forEach((n, r) => { n.textContent = sampler.slots[r]?.name || '—'; });
+    panel.renderNames(); paint();
+    const offP = seq.on('pattern', paint);
+    const offS = seq.on('state', () => playBtn.classList.toggle('active', seq.running));
+    const offStep = seq.on('step', (k) => { grid.querySelectorAll('.seq-cell.now').forEach((x) => x.classList.remove('now')); for (let r = 0; r < seq.rows; r++) cells[r][k].classList.add('now'); });
+    playBtn.classList.toggle('active', seq.running);
+    const origRemove = panel.remove.bind(panel);
+    panel.remove = () => { offP(); offS(); offStep(); origRemove(); };
+    const onEsc = (e) => { if (e.key === 'Escape' && !document.querySelector('.overlay')) { e.preventDefault(); this.toggleSequencer(); } };
+    document.addEventListener('keydown', onEsc);
+    const rm = panel.remove; panel.remove = () => { document.removeEventListener('keydown', onEsc); rm(); };
+    document.body.append(panel);
+    this.seqPanel = panel;
+  }
+
+  async toggleMic() {
+    try { await this.engine.setMic(!this.engine.micOn); this.toast(this.engine.micOn ? 'Microphone on' : 'Microphone off'); }
+    catch (e) { this.toast(`Microphone: ${e.message}`); }
+  }
+
+  async setDeckCount(n, save = true) {
+    // decks that would be hidden must not keep playing without any visible controls
+    const hiddenPlaying = this.engine.decks.slice(n).filter((d) => d.playing);
+    if (hiddenPlaying.length) {
+      if (!(await this.dialogs.confirm(`Deck ${hiddenPlaying.map((d) => d.index + 1).join(' & ')} ${hiddenPlaying.length > 1 ? 'are' : 'is'} playing. Stop ${hiddenPlaying.length > 1 ? 'them' : 'it'} and switch to ${n} decks?`))) return;
+      for (const d of hiddenPlaying) d.pause();
+    }
     this.deckCount = n;
     document.body.classList.toggle('four-decks', n === 4);
     this.deckEls.forEach((d, i) => { d.style.display = i < n ? '' : 'none'; });
@@ -150,6 +233,7 @@ class App {
   }
   queueAdd(tracks) {
     if (!this.automix.enabled) { this.automix.queue = [...this.automix.queue.slice(this.automix.idx), ...tracks]; this.automix.idx = 0; }
+    else if (this.shift) this.automix.insertNext(tracks); // Shift = play next
     else this.automix.queue.push(...tracks);
     this.toast(`${tracks.length} track(s) queued for automix`);
     this.updateAutomixUi();
@@ -158,16 +242,12 @@ class App {
     const a = this.automix;
     this.amBtn.classList.toggle('active', a.enabled);
     const next = a.nextTrack();
+    this.amSkip.disabled = !a.enabled || !!a.transition;
     this.amInfo.textContent = a.enabled ? (a.transition ? 'Mixing…' : next ? `Next: ${next.artist ? next.artist + ' – ' : ''}${next.title}` : 'Last track') : (a.queue.length ? `${a.queue.length - a.idx} queued` : '');
   }
 
-  async toggleRecord() {
-    if (!this.engine.recording) { await this.engine.resume(); this.engine.startRecording(); this.toast('Recording started'); return; }
-    const blob = await this.engine.stopRecording();
-    const name = `OpenDJ mix ${new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '-')}.wav`;
-    const a = el('a', { href: URL.createObjectURL(blob), download: name }); document.body.append(a); a.click(); a.remove();
-    this.toast(`Saved recording "${name}" (${(blob.size / 1048576).toFixed(1)} MB)`);
-  }
+  toggleRecord() { return this.recording.toggle(); }
+
 
   /** Pad FX mode actions */
   padFx(deck, fx, down) {
@@ -186,9 +266,9 @@ class App {
         setTimeout(() => ch.set('fxParam', 0.5), deck.beatLen * 8000);
         break;
       case 'filterSweep': {
-        clearInterval(this._sweep);
+        clearInterval(ch._sweep);
         const target = down ? 0.75 : 0; const from = ch.state.filter; const t0 = performance.now(); const dur = down ? deck.beatLen * 8000 : 150;
-        this._sweep = setInterval(() => { const k = Math.min(1, (performance.now() - t0) / dur); ch.set('filter', from + (target - from) * k); if (k >= 1) clearInterval(this._sweep); }, 16);
+        ch._sweep = setInterval(() => { const k = Math.min(1, (performance.now() - t0) / dur); ch.set('filter', from + (target - from) * k); if (k >= 1) clearInterval(ch._sweep); }, 16);
         break;
       }
     }
@@ -202,6 +282,7 @@ class App {
       scan: (p) => this.library.setJobStatus(p.done ? '' : `Scanning… ${p.scanned} files`),
       sync: (p) => this.library.setJobStatus(p.finished ? '' : `Syncing media server… ${p.done}${p.total ? '/' + p.total : ''}`),
       downloads: (d) => this.library.setDownloads(d),
+      lyrics: (e) => this.lyrics?.invalidate(e.trackId),
       'job-error': (e) => { this.library.setJobStatus(''); this.toast(`⚠ ${e.message}`); },
     });
     this.engine.on('track-updated', (t) => this.library.updateTrack(t));
@@ -214,11 +295,13 @@ class App {
 
     const keyDeck = { z: [0, 'cue'], x: [0, 'play'], c: [0, 'sync'], m: [1, 'cue'], ',': [1, 'play'], '.': [1, 'sync'], q: [0, 'loop'], w: [0, 'exit'], o: [1, 'loop'], p: [1, 'exit'] };
     const hot = { 1: [0, 0], 2: [0, 1], 3: [0, 2], 4: [0, 3], 7: [1, 0], 8: [1, 1], 9: [1, 2], 0: [1, 3] };
-    const typing = (e) => /INPUT|SELECT|TEXTAREA/.test(e.target.tagName);
+    const typing = (e) => /INPUT|SELECT|TEXTAREA/.test(e.target.tagName) || e.target.isContentEditable;
+    // shortcuts are off while a dialog/menu is open or another control already handled the key
+    const blocked = (e) => typing(e) || e.defaultPrevented || !!document.querySelector('.overlay, .ctx-menu');
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Shift') { this._shiftKey = true; this.shift = true; }
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') { e.preventDefault(); this.library.search.focus(); return; }
-      if (typing(e) || e.repeat || e.ctrlKey || e.metaKey) return;
+      if (blocked(e) || e.repeat || e.ctrlKey || e.metaKey) return;
       const k = e.key.toLowerCase(), E = this.engine;
       E.resume();
       if (k === ' ') { e.preventDefault(); E.decks[0].togglePlay(); }
@@ -236,6 +319,11 @@ class App {
       else if (k === 'r') this.toggleRecord();
       else if (k === 'a') this.toggleAutomix();
     });
+    // releasing keys while the window is in the background never reaches us: reset held state on blur
+    window.addEventListener('blur', () => {
+      this._shiftKey = false; this.shift = false;
+      for (const d of this.engine.decks) { d.cueUp(); for (let n = 0; n < 8; n++) if (d.hotPreview === n) d.hotCueUp(n); }
+    });
     document.addEventListener('keyup', (e) => {
       if (e.key === 'Shift') { this._shiftKey = false; this.shift = false; }
       if (typing(e)) return;
@@ -243,7 +331,7 @@ class App {
       if (keyDeck[k]?.[1] === 'cue') this.engine.decks[keyDeck[k][0]].cueUp();
       if (/^Digit/.test(e.code) && hot[e.code.replace('Digit', '')]) { const [di, n] = hot[e.code.replace('Digit', '')]; this.engine.decks[di].hotCueUp(n); }
     });
-    window.addEventListener('beforeunload', (e) => { if (this.engine.decks.some((d) => d.playing) || this.engine.recording) { e.preventDefault(); e.returnValue = ''; } });
+    window.addEventListener('beforeunload', (e) => { if (this.engine.decks.some((d) => d.playing) || this.engine.recording || this.recording?.broadcaster?.live) { e.preventDefault(); e.returnValue = ''; } });
   }
 
   frame(now) {
@@ -254,7 +342,7 @@ class App {
       this.clock.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       this.recTime.textContent = this.engine.recording ? fmtTime((Date.now() - this.engine.recStarted) / 1000).slice(0, 5) : '';
       this.midiDot.classList.toggle('active', now - this.midi.activity < 150);
-      this.midiDot.classList.toggle('connected', this.midi.inputs().length > 0);
+      this.midiDot.classList.toggle('connected', (this.midi.devices?.() || this.midi.inputs()).length > 0);
       this.midiDot.title = this.midi.inputs().map((i) => i.name).join(', ') || 'No MIDI controller';
       this.updateAutomixUi();
       // automix: ease the tempo back to the track's original speed between transitions

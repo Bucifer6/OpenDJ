@@ -1,0 +1,120 @@
+name: Build desktop apps
+
+on:
+  push:
+    branches: [main, 'claude/**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Publish a GitHub Release with this tag (e.g. v0.1.0). Leave empty to only build.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - run: npm test
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build web-app image (not pushed)
+        run: docker build -t opendj:ci .
+      - name: Smoke test the container
+        run: |
+          docker run -d --name opendj -p 7380:7380 -e OPENDJ_PASSWORD=ci-password opendj:ci
+          for i in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' opendj)" = healthy ] && break
+            curl -fsS http://127.0.0.1:7380/api/health && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:7380/api/health
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7380/api/tracks)" = 401
+          docker logs opendj
+          docker rm -f opendj
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: --win
+          - os: macos-latest
+            target: --mac
+          # Ubuntu 24.04 (rpm 4.x): electron-builder's fpm can't build .rpm with rpm 6 on newer runners
+          - os: ubuntu-24.04
+            target: --linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install rpm tooling
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+      - name: Build installers
+        run: npx electron-builder ${{ matrix.target }} --publish never
+        env:
+          # Unsigned builds; add signing certificates as secrets to sign them.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Build .rpm (Fedora/openSUSE; optional)
+        if: runner.os == 'Linux'
+        run: |
+          if ! npx electron-builder --linux rpm --x64 --publish never > rpm-build.log 2>&1; then
+            echo "::warning::rpm build failed (release continues without .rpm)"
+            tail -n 80 rpm-build.log
+          fi
+          ls -la dist/*.rpm || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenDJ-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+            dist/*.tar.gz
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          body_path: docs/RELEASE_NOTES.md
+          generate_release_notes: true
+          # manual runs create the tag on the commit that was built
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: OpenDJ ${{ inputs.release_tag || github.ref_name }}

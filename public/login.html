@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Q8IJrM6LqD8H7+uW1VBxOgrrlEKCT6tkWfhcF8TiXdY='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; form-action 'self'">
+  <meta name="theme-color" content="#0b0d10">
+  <title>OpenDJ – Sign in</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <style>
+    :root {
+      --bg: #0b0d10; --panel: #13161b; --panel-2: #191d23; --panel-3: #20252d; --line: #262c35; --line-2: #313844;
+      --text: #e6eaef; --text-2: #9aa4b2; --text-3: #6b7685; --accent: #3ea6ff; --on-accent: #04121f; --red: #ff3b4d; --green: #2ed47a;
+      --radius: 6px; --font: Inter, "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      background: radial-gradient(1200px 600px at 50% -10%, #16202c 0%, var(--bg) 60%) fixed, var(--bg);
+      color: var(--text); font: 14px/1.45 var(--font);
+      display: grid; place-items: center; padding: 16px;
+    }
+    main {
+      width: min(380px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+      padding: 28px 24px 22px; box-shadow: 0 20px 60px rgba(0, 0, 0, .55);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+    .brand img { width: 36px; height: 36px; }
+    .brand b { font-size: 20px; letter-spacing: .02em; }
+    .brand span { color: var(--text-3); font-size: 12px; display: block; }
+    h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+    p.hint { color: var(--text-2); margin: 0 0 16px; font-size: 13px; }
+    label { display: block; font-size: 12px; color: var(--text-2); margin: 12px 0 5px; }
+    input {
+      width: 100%; padding: 10px 11px; border-radius: var(--radius); border: 1px solid var(--line-2);
+      background: var(--panel-2); color: var(--text); font: inherit; outline: none;
+    }
+    input:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(62, 166, 255, .25); }
+    button {
+      margin-top: 18px; width: 100%; padding: 10px; border: 0; border-radius: var(--radius);
+      background: var(--accent); color: var(--on-accent); font: 600 14px var(--font); cursor: pointer;
+    }
+    button:hover { filter: brightness(1.08); }
+    button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+    button:disabled { opacity: .6; cursor: progress; }
+    .err { color: var(--red); min-height: 1.4em; margin: 10px 0 0; font-size: 13px; }
+    .foot { color: var(--text-3); font-size: 12px; margin-top: 16px; text-align: center; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand"><img src="icon.svg" alt=""><div><b>OpenDJ</b><span>Free, open-source DJ software</span></div></div>
+
+    <form id="login" hidden>
+      <h1>Sign in</h1>
+      <p class="hint">This OpenDJ server is password protected.</p>
+      <label for="pw">Password</label>
+      <input id="pw" name="password" type="password" autocomplete="current-password" required autofocus>
+      <button type="submit">Sign in</button>
+      <p class="err" role="alert" aria-live="polite"></p>
+    </form>
+
+    <form id="setup" hidden>
+      <h1>Choose a password</h1>
+      <p class="hint">First start: enter the setup code shown in the server log (e.g. <code>docker logs opendj</code>), then pick a password for this server.</p>
+      <label for="code">Setup code</label>
+      <input id="code" name="code" autocomplete="one-time-code" required spellcheck="false" autocapitalize="characters">
+      <label for="npw">New password (8+ characters)</label>
+      <input id="npw" name="password" type="password" autocomplete="new-password" minlength="8" required>
+      <label for="npw2">Repeat password</label>
+      <input id="npw2" type="password" autocomplete="new-password" minlength="8" required>
+      <button type="submit">Save and sign in</button>
+      <p class="err" role="alert" aria-live="polite"></p>
+    </form>
+
+    <p class="foot" id="foot">Checking…</p>
+  </main>
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const next = () => {
+    const n = new URLSearchParams(location.search).get('next') || '/';
+    return n.startsWith('/') && !n.startsWith('//') && !n.startsWith('/login.html') ? n : '/';
+  };
+  const post = async (url, body) => {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body) });
+    let j = {}; try { j = await r.json(); } catch (e) { /* empty */ }
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    return j;
+  };
+  const bind = (form, fn) => form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = form.querySelector('.err'), btn = form.querySelector('button');
+    err.textContent = ''; btn.disabled = true;
+    try { await fn(); location.replace(next()); }
+    catch (x) { err.textContent = x.message; btn.disabled = false; }
+  });
+  bind($('#login'), () => post('/api/auth/login', { password: $('#pw').value }));
+  bind($('#setup'), () => {
+    if ($('#npw').value !== $('#npw2').value) return Promise.reject(new Error('The passwords do not match'));
+    return post('/api/auth/setup', { code: $('#code').value, password: $('#npw').value });
+  });
+  fetch('/api/auth/status', { credentials: 'same-origin' }).then((r) => r.json()).then((s) => {
+    if (!s.enabled || s.authenticated) return location.replace(next());
+    $(s.setupRequired ? '#setup' : '#login').hidden = false;
+    (s.setupRequired ? $('#code') : $('#pw')).focus();
+    $('#foot').textContent = 'Audio plays in this browser. Use Chrome or Edge for MIDI controllers.';
+  }).catch(() => { $('#login').hidden = false; $('#foot').textContent = 'Server not reachable.'; });
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>

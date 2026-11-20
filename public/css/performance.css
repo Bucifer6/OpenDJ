@@ -1,0 +1,191 @@
+/* Performance features: key shift, phase meter, stems, mic, sequencer */
+.key-row { display: flex; align-items: center; gap: 4px; }
+.key-row .btn { flex: 0 0 auto; }
+.key-row .btn:nth-of-type(3) { flex: 1; }
+.key-lbl { font-size: 9px; font-weight: 800; color: var(--text-3); }
+.key-val { font: 600 11px var(--mono); min-width: 24px; text-align: center; color: var(--amber); }
+.phase-meter { width: 100%; height: 12px; display: block; }
+.pad-modes { grid-template-columns: repeat(7, 1fr); }
+.knob-xs { width: 20px; height: 20px; }
+.knob-xs .knob-ind { top: 2px; }
+.stem-knobs { display: flex; gap: 4px; }
+.stem-knobs .knob-label { font-size: 8px; }
+.mic-box { display: flex; flex-direction: column; align-items: center; gap: 4px; padding-top: 6px; border-top: 1px solid var(--line); }
+.mic-on.active { background: var(--red) !important; border-color: var(--red) !important; color: #fff !important; }
+.talk.active { background: var(--amber) !important; border-color: var(--amber) !important; color: #000 !important; }
+.seq-btn { flex: 0 0 auto; }
+.seq-panel { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--browser-h) + 46px); width: min(900px, calc(100vw - 32px)); z-index: 50; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 10px; padding: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.6); }
+.seq-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.seq-head b { color: var(--purple); font-size: 11px; }
+.seq-bpm { width: 64px; padding: 3px 6px; }
+.seq-grid { display: flex; flex-direction: column; gap: 3px; }
+.seq-row { display: grid; grid-template-columns: 90px repeat(16, 1fr); gap: 3px; }
+.seq-name { background: #1a1622; border: 1px solid #3b2d52; color: #d7b8ff; border-radius: 4px; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.seq-name.muted { opacity: .35; text-decoration: line-through; }
+.seq-cell { height: 20px; background: #15181d; border: 1px solid #262c35; border-radius: 3px; cursor: pointer; }
+.seq-cell.beat { background: #1b1f26; }
+.seq-cell.on { background: var(--purple); border-color: var(--purple); }
+.seq-cell.now { box-shadow: inset 0 0 0 2px #fff; }
+.four-decks .key-row, .four-decks .phase-meter { display: none; }
+
+/* ---- denser mixer so stems + mic fit ---- */
+.mixer { padding: 6px; gap: 6px; }
+.strip { gap: 3px; padding: 3px 3px 5px; }
+.strip .knob-wrap { gap: 1px; }
+.strip .knob-val { display: none; }
+.strip .knob-sm { width: 24px; height: 24px; }
+.strip .knob-md { width: 30px; height: 30px; }
+.fader-row { min-height: 60px; }
+.mixer-master { gap: 5px; overflow: hidden; }
+.master-vu { height: auto; flex: 1; min-height: 50px; max-height: 110px; }
+.mixer-top { overflow: hidden; }
+
+/* ---- short screens (laptops) ---- */
+@media (max-height: 860px) {
+  :root { --wave-h: 48px; }
+  .deck-header { grid-template-columns: 26px 32px minmax(0, 1fr) auto auto; }
+  .deck-cover { width: 32px; height: 32px; }
+  .overview-wrap { height: 30px; }
+  .deck { gap: 4px; padding: 6px; }
+  .btn.sm { padding: 3px 6px; }
+  .pad { height: 28px; }
+  .strip .knob-label { font-size: 8px; }
+  .strip .knob-sm { width: 22px; height: 22px; }
+  .strip .knob-md { width: 26px; height: 26px; }
+  .mixer-master .knob-md { width: 28px; height: 28px; }
+  .jog { max-width: 170px; }
+  /* two-column knob layout in channel strips */
+  .strip { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; align-content: start; row-gap: 2px; grid-template-rows: auto auto auto auto auto auto minmax(50px, 1fr) auto; }
+  .strip > .strip-num, .strip > .stem-knobs, .strip > .btn-pfl, .strip > .fader-row, .strip > .xf-assign { grid-column: span 2; }
+  .strip > .fader-row { height: 100%; }
+  .mixer-master .knob-wrap .knob-label { font-size: 8px; }
+  .mixer-master { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; align-content: start; }
+  .mixer-master > .strip-num, .mixer-master > .master-vu, .mixer-master > .mic-box { grid-column: span 2; }
+  .master-vu { min-height: 40px; height: 60px; }
+  .mic-box { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+}
+@media (max-height: 800px) {
+  .deck-left .jog { max-width: 130px; }
+  .fx-unit { padding: 3px; gap: 4px; }
+  .fx-unit .knob-label { display: none; }
+  .fx-unit .fx-col select:nth-child(2) { display: none; }
+}
+
+
+/* ================= QA layout fixes ================= */
+/* ---- 4-deck mode: compact decks that fit 1366x768 and up ---- */
+.four-decks { --browser-h: clamp(140px, calc(22vh / var(--ui-zoom, 1)), 300px); }
+.four-decks .wave-row { height: 36px; }
+.four-decks .deck { gap: 3px; padding: 5px; }
+.four-decks .deck-header { grid-template-columns: 22px minmax(0, 1fr) auto auto; gap: 6px; }
+.four-decks .deck-num { width: 22px; height: 22px; font-size: 12px; }
+.four-decks .deck-title { font-size: 12.5px; }
+.four-decks .deck-bpm { font-size: 16px; }
+.four-decks .deck-bpmbox { min-width: 70px; }
+.four-decks .overview-wrap { height: 22px; }
+.four-decks .deck-mid { gap: 3px; }
+.four-decks .deck-mid .loop-row:nth-of-type(2), .four-decks .pad-modes { display: none; } /* jump row + pad modes */
+.four-decks .pads { grid-template-columns: repeat(8, 1fr); gap: 3px; }
+.four-decks .pad { height: 24px; }
+.four-decks .pad-label { font-size: 9px; }
+.four-decks .sync-row .btn { padding: 3px 4px; }
+.four-decks .btn.big { height: 30px; max-width: 36px; }
+.four-decks .deck-tempo .sel { display: none; }
+.four-decks .tempo-fader .fader-track { min-height: 40px; }
+/* 4 mixer strips: two-column knob grid always */
+.four-decks .strip { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; align-content: start; row-gap: 2px; grid-template-rows: auto auto auto auto auto auto minmax(40px, 1fr) auto; }
+.four-decks .strip > .strip-num, .four-decks .strip > .stem-knobs, .four-decks .strip > .btn-pfl, .four-decks .strip > .fader-row, .four-decks .strip > .xf-assign { grid-column: span 2; }
+.four-decks .strip > .fader-row { height: 100%; min-height: 40px; }
+.four-decks .strip .knob-sm { width: 20px; height: 20px; }
+.four-decks .strip .knob-md { width: 24px; height: 24px; }
+.four-decks .strip .knob-label { font-size: 7.5px; }
+.four-decks .mixer-master { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; align-content: start; }
+.four-decks .mixer-master > .strip-num, .four-decks .mixer-master > .master-vu, .four-decks .mixer-master > .mic-box { grid-column: span 2; }
+.four-decks .master-vu { height: 50px; min-height: 30px; }
+.four-decks .mic-box { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+
+/* ---- narrow windows (1100-1280 px) ---- */
+@media (max-width: 1300px) {
+  .deck-mid .btn.sm, .deck-toggles .btn, .key-row .btn { font-size: 9.5px; padding: 3px 2px; letter-spacing: 0; }
+  .deck-header { gap: 5px; }
+  .deck-bpmbox { min-width: 74px; }
+  .deck-bpm { font-size: 17px; }
+  .deck-times { font-size: 12px; }
+  .pad-mode { font-size: 8px; }
+}
+/* library table scrolls sideways instead of clipping columns */
+.lib-main { overflow-x: auto; }
+.lib-header, .lib-scroll { min-width: 980px; }
+
+/* ---- sequencer docks over the library, never over the decks ---- */
+.seq-panel { top: auto; bottom: 8px; max-height: calc(var(--browser-h) + 30px); overflow: auto; }
+
+/* settings tabs keep a stable height */
+.tab-pane { min-height: 360px; }
+
+/* ---- Daylight contrast fixes ---- */
+:root[data-theme="light"] .cam-1 { color: #00806a !important; } :root[data-theme="light"] .cam-2 { color: #0a7a3a !important; }
+:root[data-theme="light"] .cam-3 { color: #4c7a00 !important; } :root[data-theme="light"] .cam-4 { color: #7a6b00 !important; }
+:root[data-theme="light"] .cam-5 { color: #9a5a00 !important; } :root[data-theme="light"] .cam-6 { color: #b04a12 !important; }
+:root[data-theme="light"] .cam-7 { color: #c0263a !important; } :root[data-theme="light"] .cam-8 { color: #b0186e !important; }
+:root[data-theme="light"] .cam-9 { color: #8a2ab0 !important; } :root[data-theme="light"] .cam-10 { color: #5a3fc0 !important; }
+:root[data-theme="light"] .cam-11 { color: #1f5fc0 !important; } :root[data-theme="light"] .cam-12 { color: #0a6e8a !important; }
+:root[data-theme="light"] .btn-cue { color: #8a5a00; }
+:root[data-theme="light"] .btn-play { color: #0b7a3e; }
+:root[data-theme="light"] .lr .num.match, :root[data-theme="light"] .lr .key.match { color: #0b7a3e; }
+:root[data-theme="light"] .midi-row { border-bottom-color: var(--line); }
+:root[data-theme="light"] .midi-table { border-color: var(--line); }
+:root[data-theme="light"] .btn:disabled { opacity: .55; }
+/* ---- High Contrast fixes ---- */
+:root[data-theme="contrast"] .stars span { color: #9a9a9a; }
+:root[data-theme="contrast"] .lr.sel .stars span:not(.on) { color: #cfcfcf; }
+:root[data-theme="contrast"] .pad.lit .pad-label { color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; }
+:root[data-theme="contrast"] .lr.sel .src { color: #fff; }
+
+/* same compact rules when UI scaling makes the effective window short (set from themes.js) */
+:root.h860 { --wave-h: 48px; }
+:root.h860 .deck-header { grid-template-columns: 26px 32px minmax(0, 1fr) auto auto; }
+:root.h860 .deck-cover { width: 32px; height: 32px; }
+:root.h860 .overview-wrap { height: 30px; }
+:root.h860 .deck { gap: 4px; padding: 6px; }
+:root.h860 .btn.sm { padding: 3px 6px; }
+:root.h860 .pad { height: 28px; }
+:root.h860 .strip .knob-label { font-size: 8px; }
+:root.h860 .strip .knob-sm { width: 22px; height: 22px; }
+:root.h860 .strip .knob-md { width: 26px; height: 26px; }
+:root.h860 .mixer-master .knob-md { width: 28px; height: 28px; }
+:root.h860 .jog { max-width: 170px; }
+:root.h860 .strip { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; align-content: start; row-gap: 2px; grid-template-rows: auto auto auto auto auto auto minmax(50px, 1fr) auto; }
+:root.h860 .strip > .strip-num, :root.h860 .strip > .stem-knobs, :root.h860 .strip > .btn-pfl, :root.h860 .strip > .fader-row, :root.h860 .strip > .xf-assign { grid-column: span 2; }
+:root.h860 .strip > .fader-row { height: 100%; }
+:root.h860 .mixer-master .knob-wrap .knob-label { font-size: 8px; }
+:root.h860 .mixer-master { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; align-content: start; }
+:root.h860 .mixer-master > .strip-num, :root.h860 .mixer-master > .master-vu, :root.h860 .mixer-master > .mic-box { grid-column: span 2; }
+:root.h860 .master-vu { min-height: 40px; height: 60px; }
+:root.h860 .mic-box { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+:root.h800 .deck-left .jog { max-width: 130px; }
+:root.h800 .fx-unit { padding: 3px; gap: 4px; }
+:root.h800 .fx-unit .knob-label { display: none; }
+:root.h800 .fx-unit .fx-col select:nth-child(2) { display: none; }
+
+/* 4 decks: give the title room; extra-compact on short screens */
+.four-decks .deck-bpm-sub, .four-decks .phase-meter { display: none; }
+.four-decks .deck-times { font-size: 11px; }
+.four-decks .deck-time.remain { font-size: 10px; }
+:root.h860 .four-decks .wave-row, :root.h860.four-decks .wave-row { height: 26px; }
+:root.h860 .four-decks .overview-wrap, :root.h860.four-decks .overview-wrap { height: 16px; }
+:root.h860 .four-decks .deck-mid .loop-row, :root.h860.four-decks .deck-mid .loop-row { display: none; }
+:root.h860 .four-decks .pad, :root.h860.four-decks .pad { height: 22px; }
+/* buttons never overlap their neighbours; long labels are clipped with an ellipsis */
+.deck-mid .btn, .deck-toggles .btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1200px) {
+  .key-lbl { display: none; }
+  .deck-toggles .btn, .loop-row .btn, .key-row .btn { font-size: 8.5px; }
+}
+:root.h860 .four-decks .deck-header { grid-template-columns: 22px minmax(0, 1fr) auto auto; }
+/* narrow effective width from UI scaling (class set in themes.js) */
+:root.w1300 .deck-mid .btn.sm, :root.w1300 .deck-toggles .btn, :root.w1300 .key-row .btn { font-size: 9.5px; padding: 3px 2px; letter-spacing: 0; }
+:root.w1300 .deck-bpm { font-size: 17px; }
+:root.w1300 .pad-mode { font-size: 8px; }
+:root.w1200 .key-lbl { display: none; }
+:root.w1200 .deck-toggles .btn, :root.w1200 .loop-row .btn, :root.w1200 .key-row .btn { font-size: 8.5px; }

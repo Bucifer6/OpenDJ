@@ -1,5 +1,6 @@
 // Waveform renderers: scrolling detail view (with beat grid, cues, loop) and full-track overview.
 import { el, clamp } from '../util.js';
+import { cssVar } from './themes.js';
 
 const PALETTES = {
   rgb: { low: [48, 128, 255], mid: [255, 170, 40], high: [240, 245, 255] },
@@ -16,6 +17,8 @@ function colorAt(w, i, pal) {
   return `rgb(${r | 0},${g | 0},${b | 0})`;
 }
 
+export const PHRASE_COLORS = { intro: '#3ea6ff', verse: '#8a96a8', buildup: '#ffb020', drop: '#ff3b4d', chorus: '#ff3b4d', breakdown: '#2ed47a', bridge: '#2ed47a', outro: '#c06cff' };
+
 export class DetailWaveform {
   constructor(deck, getSettings) {
     this.deck = deck; this.getSettings = getSettings;
@@ -29,17 +32,18 @@ export class DetailWaveform {
     }, { passive: false });
     // drag to scratch / seek on the waveform
     let last = null;
-    this.canvas.addEventListener('pointerdown', (e) => { this.canvas.setPointerCapture(e.pointerId); last = { x: e.clientX, t: performance.now() }; });
+    this.canvas.addEventListener('pointerdown', (e) => { this.canvas.setPointerCapture(e.pointerId); last = { x: e.clientX, t: performance.now(), scratch: this.deck.playing }; });
     this.canvas.addEventListener('pointermove', (e) => {
       if (!last) return;
       const w = this.canvas.getBoundingClientRect().width;
       const secs = -(e.clientX - last.x) / w * this.zoom;
       const now = performance.now();
-      if (this.deck.playing) this.deck.jogScratch(secs / 1.8, (now - last.t) / 1000); else this.deck.seek(this.deck.position + secs);
-      last = { x: e.clientX, t: now };
+      if (last.scratch) this.deck.jogScratch(secs / 1.8, (now - last.t) / 1000); else this.deck.seek(this.deck.position + secs);
+      last = { ...last, x: e.clientX, t: now };
     });
-    const up = () => { if (last && this.deck.playing) this.deck.jogRelease(); last = null; };
-    this.canvas.addEventListener('pointerup', up); this.canvas.addEventListener('pointercancel', up);
+    // release based on how the drag started, not on whether the deck is still playing (it may have stopped mid-drag)
+    const up = () => { if (last?.scratch) this.deck.jogRelease(); last = null; };
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) this.canvas.addEventListener(ev, up);
   }
 
   resize() {
@@ -51,7 +55,7 @@ export class DetailWaveform {
   draw() {
     this.resize();
     const { g, canvas, deck } = this; const W = canvas.width, H = canvas.height, mid = H / 2;
-    g.fillStyle = '#07090c'; g.fillRect(0, 0, W, H);
+    g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, W, H);
     const w = deck.waveform;
     const s = this.getSettings();
     const pal = PALETTES[s.waveformColors] || PALETTES.rgb;
@@ -87,16 +91,24 @@ export class DetailWaveform {
       g.globalAlpha = 1;
     }
     // beat grid
-    if (deck.bpm) {
+    if (deck.bpm > 0 && span > 0) {
       const bl = deck.beatLen;
       let k = Math.ceil((t0 - deck.gridOffset) / bl);
-      for (let t = deck.gridOffset + k * bl; t < t0 + span; t += bl, k++) {
+      for (let t = deck.gridOffset + k * bl, n = 0; t < t0 + span && n < 2000; t += bl, k++, n++) {
         const x = (t - t0) * pxPerSec;
         const bar = ((k % 4) + 4) % 4 === 0;
         g.fillStyle = bar ? 'rgba(255,60,60,0.85)' : 'rgba(255,255,255,0.28)';
         g.fillRect(x, 0, bar ? 2 * dpr : dpr, bar ? H : H * 0.12);
         if (!bar) g.fillRect(x, H - H * 0.12, dpr, H * 0.12);
       }
+    }
+    // phrase labels
+    for (const p of deck.track?.phrases || []) {
+      const x = (p.start - t0) * pxPerSec;
+      if (x < -200 || x > W) continue;
+      g.fillStyle = PHRASE_COLORS[p.type] || '#6b7685';
+      g.fillRect(x, H - 3 * dpr, Math.max(0, (p.end - p.start) * pxPerSec - 2 * dpr), 3 * dpr);
+      g.font = `600 ${9 * dpr}px Inter, system-ui`; g.fillText(p.type.toUpperCase(), x + 4 * dpr, H - 6 * dpr);
     }
     // cues
     const cues = deck.track?.cues || [];
@@ -131,7 +143,7 @@ export class OverviewWaveform {
     let down = false;
     this.canvas.addEventListener('pointerdown', (e) => { down = true; this.canvas.setPointerCapture(e.pointerId); seek(e); });
     this.canvas.addEventListener('pointermove', (e) => { if (down) seek(e); });
-    this.canvas.addEventListener('pointerup', () => { down = false; });
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) this.canvas.addEventListener(ev, () => { down = false; });
   }
   renderCache(W, H) {
     const w = this.deck.waveform; const s = this.getSettings();
@@ -152,7 +164,7 @@ export class OverviewWaveform {
     const W = Math.max(1, Math.round(r.width * dpr)), H = Math.max(1, Math.round(r.height * dpr));
     if (this.canvas.width !== W || this.canvas.height !== H) { this.canvas.width = W; this.canvas.height = H; this.cacheKey = ''; }
     const { g, deck } = this;
-    g.fillStyle = '#07090c'; g.fillRect(0, 0, W, H);
+    g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, W, H);
     if (!deck.waveform || !deck.duration) return;
     const key = `${deck.track?.id}:${W}:${H}:${this.getSettings().waveformColors}`;
     if (key !== this.cacheKey) { this.cache = this.renderCache(W, H); this.cacheKey = key; }
@@ -160,12 +172,18 @@ export class OverviewWaveform {
     const k = deck.position / deck.duration;
     g.fillStyle = 'rgba(7,9,12,0.55)'; g.fillRect(0, 0, k * W, H); // played portion dimmed
     if (deck.loop) { g.fillStyle = 'rgba(46,204,113,0.3)'; g.fillRect(deck.loop.start / deck.duration * W, 0, Math.max(2, (deck.loop.end - deck.loop.start) / deck.duration * W), H); }
+    // phrase / structure bands along the top (intro, drop, breakdown, outro…)
+    for (const p of deck.track?.phrases || []) {
+      g.fillStyle = PHRASE_COLORS[p.type] || '#6b7685';
+      g.fillRect(p.start / deck.duration * W + dpr, 0, Math.max(1, (p.end - p.start) / deck.duration * W - 2 * dpr), 3 * dpr);
+    }
     for (const c of deck.track?.cues || []) {
       g.fillStyle = c.index >= 0 ? (c.color || '#2ecc71') : '#ff4757';
       g.fillRect(c.position / deck.duration * W, 0, Math.max(1, dpr * 1.5), H);
+      if (c.loopEnd) { g.fillStyle = 'rgba(46,212,122,0.25)'; g.fillRect(c.position / deck.duration * W, H - 4 * dpr, Math.max(2, (c.loopEnd - c.position) / deck.duration * W), 4 * dpr); }
     }
     // bar ticks every 16 bars
-    if (deck.bpm) {
+    if (deck.bpm > 0) {
       g.fillStyle = 'rgba(255,255,255,0.12)';
       const p = deck.beatLen * 64;
       for (let t = deck.gridOffset; t < deck.duration; t += p) g.fillRect(t / deck.duration * W, H - 3 * dpr, dpr, 3 * dpr);

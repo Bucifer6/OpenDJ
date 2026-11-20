@@ -1,7 +1,7 @@
 import { el } from '../util.js';
 import { api } from '../api.js';
-import { describeKey } from '../midi/midi.js';
-import { PRESETS } from '../midi/presets.js';
+import { THEMES, applyTheme } from './themes.js';
+import { controllersPanel } from './controllers-panel.js';
 
 export class Dialogs {
   constructor(app) { this.app = app; }
@@ -9,7 +9,17 @@ export class Dialogs {
   modal(title, body, buttons = [], { wide = false } = {}) {
     return new Promise((resolve) => {
       const close = (v) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
-      const onKey = (e) => { if (e.key === 'Escape') close(null); };
+      // only the top-most dialog reacts to Escape
+      const onKey = (e) => {
+        if ([...document.querySelectorAll('.overlay')].at(-1) !== overlay) return;
+        if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); close(null); return; }
+        if (e.key === 'Tab') { // keep keyboard focus inside the dialog
+          const f = [...box.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter((x) => !x.disabled && x.offsetParent !== null);
+          if (!f.length) return;
+          const i = f.indexOf(document.activeElement);
+          if (e.shiftKey && (i <= 0)) { e.preventDefault(); f.at(-1).focus(); } else if (!e.shiftKey && (i === -1 || i === f.length - 1)) { e.preventDefault(); f[0].focus(); }
+        }
+      };
       const foot = el('div', { class: 'modal-foot' }, ...buttons.map((b) => el('button', { class: `btn ${b.primary ? 'primary' : ''} ${b.danger ? 'danger' : ''}`, onclick: async () => { if (b.action) { const r = await b.action(); if (r === false) return; close(r ?? b.value); } else close(b.value); } }, b.label)));
       const box = el('div', { class: `modal ${wide ? 'wide' : ''}`, role: 'dialog', 'aria-label': title },
         el('div', { class: 'modal-head' }, el('h2', {}, title), el('button', { class: 'modal-x', onclick: () => close(null), 'aria-label': 'Close' }, '✕')),
@@ -17,7 +27,7 @@ export class Dialogs {
       const overlay = el('div', { class: 'overlay', onmousedown: (e) => { if (e.target === overlay) close(null); } }, box);
       document.body.append(overlay);
       document.addEventListener('keydown', onKey);
-      setTimeout(() => box.querySelector('input, select, button.primary')?.focus(), 30);
+      setTimeout(() => (box.querySelector('.modal-body input:not([type=checkbox]):not([type=color]), .modal-body select, .modal-body textarea') || box.querySelector('.modal-foot .btn.primary') || box.querySelector('.modal-x'))?.focus(), 30);
     });
   }
 
@@ -26,7 +36,18 @@ export class Dialogs {
     const build = (list) => el('div', { class: 'ctx-menu' }, ...list.map((it) => {
       if (it === '-') return el('div', { class: 'ctx-sep' });
       const row = el('div', { class: `ctx-item ${it.danger ? 'danger' : ''} ${it.sub ? 'has-sub' : ''}` }, it.label);
-      if (it.sub) { const sub = build(it.sub); sub.classList.add('ctx-sub'); row.append(sub); }
+      if (it.sub) {
+        const sub = build(it.sub); sub.classList.add('ctx-sub'); row.append(sub);
+        // keep submenus inside the window (flip left / shift up when they would overflow)
+        row.addEventListener('mouseenter', () => {
+          sub.style.top = ''; sub.style.left = ''; sub.style.right = '';
+          requestAnimationFrame(() => {
+            const sr = sub.getBoundingClientRect();
+            if (sr.bottom > innerHeight - 8) sub.style.top = `${Math.min(-4, innerHeight - 8 - sr.bottom - 4)}px`;
+            if (sr.right > innerWidth - 8) { sub.style.left = 'auto'; sub.style.right = '100%'; }
+          });
+        });
+      }
       else row.addEventListener('click', () => { m.remove(); it.action(); });
       return row;
     }));
@@ -34,7 +55,10 @@ export class Dialogs {
     document.body.append(m);
     const r = m.getBoundingClientRect();
     m.style.left = `${Math.min(x, innerWidth - r.width - 8)}px`; m.style.top = `${Math.min(y, innerHeight - r.height - 8)}px`;
-    setTimeout(() => document.addEventListener('mousedown', function off(e) { if (!m.contains(e.target)) { m.remove(); document.removeEventListener('mousedown', off); } }), 0);
+    const close = () => { m.remove(); document.removeEventListener('mousedown', off); document.removeEventListener('keydown', esc, true); };
+    const off = (e) => { if (!m.contains(e.target)) close(); };
+    const esc = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); close(); } };
+    setTimeout(() => { document.addEventListener('mousedown', off); document.addEventListener('keydown', esc, true); }, 0);
   }
 
   async prompt(title, label, value = '') {
@@ -42,7 +66,7 @@ export class Dialogs {
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok.click(); });
     let ok;
     const p = this.modal(title, el('label', { class: 'field' }, el('span', {}, label), input), [{ label: 'Cancel', value: null }, { label: 'OK', primary: true, action: () => input.value.trim() }]);
-    ok = document.querySelector('.modal .btn.primary');
+    ok = [...document.querySelectorAll('.overlay')].at(-1)?.querySelector('.modal-foot .btn.primary');
     return p;
   }
   confirm(text) { return this.modal('Confirm', el('p', {}, text), [{ label: 'Cancel', value: false }, { label: 'OK', primary: true, value: true }]); }
@@ -140,19 +164,24 @@ export class Dialogs {
     if (!tracks?.length) return this.app.toast('No tracks in this view');
     const smart = el('input', { type: 'checkbox', checked: true });
     const o = this.app.settings.automix;
-    const style = el('select', { class: 'sel' }, ...[['eqswap', 'EQ swap (bass swap)'], ['crossfade', 'Smooth crossfade'], ['filter', 'Filter fade'], ['echo', 'Echo out']].map(([v, l]) => el('option', { value: v }, l)));
+    const style = el('select', { class: 'sel' }, ...[['phrase', 'Phrase-aligned bass swap'], ['eqswap', 'EQ swap (bass swap)'], ['crossfade', 'Smooth crossfade'], ['filter', 'Filter fade'], ['echo', 'Echo out']].map(([v, l]) => el('option', { value: v }, l)));
     style.value = o.style;
+    const order = el('select', { class: 'sel' }, ...[['harmonic', 'Harmonic (key + tempo)'], ['build', 'Build up (rising energy)'], ['peak', 'Peak (rise, then cool down)'], ['wave', 'Waves (up and down)']].map(([v, l]) => el('option', { value: v }, l)));
+    order.value = o.order || 'harmonic';
+    const keySync = el('input', { type: 'checkbox', checked: !!o.keySync });
     const beats = el('select', { class: 'sel' }, ...[8, 16, 32, 64].map((b) => el('option', { value: b }, `${b} beats`)));
     beats.value = String(o.transitionBeats);
     const body = el('div', { class: 'form' },
       el('p', {}, `Auto-mix ${tracks.length} tracks on decks 1 & 2 with beat-matched transitions.`),
-      el('label', { class: 'check' }, smart, ' Smart order (harmonic key + tempo + energy)'),
+      el('label', { class: 'check' }, smart, ' Smart order'),
+      el('label', { class: 'field' }, el('span', {}, 'Energy curve'), order),
+      el('label', { class: 'check' }, keySync, ' Fix key clashes with Key Sync'),
       el('label', { class: 'field' }, el('span', {}, 'Transition style'), style),
       el('label', { class: 'field' }, el('span', {}, 'Transition length'), beats));
     const r = await this.modal('Automix', body, [{ label: 'Cancel', value: null }, { label: 'Start automix', primary: true, value: true }]);
     if (!r) return;
-    this.app.setSetting('automix', { ...o, style: style.value, transitionBeats: Number(beats.value) });
-    try { await this.app.automix.start(tracks, { smart: smart.checked }); } catch (e) { this.app.toast(e.message); }
+    this.app.setSetting('automix', { ...o, style: style.value, transitionBeats: Number(beats.value), order: order.value, keySync: keySync.checked });
+    try { await this.app.automix.start(tracks, { smart: smart.checked, order: order.value }); } catch (e) { this.app.toast(e.message); }
   }
 
   gridEditor(deck) {
@@ -187,6 +216,7 @@ export class Dialogs {
     const field = (label, ctrl, hint) => el('label', { class: 'field' }, el('span', {}, label), ctrl, hint ? el('small', { class: 'hint' }, hint) : null);
 
     const outputs = await app.engine.listOutputs();
+    const inputs = await navigator.mediaDevices?.enumerateDevices?.().then((ds) => ds.filter((d) => d.kind === 'audioinput' && d.deviceId !== 'default').map((d) => ({ id: d.deviceId, label: d.label || `Input ${d.deviceId.slice(0, 6)}` }))).catch(() => []) || [];
     const outOpts = [['default', 'System default'], ...outputs.filter((o) => o.id !== 'default').map((o) => [o.id, o.label])];
     const audio = el('div', { class: 'form' },
       field('Master output', sel(s.masterDeviceId || 'default', outOpts, async (v) => { await set('masterDeviceId', v); app.engine.applyOutputs(); })),
@@ -194,7 +224,12 @@ export class Dialogs {
         'Most DJ controllers with a built-in sound card expose 4 channels: choose "channels 3-4" and select the controller as master output.'),
       field('Headphone output (separate device mode)', sel(s.cueDeviceId || '', [['', '— none —'], ...outOpts.filter(([v]) => v !== 'default')], async (v) => { await set('cueDeviceId', v); app.engine.applyOutputs(); })),
       el('button', { class: 'btn sm', onclick: async () => { try { const st = await navigator.mediaDevices.getUserMedia({ audio: true }); st.getTracks().forEach((t) => t.stop()); this.app.toast('Device names unlocked — reopen settings'); } catch (e) { this.app.toast(e.message); } } }, 'Show device names (asks for permission)'),
+      field('Microphone / aux input', sel(s.micDeviceId || '', [['', 'System default input'], ...inputs.map((d) => [d.id, d.label])], async (v) => { await set('micDeviceId', v); if (app.engine.micOn) { await app.engine.setMic(false); await app.engine.setMic(true); } })),
+      field('Talkover ducking', sel(s.talkoverDb ?? -12, [[-6, '−6 dB'], [-12, '−12 dB'], [-18, '−18 dB'], [-24, '−24 dB']], (v) => set('talkoverDb', Number(v)))),
+      field('Audio latency', sel(s.latencyHint || 'interactive', [['interactive', 'Lowest (interactive)'], ['10', '10 ms'], ['20', '20 ms'], ['balanced', 'Balanced'], ['playback', 'Safe (high latency, no dropouts)']], (v) => { set('latencyHint', v); this.app.toast('Restart OpenDJ to apply the new latency'); }),
+        'Raise this if you hear crackles; lower it for tighter scratching and cueing.'),
       el('label', { class: 'check' }, chk(s.limiter, (v) => { set('limiter', v); app.engine.setLimiter(v); }), ' Master limiter (prevents clipping)'),
+      el('label', { class: 'check' }, chk(s.highPrecisionAudio, (v) => { set('highPrecisionAudio', v); this.app.toast('Applies to tracks loaded from now on'); }), ' High-precision deck audio (32-bit float; uses twice the memory per loaded track)'),
       el('label', { class: 'check' }, chk(s.autoGain, (v) => set('autoGain', v)), ' Auto gain (level-match tracks on load)'),
       el('p', { class: 'hint' }, `Sample rate ${app.engine.ctx.sampleRate} Hz · output latency ≈ ${Math.round(((app.engine.ctx.outputLatency || 0) + (app.engine.ctx.baseLatency || 0)) * 1000)} ms`),
     );
@@ -204,15 +239,16 @@ export class Dialogs {
       field('Sync mode', sel(s.syncMode, [['beat', 'Beat sync (tempo + phase)'], ['tempo', 'Tempo sync only']], (v) => set('syncMode', v))),
       el('label', { class: 'check' }, chk(s.keyLockDefault, (v) => set('keyLockDefault', v)), ' Key lock on by default'),
       el('label', { class: 'check' }, chk(s.quantize, (v) => { set('quantize', v); for (const d of app.engine.decks) d.setQuantize(v); }), ' Quantize'),
-      field('Waveform colours', sel(s.waveformColors, [['rgb', '3-band RGB'], ['blue', 'Blue'], ['mono', 'Monochrome']], (v) => set('waveformColors', v))),
     );
     const am = s.automix;
     const automix = el('div', { class: 'form' },
-      field('Transition style', sel(am.style, [['eqswap', 'EQ swap (bass swap)'], ['crossfade', 'Smooth crossfade'], ['filter', 'Filter fade'], ['echo', 'Echo out']], (v) => set('automix', { ...app.settings.automix, style: v }))),
+      field('Transition style', sel(am.style, [['phrase', 'Phrase-aligned bass swap'], ['eqswap', 'EQ swap (bass swap)'], ['crossfade', 'Smooth crossfade'], ['filter', 'Filter fade'], ['echo', 'Echo out']], (v) => set('automix', { ...app.settings.automix, style: v }))),
       field('Transition length', sel(am.transitionBeats, [8, 16, 32, 64].map((b) => [b, `${b} beats`]), (v) => set('automix', { ...app.settings.automix, transitionBeats: Number(v) }))),
       el('label', { class: 'check' }, chk(am.keepSync, (v) => set('automix', { ...app.settings.automix, keepSync: v })), ' Beat-match transitions'),
       el('label', { class: 'check' }, chk(am.skipSilence, (v) => set('automix', { ...app.settings.automix, skipSilence: v })), ' Skip silence at track ends'),
       el('label', { class: 'check' }, chk(am.shuffle, (v) => set('automix', { ...app.settings.automix, shuffle: v })), ' Shuffle'),
+      el('label', { class: 'check' }, chk(am.keySync, (v) => set('automix', { ...app.settings.automix, keySync: v })), ' Fix key clashes with Key Sync'),
+      field('Smart order energy curve', sel(am.order || 'harmonic', [['harmonic', 'Harmonic'], ['build', 'Build up'], ['peak', 'Peak'], ['wave', 'Waves']], (v) => set('automix', { ...app.settings.automix, order: v }))),
     );
     const dlIn = el('input', { class: 'inp', value: s.downloadDir });
     dlIn.addEventListener('change', () => set('downloadDir', dlIn.value));
@@ -220,7 +256,13 @@ export class Dialogs {
     const m3uIn = el('input', { class: 'inp', placeholder: 'Path to .m3u / .m3u8 playlist' });
     const library = el('div', { class: 'form' },
       field('Download folder (for tracks from media servers)', el('div', { class: 'row' }, dlIn, el('button', { class: 'btn', onclick: async () => { const p = await this.pickFolder('Download folder'); if (p) { dlIn.value = p; set('downloadDir', p); } } }, 'Browse…'))),
+      (() => { // hosted web app: sign out
+        const box = el('div', { class: 'row' });
+        api.authStatus?.().then((st) => { if (st?.enabled && st?.loggedIn !== false) box.append(el('button', { class: 'btn sm', onclick: async () => { await api.logout(); location.href = '/login.html'; } }, 'Sign out')); }).catch(() => {});
+        return box;
+      })(),
       el('h3', {}, 'Import'),
+      el('div', { class: 'row' }, ...[['rekordbox', 'rekordbox XML'], ['traktor', 'Traktor NML'], ['serato', 'Serato crates'], ['virtualdj', 'VirtualDJ database']].map(([k, l]) => el('button', { class: 'btn sm', onclick: () => app.library.dlg.importFrom(k) }, `Import ${l}…`))),
       el('div', { class: 'row' }, rbIn, el('button', { class: 'btn', onclick: async () => {
         try { const r = await api.importRekordbox({ path: rbIn.value.trim() }); this.app.toast(`Imported ${r.imported} tracks, ${r.playlists} playlists from rekordbox${r.missing ? ` (${r.missing} files not found)` : ''}`); app.library.refresh(); } catch (e) { this.app.toast(e.message); }
       } }, 'Import rekordbox XML')),
@@ -233,7 +275,7 @@ export class Dialogs {
         el('button', { class: 'btn', onclick: () => this.exportUsb([]) }, 'Export playlists to USB…')),
       el('p', { class: 'hint' }, 'The rekordbox XML export (cues, loops, beat grids, playlists) can be imported into rekordbox, Serato (via plugins), Traktor or Mixxx.'),
     );
-    const controllers = this.midiPanel();
+    const controllers = controllersPanel(app);
     const shortcuts = el('div', { class: 'form shortcuts' }, el('table', {}, ...[
       ['Space', 'Play/pause deck 1'], ['Z / X / C', 'Deck 1 cue / play / sync'], ['M / , / .', 'Deck 2 cue / play / sync'],
       ['1 – 4', 'Deck 1 hot cues A–D (Shift = delete)'], ['7 – 0', 'Deck 2 hot cues A–D'], ['Q / W', 'Deck 1 loop 4 / exit'], ['O / P', 'Deck 2 loop 4 / exit'],
@@ -241,7 +283,21 @@ export class Dialogs {
       ['Ctrl + F', 'Search library'], ['R', 'Start / stop recording'], ['A', 'Automix on/off'], ['Shift (hold)', 'Shift layer (delete cues, set master…)'],
     ].map(([k, d]) => el('tr', {}, el('td', {}, el('kbd', {}, k)), el('td', {}, d)))));
 
-    const tabs = { audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], keys: ['Shortcuts', shortcuts] };
+    // ---- appearance ----
+    const cards = THEMES.map((t) => el('button', { class: `theme-card ${(s.theme || 'midnight') === t.id ? 'active' : ''}`, 'data-id': t.id, onclick: async () => {
+      await set('theme', t.id); applyTheme(app.settings);
+      for (const c of cards) c.classList.toggle('active', c.dataset.id === t.id);
+    } }, el('div', { class: 'theme-swatch' }, ...t.swatch.map((c) => el('span', { style: { background: c } }))), el('b', {}, t.name), el('small', {}, t.desc)));
+    const accent = el('input', { type: 'color', value: s.accentColor || '#3ea6ff', title: 'Custom accent colour' });
+    accent.addEventListener('input', async () => { await set('accentColor', accent.value); applyTheme(app.settings); });
+    const appearance = el('div', { class: 'form' },
+      el('div', { class: 'theme-grid' }, ...cards),
+      el('div', { class: 'row' }, field('Accent colour', accent), el('button', { class: 'btn sm', onclick: async () => { await set('accentColor', ''); applyTheme(app.settings); } }, 'Use theme accent')),
+      field('Interface size', sel(s.uiScale || 100, [80, 90, 100, 110, 125, 150].map((v) => [v, `${v}%`]), async (v) => { await set('uiScale', Number(v)); applyTheme(app.settings); }), 'Shrink for small laptop screens, enlarge for touchscreens and big displays.'),
+      field('Waveform colours', sel(s.waveformColors, [['rgb', '3-band RGB'], ['blue', 'Blue'], ['mono', 'Monochrome']], (v) => set('waveformColors', v))),
+    );
+    const dvsTab = el('div', { class: 'form' }, el('p', { class: 'hint' }, 'Control decks with Serato or Traktor timecode vinyl / CDs through your audio interface inputs.'), el('button', { class: 'btn', onclick: () => import('../dvs/dvs-ui.js').then((m) => m.openDvsPanel(app)) }, 'Open DVS setup…'));
+    const tabs = { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], dvs: ['DVS', dvsTab], keys: ['Shortcuts', shortcuts] };
     const tabBar = el('div', { class: 'tabs' });
     const pane = el('div', { class: 'tab-pane' });
     const show = (k) => { pane.replaceChildren(tabs[k][1]); for (const b of tabBar.children) b.classList.toggle('active', b.dataset.k === k); };
@@ -249,52 +305,8 @@ export class Dialogs {
     show(tab);
     await this.modal('Settings', el('div', {}, tabBar, pane), [{ label: 'Close', primary: true, value: true }], { wide: true });
     app.midi.cancelLearn();
+    controllers.destroy?.();
   }
 
-  midiPanel() {
-    const midi = this.app.midi;
-    const wrap = el('div', { class: 'form' });
-    if (midi.unsupported || midi.error) {
-      wrap.append(el('p', { class: 'hint' }, midi.error ? `MIDI unavailable: ${midi.error}` : 'Web MIDI is not available in this browser. Use the OpenDJ desktop app, Chrome or Edge.'));
-      return wrap;
-    }
-    const devSel = el('select', { class: 'sel' });
-    const monitor = el('div', { class: 'midi-monitor' }, 'Move a control on your controller…');
-    const filterIn = el('input', { class: 'inp', type: 'search', placeholder: 'Filter functions…' });
-    const table = el('div', { class: 'midi-table' });
-    const presetSel = el('select', { class: 'sel' }, el('option', { value: '' }, 'Apply preset…'), ...PRESETS.map((p) => el('option', { value: p.name }, p.name)));
-    presetSel.addEventListener('change', () => { if (devSel.value && presetSel.value) { midi.applyPreset(devSel.value, presetSel.value); render(); } presetSel.value = ''; });
-    const fillDevices = () => {
-      const names = midi.inputs().map((i) => i.name);
-      devSel.replaceChildren(...(names.length ? names : ['(no controller connected)']).map((n) => el('option', { value: names.length ? n : '' }, n)));
-    };
-    const render = () => {
-      const dev = devSel.value;
-      const map = dev ? midi.mappings[dev] : null;
-      const q = filterIn.value.toLowerCase();
-      table.replaceChildren(...midi.targets.filter((t) => !q || t.label.toLowerCase().includes(q) || t.id.includes(q)).slice(0, 400).map((t) => {
-        const entries = map?.entries.filter((e) => e.target === t.id) || [];
-        const learning = midi.learning?.targetId === t.id;
-        return el('div', { class: `midi-row ${learning ? 'learning' : ''}` },
-          el('span', { class: 'mr-label' }, t.label), el('span', { class: 'mr-kind' }, t.kind),
-          el('span', { class: 'mr-map' }, entries.map((e) => describeKey(e.key) + (e.lsbKey ? ' (14-bit)' : '') + (e.invert ? ' ⇅' : '')).join(', ') || '—'),
-          el('button', { class: 'btn xs', disabled: !dev, onclick: () => { learning ? midi.cancelLearn() : midi.learn(dev, t.id); render(); } }, learning ? 'Listening…' : 'Learn'),
-          entries.length ? el('button', { class: 'btn xs', title: 'Invert', onclick: () => { for (const e of entries) e.invert = !e.invert; midi.save(); render(); } }, '⇅') : null,
-          entries.length ? el('button', { class: 'btn xs', title: 'Clear', onclick: () => { map.entries = map.entries.filter((e) => e.target !== t.id); midi.save(); render(); } }, '✕') : null);
-      }));
-    };
-    midi.on('message', (m) => { if (m.device === devSel.value || !devSel.value) monitor.textContent = `${m.device}: ${describeKey(m.key)} = ${m.value}`; });
-    midi.on('learning', render); midi.on('devices', () => { fillDevices(); render(); });
-    devSel.addEventListener('change', render); filterIn.addEventListener('input', render);
-    const fileIn = el('input', { type: 'file', accept: '.json', style: { display: 'none' } });
-    fileIn.addEventListener('change', async () => { try { midi.importMapping(devSel.value, await fileIn.files[0].text()); render(); this.app.toast('Mapping imported'); } catch (e) { this.app.toast(e.message); } });
-    fillDevices(); render();
-    wrap.append(
-      el('p', { class: 'hint' }, 'Plug in any MIDI DJ controller. Click "Learn" next to a function, then move the knob / press the button on your controller. 14-bit faders, relative jog wheels and LED feedback are supported.'),
-      el('div', { class: 'row' }, devSel, presetSel,
-        el('button', { class: 'btn sm', onclick: () => { const blob = new Blob([midi.exportMapping(devSel.value)], { type: 'application/json' }); const a = el('a', { href: URL.createObjectURL(blob), download: `${devSel.value || 'controller'}.opendj-midi.json` }); a.click(); } }, 'Export'),
-        el('button', { class: 'btn sm', onclick: () => fileIn.click() }, 'Import'), fileIn),
-      monitor, filterIn, table);
-    return wrap;
-  }
+
 }

@@ -62,3 +62,35 @@ test('waveform encode/decode round trip + trim points', () => {
   const tp = trimPoints(x, SR);
   assert.ok(Math.abs(tp.startTime - 1) < 0.06);
 });
+
+const kick = (t, bpm) => { const b = 60 / bpm, tb = (t - 0.1 + b * 100) % b; return t > 0.1 && tb < 0.15 ? 0.8 * Math.sin(2 * Math.PI * (50 + 100 * Math.exp(-tb * 40)) * tb) * Math.exp(-tb * 18) : 0; };
+
+test('kick + sustained chord/bass tones: 124 BPM (not 112)', () => {
+  const x = new Float32Array(SR * 40);
+  for (let i = 0; i < x.length; i++) {
+    const t = i / SR;
+    x[i] = 0.7 * (kick(t, 124) + 0.15 * (Math.sin(2 * Math.PI * 277.2 * t) + Math.sin(2 * Math.PI * 329.6 * t) + Math.sin(2 * Math.PI * 415.3 * t)) + 0.2 * Math.sin(2 * Math.PI * 138.6 * t));
+  }
+  const r = detectBpm(x, SR);
+  assert.ok(Math.abs(r.bpm - 124) < 0.05, `got ${r.bpm}`);
+});
+
+test('kick + off-beat bass is not detected at 2/3 tempo', () => {
+  const sr = 22050, bpm = 124, b = 60 / bpm;
+  const x = new Float32Array(sr * 60);
+  for (let i = 0; i < x.length; i++) {
+    const t = i / sr, tb = (t - 0.1 - b / 2 + b * 100) % b;
+    x[i] = 0.6 * kick(t, bpm) + (t > 0.1 + b / 2 && tb < b * 0.45 ? 0.35 * Math.sin(2 * Math.PI * 55 * tb) * Math.min(1, tb * 200) * Math.exp(-tb * 3) : 0);
+  }
+  const r = detectBpm(x, sr);
+  assert.ok(Math.abs(r.bpm - bpm) < 0.05, `got ${r.bpm}`);
+});
+
+test('toCamelot: major keys are not mistaken for minor', () => {
+  assert.equal(toCamelot('Amaj'), '11B');
+  assert.equal(toCamelot('A major'), '11B');
+  assert.equal(toCamelot('C major'), '8B');
+  assert.equal(toCamelot('Gbmaj'), '2B');
+  assert.equal(toCamelot('A minor'), '8A');
+  assert.equal(toCamelot('Cmin'), '5A');
+});

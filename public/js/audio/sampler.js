@@ -31,12 +31,12 @@ export class Sampler {
     const buf = await this.ctx.decodeAudioData(await file.arrayBuffer());
     this.slots[i] = { name: file.name.replace(/\.[^.]+$/, ''), buffer: buf, builtin: false, playing: null, mode: 'oneshot' };
   }
-  trigger(i, { velocity = 1 } = {}) {
+  trigger(i, { velocity = 1, when = 0, choke = true } = {}) {
     const s = this.slots[i]; if (!s?.buffer) return;
-    if (s.playing) { try { s.playing.stop(); } catch { /* ended */ } }
+    if (s.playing && choke) { try { s.playing.stop(when || 0); } catch { /* ended */ } }
     const src = this.ctx.createBufferSource(); src.buffer = s.buffer;
     const g = this.ctx.createGain(); g.gain.value = velocity;
-    src.connect(g); g.connect(this.out); src.start();
+    src.connect(g); g.connect(this.out); src.start(when || 0);
     s.playing = src; src.onended = () => { if (s.playing === src) s.playing = null; };
   }
   stop(i) { const s = this.slots[i]; if (s?.playing) { s.playing.stop(); s.playing = null; } }

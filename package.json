@@ -1,7 +1,7 @@
 {
   "name": "opendj",
   "productName": "OpenDJ",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Free, open-source DJ software: decks, mixer, effects, auto-mix, MIDI controllers, and a library that pulls from local/USB/NAS folders, Plex, Jellyfin, Emby and Subsonic.",
   "license": "MIT",
   "type": "module",
@@ -10,15 +10,17 @@
     "start": "electron .",
     "web": "node server/cli.js",
     "test": "node --test test/*.test.js",
-    "test:e2e": "node scripts/e2e-smoke.mjs",
-    "dist": "electron-builder",
-    "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac",
-    "dist:linux": "electron-builder --linux"
+    "test:e2e": "node scripts/e2e-smoke.mjs && node scripts/e2e-performance.mjs && node scripts/e2e-regressions.mjs && node scripts/e2e-controllers.mjs && node scripts/e2e-lighting.mjs && node scripts/e2e-video.mjs && node scripts/e2e-webapp.mjs && node scripts/e2e-dvs.mjs && node scripts/e2e-link-lyrics.mjs && node scripts/e2e-recording.mjs && node scripts/e2e-stems.mjs",
+    "dist": "electron-builder --publish never",
+    "dist:win": "electron-builder --win --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:linux": "electron-builder --linux --publish never",
+    "test:webapp": "node scripts/e2e-webapp.mjs"
   },
   "dependencies": {
     "fast-xml-parser": "^4.5.0",
-    "music-metadata": "^10.6.0"
+    "music-metadata": "^10.6.0",
+    "onnxruntime-web": "1.23.2"
   },
   "devDependencies": {
     "electron": "^33.2.0",
@@ -27,9 +29,147 @@
   "build": {
     "appId": "org.opendj.app",
     "productName": "OpenDJ",
-    "files": ["electron/**", "server/**", "public/**", "package.json"],
-    "win": { "target": ["nsis", "portable"] },
-    "mac": { "target": ["dmg"], "category": "public.app-category.music" },
-    "linux": { "target": ["AppImage", "deb"], "category": "Audio" }
+    "copyright": "Copyright \u00a9 OpenDJ contributors",
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "files": [
+      "electron/**",
+      "server/**",
+      "public/**",
+      "package.json",
+      "THIRD_PARTY_NOTICES.md",
+      "!**/*.map",
+      "!node_modules/onnxruntime-web/dist/*.map",
+      "!node_modules/onnxruntime-web/dist/*.js",
+      "!node_modules/onnxruntime-web/lib/**"
+    ],
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.music",
+      "icon": "build/icon.png",
+      "hardenedRuntime": false,
+      "identity": null,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "OpenDJ uses audio inputs for the microphone channel and to list audio interfaces.",
+        "NSAppleEventsUsageDescription": "OpenDJ opens folders in Finder."
+      }
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "tar.gz",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "Audio",
+      "icon": "build/icon.png",
+      "synopsis": "Free DJ software",
+      "description": "Free, open-source DJ software: decks, mixer, effects, auto-mix, MIDI controllers, and a library that pulls from local/USB/NAS folders, Plex, Jellyfin, Emby and Subsonic.",
+      "desktop": {
+        "Name": "OpenDJ",
+        "Comment": "Free DJ software",
+        "Keywords": "dj;mix;music;audio;midi;"
+      },
+      "maintainer": "OpenDJ contributors <opendj@users.noreply.github.com>"
+    },
+    "deb": {
+      "depends": [
+        "libasound2 | libasound2t64",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0"
+      ]
+    },
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
+    ],
+    "beforePack": "build/before-pack.cjs",
+    "afterAllArtifactBuild": "build/after-all.cjs",
+    "rpm": {
+      "fpm": [
+        "--rpm-rpmbuild-define=_build_id_links none",
+        "--rpm-rpmbuild-define=debug_package %{nil}"
+      ]
+    }
+  },
+  "homepage": "https://github.com/Bucifer6/OpenDJ",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Bucifer6/OpenDJ.git"
+  },
+  "author": {
+    "name": "OpenDJ contributors",
+    "email": "opendj@users.noreply.github.com"
+  },
+  "optionalDependencies": {
+    "ffmpeg-static": "^5.3.0"
   }
 }

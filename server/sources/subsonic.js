@@ -182,6 +182,11 @@ export class SubsonicClient extends SourceClient {
     return { url: this._url('stream', { id: remoteId, format: 'raw' }), headers: {} };
   }
 
+  /** Server-side transcode (MP3 320 kbps: the one target every Subsonic server offers) when OpenDJ has no FFmpeg. */
+  transcodeRequest(remoteId) {
+    return { url: this._url('stream', { id: remoteId, format: 'mp3', maxBitRate: '320' }), headers: {} };
+  }
+
   downloadRequest(remoteId, track) {
     return { url: this._url('download', { id: remoteId }), headers: {}, ext: track?.format || null };
   }

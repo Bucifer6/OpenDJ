@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.github
+.claude
+.opendj-data
+build
+docs
+electron
+test
+scripts
+*.log

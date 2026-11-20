@@ -1,5 +1,6 @@
 // Reusable hardware-style controls. All are "controlled": they render from get() and call set(v).
 import { el, clamp } from '../util.js';
+import { cssVar } from './themes.js';
 
 /** Rotary knob. Drag vertically, wheel to fine-tune, double-click to reset. */
 export function knob({ label, min = -1, max = 1, def = 0, get, set, size = 'md', bipolar = min < 0, title, format }) {
@@ -29,7 +30,7 @@ export function knob({ label, min = -1, max = 1, def = 0, get, set, size = 'md',
     if (bipolar && Math.abs(v - def) < (max - min) * 0.02 && !e.shiftKey) v = def; // centre detent
     set(clamp(v, min, max)); render();
   });
-  cap.addEventListener('pointerup', () => { startY = null; });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) cap.addEventListener(ev, () => { startY = null; });
   cap.addEventListener('dblclick', () => { set(def); render(); });
   cap.addEventListener('wheel', (e) => { e.preventDefault(); set(clamp(get() - Math.sign(e.deltaY) * (max - min) / 100, min, max)); render(); }, { passive: false });
   cap.addEventListener('keydown', (e) => {
@@ -67,9 +68,15 @@ export function fader({ label, min = 0, max = 1, def = min, get, set, horizontal
     e.preventDefault();
   });
   track.addEventListener('pointermove', (e) => { if (!drag) return; set(fromK(posToK(e) - drag.off)); render(); });
-  track.addEventListener('pointerup', () => { drag = null; });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) track.addEventListener(ev, () => { drag = null; });
   track.addEventListener('dblclick', () => { set(def); render(); });
   root.addEventListener('wheel', (e) => { e.preventDefault(); const dir = -Math.sign(e.deltaY) * (invert ? -1 : 1); set(clamp(get() + dir * (max - min) / 100, min, max)); render(); }, { passive: false });
+  root.addEventListener('keydown', (e) => {
+    const inc = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }[e.key];
+    if (!inc) return;
+    e.preventDefault(); // also keeps the global shortcuts (crossfader/library) from reacting
+    set(clamp(get() + inc * (invert ? -1 : 1) * (max - min) / (e.shiftKey ? 200 : 50), min, max)); render();
+  });
   render();
   root.render = render;
   return root;
@@ -79,7 +86,12 @@ export function fader({ label, min = 0, max = 1, def = min, get, set, horizontal
 export function button(label, { cls = '', title, down, up, click, active, disabled } = {}) {
   const b = el('button', { class: `btn ${cls}`, title: title || (typeof label === 'string' ? label : '') }, label);
   if (down) b.addEventListener('pointerdown', (e) => { if (e.button === 0) down(e); });
-  if (up) { b.addEventListener('pointerup', (e) => up(e)); b.addEventListener('pointerleave', (e) => { if (e.buttons) up(e); }); }
+  if (up) {
+    let held = false;
+    b.addEventListener('pointerdown', () => { held = true; });
+    const release = (e) => { if (held) { held = false; up(e); } };
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, release);
+  }
   if (click) b.addEventListener('click', (e) => click(e));
   b.render = () => {
     if (active) b.classList.toggle('active', !!active());
@@ -119,6 +131,7 @@ export function jogWheel(deck) {
   canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', end);
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); deck.jogNudge(-e.deltaY / 2000); }, { passive: false });
 
+  window.addEventListener('opendj-theme', () => { root._deckColor = null; });
   root.draw = () => {
     const W = canvas.width, c = W / 2;
     g.clearRect(0, 0, W, W);
@@ -126,7 +139,7 @@ export function jogWheel(deck) {
     const ang = (pos / 1.8) * 2 * Math.PI;
     // platter
     const grad = g.createRadialGradient(c, c, 20, c, c, c);
-    grad.addColorStop(0, '#2a2f38'); grad.addColorStop(0.75, '#14171c'); grad.addColorStop(0.77, '#0d0f12'); grad.addColorStop(1, '#1b1f26');
+    grad.addColorStop(0, cssVar('--platter-1')); grad.addColorStop(0.75, cssVar('--platter-2')); grad.addColorStop(0.77, cssVar('--platter-3')); grad.addColorStop(1, cssVar('--platter-4'));
     g.fillStyle = grad; g.beginPath(); g.arc(c, c, c - 4, 0, 2 * Math.PI); g.fill();
     // grooves
     g.strokeStyle = 'rgba(255,255,255,0.04)'; g.lineWidth = 1;
@@ -136,18 +149,18 @@ export function jogWheel(deck) {
     g.strokeStyle = 'rgba(255,255,255,0.08)'; g.lineWidth = 6;
     g.beginPath(); g.arc(c, c, c - 12, 0, 2 * Math.PI); g.stroke();
     const warn = deck.duration && deck.remaining < 30;
-    g.strokeStyle = warn && Math.floor(performance.now() / 400) % 2 ? '#ff4757' : getComputedStyle(root).getPropertyValue('--deck-color') || '#3ea6ff';
+    g.strokeStyle = warn && Math.floor(performance.now() / 400) % 2 ? '#ff4757' : (root._deckColor ||= getComputedStyle(root).getPropertyValue('--deck-color').trim() || '#3ea6ff');
     g.beginPath(); g.arc(c, c, c - 12, -Math.PI / 2, -Math.PI / 2 + k * 2 * Math.PI); g.stroke();
     // marker line
     g.save(); g.translate(c, c); g.rotate(ang);
-    g.strokeStyle = '#e8ecf1'; g.lineWidth = 5; g.lineCap = 'round';
+    g.strokeStyle = cssVar('--platter-mark'); g.lineWidth = 5; g.lineCap = 'round';
     g.beginPath(); g.moveTo(0, -c * 0.32); g.lineTo(0, -c * 0.72); g.stroke();
     g.restore();
     // centre label
-    g.fillStyle = deck.playing ? '#1f2630' : '#171b21'; g.beginPath(); g.arc(c, c, c * 0.28, 0, 2 * Math.PI); g.fill();
-    g.fillStyle = '#9aa4b2'; g.font = '600 26px Inter, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = deck.playing ? cssVar('--platter-1') : cssVar('--platter-4'); g.beginPath(); g.arc(c, c, c * 0.28, 0, 2 * Math.PI); g.fill();
+    g.fillStyle = cssVar('--platter-text'); g.font = '600 26px Inter, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillText(deck.effectiveBpm ? deck.effectiveBpm.toFixed(1) : '--', c, c - 8);
-    g.font = '500 16px Inter, system-ui, sans-serif'; g.fillStyle = '#6b7685';
+    g.font = '500 16px Inter, system-ui, sans-serif'; g.fillStyle = cssVar('--platter-text-2');
     g.fillText('BPM', c, c + 18);
   };
   return root;

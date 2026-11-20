@@ -10,27 +10,37 @@ function readExtended80(buf, off) {
 }
 
 export function aiffToWav(buf) {
-  if (buf.toString('ascii', 0, 4) !== 'FORM') throw new Error('not AIFF');
+  if (buf.length < 12 || buf.toString('ascii', 0, 4) !== 'FORM') throw new Error('not AIFF');
   const formType = buf.toString('ascii', 8, 12);
   if (formType !== 'AIFF' && formType !== 'AIFC') throw new Error('not AIFF');
   let off = 12, channels = 2, bits = 16, rate = 44100, frames = 0, data = null, compression = 'NONE';
+  let comm = false;
   while (off + 8 <= buf.length) {
     const id = buf.toString('ascii', off, off + 4);
     const size = buf.readUInt32BE(off + 4);
     const body = off + 8;
     if (id === 'COMM') {
+      if (body + 18 > buf.length || (formType === 'AIFC' && body + 22 > buf.length)) throw new Error('AIFF COMM chunk truncated');
+      comm = true;
       channels = buf.readUInt16BE(body);
       frames = buf.readUInt32BE(body + 2);
       bits = buf.readUInt16BE(body + 6);
       rate = readExtended80(buf, body + 8);
       if (formType === 'AIFC') compression = buf.toString('ascii', body + 18, body + 22);
     } else if (id === 'SSND') {
+      if (body + 8 > buf.length) throw new Error('AIFF SSND chunk truncated');
       const dataOffset = buf.readUInt32BE(body);
-      data = buf.subarray(body + 8 + dataOffset, Math.min(buf.length, body + size));
+      const start = body + 8 + dataOffset;
+      if (start > buf.length) throw new Error('AIFF SSND offset out of range');
+      data = buf.subarray(start, Math.max(start, Math.min(buf.length, body + size)));
     }
     off = body + size + (size & 1);
   }
+  if (!comm) throw new Error('AIFF has no COMM chunk');
   if (!data) throw new Error('AIFF has no sound data');
+  if (![8, 16, 24, 32].includes(bits)) throw new Error(`Unsupported AIFF bit depth ${bits}`);
+  if (!(channels >= 1 && channels <= 32)) throw new Error(`Invalid AIFF channel count ${channels}`);
+  if (!(rate > 0 && rate <= 1536000)) throw new Error(`Invalid AIFF sample rate ${rate}`);
   const littleEndian = compression === 'sowt';
   if (compression !== 'NONE' && compression !== 'sowt' && compression !== 'twos') throw new Error(`Unsupported AIFC compression ${compression}`);
   const bytes = bits / 8;
