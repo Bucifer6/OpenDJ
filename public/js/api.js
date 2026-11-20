@@ -66,6 +66,17 @@ export const api = {
   importTraktor: (body) => req('POST', '/api/import/traktor', body),
   importSerato: (body) => req('POST', '/api/import/serato', body),
   importVirtualDJ: (body) => req('POST', '/api/import/virtualdj', body),
+  // ---- lighting ----
+  lighting: () => req('GET', '/api/lighting'),
+  saveLightingConfig: (config) => req('PUT', '/api/lighting/config', config),
+  lightingState: (state) => req('POST', '/api/lighting/state', state),
+  lightingLive: (patch) => req('POST', '/api/lighting/live', patch),
+  lightingTest: (ms) => req('POST', '/api/lighting/test', { ms }),
+  lightingStatus: () => req('GET', '/api/lighting/status'),
+  lightingStreamUrl: ({ preview = false, dmx = 0 } = {}) => `/api/lighting/stream?preview=${preview ? 1 : 0}&dmx=${dmx}`,
+  hueDiscover: () => req('GET', '/api/lighting/hue/discover'),
+  huePair: (bridge) => req('POST', '/api/lighting/hue/pair', { bridge }),
+  hueLights: () => req('GET', '/api/lighting/hue/lights'),
   events(handlers) {
     const es = new EventSource('/api/events');
     for (const [ev, fn] of Object.entries(handlers)) es.addEventListener(ev, (e) => fn(JSON.parse(e.data || '{}')));

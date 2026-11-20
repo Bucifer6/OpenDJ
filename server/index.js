@@ -18,11 +18,12 @@ import { evaluateSmart, normSmart, SMART_FIELDS, SMART_OPS, SOURCE_VALUES, TRACK
 import { History, exportSession, sessionTitle } from './history.js';
 import { MissingChecker, relocateTracks, findDuplicates, mergeDuplicates, buildBackup, restoreBackup } from './library-tools.js';
 import { parseTraktorNml, readSeratoCrates, parseVirtualDjXml, importParsed } from './importers.js';
+import { registerLightingRoutes } from './lighting/routes.js';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png',
+  '.css': 'text/css; charset=utf-8', '.webmanifest': 'application/manifest+json', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png',
   '.ico': 'image/x-icon', '.woff2': 'font/woff2',
   '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.flac': 'audio/flac', '.m4a': 'audio/mp4', '.mp4': 'audio/mp4', '.aac': 'audio/aac',
   '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.webm': 'audio/webm', '.aif': 'audio/wav', '.aiff': 'audio/wav',
@@ -395,6 +396,9 @@ export function createServer({ dataDir = defaultDataDir(), log = console } = {})
   route('PUT', '/api/settings', async ({ body }) => library.updateSettings(body));
   route('GET', '/api/jobs', () => [...jobs.keys()]);
   route('GET', '/api/info', () => ({ version: '0.1.0', dataDir, platform: process.platform, tracks: Object.keys(library.data.tracks).length }));
+  // ---------------- lighting (DMX / Art-Net / sACN / WLED / Hue / OSC) ----------------
+  registerLightingRoutes({ route, library, emit });
+
   route('GET', '/api/events', ({ req, res }) => {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     res.write(`event: hello\ndata: {}\n\n`);
