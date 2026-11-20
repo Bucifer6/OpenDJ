@@ -13,7 +13,8 @@ function attach() {
   const bridge = window.opener && !window.opener.closed ? window.opener.__opendjVideo : null;
   if (!bridge) { status.textContent = 'Open this window from OpenDJ (Video → Pop-out output)'; attached = false; return; }
   try {
-    const { stream, width, height } = bridge.attach(window);
+    const { stream, width, height, fullscreen } = bridge.attach(window);
+    if (fullscreen && !document.fullscreenElement) askFullscreen();
     video.srcObject = stream;
     video.play().catch(() => {});
     attached = true;
@@ -36,10 +37,13 @@ const toggleFs = () => (document.fullscreenElement ? document.exitFullscreen() :
 document.getElementById('fs').addEventListener('click', toggleFs);
 document.addEventListener('dblclick', toggleFs);
 document.addEventListener('keydown', (e) => { if (e.key === 'f' || e.key === 'F') toggleFs(); });
-if (window.__opendjWantFullscreen) {
-  clickFs.hidden = false;
-  const go = () => { clickFs.hidden = true; document.documentElement.requestFullscreen().catch(() => {}); document.removeEventListener('pointerdown', go); };
-  document.addEventListener('pointerdown', go);
+function askFullscreen() {
+  // a new window can't enter full screen by itself: try (works with a fresh user activation), else ask for a click
+  document.documentElement.requestFullscreen().catch(() => {
+    clickFs.hidden = false;
+    const go = () => { clickFs.hidden = true; document.documentElement.requestFullscreen().catch(() => {}); document.removeEventListener('pointerdown', go); };
+    document.addEventListener('pointerdown', go);
+  });
 }
 document.addEventListener('fullscreenchange', () => { clickFs.hidden = true; });
 

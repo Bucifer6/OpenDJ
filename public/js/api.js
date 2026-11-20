@@ -1,9 +1,15 @@
 // Thin client for the local OpenDJ server.
+// Hosted mode (password login): a 401 means the session ended, so go to the login page and come back afterwards.
+export function toLogin() {
+  if (location.pathname.endsWith('/login.html')) return;
+  location.href = `/login.html?next=${encodeURIComponent(location.pathname + location.search)}`;
+}
 async function req(method, url, body, raw = false) {
-  const opts = { method, headers: {} };
+  const opts = { method, headers: {}, credentials: 'same-origin' };
   if (body instanceof Uint8Array || body instanceof ArrayBuffer) { opts.body = body; opts.headers['Content-Type'] = 'application/octet-stream'; }
   else if (body !== undefined) { opts.body = JSON.stringify(body); opts.headers['Content-Type'] = 'application/json'; }
   const r = await fetch(url, opts);
+  if (r.status === 401 && !url.startsWith('/api/auth/')) { toLogin(); throw new Error('Login required'); }
   if (!r.ok) {
     let msg = r.statusText; try { msg = (await r.json()).error || msg; } catch { /* not json */ }
     throw new Error(msg);
@@ -16,6 +22,8 @@ export const api = {
   deleteTracks: (ids) => req('POST', '/api/tracks/delete', { ids }),
   played: (id) => req('POST', '/api/tracks/played', { id }),
   streamUrl: (id) => `/api/tracks/${id}/stream`,
+  /** Video of a track (track.hasVideo): original file when the browser can play it, else an MP4 made by FFmpeg. */
+  videoUrl: (id) => `/api/tracks/${id}/video`,
   coverUrl: (id) => `/api/tracks/${id}/cover`,
   async waveform(id) { try { const r = await req('GET', `/api/tracks/${id}/waveform`, undefined, true); return await r.arrayBuffer(); } catch { return null; } },
   saveWaveform: (id, bytes) => req('PUT', `/api/tracks/${id}/waveform`, bytes),
@@ -47,6 +55,33 @@ export const api = {
   settings: () => req('GET', '/api/settings'),
   saveSettings: (patch) => req('PUT', '/api/settings', patch),
   info: () => req('GET', '/api/info'),
+  /** { ffmpeg, version, formats: ['mp3', 'wma', …], hosted, auth, upload: { maxMB, accept } } */
+  capabilities: () => req('GET', '/api/capabilities'),
+  authStatus: () => req('GET', '/api/auth/status'),
+  async logout() { await req('POST', '/api/auth/logout'); toLogin(); },
+  changePassword: (current, password) => req('POST', '/api/auth/password', { current, password }),
+  /**
+   * Upload a File/Blob into the uploads library folder. Resolves { id, track }.
+   * onProgress(loaded, total); pass an AbortSignal to cancel. Uses XHR because fetch has no upload progress.
+   */
+  upload(file, { onProgress, signal } = {}) {
+    return new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest();
+      x.open('POST', '/api/upload');
+      x.setRequestHeader('Content-Type', 'application/octet-stream');
+      x.setRequestHeader('X-Filename', encodeURIComponent(file.name || 'upload'));
+      x.upload.onprogress = (e) => onProgress?.(e.loaded, e.lengthComputable ? e.total : file.size);
+      x.onload = () => {
+        let j = {}; try { j = JSON.parse(x.responseText || '{}'); } catch { /* not json */ }
+        if (x.status === 401) { toLogin(); return reject(new Error('Login required')); }
+        if (x.status >= 200 && x.status < 300) resolve(j); else reject(new Error(j.error || `Upload failed (HTTP ${x.status})`));
+      };
+      x.onerror = () => reject(new Error('Upload failed (network error)'));
+      x.onabort = () => reject(Object.assign(new Error('Upload cancelled'), { name: 'AbortError' }));
+      signal?.addEventListener('abort', () => x.abort(), { once: true });
+      x.send(file);
+    });
+  },
   // ---- library & prep ----
   updateTracks: (ids, patch) => req('POST', '/api/tracks/update', { ids, patch }),
   missingTracks: () => req('GET', '/api/tracks/missing'),

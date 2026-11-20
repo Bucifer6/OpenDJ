@@ -24,7 +24,18 @@ export function applyTheme(settings) {
   root.dataset.theme = theme;
   // optional custom accent colour on top of any theme
   if (settings.accentColor) root.style.setProperty('--accent', settings.accentColor); else root.style.removeProperty('--accent');
-  root.style.zoom = String((settings.uiScale || 100) / 100);
+  // never scale beyond what keeps a usable 1100x700 effective window
+  const want = (settings.uiScale || 100) / 100;
+  const z = Math.max(0.5, Math.min(want, innerWidth / 1100, innerHeight / 700, want));
+  root.style.zoom = String(z);
+  root.style.setProperty('--ui-zoom', String(z)); // layout heights divide by this so the page still fits the window
+  root.classList.toggle('zoom-large', z > 1.05);
+  const effH = innerHeight / z;
+  root.classList.toggle('h860', effH <= 860); root.classList.toggle('h800', effH <= 800);
+  const effW = innerWidth / z;
+  root.classList.toggle('w1300', effW <= 1300); root.classList.toggle('w1200', effW <= 1200);
+  if (!applyTheme._resize) { applyTheme._resize = true; let t; addEventListener('resize', () => { clearTimeout(t); t = setTimeout(() => applyTheme(applyTheme._last), 150); }); }
+  applyTheme._last = settings;
   root.style.colorScheme = theme === 'light' ? 'light' : 'dark';
   cache = new Map();
   window.dispatchEvent(new Event('opendj-theme'));

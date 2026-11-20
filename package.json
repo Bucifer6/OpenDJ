@@ -10,11 +10,12 @@
     "start": "electron .",
     "web": "node server/cli.js",
     "test": "node --test test/*.test.js",
-    "test:e2e": "node scripts/e2e-smoke.mjs && node scripts/e2e-performance.mjs && node scripts/e2e-controllers.mjs",
+    "test:e2e": "node scripts/e2e-smoke.mjs && node scripts/e2e-performance.mjs && node scripts/e2e-regressions.mjs && node scripts/e2e-controllers.mjs && node scripts/e2e-lighting.mjs && node scripts/e2e-video.mjs && node scripts/e2e-webapp.mjs",
     "dist": "electron-builder --publish never",
     "dist:win": "electron-builder --win --publish never",
     "dist:mac": "electron-builder --mac --publish never",
-    "dist:linux": "electron-builder --linux --publish never"
+    "dist:linux": "electron-builder --linux --publish never",
+    "test:webapp": "node scripts/e2e-webapp.mjs"
   },
   "dependencies": {
     "fast-xml-parser": "^4.5.0",
@@ -147,7 +148,10 @@
         "libuuid1",
         "libsecret-1-0"
       ]
-    }
+    },
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
+    ]
   },
   "homepage": "https://github.com/Bucifer6/OpenDJ",
   "repository": {

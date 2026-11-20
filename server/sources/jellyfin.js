@@ -197,6 +197,16 @@ export class JellyfinClient extends SourceClient {
     return { url: `${this._base()}/Audio/${remoteId}/stream?static=true&api_key=${this._tok()}`, headers: {} };
   }
 
+  /** Server-side transcode to FLAC (lossless) for formats the browser can't decode (used when OpenDJ has no FFmpeg). */
+  transcodeRequest(remoteId) {
+    const q = new URLSearchParams({
+      UserId: this.config.userId || '', DeviceId: 'opendj', MaxStreamingBitrate: '999999999',
+      Container: 'flac,mp3,m4a|aac,ogg|opus,ogg|vorbis,wav,webm|opus', TranscodingContainer: 'flac', TranscodingProtocol: 'http',
+      AudioCodec: 'flac', api_key: this.config.token || '',
+    });
+    return { url: `${this._base()}/Audio/${encodeURIComponent(remoteId)}/universal?${q}`, headers: {} };
+  }
+
   downloadRequest(remoteId, track) {
     return {
       url: `${this._base()}/Items/${remoteId}/Download?api_key=${this._tok()}`,

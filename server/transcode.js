@@ -195,8 +195,9 @@ export class Transcoder {
     });
     let srcTmp = null;
     job.promise = (async () => {
-      const release = await this.sem.acquire(job.ctrl.signal);
+      let release = null;
       try {
+        release = await this.sem.acquire(job.ctrl.signal);
         let input = inputSpec;
         if (typeof inputSpec === 'function') { input = await inputSpec(job.ctrl.signal, final + '.src'); srcTmp = input; }
         try { await runOnce(input, makeArgs); }
@@ -213,7 +214,7 @@ export class Transcoder {
         throw e;
       } finally {
         job.done = true;
-        release();
+        release?.();
         this.jobs.delete(final);
         if (srcTmp && srcTmp.endsWith('.src')) fs.promises.rm(srcTmp, { force: true }).catch(() => {});
       }

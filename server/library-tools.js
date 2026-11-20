@@ -246,11 +246,12 @@ export function mergeDuplicates(library, groups) {
 
 const SECRET_KEYS = ['password', 'token'];
 /** Settings that describe this machine/server, not the user's library (never taken from a backup). */
-const LOCAL_ONLY_SETTINGS = new Set(['allowedRoots', 'uploadDir', 'downloadDir']);
+const LOCAL_ONLY_SETTINGS = new Set(['allowedRoots', 'uploadDir', 'downloadDir', 'youtubeApiKey']);
 export const REDACTED = '••••••';
 
 /** Settings as sent to the UI / written to backups: the Hue bridge key is replaced (UI only needs to know it exists). */
 export function redactSettings(settings, { forBackup = false } = {}) {
+  if (forBackup && settings?.youtubeApiKey) settings = { ...settings, youtubeApiKey: '' };
   const hue = settings?.lighting?.outputs?.hue;
   if (!hue?.username) return settings;
   return { ...settings, lighting: { ...settings.lighting, outputs: { ...settings.lighting.outputs, hue: { ...hue, username: forBackup ? '' : REDACTED } } } };

@@ -1,6 +1,7 @@
 // End-to-end test for the video mixer: generated video track on deck 1, video follows the deck (seek / loop),
 // crossfader drives layer opacity, visualizer for audio-only tracks, pop-out output window receives frames.
 // Usage: node scripts/e2e-video.mjs [outDir]   (needs ffmpeg on PATH, or `npm i --no-save ffmpeg-static`)
+// VIDEO_RENDERER=2d forces the 2D-canvas fallback compositor.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -48,9 +49,35 @@ function writeWav(file, bpm, seconds, rootHz) {
 }
 writeWav(path.join(music, 'Audio Artist - Audio Only.wav'), 124, 30, 220);
 
+
+// Hermetic stand-in for the YouTube IFrame Player API (the real one needs network access to youtube.com).
+const YT_STUB = () => {
+  window.YT = { Player: class {
+    constructor(el, opts) {
+      this.opts = opts; this.vol = 100; this.muted = !!opts.playerVars?.mute; this.state = -1; this.t = opts.playerVars?.start || 0;
+      this.f = document.createElement('div'); this.f.className = 'yt-stub'; this.f.dataset.videoId = opts.videoId;
+      Object.assign(this.f.style, { background: '#c00', width: '100%', height: '100%' });
+      el.replaceWith(this.f);
+      (window.__ytPlayers ||= []).push(this);
+      setTimeout(() => opts.events?.onReady?.({ target: this }), 10);
+    }
+    getIframe() { return this.f; }
+    playVideo() { this.state = 1; this.opts.events?.onStateChange?.({ data: 1 }); }
+    pauseVideo() { this.state = 2; this.opts.events?.onStateChange?.({ data: 2 }); }
+    mute() { this.muted = true; } unMute() { this.muted = false; } isMuted() { return this.muted; }
+    setVolume(v) { this.vol = v; } getVolume() { return this.vol; }
+    getCurrentTime() { return this.t; } getPlaybackRate() { return 1; } setPlaybackRate() {} seekTo(t) { this.t = t; }
+    getPlayerState() { return this.state; }
+    loadVideoById(o) { this.f.dataset.videoId = o.videoId; }
+    getVideoData() { return { title: 'Stub Video', author: 'Stub Channel' }; }
+    destroy() { this.f.remove(); }
+  } };
+};
+
 const app = await start({ port: 0, dataDir: path.join(tmp, 'data') });
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
 const context = await browser.newContext({ viewport: { width: 1600, height: 960 } });
+await context.addInitScript(YT_STUB);
 const page = await context.newPage();
 const errors = [];
 const watch = (p) => { p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); }); p.on('pageerror', (e) => errors.push(String(e))); };
@@ -90,7 +117,8 @@ try {
   check(ids[0] && ids[1], 'video + audio tracks scanned');
 
   // wiring is not in app.js yet: set the video module up from the page
-  await page.evaluate(async () => {
+  await page.evaluate(async (renderer) => {
+    if (renderer) localStorage.setItem('opendj.video', JSON.stringify({ renderer })); // VIDEO_RENDERER=2d tests the 2D fallback
     if (!document.querySelector('link[href$="video.css"]')) {
       const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'css/video.css'; document.head.append(l);
       await new Promise((res) => { l.onload = res; l.onerror = res; });
@@ -98,7 +126,7 @@ try {
     const { setupVideo } = await import('/js/video/video-ui.js');
     window.__videoApi = setupVideo(window.opendj);
     window.__videoApi.openPanel();
-  });
+  }, process.env.VIDEO_RENDERER || '');
   check(await page.locator('.vid-panel').isVisible(), 'video panel opens');
   const kind = await page.evaluate(() => window.opendj.video.mixer.rendererKind);
   console.log('renderer:', kind);
@@ -185,6 +213,23 @@ try {
   await popup.setViewportSize({ width: 960, height: 540 }).catch(() => {});
   await popup.screenshot({ path: path.join(outDir, 'video-output.png') });
   console.log('screenshot:', path.join(outDir, 'video-output.png'));
+
+  // YouTube layer (stubbed IFrame API): CSS opacity follows its crossfader side, jukebox volume too, pop-out follows
+  await page.evaluate(async () => {
+    const E = window.opendj.engine; E.decks[1].pause(); E.channels[1].set('volume', 0);
+    const yt = window.opendj.video.youtube;
+    await yt.load('dQw4w9WgXcQ', { title: 'Stub Video' });
+    yt.setSide('B'); yt.setJukebox(true);
+  });
+  const ytAt = async (x) => page.evaluate(async (x) => { window.opendj.engine.setCrossfader(x); await new Promise((r) => setTimeout(r, 150)); const p = window.__ytPlayers[0]; return { op: Number(p.f.style.opacity), vol: p.vol, muted: p.muted }; }, x);
+  const y1 = await ytAt(-1), y2 = await ytAt(1);
+  console.log('  youtube A/B', JSON.stringify([y1, y2]));
+  check(y1.op < 0.01 && y2.op > 0.99, 'YouTube layer opacity follows its crossfader side');
+  check(y1.vol === 0 && y2.vol > 50 && !y2.muted, `jukebox volume follows the crossfader (${y1.vol} → ${y2.vol})`);
+  await popup.waitForFunction(() => window.__ytPlayers?.length === 1 && Number(document.getElementById('yt').style.opacity) > 0.9, null, { timeout: 5000 });
+  check(await popup.evaluate(() => window.__ytPlayers[0].opts.playerVars.mute === 1), 'pop-out runs its own muted YouTube player, synced by postMessage');
+  await page.evaluate(() => window.opendj.video.youtube.stop());
+  await page.evaluate(() => window.opendj.engine.setCrossfader(-1));
   // black when nothing plays
   await page.evaluate(() => { const E = window.opendj.engine; E.decks.forEach((d) => d.pause()); E.channels[0].set('volume', 0); E.channels[1].set('volume', 0); window.opendj.video.mixer.setOverlay({ text: '' }); window.opendj.video.mixer.setFx(0, 'pulse', false); });
   await popup.waitForTimeout(1200);

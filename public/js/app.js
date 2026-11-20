@@ -11,6 +11,7 @@ import { MidiManager } from './midi/midi.js';
 import { Sequencer } from './audio/sequencer.js';
 import { applyTheme } from './ui/themes.js';
 import { Lighting } from './lighting/lighting.js';
+import { setupVideo } from './video/video-ui.js';
 
 class App {
   constructor() { this.shift = false; this._shiftKey = false; }
@@ -92,6 +93,7 @@ class App {
       el('div', { class: 'tb-spacer' }),
       el('div', { class: 'tb-group' }, this.recBtn, this.recTime),
       this.midiDot, this.cpu, this.clock,
+      el('button', { class: 'btn sm video-btn', title: 'Video mixer, visuals, YouTube & projector output', onclick: () => (this.videoUi ||= setupVideo(this)).toggleMixer() }, '🎬 VIDEO'),
       el('button', { class: 'btn sm light-btn', title: 'Lighting (DMX, Art-Net, sACN, WLED, Hue, OSC)', onclick: () => this.lighting?.openPanel() }, '💡 LIGHTS'),
       el('button', { class: 'btn icon', title: 'Settings', onclick: () => this.dialogs.settings() }, '⚙'),
       el('button', { class: 'btn icon', title: 'Full screen', onclick: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()) }, '⛶'),
@@ -120,7 +122,8 @@ class App {
     const handle = el('div', { class: 'resize-handle', title: 'Drag to resize the browser' });
     let startY, startH;
     handle.addEventListener('pointerdown', (e) => { handle.setPointerCapture(e.pointerId); startY = e.clientY; startH = this.library.root.getBoundingClientRect().height; });
-    handle.addEventListener('pointermove', (e) => { if (startY == null) return; const h = Math.max(120, Math.min(innerHeight - 260, startH - (e.clientY - startY))); document.documentElement.style.setProperty('--browser-h', `${h}px`); });
+    handle.addEventListener('pointermove', (e) => { if (startY == null) return; const z = (this.settings.uiScale || 100) / 100, room = innerHeight / z - (this.deckCount === 4 ? 560 : 420); // always leave room for waveforms + decks
+      const h = Math.max(120, Math.min(Math.max(120, room), startH - (e.clientY - startY))); document.documentElement.style.setProperty('--browser-h', `${h}px`); });
     for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) handle.addEventListener(ev, () => { startY = null; });
     root.replaceChildren(topbar, this.waveArea, this.deckArea, this.samplerBar, handle, this.library.root, this.toasts);
   }
@@ -179,6 +182,9 @@ class App {
     playBtn.classList.toggle('active', seq.running);
     const origRemove = panel.remove.bind(panel);
     panel.remove = () => { offP(); offS(); offStep(); origRemove(); };
+    const onEsc = (e) => { if (e.key === 'Escape' && !document.querySelector('.overlay')) { e.preventDefault(); this.toggleSequencer(); } };
+    document.addEventListener('keydown', onEsc);
+    const rm = panel.remove; panel.remove = () => { document.removeEventListener('keydown', onEsc); rm(); };
     document.body.append(panel);
     this.seqPanel = panel;
   }
@@ -188,7 +194,13 @@ class App {
     catch (e) { this.toast(`Microphone: ${e.message}`); }
   }
 
-  setDeckCount(n, save = true) {
+  async setDeckCount(n, save = true) {
+    // decks that would be hidden must not keep playing without any visible controls
+    const hiddenPlaying = this.engine.decks.slice(n).filter((d) => d.playing);
+    if (hiddenPlaying.length) {
+      if (!(await this.dialogs.confirm(`Deck ${hiddenPlaying.map((d) => d.index + 1).join(' & ')} ${hiddenPlaying.length > 1 ? 'are' : 'is'} playing. Stop ${hiddenPlaying.length > 1 ? 'them' : 'it'} and switch to ${n} decks?`))) return;
+      for (const d of hiddenPlaying) d.pause();
+    }
     this.deckCount = n;
     document.body.classList.toggle('four-decks', n === 4);
     this.deckEls.forEach((d, i) => { d.style.display = i < n ? '' : 'none'; });
@@ -214,6 +226,7 @@ class App {
     const a = this.automix;
     this.amBtn.classList.toggle('active', a.enabled);
     const next = a.nextTrack();
+    this.amSkip.disabled = !a.enabled || !!a.transition;
     this.amInfo.textContent = a.enabled ? (a.transition ? 'Mixing…' : next ? `Next: ${next.artist ? next.artist + ' – ' : ''}${next.title}` : 'Last track') : (a.queue.length ? `${a.queue.length - a.idx} queued` : '');
   }
 

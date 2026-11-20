@@ -7,7 +7,7 @@ export class OutputManager {
     this.mixer = mixer; this.youtube = youtube; this.win = null; this._poll = null;
     window.__opendjVideo = {
       version: 1,
-      attach: (w) => { this.win = w; this.mixer.addOutput('popup'); this.startPoll(); this.sendYt(true); return { stream: this.mixer.stream(), width: this.mixer.canvas.width, height: this.mixer.canvas.height }; },
+      attach: (w) => { this.win = w; this.mixer.addOutput('popup'); this.startPoll(); this.sendYt(true); const fullscreen = this.wantFullscreen; this.wantFullscreen = false; return { stream: this.mixer.stream(), width: this.mixer.canvas.width, height: this.mixer.canvas.height, fullscreen }; },
       detach: (w) => { if (w === this.win) this.closed(); },
     };
     youtube?.on('load', () => this.sendYt(true));
@@ -42,9 +42,9 @@ export class OutputManager {
     const w = window.open('/video.html', 'opendj-video', features);
     if (!w) throw new Error('The output window was blocked. Allow pop-ups for OpenDJ.');
     this.win = w;
+    this.wantFullscreen = !!screen; // the popup asks for fullscreen on its first click
     if (screen) {
       try { w.moveTo(screen.availLeft, screen.availTop); w.resizeTo(screen.availWidth, screen.availHeight); } catch { /* */ }
-      w.__opendjWantFullscreen = { left: screen.left, top: screen.top }; // the popup asks for fullscreen on its first click
     }
     this.startPoll();
     return w;

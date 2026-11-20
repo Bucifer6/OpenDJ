@@ -1,0 +1,31 @@
+/* Browser upload (public/js/ui/upload.js): drop overlay on the library + progress panel. Uses the app's theme tokens. */
+.upl-zone { position: relative; }
+.upl-drop {
+  position: absolute; inset: 6px; z-index: 40; display: grid; place-items: center; pointer-events: none;
+  border: 2px dashed var(--accent, #3ea6ff); border-radius: calc(var(--radius, 6px) * 2);
+  background: color-mix(in srgb, var(--bg, #0b0d10) 78%, var(--accent, #3ea6ff) 10%);
+}
+.upl-drop > div { padding: 12px 18px; border-radius: var(--radius, 6px); background: var(--panel, #13161b); color: var(--text, #e6eaef); font-weight: 600; box-shadow: 0 8px 30px var(--shadow, rgba(0,0,0,.6)); }
+.upl-drop[hidden], .upl-panel[hidden] { display: none; }
+
+.upl-panel {
+  position: fixed; right: 16px; bottom: 16px; z-index: 1000; width: min(360px, calc(100vw - 32px)); max-height: 46vh;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--panel, #13161b); color: var(--text, #e6eaef); border: 1px solid var(--line-2, #313844);
+  border-radius: calc(var(--radius, 6px) * 1.5); box-shadow: 0 12px 40px var(--shadow, rgba(0,0,0,.6)); font-size: 12px;
+}
+.upl-panel header { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid var(--line, #262c35); }
+.upl-title { font-weight: 600; }
+.upl-close, .upl-cancel { background: none; border: 0; color: var(--text-2, #9aa4b2); cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: 4px; }
+.upl-close:hover, .upl-cancel:hover { color: var(--text, #e6eaef); background: var(--hover, #1a1f26); }
+.upl-close:focus-visible, .upl-cancel:focus-visible { outline: 2px solid var(--accent, #3ea6ff); }
+.upl-list { overflow-y: auto; padding: 4px 0; }
+.upl-row { display: grid; grid-template-columns: 1fr auto auto; gap: 2px 8px; align-items: center; padding: 6px 10px; }
+.upl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upl-info { color: var(--text-2, #9aa4b2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.upl-bar { grid-column: 1 / -1; height: 3px; border-radius: 2px; background: var(--inset, #0e1115); overflow: hidden; }
+.upl-bar > i { display: block; height: 100%; width: 0; background: var(--accent, #3ea6ff); transition: width .15s linear; }
+.upl-row.done .upl-bar > i { background: var(--green, #2ed47a); }
+.upl-row.failed .upl-info { color: var(--red, #ff3b4d); white-space: normal; }
+.upl-row.failed .upl-bar > i { background: var(--red, #ff3b4d); }
+@media (prefers-reduced-motion: reduce) { .upl-bar > i { transition: none; } }

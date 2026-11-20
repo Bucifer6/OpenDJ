@@ -109,7 +109,7 @@ export class LibraryUI {
     const { col, dir } = this.sort;
     if (col && !(this.view.kind === 'playlist' && col === '#') && this.view.kind !== 'duplicates') {
       const session = this.view.kind === 'session';
-      const val = (t) => (col === 'key' ? (toCamelot(t.key) || '').padStart(3, '0') : col === 'source' ? (t.sourceKind || 'local')
+      const val = (t) => (col === 'key' ? (toCamelot(t.key) ? toCamelot(t.key).padStart(3, '0') : '') : col === 'source' ? (t.sourceKind || 'local')
         : col === 'tags' ? (t.tags || []).join(', ') : col === 'addedAt' && session ? t._playedAt : t[col]);
       list = [...list].sort((a, b) => {
         const x = val(a), y = val(b);
@@ -204,7 +204,7 @@ export class LibraryUI {
         style: { top: `${i * ROW_H}px`, gridTemplateColumns: this.gridTemplate() },
         draggable: 'true', 'data-i': i,
         html: `<div class="art" style="background-image:url(${api.coverUrl(t.id)})"></div>`
-          + `<div class="c-title">${sw}${t.missing ? '<span class="lc-miss">⚠</span>' : ''}${escapeHtml(t.title)}</div><div>${escapeHtml(t.artist)}</div>`
+          + `<div class="c-title" title="${escapeHtml(t.title)}">${sw}${t.missing ? '<span class="lc-miss">⚠</span>' : ''}${escapeHtml(t.title)}</div><div title="${escapeHtml(t.artist)}">${escapeHtml(t.artist)}</div>`
           + `<div class="num ${bpmClose ? 'match' : ''}">${Number(t.bpm) > 0 ? Number(t.bpm).toFixed(Number(t.bpm) % 1 ? 1 : 0) : ''}</div>`
           + `<div class="key ${cam ? `cam-${cam.replace(/\D/g, '')}` : ''} ${comp ? 'match' : ''}">${escapeHtml(cam || t.key || '')}</div>`
           + `<div class="num">${fmtDur(t.duration)}</div><div class="num">${escapeHtml(t.energy ?? '')}</div>`
@@ -224,6 +224,7 @@ export class LibraryUI {
     const idx = (e) => { const r = e.target.closest('.lr'); return r ? +r.dataset.i : -1; };
     this.rowsEl.addEventListener('click', (e) => {
       const i = idx(e); if (i < 0) return;
+      if (e.detail === 2 && !e.target.closest('[data-s]')) { this.loadToFreeDeck(this.rows[i].id); return; }
       const star = e.target.closest('[data-s]');
       if (star) { const t = this.rows[i]; const r = +star.dataset.s === t.rating ? 0 : +star.dataset.s; t.rating = r; api.updateTrack(t.id, { rating: r }); this.renderRows(true); return; }
       const id = this.rows[i].id;
@@ -232,7 +233,6 @@ export class LibraryUI {
       else { this.selected = new Set([id]); }
       this.cursor = i; this.renderRows(true); this.scroller.focus({ preventScroll: true });
     });
-    this.rowsEl.addEventListener('dblclick', (e) => { const i = idx(e); if (i >= 0) this.loadToFreeDeck(this.rows[i].id); });
     this.rowsEl.addEventListener('dragstart', (e) => {
       const i = idx(e); if (i < 0) return;
       const id = this.rows[i].id;
@@ -351,7 +351,8 @@ export class LibraryUI {
       const node = el('div', { class: `tree-item ${active ? 'active' : ''} ${cls}`, onclick: () => this.setView(v, label) },
         el('span', { class: 'ti-icon' }, icon), el('span', { class: 'ti-label' }, label),
         count != null ? el('span', { class: 'ti-count' }, String(count)) : null,
-        ...actions.map((a) => el('button', { class: 'ti-act', title: a.title, onclick: (e) => { e.stopPropagation(); a.fn(); } }, a.icon)));
+        ...actions.map((a) => el('button', { class: 'ti-act', title: a.title, onclick: (e) => { e.stopPropagation(); a.fn(e); } }, a.icon)));
+      if (actions[0]?.menu) node.addEventListener('contextmenu', (e) => { e.preventDefault(); actions[0].fn(e); });
       if (drop) {
         node.addEventListener('dragover', (e) => { e.preventDefault(); node.classList.add('drop'); });
         node.addEventListener('dragleave', () => node.classList.remove('drop'));
@@ -373,7 +374,7 @@ export class LibraryUI {
         plNodes.push(item(p.name, { kind: 'playlist', id: p.id }, {
           icon: '♫', count: p.trackIds.length, cls: folder ? 'nested' : '',
           drop: async (ids) => { await api.addToPlaylist(p.id, ids); this.refresh(); this.app.toast(`Added ${ids.length} to ${p.name}`); },
-          actions: [{ icon: '⋯', title: 'Playlist options', fn: () => this.playlistMenu(p) }],
+          actions: [{ icon: '⋯', title: 'Playlist options', menu: true, fn: (e) => this.playlistMenu(p, e) }],
         }));
       }
     }
@@ -391,7 +392,7 @@ export class LibraryUI {
       item('Duplicates', { kind: 'duplicates' }, { icon: '⧉' }),
       head('SMART PLAYLISTS', el('button', { class: 'ti-act', title: 'New smart playlist', onclick: () => this.dlg.smartPlaylist() }, '+')),
       ...smartPl.map((p) => item(p.name, { kind: 'playlist', id: p.id }, {
-        icon: '⚙', count: p.trackIds.length, actions: [{ icon: '⋯', title: 'Smart playlist options', fn: () => this.playlistMenu(p) }],
+        icon: '⚙', count: p.trackIds.length, actions: [{ icon: '⋯', title: 'Smart playlist options', menu: true, fn: (e) => this.playlistMenu(p, e) }],
       })),
       head('HISTORY'),
       ...sessions.map((s) => {
@@ -418,13 +419,14 @@ export class LibraryUI {
             { icon: '✎', title: 'Edit connection', fn: () => this.app.dialogs.addSource(s) },
             { icon: '✕', title: 'Remove server', fn: async () => { if (await this.app.dialogs.confirm(`Disconnect ${s.name}? Downloaded tracks are kept.`)) { await api.removeSource(s.id); this.refresh(); } } }],
         }),
-        ...remotePl.filter((p) => p.sourceId === s.id).map((p) => item(p.name, { kind: 'playlist', id: p.id }, { icon: '♫', count: p.trackIds.length, cls: 'nested', actions: [{ icon: '⋯', title: 'Playlist options', fn: () => this.playlistMenu(p) }] })),
+        ...remotePl.filter((p) => p.sourceId === s.id).map((p) => item(p.name, { kind: 'playlist', id: p.id }, { icon: '♫', count: p.trackIds.length, cls: 'nested', actions: [{ icon: '⋯', title: 'Playlist options', menu: true, fn: (e) => this.playlistMenu(p, e) }] })),
       ]),
     );
   }
 
-  playlistMenu(p) {
+  playlistMenu(p, e) {
     const r = this.tree.getBoundingClientRect();
+    const x = e?.clientX ?? r.right - 20, y = e?.clientY ?? r.top + 100;
     const items = [
       ...(p.smart ? [{ label: 'Edit rules…', action: () => this.dlg.smartPlaylist(p) }] : []),
       { label: 'Automix this playlist', action: () => this.app.dialogs.automixQueue(p.trackIds.map((i) => this.tracks.get(i)).filter(Boolean)) },
@@ -442,6 +444,6 @@ export class LibraryUI {
         { label: 'Move to folder…', action: async () => { const n = await this.app.dialogs.prompt('Playlist folder', 'Folder name (empty = none)', p.folder || ''); if (n !== null) { await api.updatePlaylist(p.id, { folder: n }); this.refresh(); } } },
         { label: 'Delete playlist', danger: true, action: async () => { if (await this.app.dialogs.confirm(`Delete playlist "${p.name}"?`)) { await api.deletePlaylist(p.id); if (this.view.id === p.id) this.setView({ kind: 'all' }, 'Collection'); this.refresh(); } } });
     }
-    this.app.dialogs.menu(r.right - 20, r.top + 100, items);
+    this.app.dialogs.menu(x, y, items);
   }
 }

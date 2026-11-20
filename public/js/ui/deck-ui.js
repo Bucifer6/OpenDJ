@@ -234,6 +234,7 @@ export function buildDeck(app, deck) {
   const updateMeta = () => {
     const t = deck.track;
     title.textContent = t ? t.title || 'Untitled' : (deck.error ? `⚠ ${deck.error}` : 'Drop a track here');
+    title.title = t ? `${t.title || ''}${t.artist ? ' — ' + t.artist : ''}` : '';
     artist.textContent = t ? t.artist || '' : '';
     cover.style.backgroundImage = t ? `url(${api.coverUrl(t.id)})` : '';
     const cam = toCamelot(t?.key);

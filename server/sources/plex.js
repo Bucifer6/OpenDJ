@@ -167,6 +167,11 @@ export class PlexClient extends SourceClient {
   streamRequest(remoteId, track) {
     if (track?.remotePath) return { url: this._withToken(track.remotePath), headers: {} };
     // Fallback without a known part key: universal transcoder (MP3).
+    return this.transcodeRequest(remoteId);
+  }
+
+  /** Plex universal transcoder -> MP3 (formats the browser can't decode, when OpenDJ has no FFmpeg). */
+  transcodeRequest(remoteId) {
     const q = new URLSearchParams({
       path: `/library/metadata/${remoteId}`,
       protocol: 'http',

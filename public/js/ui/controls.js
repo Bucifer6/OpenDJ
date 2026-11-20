@@ -71,6 +71,12 @@ export function fader({ label, min = 0, max = 1, def = min, get, set, horizontal
   for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) track.addEventListener(ev, () => { drag = null; });
   track.addEventListener('dblclick', () => { set(def); render(); });
   root.addEventListener('wheel', (e) => { e.preventDefault(); const dir = -Math.sign(e.deltaY) * (invert ? -1 : 1); set(clamp(get() + dir * (max - min) / 100, min, max)); render(); }, { passive: false });
+  root.addEventListener('keydown', (e) => {
+    const inc = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }[e.key];
+    if (!inc) return;
+    e.preventDefault(); // also keeps the global shortcuts (crossfader/library) from reacting
+    set(clamp(get() + inc * (invert ? -1 : 1) * (max - min) / (e.shiftKey ? 200 : 50), min, max)); render();
+  });
   render();
   root.render = render;
   return root;

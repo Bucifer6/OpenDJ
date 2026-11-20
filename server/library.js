@@ -37,7 +37,8 @@ export const DEFAULT_SETTINGS = {
   transcodeCacheGB: 4,        // FFmpeg transcode cache cap (data dir/transcode-cache), LRU
   uploadDir: '',              // browser uploads land here ('' = <data dir>/Uploads, or OPENDJ_UPLOAD_DIR)
   uploadMaxMB: 2048,          // per-file upload limit
-  allowedRoots: null,         // hosted mode: folders the web UI may browse/add/export to (OPENDJ_MUSIC_ROOTS wins)
+  allowedRoots: null,
+  youtubeApiKey: '',          // YouTube Data API key for search (never written to backups)         // hosted mode: folders the web UI may browse/add/export to (OPENDJ_MUSIC_ROOTS wins)
 };
 // Object-valued settings that are replaced on update instead of shallow-merged.
 const REPLACE_SETTINGS = new Set(['midiMappings', 'sequencer', 'lighting']);

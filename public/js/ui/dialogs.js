@@ -10,7 +10,16 @@ export class Dialogs {
     return new Promise((resolve) => {
       const close = (v) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
       // only the top-most dialog reacts to Escape
-      const onKey = (e) => { if (e.key === 'Escape' && [...document.querySelectorAll('.overlay')].at(-1) === overlay) { e.preventDefault(); e.stopImmediatePropagation(); close(null); } };
+      const onKey = (e) => {
+        if ([...document.querySelectorAll('.overlay')].at(-1) !== overlay) return;
+        if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); close(null); return; }
+        if (e.key === 'Tab') { // keep keyboard focus inside the dialog
+          const f = [...box.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter((x) => !x.disabled && x.offsetParent !== null);
+          if (!f.length) return;
+          const i = f.indexOf(document.activeElement);
+          if (e.shiftKey && (i <= 0)) { e.preventDefault(); f.at(-1).focus(); } else if (!e.shiftKey && (i === -1 || i === f.length - 1)) { e.preventDefault(); f[0].focus(); }
+        }
+      };
       const foot = el('div', { class: 'modal-foot' }, ...buttons.map((b) => el('button', { class: `btn ${b.primary ? 'primary' : ''} ${b.danger ? 'danger' : ''}`, onclick: async () => { if (b.action) { const r = await b.action(); if (r === false) return; close(r ?? b.value); } else close(b.value); } }, b.label)));
       const box = el('div', { class: `modal ${wide ? 'wide' : ''}`, role: 'dialog', 'aria-label': title },
         el('div', { class: 'modal-head' }, el('h2', {}, title), el('button', { class: 'modal-x', onclick: () => close(null), 'aria-label': 'Close' }, '✕')),
@@ -18,7 +27,7 @@ export class Dialogs {
       const overlay = el('div', { class: 'overlay', onmousedown: (e) => { if (e.target === overlay) close(null); } }, box);
       document.body.append(overlay);
       document.addEventListener('keydown', onKey);
-      setTimeout(() => box.querySelector('input, select, button.primary')?.focus(), 30);
+      setTimeout(() => (box.querySelector('.modal-body input:not([type=checkbox]):not([type=color]), .modal-body select, .modal-body textarea') || box.querySelector('.modal-foot .btn.primary') || box.querySelector('.modal-x'))?.focus(), 30);
     });
   }
 
@@ -27,7 +36,18 @@ export class Dialogs {
     const build = (list) => el('div', { class: 'ctx-menu' }, ...list.map((it) => {
       if (it === '-') return el('div', { class: 'ctx-sep' });
       const row = el('div', { class: `ctx-item ${it.danger ? 'danger' : ''} ${it.sub ? 'has-sub' : ''}` }, it.label);
-      if (it.sub) { const sub = build(it.sub); sub.classList.add('ctx-sub'); row.append(sub); }
+      if (it.sub) {
+        const sub = build(it.sub); sub.classList.add('ctx-sub'); row.append(sub);
+        // keep submenus inside the window (flip left / shift up when they would overflow)
+        row.addEventListener('mouseenter', () => {
+          sub.style.top = ''; sub.style.left = ''; sub.style.right = '';
+          requestAnimationFrame(() => {
+            const sr = sub.getBoundingClientRect();
+            if (sr.bottom > innerHeight - 8) sub.style.top = `${Math.min(-4, innerHeight - 8 - sr.bottom - 4)}px`;
+            if (sr.right > innerWidth - 8) { sub.style.left = 'auto'; sub.style.right = '100%'; }
+          });
+        });
+      }
       else row.addEventListener('click', () => { m.remove(); it.action(); });
       return row;
     }));
@@ -35,7 +55,10 @@ export class Dialogs {
     document.body.append(m);
     const r = m.getBoundingClientRect();
     m.style.left = `${Math.min(x, innerWidth - r.width - 8)}px`; m.style.top = `${Math.min(y, innerHeight - r.height - 8)}px`;
-    setTimeout(() => document.addEventListener('mousedown', function off(e) { if (!m.contains(e.target)) { m.remove(); document.removeEventListener('mousedown', off); } }), 0);
+    const close = () => { m.remove(); document.removeEventListener('mousedown', off); document.removeEventListener('keydown', esc, true); };
+    const off = (e) => { if (!m.contains(e.target)) close(); };
+    const esc = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); close(); } };
+    setTimeout(() => { document.addEventListener('mousedown', off); document.addEventListener('keydown', esc, true); }, 0);
   }
 
   async prompt(title, label, value = '') {

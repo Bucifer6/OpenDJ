@@ -43,7 +43,7 @@ export class YouTubeSource extends Emitter {
   }
 
   /** Mixer "extra layer" interface. */
-  get active() { return !!this.player && this.showInMix && (this.state === 1 || this.state === 3 || this.state === 2); }
+  get active() { return !!this.player && this.showInMix; }
   key() { return this.videoId; }
   title() { return this.meta.title ? (this.meta.channel ? `${this.meta.channel} – ${this.meta.title}` : this.meta.title) : ''; }
   setWeight(w) {

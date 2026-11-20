@@ -107,7 +107,7 @@ export function setupVideo(app) {
       for (let i = 0; i < mixer.deckCount; i++) {
         const bar = el('i'), lbl = el('span', { class: 'vid-m-lbl' });
         meterEls.push({ bar, lbl });
-        meters.append(el('div', { class: 'vid-m', style: { '--deck-color': `var(--deck${i + 1})` } }, el('b', {}, String(i + 1)), lbl, el('span', { class: 'vid-m-bar' }, bar)));
+        meters.append(el('div', { class: 'vid-m', style: `--deck-color: var(--deck${i + 1})` }, el('b', {}, String(i + 1)), lbl, el('span', { class: 'vid-m-bar' }, bar)));
       }
       const yb = el('i'), yl = el('span', { class: 'vid-m-lbl' }, 'YouTube');
       meterEls.push({ bar: yb, lbl: yl, yt: true });
@@ -156,7 +156,7 @@ export function setupVideo(app) {
           el('option', { value: 'auto', selected: l.mode === 'auto' }, 'Video, else visualizer'),
           el('option', { value: 'visual', selected: l.mode === 'visual' }, 'Visualizer only'),
           el('option', { value: 'off', selected: l.mode === 'off' }, 'Off (black)'));
-        rows.push(el('div', { class: 'vid-deckrow', style: { '--deck-color': `var(--deck${i + 1})` } }, el('b', {}, `Deck ${i + 1}`), ms));
+        rows.push(el('div', { class: 'vid-deckrow', style: `--deck-color: var(--deck${i + 1})` }, el('b', {}, `Deck ${i + 1}`), ms));
       }
       return el('div', { class: 'form' },
         el('label', { class: 'field' }, el('span', {}, 'Transition'), sel),
@@ -173,7 +173,7 @@ export function setupVideo(app) {
           const b = el('button', { class: `btn xs ${mixer.config.fx[i][f.id] ? 'active' : ''}`, disabled: !ok, title: ok ? f.name : `${f.name} needs WebGL2`, onclick: () => { const on = !mixer.config.fx[i][f.id]; mixer.setFx(i, f.id, on); b.classList.toggle('active', on); } }, f.name);
           return b;
         });
-        rows.push(el('div', { class: 'vid-fxrow', style: { '--deck-color': `var(--deck${i + 1})` } }, el('b', {}, String(i + 1)), el('div', { class: 'vid-fxbtns' }, ...btns)));
+        rows.push(el('div', { class: 'vid-fxrow', style: `--deck-color: var(--deck${i + 1})` }, el('b', {}, String(i + 1)), el('div', { class: 'vid-fxbtns' }, ...btns)));
       }
       return el('div', { class: 'form' }, ...rows,
         el('p', { class: 'hint' }, `Pulse and strobe follow the deck’s beat grid. Renderer: ${mixer.rendererKind === 'webgl2' ? 'WebGL2 (all effects)' : '2D canvas (no RGB shift / kaleidoscope)'}. Strobe flashes; use with care around photosensitive audiences.`));
