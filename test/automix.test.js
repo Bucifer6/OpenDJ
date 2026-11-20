@@ -159,3 +159,30 @@ test('planMixOut never starts after the end of the track', async () => {
     if (!(r.start <= r.end && r.len >= 0)) throw new Error(`bad plan for ${duration}s/${transitionBeats}: ${JSON.stringify(r)}`);
   }
 });
+
+test('N3: after a transition the incoming deck eases back to its original tempo over a few bars', async () => {
+  const { tempoRampValue, TEMPO_RESTORE_BARS } = await import('../public/js/automix.js');
+  assert.equal(tempoRampValue(4, 0), 4); assert.equal(tempoRampValue(4, 1), 0); assert.equal(tempoRampValue(-3, 0.5), -1.5);
+  for (let k = 0.05; k <= 1; k += 0.05) assert.ok(tempoRampValue(4, k) <= tempoRampValue(4, k - 0.05) + 1e-9, 'monotonic');
+  assert.ok(TEMPO_RESTORE_BARS >= 4 && TEMPO_RESTORE_BARS <= 16);
+  // drive the ramp with a fake deck and clock
+  const app = fakeApp(); app.settings.automix.restoreTempo = true;
+  const am = new AutoMix(app);
+  const deck = { tempo: 3.2, syncOn: false, effectiveBpm: 128, setTempo(v) { this.tempo = v; } };
+  am.current = deck;
+  const realNow = performance.now; let now = 1000; performance.now = () => now;
+  try {
+    am.startTempoRamp(deck);
+    const dur = am.tempoRamp.dur;
+    assert.ok(Math.abs(dur - TEMPO_RESTORE_BARS * 4 * 60 / 128 * 1000) < 1);
+    now += dur / 2; am.stepTempoRamp();
+    assert.ok(Math.abs(deck.tempo - 1.6) < 1e-9, `half way ${deck.tempo}`);
+    now += dur; am.stepTempoRamp();
+    assert.equal(deck.tempo, 0); assert.equal(am.tempoRamp, null);
+    // the user moving the tempo fader cancels it
+    deck.tempo = 2; am.startTempoRamp(deck); now += dur / 4; deck.tempo = 5; am.stepTempoRamp();
+    assert.equal(am.tempoRamp, null); assert.equal(deck.tempo, 5);
+    // option off
+    app.settings.automix.restoreTempo = false; deck.tempo = 2; am.startTempoRamp(deck); assert.equal(am.tempoRamp, null);
+  } finally { performance.now = realNow; }
+});

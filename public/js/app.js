@@ -376,9 +376,6 @@ class App {
       this.midiDot.classList.toggle('connected', (this.midi.devices?.() || this.midi.inputs()).length > 0);
       this.midiDot.title = this.midi.inputs().map((i) => i.name).join(', ') || 'No MIDI controller';
       this.updateAutomixUi();
-      // automix: ease the tempo back to the track's original speed between transitions
-      const a = this.automix;
-      if (a.enabled && !a.transition && a.current && Math.abs(a.current.tempo) > 0.02 && !a.current.syncOn) a.current.setTempo(a.current.tempo * 0.995);
     }
   }
 }
