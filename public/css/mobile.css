@@ -50,3 +50,12 @@
   .toast { max-width: none; }
   .modal { max-width: calc(100vw - 16px); }
 }
+
+/* ---------- mobile app / on-device mode (html.odj-local, set by js/platform.js) ----------
+   Features that need the OpenDJ server, UDP, USB or Web MIDI are hidden (Settings → Mobile explains why). */
+.odj-local .topbar .dvs-btn, .odj-local .topbar .light-btn, .odj-local .topbar .video-btn, .odj-local .topbar .midi-dot,
+.odj-local .topbar .live-btn, .odj-local .topbar .signout-btn { display: none !important; }
+.odj-native .topbar .btn[title="Full screen"] { display: none !important; } /* the app is full screen already */
+.odj-local .deck-stems, .odj-local .stem-knobs { display: none !important; } /* AI stems: desktop app */
+.unavail-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.unavail-list b { color: var(--text); }
