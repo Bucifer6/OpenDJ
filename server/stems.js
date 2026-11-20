@@ -14,6 +14,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { guardedFetch } from './netguard.js';
 
 export const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'];
 export const STEM_RATE = 44100;
@@ -41,7 +42,11 @@ const ID_RE = /^[\w-]{1,64}$/;
 const isHex64 = (s) => /^[0-9a-f]{64}$/i.test(String(s || ''));
 const MAX_MODEL_BYTES = 2 * 2 ** 30;
 
-/** Model the settings ask for: the default, or { url[#entry], sha256 } from settings. */
+/**
+ * Model the settings ask for: the default, or { url[#entry], sha256 } from settings. A custom URL needs its SHA-256:
+ * the server downloads it and serves it back, so an unpinned URL would let anyone who can edit settings read
+ * arbitrary URLs through the server.
+ */
 export function modelSpec(settings = {}) {
   const raw = String(settings.stemsModelUrl || '').trim();
   if (!raw || raw === DEFAULT_MODEL.url) return { ...DEFAULT_MODEL, custom: false };
@@ -51,6 +56,7 @@ export function modelSpec(settings = {}) {
   const entry = decodeURIComponent(u.hash.replace(/^#(entry=)?/, '')) || null; // archive member: https://…/x.tgz#package/model.onnx
   u.hash = '';
   const sha256 = isHex64(settings.stemsModelSha256) ? settings.stemsModelSha256.toLowerCase() : null;
+  if (!sha256) throw bad('A custom stems model URL needs its SHA-256 (stemsModelSha256), so the download can be verified');
   const archive = /\.(tgz|tar\.gz)$/i.test(u.pathname) || !!entry;
   return {
     id: 'custom', name: path.basename(entry || u.pathname) || 'Custom model', url: u.href, entry: archive ? entry : null,
@@ -58,8 +64,8 @@ export function modelSpec(settings = {}) {
   };
 }
 
-/** Cache file name: the expected hash, or a hash of the URL for unpinned custom models (trust on first use). */
-const modelKey = (spec) => spec.sha256 || `url-${crypto.createHash('sha256').update(spec.url + '#' + (spec.entry || '')).digest('hex').slice(0, 32)}`;
+/** Cache file name: the expected (pinned) hash. */
+const modelKey = (spec) => spec.sha256;
 
 /**
  * Streams a .tar (already gunzipped) and writes only `entry` to `out`. Handles ustar prefix and pax path.
@@ -164,8 +170,10 @@ const run = (bin, args) => new Promise((resolve, reject) => {
  * @param {string} [o.dataDir] defaults to library.dataDir
  * @param {string|null} [o.ortDir] onnxruntime-web dist folder (default: resolved from node_modules)
  * @param {Function} [o.fetch]
+ * @param {boolean} [o.restricted]  hosted mode: the model URL may not point at this server / link-local addresses
+ * @param {Function} [o.lookup]     DNS lookup (tests)
  */
-export function registerStemRoutes({ route, library, emit = () => {}, dataDir = library.dataDir, ortDir, fetch: f = globalThis.fetch }) {
+export function registerStemRoutes({ route, library, emit = () => {}, dataDir = library.dataDir, ortDir, fetch: f = globalThis.fetch, restricted = false, lookup }) {
   const root = path.join(dataDir, 'stems');
   const modelsDir = path.join(root, 'models');
   fs.mkdirSync(modelsDir, { recursive: true });
@@ -181,7 +189,8 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
   let lastError = null;
   const modelFile = (spec) => path.join(modelsDir, `${modelKey(spec)}.onnx`);
   const modelMeta = (spec) => { try { return JSON.parse(fs.readFileSync(modelFile(spec) + '.json', 'utf8')); } catch { return null; } };
-  const modelReady = (spec) => fs.existsSync(modelFile(spec)) && !!modelMeta(spec);
+  /** Downloaded and verified against the pinned SHA-256 (only such a file is ever served). */
+  const modelReady = (spec) => { const m = modelMeta(spec); return !!m && !!spec.sha256 && m.sha256 === spec.sha256 && fs.existsSync(modelFile(spec)); };
 
   const modelStatus = () => {
     let spec; try { spec = modelSpec(settings()); } catch (e) { return { error: e.message }; }
@@ -202,7 +211,8 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     let lastEmit = 0;
     const progress = (force) => { const now = Date.now(); if (force || now - lastEmit > 400) { lastEmit = now; emit('stems-model', { received: download.received, total: download.total }); } };
     try {
-      const res = await f(spec.url, { signal: ctrl.signal, redirect: 'follow' });
+      // redirects are followed by hand; in hosted mode every hop must not point at this server / link-local
+      const res = await guardedFetch(spec.url, { signal: ctrl.signal }, { fetch: f, check: restricted, lookup });
       if (!res.ok || !res.body) throw new Error(`Model download failed: HTTP ${res.status}`);
       const len = Number(res.headers.get('content-length')) || 0;
       if (len > MAX_MODEL_BYTES) throw new Error('Model file is too large');
@@ -235,7 +245,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
       await outDone;
       const aHex = archiveHash.digest('hex'), fHex = fileHash.digest('hex');
       if (spec.archiveSha256 && aHex !== spec.archiveSha256) throw new Error('Model download is corrupt (archive SHA-256 mismatch)');
-      if (spec.sha256 && fHex !== spec.sha256) throw new Error('Model download is corrupt (SHA-256 mismatch)');
+      if (!spec.sha256 || fHex !== spec.sha256) throw new Error('Model download is corrupt (SHA-256 mismatch)');
       if (fileBytes < 1024) throw new Error('Model download is empty');
       await fs.promises.rename(part, target);
       fs.writeFileSync(target + '.json', JSON.stringify({ url: spec.url, entry: spec.entry, sha256: fHex, bytes: fileBytes, pinned: !!spec.sha256, at: Date.now() }));

@@ -728,7 +728,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   // ---------------- lighting (DMX / Art-Net / sACN / WLED / Hue / OSC) ----------------
   const lighting = registerLightingRoutes({ route, library, emit });
   const link = registerLinkRoutes({ route, library, emit, log });
-  const stems = registerStemRoutes({ route, library, emit });
+  const stems = registerStemRoutes({ route, library, emit, restricted });
   registerLyricsRoutes({ route, library, emit, dataDir, canRead: readable, canWrite: readable });
   const recording = registerRecordingRoutes({ route, library, emit, pathAllowed, allowedRoots });
   const broadcast = registerBroadcastRoutes({ route, library, emit, pathAllowed: readable, log });
