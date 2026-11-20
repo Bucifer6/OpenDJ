@@ -98,10 +98,13 @@ try {
   await page.evaluate(() => window.opendj.engine.sampler.trigger(0));
 
   // recording
+  // recordings stream to disk on the server; keep them inside the test's temp folder
+  await page.evaluate((folder) => fetch('/api/recording/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, format: 'wav' }) }), path.join(tmp, 'Recordings'));
   await page.evaluate(() => window.opendj.engine.startRecording());
-  await page.waitForTimeout(700);
-  const size = await page.evaluate(async () => (await window.opendj.engine.stopRecording()).size);
-  check(size > 44100, `recording produced WAV (${size} bytes)`);
+  await page.waitForTimeout(1500);
+  await page.evaluate(() => window.opendj.engine.stopRecording());
+  const rec = await page.evaluate(async () => (await (await fetch('/api/recordings')).json()).recordings[0]);
+  check(rec && /\.wav$/.test(rec.name) && rec.size > 44100, `recording saved to disk (${rec?.name}, ${rec?.size} bytes)`);
 
   // persisted analysis
   const saved = await page.evaluate(async (id) => (await (await fetch('/api/tracks')).json()).find((t) => t.id === id), ids[0]);
