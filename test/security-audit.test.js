@@ -383,3 +383,18 @@ test('#11 frames are refused in every mode (X-Frame-Options + frame-ancestors on
   }
   assert.equal((await c('GET', '/api/info')).headers['x-frame-options'], 'DENY');
 }));
+
+// ---------------------------------------------------------------- #8 open redirect after login
+test('#8 login.html only returns to pages of this server', async () => {
+  const vm = await import('node:vm');
+  const html = fs.readFileSync(new URL('../public/login.html', import.meta.url), 'utf8');
+  const src = /const next = \(\) => \{[\s\S]*?\n {2}\};/.exec(html)[0];
+  const nextFor = (q) => vm.runInNewContext(`${src}; next()`, { URL, URLSearchParams, location: { origin: 'http://nas:7380', search: q === null ? '' : '?next=' + q } });
+  for (const evil of ['/%5Cattacker.example/phish', '/%09/attacker.example/x', '//attacker.example', '/\\attacker.example', 'https://attacker.example/', '/.//attacker.example', 'javascript:alert(1)', '/%2F%2Fattacker.example', encodeURIComponent('/\\attacker.example')]) {
+    const r = nextFor(evil);
+    assert.ok(r === '/' || new URL(r).origin === 'http://nas:7380', `${evil} -> ${r}`);
+  }
+  assert.equal(nextFor(encodeURIComponent('/?deck=2#lib')), 'http://nas:7380/?deck=2#lib');
+  assert.equal(nextFor('/login.html'), '/');
+  assert.equal(nextFor(null), 'http://nas:7380/');
+});
