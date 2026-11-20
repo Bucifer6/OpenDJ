@@ -662,7 +662,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     return f;
   });
   route('POST', '/api/folders/:id/scan', async ({ params }) => {
-    const f = library.data.folders.find((x) => x.id === params.id); if (!f) throw new HttpError(404, 'No folder');
+    const f = library.getFolder(params.id); if (!f) throw new HttpError(404, 'No folder');
     if (!readable(f.path)) throw new HttpError(403, 'This folder is outside the allowed music folders');
     runJob('scan:' + f.id, () => scanFolder(library, f, { onProgress: (p) => emit('scan', p) }));
     return { started: true };

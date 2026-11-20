@@ -398,3 +398,27 @@ test('#8 login.html only returns to pages of this server', async () => {
   assert.equal(nextFor('/login.html'), '/');
   assert.equal(nextFor(null), 'http://nas:7380/');
 });
+
+// ---------------------------------------------------------------- #9 prototype pollution through ids
+test('#9 ids like __proto__ / constructor never reach Object.prototype', () => desktop(async ({ app, c }) => {
+  assert.equal(app.library.getTrack('__proto__'), undefined);
+  assert.equal(app.library.getTrack('constructor'), undefined);
+  assert.equal(app.library.getTrack('toString'), undefined);
+  const r = await c('POST', '/api/tracks/update', { ids: ['__proto__', 'constructor', 'prototype', 'hasOwnProperty'], patch: { title: 'polluted', bpm: 999, tags: ['x'] } });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.updated, 0);
+  assert.equal({}.title, undefined);
+  assert.equal({}.bpm, undefined);
+  assert.equal(Object.prototype.userEdited, undefined);
+  for (const p of ['/api/tracks/__proto__', '/api/tracks/constructor']) assert.equal((await c('PATCH', p, { title: 'x' })).status, 404, p);
+  assert.equal((await c('GET', '/api/tracks/__proto__/stream')).status, 404);
+  assert.equal((await c('POST', '/api/tracks/played', { id: '__proto__' })).status, 404);
+  const pl = (await c('POST', '/api/playlists', { name: 'P' })).json;
+  assert.equal((await c('POST', `/api/playlists/${pl.id}/add`, { trackIds: ['__proto__', 'constructor'] })).json.trackIds.length, 0);
+  assert.equal(app.library.getPlaylist('__proto__'), undefined);
+  assert.equal(app.library.getSource('constructor'), undefined);
+  assert.equal(app.library.getFolder('__proto__'), undefined);
+  assert.equal((await c('POST', '/api/folders/__proto__/scan')).status, 404);
+  assert.throws(() => app.library.upsertTrack({ id: '__proto__', title: 'x' }), /Bad track id/);
+  assert.equal({}.playCount, undefined);
+}));
