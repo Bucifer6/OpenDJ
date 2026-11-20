@@ -36,13 +36,18 @@ export function setupRecording(app) {
   const anchor = app.recTime || app.recBtn;
   if (anchor?.parentNode) anchor.after(sizeEl, moreBtn, liveBtn);
   if (app.recBtn) app.recBtn.title = 'Record your mix to disk (WAV / FLAC / MP3 / AAC / Opus). R = start / stop';
+  let lastCastError = null;
   const topbarTick = setInterval(() => {
     sizeEl.textContent = recorder.recording ? mb(recorder.bytes) : '';
     const outs = broadcaster.status?.outputs || [];
     liveBtn.classList.toggle('active', broadcaster.live);
     liveBtn.classList.toggle('warn', broadcaster.live && outs.some((o) => o.state !== 'live'));
     const listeners = outs.reduce((s, o) => s + (o.listeners || 0), 0);
-    liveBtn.textContent = broadcaster.live ? `📡 ON AIR${listeners ? ` · ${listeners}` : ''}` : '📡 LIVE';
+    // ON AIR only once at least one output really is live; until then say what is happening
+    const onAir = outs.some((o) => o.state === 'live');
+    liveBtn.textContent = !broadcaster.live ? '📡 LIVE' : onAir ? `📡 ON AIR${listeners ? ` · ${listeners}` : ''}` : outs.some((o) => o.state === 'reconnecting' || o.state === 'error') ? '📡 RECONNECTING…' : '📡 CONNECTING…';
+    if (broadcaster.live && !onAir && outs[0]?.error && outs[0].error !== lastCastError) { lastCastError = outs[0].error; toast(`⚠ Broadcast: ${outs[0].error}`); }
+    if (onAir) lastCastError = null;
   }, 500);
   recorder.on('state', (on) => { app.recBtn?.classList.toggle('active', on); if (!on && app.recTime) app.recTime.textContent = ''; });
   recorder.on('warning', (m) => toast(`⚠ ${m}`));

@@ -25,8 +25,19 @@ export function clientFor(library, sourceId) {
 
 /** Connect with new credentials, persist the resulting token (not raw password where avoidable). */
 export async function addSource(library, cfg) {
-  const client = createClient(cfg);
-  const info = await client.connect();
+  // a wrong URL or an offline server is the user's input, not a server fault: 400 / 502 with a readable reason
+  const bad = (status, msg) => Object.assign(new Error(msg), { status });
+  let u = null; try { u = new URL(String(cfg.url || '')); } catch { /* checked below */ }
+  if (!u || !/^https?:$/.test(u.protocol)) throw bad(400, 'Enter the server address as a full URL, e.g. http://192.168.1.10:8096');
+  let client, info;
+  try { client = createClient(cfg); } catch (e) { throw bad(400, e.message); }
+  try { info = await client.connect(); } catch (e) {
+    if (e.status) throw bad(e.status === 401 || e.status === 403 ? 400 : 502, e.status === 401 || e.status === 403 ? 'The server refused the login (check user name / password / token)' : e.message); // never pass a remote 401 through (the UI would ask for the OpenDJ login)
+    const c = e.cause?.code || e.code;
+    if (!c && !(e instanceof TypeError)) throw bad(400, e.message); // login refused, wrong library… (the client's message)
+    const why = c === 'ECONNREFUSED' ? 'connection refused' : c === 'ENOTFOUND' || c === 'EAI_AGAIN' ? 'host not found' : c === 'ETIMEDOUT' || c === 'UND_ERR_CONNECT_TIMEOUT' ? 'timed out' : (e.cause?.message || e.message);
+    throw bad(502, `Could not reach ${u.host}: ${why}`);
+  }
   const saved = library.saveSource({ ...cfg, ...client.persistable(), serverName: info?.serverName || cfg.name }, { replace: true });
   // Plex/Jellyfin/Emby never sign in again once they have a token: don't keep the raw password around.
   // (Subsonic signs every request with it; MediaMax re-logs in when its session expires.)

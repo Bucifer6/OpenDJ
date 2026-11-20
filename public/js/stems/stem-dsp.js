@@ -261,9 +261,10 @@ export function interleaveInt16(planar, channels, n, offset = 0, out = new Int16
 }
 
 /** Float32 -> Int16 (rounded, clipped), for the deck worklet's compact stem buffers. */
-export function floatToInt16(src, out = new Int16Array(src.length)) {
+export function floatToInt16(src, out = new Int16Array(src.length), scale = 1) {
+  const g = 32767 / (scale > 1 ? scale : 1); // scale: peak-normalisation of the deck audio (see audio/deck.js)
   for (let i = 0; i < src.length; i++) {
-    let v = src[i] * 32767;
+    let v = src[i] * g;
     v = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
     out[i] = Math.round(v);
   }

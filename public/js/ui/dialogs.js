@@ -1,4 +1,4 @@
-import { el } from '../util.js';
+import { el, uiZoom } from '../util.js';
 import { api } from '../api.js';
 import { THEMES, applyTheme } from './themes.js';
 import { controllersPanel } from './controllers-panel.js';
@@ -43,18 +43,19 @@ export class Dialogs {
           sub.style.top = ''; sub.style.left = ''; sub.style.right = '';
           requestAnimationFrame(() => {
             const sr = sub.getBoundingClientRect();
-            if (sr.bottom > innerHeight - 8) sub.style.top = `${Math.min(-4, innerHeight - 8 - sr.bottom - 4)}px`;
+            if (sr.bottom > innerHeight - 8) sub.style.top = `${Math.min(-4, innerHeight - 8 - sr.bottom - 4) / uiZoom()}px`;
             if (sr.right > innerWidth - 8) { sub.style.left = 'auto'; sub.style.right = '100%'; }
           });
         });
       }
-      else row.addEventListener('click', () => { m.remove(); it.action(); });
+      else row.addEventListener('click', () => { close(); it.action(); }); // close(): also drops the Esc / outside-click listeners
       return row;
     }));
     const m = build(items);
     document.body.append(m);
     const r = m.getBoundingClientRect();
-    m.style.left = `${Math.min(x, innerWidth - r.width - 8)}px`; m.style.top = `${Math.min(y, innerHeight - r.height - 8)}px`;
+    const z = uiZoom(); // window px -> zoomed CSS px
+    m.style.left = `${Math.max(8, Math.min(x, innerWidth - r.width - 8)) / z}px`; m.style.top = `${Math.max(8, Math.min(y, innerHeight - r.height - 8)) / z}px`;
     const close = () => { m.remove(); document.removeEventListener('mousedown', off); document.removeEventListener('keydown', esc, true); };
     const off = (e) => { if (!m.contains(e.target)) close(); };
     const esc = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); close(); } };
@@ -74,11 +75,12 @@ export class Dialogs {
   // ---------- folder picker (native in Electron, server-side browser otherwise) ----------
   async pickFolder(title = 'Choose folder') {
     if (window.opendjNative?.pickFolder) return window.opendjNative.pickFolder(title);
-    let cur = await api.browse();
-    const pathEl = el('input', { class: 'inp', value: cur.path });
+    let cur;
+    try { cur = await api.browse(); } catch (e) { this.app.toast(`Cannot browse folders: ${e.message}`); return null; }
+    const pathEl = el('input', { class: 'inp', value: cur.path ?? '', placeholder: 'Choose one of the allowed folders below' }); // hosted mode: the roots list has no path
     const list = el('div', { class: 'browse-list' });
     const render = () => {
-      pathEl.value = cur.path;
+      pathEl.value = cur.path ?? '';
       list.replaceChildren(
         cur.parent ? el('div', { class: 'browse-item', onclick: async () => { cur = await api.browse(cur.parent); render(); } }, '⬑ ..') : null,
         ...cur.entries.map((e) => el('div', { class: 'browse-item', onclick: async () => { try { cur = await api.browse(e.path); render(); } catch (err) { this.app.toast(err.message); } } }, '🗀 ' + e.name)));
@@ -298,10 +300,18 @@ export class Dialogs {
     } }, el('div', { class: 'theme-swatch' }, ...t.swatch.map((c) => el('span', { style: { background: c } }))), el('b', {}, t.name), el('small', {}, t.desc)));
     const accent = el('input', { type: 'color', value: s.accentColor || '#3ea6ff', title: 'Custom accent colour' });
     accent.addEventListener('input', async () => { await set('accentColor', accent.value); applyTheme(app.settings); });
+    // the size is capped so the effective window stays at least 1100x700: say so instead of silently ignoring it
+    const scaleNoteEl = el('p', { class: 'hint scale-note' });
+    const scaleNote = () => {
+      const want = app.settings.uiScale || 100, eff = Math.round(uiZoom() * 100);
+      scaleNoteEl.textContent = eff < want ? `Limited to ${eff}% at this window size (the layout needs at least 1100 × 700 points); enlarge the window to use ${want}%.` : '';
+    };
+    scaleNote();
     const appearance = el('div', { class: 'form' },
       el('div', { class: 'theme-grid' }, ...cards),
       el('div', { class: 'row' }, field('Accent colour', accent), el('button', { class: 'btn sm', onclick: async () => { await set('accentColor', ''); applyTheme(app.settings); } }, 'Use theme accent')),
-      field('Interface size', sel(s.uiScale || 100, [80, 90, 100, 110, 125, 150].map((v) => [v, `${v}%`]), async (v) => { await set('uiScale', Number(v)); applyTheme(app.settings); }), 'Shrink for small laptop screens, enlarge for touchscreens and big displays.'),
+      field('Interface size', sel(s.uiScale || 100, [80, 90, 100, 110, 125, 150].map((v) => [v, `${v}%`]), async (v) => { await set('uiScale', Number(v)); applyTheme(app.settings); scaleNote(); }), 'Shrink for small laptop screens, enlarge for touchscreens and big displays.'),
+      scaleNoteEl,
       field('Waveform colours', sel(s.waveformColors, [['rgb', '3-band RGB'], ['blue', 'Blue'], ['mono', 'Monochrome']], (v) => set('waveformColors', v))),
     );
     const dvsTab = el('div', { class: 'form' }, el('p', { class: 'hint' }, 'Control decks with Serato or Traktor timecode vinyl / CDs through your audio interface inputs.'), el('button', { class: 'btn', onclick: () => import('../dvs/dvs-ui.js').then((m) => m.openDvsPanel(app)) }, 'Open DVS setup…'));

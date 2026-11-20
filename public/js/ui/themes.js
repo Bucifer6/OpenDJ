@@ -31,7 +31,7 @@ export function applyTheme(settings) {
   root.style.setProperty('--ui-zoom', String(z)); // layout heights divide by this so the page still fits the window
   root.classList.toggle('zoom-large', z > 1.05);
   const effH = innerHeight / z;
-  root.classList.toggle('h860', effH <= 860); root.classList.toggle('h800', effH <= 800);
+  root.classList.toggle('h920', effH <= 920); root.classList.toggle('h860', effH <= 860); root.classList.toggle('h800', effH <= 800);
   const effW = innerWidth / z;
   root.classList.toggle('w1300', effW <= 1300); root.classList.toggle('w1200', effW <= 1200);
   if (!applyTheme._resize) { applyTheme._resize = true; let t; addEventListener('resize', () => { clearTimeout(t); t = setTimeout(() => applyTheme(applyTheme._last), 150); }); }

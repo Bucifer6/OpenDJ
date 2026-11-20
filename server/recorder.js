@@ -253,6 +253,20 @@ export function tracksForPart(tracks, start, end = Infinity) {
   return before ? [{ ...before, t: 0 }, ...inside] : inside;
 }
 
+/**
+ * File name for a new recording part whose stem is free for EVERY recording format and the .cue / .txt sidecars,
+ * so two recordings started in the same minute (e.g. a WAV, then an MP3) never share or overwrite a tracklist.
+ */
+export async function uniqueRecordingName(dir, stem, ext) {
+  const taken = (f) => fs.promises.access(f).then(() => true, () => false);
+  for (let i = 1; i < 1000; i++) {
+    const base = path.join(dir, `${stem}${i > 1 ? ` (${i})` : ''}`);
+    const all = [...AUDIO_EXTS, '.cue', '.txt'].map((e) => base + e);
+    if (!(await Promise.all(all.map(taken))).some(Boolean)) return `${base}.${ext}`;
+  }
+  return uniqueName(dir, stem, ext);
+}
+
 // ------------------------------------------------------------------ chunk sequencing
 
 /**
@@ -369,7 +383,7 @@ export class RecordingSession {
   async _openPart() {
     const n = this.parts.length + 1;
     const ext = REC_FORMATS[this.format].ext;
-    const file = await uniqueName(this.dir, this.splitFrames ? `${this.stem} - part ${n}` : this.stem, ext);
+    const file = await uniqueRecordingName(this.dir, this.splitFrames ? `${this.stem} - part ${n}` : this.stem, ext);
     const o = { sampleRate: this.sampleRate, channels: this.channels, inFormat: this.sampleFormat, bits: this.bits };
     const w = this.format === 'wav' ? new WavWriter(file, o)
       : new FfmpegWriter(file, { ...o, ffmpegPath: this.ffmpegPath, format: this.format, bitrate: this.bitrate, title: this.splitFrames ? `${this.title} (part ${n})` : this.title, artist: this.artist });
@@ -555,6 +569,8 @@ export function registerRecordingRoutes({ route, library, emit = () => {}, pathA
     try { await s.open(); } catch (e) {
       if (e.code === 'EACCES' || e.code === 'EPERM' || e.code === 'EROFS') throw httpError(403, `Cannot write to ${s.dir}: ${e.code}`);
       if (e.code === 'ENOSPC') throw httpError(507, 'The disk is full');
+      if (e.code === 'ENOTDIR' || e.code === 'EEXIST') throw httpError(400, `Cannot record to ${s.dir}: part of that path is a file, not a folder`);
+      if (e.code === 'ENOENT') throw httpError(400, `Cannot record to ${s.dir}: the folder (or its drive) does not exist`);
       throw e;
     }
     sessions.set(s.id, s);

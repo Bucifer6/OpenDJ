@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { readJsonSafe, writeJsonAtomic, chmodQuiet } from './jsonstore.js';
+import { sanitizeSetting, sanitizeSettings } from './settings-schema.js';
 
 export const DEFAULT_SETTINGS = {
   deckCount: 2,
@@ -63,7 +64,7 @@ const STR_FIELDS = { title: 500, artist: 500, album: 500, genre: 200, comment: 2
 export function sanitizeField(k, v) {
   if (NUM_FIELDS.has(k)) { if (v === null || v === undefined || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
   if (Object.hasOwn(STR_FIELDS, k)) return v === null || v === undefined ? (k === 'key' || k === 'color' ? null : '') : String(v).slice(0, STR_FIELDS[k]);
-  if (k === 'analyzed' || k === 'bpmLocked') return !!v;
+  if (k === 'analyzed' || k === 'bpmLocked' || k === 'gridLocked') return !!v;
   if (['cues', 'loops', 'phrases', 'hotLoops'].includes(k)) return Array.isArray(v) ? v.slice(0, 1000) : [];
   return v;
 }
@@ -104,7 +105,7 @@ export class Library {
     const st = readJsonSafe(this.settingsFile);
     if (st.error) this.loadErrors.push(st.error);
     const s = st.data && typeof st.data === 'object' ? st.data : {};
-    const clean = Object.fromEntries(Object.entries(s).filter(([k]) => Object.hasOwn(DEFAULT_SETTINGS, k)));
+    const clean = sanitizeSettings(s, DEFAULT_SETTINGS); // known keys only, invalid values -> default (a bad value must not brick the UI)
     this.settings = { ...this.settings, ...clean, automix: { ...this.settings.automix, ...(clean.automix || {}) } };
     for (const e of this.loadErrors) console.error('[opendj]', e);
   }
@@ -147,7 +148,7 @@ export class Library {
       cues: prev.cues, loops: prev.loops, gridOffset: prev.gridOffset, analyzed: prev.analyzed,
       rating: prev.rating, playCount: prev.playCount, lastPlayed: prev.lastPlayed, addedAt: prev.addedAt,
       localPath: prev.localPath, gain: prev.gain, color: prev.color, comment: prev.comment || t.comment,
-      tags: prev.tags, phrases: prev.phrases, mixIn: prev.mixIn, mixOut: prev.mixOut, downbeat: prev.downbeat, hotLoops: prev.hotLoops, keyShift: prev.keyShift, bpmLocked: prev.bpmLocked,
+      tags: prev.tags, phrases: prev.phrases, mixIn: prev.mixIn, mixOut: prev.mixOut, downbeat: prev.downbeat, hotLoops: prev.hotLoops, keyShift: prev.keyShift, bpmLocked: prev.bpmLocked, gridLocked: prev.gridLocked,
       ...(prev.userEdited ? { title: prev.title, artist: prev.artist, album: prev.album, genre: prev.genre, year: prev.year } : {}),
       bpm: prev.analyzed ? prev.bpm : (t.bpm || prev.bpm), key: prev.key || t.key,
     } : {};
@@ -161,7 +162,7 @@ export class Library {
     const t = this.getTrack(tid);
     if (!t) return null;
     const allowed = ['title', 'artist', 'album', 'genre', 'year', 'bpm', 'key', 'rating', 'comment', 'cues', 'loops',
-      'gridOffset', 'analyzed', 'gain', 'color', 'playCount', 'lastPlayed', 'duration', 'endTime', 'startTime', 'energy', 'bpmLocked',
+      'gridOffset', 'analyzed', 'gain', 'color', 'playCount', 'lastPlayed', 'duration', 'endTime', 'startTime', 'energy', 'bpmLocked', 'gridLocked',
       'phrases', 'tags', 'hotLoops', 'keyShift', 'mixIn', 'mixOut', 'downbeat'];
     for (const k of allowed) if (k in patch) t[k] = sanitizeField(k, patch[k]);
     if ('tags' in patch) t.tags = normTags(patch.tags);
@@ -292,8 +293,10 @@ export class Library {
   updateSettings(patch) {
     for (const [k, v] of Object.entries(patch || {})) {
       if (!Object.hasOwn(DEFAULT_SETTINGS, k)) continue;
-      this.settings[k] = (v && typeof v === 'object' && !Array.isArray(v) && !REPLACE_SETTINGS.has(k))
-        ? { ...this.settings[k], ...v } : v;
+      const r = sanitizeSetting(k, v); // invalid values (and invalid sub-values of objects) are ignored: settings-schema.js
+      if (!r.ok) continue;
+      this.settings[k] = (r.value && typeof r.value === 'object' && !Array.isArray(r.value) && !REPLACE_SETTINGS.has(k))
+        ? { ...this.settings[k], ...r.value } : r.value;
     }
     this.save();
     return this.settings;

@@ -11,7 +11,7 @@ import { camelotCompatible, toCamelot } from '../audio/analysis-core.js';
 
 export const DECK_COLORS = ['var(--deck1)', 'var(--deck2)', 'var(--deck3)', 'var(--deck4)'];
 const LOOP_SIZES = [1 / 4, 1 / 2, 1, 2, 4, 8, 16, 32];
-const fmtBeats = (b) => (b >= 1 ? String(b) : b === 0.5 ? '½' : b === 0.25 ? '¼' : b === 0.125 ? '⅛' : b === 0.75 ? '¾' : b.toFixed(2));
+const fmtBeats = (b) => (b = Math.round(b * 1000) / 1000, b >= 1 ? String(b) : b === 0.5 ? '½' : b === 0.25 ? '¼' : b === 0.125 ? '⅛' : b === 0.75 ? '¾' : b.toFixed(2));
 
 export function buildDeck(app, deck) {
   const i = deck.index, ch = app.engine.channels[i];
@@ -27,7 +27,7 @@ export function buildDeck(app, deck) {
   const bpmBig = el('div', { class: 'deck-bpm' }, '--');
   const bpmSub = el('div', { class: 'deck-bpm-sub' }, '');
   const elapsed = el('div', { class: 'deck-time' }, '00:00.0');
-  const remain = el('div', { class: 'deck-time remain' }, '-00:00.0');
+  const remain = el('div', { class: 'deck-time remain' }, '00:00.0');
   const masterBadge = el('span', { class: 'badge master-badge' }, 'MASTER');
   const header = el('div', { class: 'deck-header' },
     el('div', { class: 'deck-num' }, String(i + 1)),
@@ -92,7 +92,7 @@ export function buildDeck(app, deck) {
   );
   let jumpBeats = 4;
   const jumpLabel = el('span', {}, '4');
-  const jumpRow = el('div', { class: 'loop-row' },
+  const jumpRow = el('div', { class: 'loop-row jump-row' },
     button('◀◀', { cls: 'sm', click: () => deck.beatJump(-jumpBeats), title: 'Beat jump back' }),
     button(el('span', {}, 'JUMP ', jumpLabel), { cls: 'sm', click: () => { jumpBeats = jumpBeats >= 32 ? 1 : jumpBeats * 2; jumpLabel.textContent = jumpBeats; } }),
     button('▶▶', { cls: 'sm', click: () => deck.beatJump(jumpBeats), title: 'Beat jump forward' }),
@@ -258,7 +258,7 @@ export function buildDeck(app, deck) {
     if (now - lastFrame < 50) return; lastFrame = now;
     const pos = deck.position;
     elapsed.textContent = fmtTime(pos);
-    remain.textContent = fmtTime(deck.duration - pos, true);
+    remain.textContent = deck.track && deck.duration > 0 ? fmtTime(deck.duration - pos, true) : '00:00.0'; // no "-00:00.0" on empty decks
     remain.classList.toggle('warn', deck.duration > 0 && deck.duration - pos < 30 && deck.playing);
     bpmBig.textContent = deck.effectiveBpm ? deck.effectiveBpm.toFixed(2) : '--';
     bpmSub.textContent = deck.bpm ? `${deck.tempo >= 0 ? '+' : ''}${deck.tempo.toFixed(2)}%  ·  ${deck.bpm.toFixed(2)}` : '';

@@ -41,35 +41,6 @@
 .mixer-top { overflow: hidden; }
 
 /* ---- short screens (laptops) ---- */
-@media (max-height: 860px) {
-  :root { --wave-h: 48px; }
-  .deck-header { grid-template-columns: 26px 32px minmax(0, 1fr) auto auto; }
-  .deck-cover { width: 32px; height: 32px; }
-  .overview-wrap { height: 30px; }
-  .deck { gap: 4px; padding: 6px; }
-  .btn.sm { padding: 3px 6px; }
-  .pad { height: 28px; }
-  .strip .knob-label { font-size: 8px; }
-  .strip .knob-sm { width: 22px; height: 22px; }
-  .strip .knob-md { width: 26px; height: 26px; }
-  .mixer-master .knob-md { width: 28px; height: 28px; }
-  .jog { max-width: 170px; }
-  /* two-column knob layout in channel strips */
-  .strip { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; align-content: start; row-gap: 2px; grid-template-rows: auto auto auto auto auto auto minmax(50px, 1fr) auto; }
-  .strip > .strip-num, .strip > .stem-knobs, .strip > .btn-pfl, .strip > .fader-row, .strip > .xf-assign { grid-column: span 2; }
-  .strip > .fader-row { height: 100%; }
-  .mixer-master .knob-wrap .knob-label { font-size: 8px; }
-  .mixer-master { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; align-content: start; }
-  .mixer-master > .strip-num, .mixer-master > .master-vu, .mixer-master > .mic-box { grid-column: span 2; }
-  .master-vu { min-height: 40px; height: 60px; }
-  .mic-box { flex-direction: row; flex-wrap: wrap; justify-content: center; }
-}
-@media (max-height: 800px) {
-  .deck-left .jog { max-width: 130px; }
-  .fx-unit { padding: 3px; gap: 4px; }
-  .fx-unit .knob-label { display: none; }
-  .fx-unit .fx-col select:nth-child(2) { display: none; }
-}
 
 
 /* ================= QA layout fixes ================= */
@@ -84,7 +55,7 @@
 .four-decks .deck-bpmbox { min-width: 70px; }
 .four-decks .overview-wrap { height: 22px; }
 .four-decks .deck-mid { gap: 3px; }
-.four-decks .deck-mid .loop-row:nth-of-type(2), .four-decks .pad-modes { display: none; } /* jump row + pad modes */
+.four-decks .pad-modes { display: none; } /* pad modes (the beat-jump row hides on short screens: see h920 below) */
 .four-decks .pads { grid-template-columns: repeat(8, 1fr); gap: 3px; }
 .four-decks .pad { height: 24px; }
 .four-decks .pad-label { font-size: 9px; }
@@ -105,14 +76,6 @@
 .four-decks .mic-box { flex-direction: row; flex-wrap: wrap; justify-content: center; }
 
 /* ---- narrow windows (1100-1280 px) ---- */
-@media (max-width: 1300px) {
-  .deck-mid .btn.sm, .deck-toggles .btn, .key-row .btn { font-size: 9.5px; padding: 3px 2px; letter-spacing: 0; }
-  .deck-header { gap: 5px; }
-  .deck-bpmbox { min-width: 74px; }
-  .deck-bpm { font-size: 17px; }
-  .deck-times { font-size: 12px; }
-  .pad-mode { font-size: 8px; }
-}
 /* library table scrolls sideways instead of clipping columns */
 .lib-main { overflow-x: auto; }
 .lib-header, .lib-scroll { min-width: 980px; }
@@ -178,10 +141,6 @@
 :root.h860 .four-decks .pad, :root.h860.four-decks .pad { height: 22px; }
 /* buttons never overlap their neighbours; long labels are clipped with an ellipsis */
 .deck-mid .btn, .deck-toggles .btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 1200px) {
-  .key-lbl { display: none; }
-  .deck-toggles .btn, .loop-row .btn, .key-row .btn { font-size: 8.5px; }
-}
 :root.h860 .four-decks .deck-header { grid-template-columns: 22px minmax(0, 1fr) auto auto; }
 /* narrow effective width from UI scaling (class set in themes.js) */
 :root.w1300 .deck-mid .btn.sm, :root.w1300 .deck-toggles .btn, :root.w1300 .key-row .btn { font-size: 9.5px; padding: 3px 2px; letter-spacing: 0; }
@@ -191,7 +150,74 @@
 :root.w1200 .deck-toggles .btn, :root.w1200 .loop-row .btn, :root.w1200 .key-row .btn { font-size: 8.5px; }
 
 /* 4 decks: the master column is too narrow for two knob columns — stack it in one */
-.four-decks .mixer-master { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
-.four-decks .mixer-master .knob-md { width: 24px; height: 24px; }
-.four-decks .mixer-master .knob-wrap .knob-label { font-size: 7.5px; white-space: nowrap; }
-.four-decks .mic-box { flex-direction: column; flex-wrap: nowrap; gap: 3px; }
+:root .four-decks .mixer-master { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+:root .four-decks .mixer-master .knob-md { width: 24px; height: 24px; }
+:root .four-decks .mixer-master .knob-wrap .knob-label { font-size: 7.5px; white-space: nowrap; }
+:root .four-decks .mic-box { flex-direction: column; flex-wrap: nowrap; gap: 3px; }
+/* (:root prefix: specificity 0,3,0 like the :root.h860 rules above, so the 4-deck stack also wins on short screens) */
+:root .four-decks .mixer-master > .master-vu { min-height: 24px; height: 40px; flex: 0 0 auto; }
+
+/* ---- narrow effective width: rules that used to live in viewport media queries (zoom-aware classes) ---- */
+:root.w1300 .deck-header { gap: 5px; }
+:root.w1300 .deck-bpmbox { min-width: 74px; }
+:root.w1300 .deck-times { font-size: 12px; }
+:root.w1200 .deck-body { grid-template-columns: minmax(110px, 0.6fr) minmax(0, 1.6fr) 54px; }
+:root.w1200 .am-info { display: none; }
+
+/* ---- deck buttons: labels shrink with an ellipsis instead of being cut on both sides ---- */
+.deck-mid .btn:not(.stem-knob), .deck-toggles .btn { display: block; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 2px; padding-right: 2px; }
+.deck-mid .btn .loop-size { display: inline; }
+:root.w1300 .deck-toggles .btn, :root.w1300 .deck-mid .loop-row .btn { letter-spacing: -.02em; }
+
+/* ---- AI stem row: one line, the last knob is never cut off ---- */
+.deck-stems .stems-row:first-child { flex-wrap: nowrap; padding-right: 5px; } /* room for the last knob ring */
+.deck-stems .stem-cell > .knob-wrap { flex: 0 0 auto; }
+.deck-stems .stem-btn { overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- top bar keeps one line at 1100 px ---- */
+.topbar > *:not(.tb-spacer):not(.tb-group) { flex-shrink: 0; }
+.seg-btn, .clock { white-space: nowrap; }
+:root.w1200 .topbar { gap: 6px; }
+:root.w1200 .clock { font-size: 11px; }
+
+/* ---- 2 decks on short screens: all 8 pads stay visible (QA M5) ----
+   h920: one row of 8 pads, denser rows, single-line FX unit. h800: pads move up right under the transport rows;
+   what does not fit (beat jump, key, FX, stems) scrolls, with a visible thin scrollbar. */
+:root.h920 body:not(.four-decks) .deck-mid { gap: 3px; }
+:root.h920 body:not(.four-decks) .pads { grid-template-columns: repeat(8, 1fr); gap: 3px; }
+:root.h920 body:not(.four-decks) .pad { height: 26px; }
+:root.h920 body:not(.four-decks) .pad-label { font-size: 9px; }
+:root.h920 body:not(.four-decks) .deck-mid .btn.sm { padding-top: 2px; padding-bottom: 2px; }
+:root.h920 body:not(.four-decks) .pad-mode { padding: 2px 0; }
+:root.h920 body:not(.four-decks) .fx-unit { padding: 3px; gap: 4px; }
+:root.h920 body:not(.four-decks) .fx-unit .fx-col { flex-direction: row; }
+:root.h920 body:not(.four-decks) .fx-unit .knob-label { display: none; }
+:root.h920 body:not(.four-decks) .deck-stems { padding: 1px 0; gap: 2px; }
+.deck-mid { scrollbar-width: thin; }
+:root.h800 .deck-mid > .pad-modes { order: 1; }
+:root.h800 .deck-mid > .pads { order: 2; }
+:root.h800 .deck-mid > .jump-row { order: 3; }
+:root.h800 .deck-mid > .key-row { order: 4; }
+:root.h800 .deck-mid > .deck-stems { order: 5; }
+:root.h800 .deck-mid > .fx-unit { order: 6; }
+:root.h800 .deck-mid > .loop-row:not(.jump-row) { order: 0; }
+
+/* ---- 4 decks: the 8-pad row fits at 900 px too ---- */
+:root.h920 .four-decks .deck-mid { gap: 2px; }
+:root.h920 .four-decks .deck-mid .jump-row { display: none; }
+:root.h920 .four-decks .pad { height: 22px; }
+
+/* ---- Daylight: readable labels on lit transport buttons and pads (QA m11) ---- */
+:root[data-theme="light"] .btn-play.active { color: #fff; }
+:root[data-theme="light"] .btn-cue.active { color: #1f1400; }
+:root[data-theme="light"] .pad.lit .pad-label { color: color-mix(in srgb, var(--pad-color) 65%, #000); }
+:root[data-theme="light"] .loop-btn:not(.active) .loop-size { color: #0b6e38; }
+/* narrow decks (≤ 1300 px effective, iPad 1024 px): clip instead of an ellipsis so short labels (OUT, SLIP, KEY LOC…)
+   keep every letter that fits, and slightly tighter type */
+:root.w1300 .deck-mid .btn:not(.stem-knob), :root.w1300 .deck-toggles .btn { text-overflow: clip; padding-left: 1px; padding-right: 1px; font-size: 9px; letter-spacing: -.03em; }
+/* very narrow decks: two rows of 4 pads (8 pads in a row leave no room for cue names) */
+:root.w1200.h920 body:not(.four-decks) .pads { grid-template-columns: repeat(4, 1fr); }
+:root.w1200.h920 body:not(.four-decks) .pad { height: 22px; }
+/* narrow decks: the four stem cells wrap two per line so each button + knob stays readable */
+:root.w1300 .deck-stems .stems-row:first-child { flex-wrap: wrap; row-gap: 2px; }
+:root.w1300 .deck-stems .stem-cell { flex: 1 1 45%; }

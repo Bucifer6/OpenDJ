@@ -18,6 +18,7 @@ button, input, select { font: inherit; color: inherit; }
 .boot { display: grid; place-items: center; height: 100vh; color: var(--text-2); font-size: 14px; }
 
 /* ---------- buttons ---------- */
+[hidden] { display: none !important; } /* the hidden attribute always wins over display rules like .btn { display: inline-flex } */
 .btn { background: var(--panel-3); border: 1px solid var(--line-2); border-radius: var(--radius); padding: 6px 10px; cursor: pointer; color: var(--text); font-weight: 600; letter-spacing: .02em; transition: background .08s, border-color .08s, box-shadow .08s; white-space: nowrap; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
 .btn:hover { background: color-mix(in srgb, var(--panel-3) 80%, var(--text) 8%); border-color: color-mix(in srgb, var(--line-2) 70%, var(--text) 20%); }
 .btn:active { transform: translateY(1px); }
@@ -310,7 +311,3 @@ kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-bottom
 ::-webkit-scrollbar-thumb { background: #2a313b; border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-track { background: transparent; }
 
-@media (max-width: 1200px) {
-  .deck-body { grid-template-columns: minmax(110px, 0.6fr) minmax(0, 1.6fr) 54px; }
-  .am-info { display: none; }
-}

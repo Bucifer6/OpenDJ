@@ -7,7 +7,7 @@ const GRAIN = 2048; // key-lock grain size (source frames)
 class DeckProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.L = null; this.R = null; this.len = 0; this.k = 1;
+    this.L = null; this.R = null; this.len = 0; this.k = 1; this.scale = 1;
     this.step = 1;            // source frames per output frame at rate 1 (resample ratio)
     this.pos = 0;             // play head in source frames
     this.shadow = 0;          // slip-mode shadow position
@@ -37,9 +37,12 @@ class DeckProcessor extends AudioWorkletProcessor {
     switch (m.type) {
       case 'load':
         this.L = m.left; this.R = m.right || m.left; this.len = this.L.length;
-        this.k = this.L instanceof Int16Array ? 1 / 32768 : 1; // sample scale (16-bit decks use half the memory)
-        stemCoefficients(this.stemCur, this.stemCoef); this.stemCoef[0] *= this.k;
-        stemCoefficients(this.sendCur, this.sendCoef); this.sendCoef[0] *= this.k;
+        // 16-bit decks use half the memory; tracks peaking above 0 dBFS are stored peak-normalised and scaled back
+        // up here (m.scale = the track's peak), so nothing clips before the channel gain / auto gain.
+        this.scale = m.scale > 0 ? m.scale : 1;
+        this.k = this.L instanceof Int16Array ? this.scale / 32767 : 1; // sample scale
+        this.scaleCoef(stemCoefficients(this.stemCur, this.stemCoef));
+        this.scaleCoef(stemCoefficients(this.sendCur, this.sendCoef));
         this.step = m.sampleRate / sampleRate;
         this.pos = this.shadow = 0; this.playing = false; this.curRate = 0; this.loop = null; this.brake = 0;
         this.scratch = null; this.dir = 1; this.slip = false; this.endedSent = false; this.stems = null;
@@ -70,6 +73,9 @@ class DeckProcessor extends AudioWorkletProcessor {
       case 'motor': this.startTime = m.value; break;
     }
   }
+
+  /** Apply the sample scales to stem-mix coefficients: [0] the original (this.k), [1..3] the Int16 stems (same peak scale). */
+  scaleCoef(c) { c[0] *= this.k; c[1] *= this.scale; c[2] *= this.scale; c[3] *= this.scale; return c; }
 
   endSlip(force) { if (this.slip || force) { this.pos = this.shadow; this.resetGrains(); } }
   /** WSOLA: start the new grain near the play head, at the offset whose waveform best continues the other grain. */
@@ -132,8 +138,8 @@ class DeckProcessor extends AudioWorkletProcessor {
       // stem gains: per-sample smoothing; the plain original path is used whenever every stem is at unity
       let useMix = false, useSend = false;
       if (stems) {
-        if (smoothGains(this.stemCur, this.stemTarget, this.stemK)) { stemCoefficients(this.stemCur, this.stemCoef); this.stemCoef[0] *= this.k; }
-        if (smoothGains(this.sendCur, this.sendTarget, this.stemK)) { stemCoefficients(this.sendCur, this.sendCoef); this.sendCoef[0] *= this.k; }
+        if (smoothGains(this.stemCur, this.stemTarget, this.stemK)) this.scaleCoef(stemCoefficients(this.stemCur, this.stemCoef));
+        if (smoothGains(this.sendCur, this.sendTarget, this.stemK)) this.scaleCoef(stemCoefficients(this.sendCur, this.sendCoef));
         useMix = !isUnity(this.stemCur);
         useSend = !!fL && !isSilent(this.sendCur);
       }
@@ -166,6 +172,7 @@ class DeckProcessor extends AudioWorkletProcessor {
       this.pos += speed;
       if (this.slip) this.shadow += this.playing ? this.rate * this.step : 0;
       if (this.loop && speed > 0 && this.pos >= this.loop.end) { this.pos -= (this.loop.end - this.loop.start); this.resetGrains(); }
+      else if (this.loop && speed < 0 && this.pos < this.loop.start) { this.pos += (this.loop.end - this.loop.start); this.resetGrains(); } // reverse wraps too
       if (this.pos < 0) { this.pos = 0; if (!this.scratch) this.curRate = 0; }
       if (this.pos >= this.len) {
         this.pos = this.len - 1; this.curRate = 0;

@@ -63,6 +63,7 @@ export class Deck extends Emitter {
     if (!this.track) return 0;
     const p = this._pos + (this.ctx.currentTime - this._t) * this._rate;
     if (this.loop?.active && p > this.loop.end && this._rate > 0) return this.loop.start + ((p - this.loop.start) % (this.loop.end - this.loop.start));
+    if (this.loop?.active && p < this.loop.start && this._rate < 0 && this._pos >= this.loop.start) { const L = this.loop.end - this.loop.start; return this.loop.end - ((this.loop.start - p) % L); }
     return clamp(p, 0, this.duration);
   }
   get rate() { return (1 + this.tempo / 100) * (1 + this.bend); }
@@ -108,14 +109,16 @@ export class Deck extends Emitter {
         if (stale()) return false;
         wave = decodeWaveform(r.wave.buffer);
         const patch = {
-          bpm: track.bpm && track.bpmLocked ? track.bpm : r.result.bpm, gridOffset: r.result.gridOffset,
+          // imported grids (rekordbox / Traktor / Serato / VirtualDJ: gridLocked) and locked BPMs are authoritative
+          bpm: track.bpm && (track.bpmLocked || track.gridLocked) ? track.bpm : r.result.bpm,
+          gridOffset: track.gridLocked && Number.isFinite(track.gridOffset) ? track.gridOffset : r.result.gridOffset,
           key: track.key || r.result.key, gain: r.result.gain, startTime: r.result.startTime, endTime: r.result.endTime,
           energy: r.result.energy, duration: buf.duration, analyzed: true,
         };
         for (const k of ['phrases', 'mixIn', 'mixOut', 'downbeat']) if (r.result[k] !== undefined) patch[k] = r.result[k];
         // automatic cue creation (like rekordbox auto cue / SMART CUE) for tracks without any cues yet
         if (!(track.cues || []).length && Array.isArray(r.result.autoCues) && r.result.autoCues.length && this.engine.settings.autoCues !== false) {
-          patch.cues = r.result.autoCues;
+          patch.cues = r.result.autoCues.map((c) => ({ ...c, auto: true })); // auto: replaceable by imported cues
         }
         Object.assign(track, patch);
         api.saveWaveform(track.id, r.wave).catch(() => {});
@@ -126,10 +129,15 @@ export class Deck extends Emitter {
       if (!track.phrases && wave && this.bpm) this.refreshStructure(false); // tracks analysed before phrase detection existed
       // Deck memory: 16-bit samples by default (CD resolution, half the RAM of float); 32-bit float on request.
       const hiPrec = !!this.engine.settings.highPrecisionAudio;
-      const left = deckChannel(buf.getChannelData(0), hiPrec);
-      const right = buf.numberOfChannels > 1 ? deckChannel(buf.getChannelData(1), hiPrec) : null;
+      const ch0 = buf.getChannelData(0), ch1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : null;
+      // 16-bit decks: material above 0 dBFS (float files, inter-sample overs of loud lossy masters) is stored
+      // peak-normalised and scaled back in the worklet, so it never clips before the channel / auto gain.
+      const scale = hiPrec ? 1 : Math.max(1, peakAbs(ch0), ch1 ? peakAbs(ch1) : 0);
+      this.audioScale = scale;
+      const left = deckChannel(ch0, hiPrec, scale);
+      const right = ch1 ? deckChannel(ch1, hiPrec, scale) : null;
       this.frames = left.length;
-      this.node.port.postMessage({ type: 'load', left, right, sampleRate: buf.sampleRate }, right ? [left.buffer, right.buffer] : [left.buffer]);
+      this.node.port.postMessage({ type: 'load', left, right, sampleRate: buf.sampleRate, scale }, right ? [left.buffer, right.buffer] : [left.buffer]);
       this.resetStemControls(); this.postStemGains();
       this.post('rate', { value: this.rate }); this.post('keylock', { value: this.keyLock });
       this.keyShift = 0; this.post('pitch', { value: 1 });
@@ -153,7 +161,8 @@ export class Deck extends Emitter {
     }
   }
 
-  eject() { if (this.playing) return; this.post('unload'); this.reset(); this.emit('load', null); this.emit('state'); }
+  // ++_loadSeq: a load still in flight becomes stale (it must not finish into an ejected deck)
+  eject() { if (this.playing) return; ++this._loadSeq; this.post('unload'); this.reset(); this.emit('load', null); this.emit('state'); }
 
   // ---------- transport ----------
   play() {
@@ -268,7 +277,7 @@ export class Deck extends Emitter {
   }
   loopHalve() { if (this.loop) this.setLoop(this.loop.start, this.loop.start + (this.loop.end - this.loop.start) / 2, this.loop.active); }
   loopDouble() { if (this.loop) this.setLoop(this.loop.start, this.loop.start + (this.loop.end - this.loop.start) * 2, this.loop.active); }
-  get loopBeats() { return this.loop ? (this.loop.end - this.loop.start) / this.beatLen : 0; }
+  get loopBeats() { return this.loop ? Math.round(((this.loop.end - this.loop.start) / this.beatLen) * 1000) / 1000 : 0; } // rounded: no 3.999999999
 
   /** Loop roll: momentary loop with slip, playback resumes where it would have been. */
   rollOn(beats) {
@@ -379,7 +388,7 @@ export class Deck extends Emitter {
         const pair = {};
         for (const [k, c] of [['L', 0], ['R', Math.min(1, buf.numberOfChannels - 1)]]) {
           const src = buf.getChannelData(c), dst = new Int16Array(frames);
-          floatToInt16(src.length > frames ? src.subarray(0, frames) : src, dst);
+          floatToInt16(src.length > frames ? src.subarray(0, frames) : src, dst, this.audioScale || 1); // same scale as the deck audio
           pair[k] = dst;
         }
         out.push(pair);
@@ -552,15 +561,23 @@ export function shiftCamelot(cam, n) {
 }
 
 /** Copy one decoded channel for the deck worklet: Int16 with TPDF dither (default) or Float32 (high precision). */
-export function deckChannel(src, highPrecision = false) {
+export function deckChannel(src, highPrecision = false, scale = 1) {
   if (highPrecision) return new Float32Array(src);
   const out = new Int16Array(src.length);
+  const g = 32767 / (scale > 1 ? scale : 1);
   let seed = 22222;
   for (let i = 0; i < src.length; i++) {
     seed = (seed * 1664525 + 1013904223) >>> 0; const r1 = seed / 4294967296;
     seed = (seed * 1664525 + 1013904223) >>> 0; const r2 = seed / 4294967296;
-    const v = Math.round(src[i] * 32767 + (r1 - r2)); // ±1 LSB triangular dither
+    const v = Math.round(src[i] * g + (r1 - r2)); // ±1 LSB triangular dither
     out[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
   }
   return out;
+}
+
+/** Largest absolute sample value of a channel. */
+export function peakAbs(src) {
+  let p = 0;
+  for (let i = 0; i < src.length; i++) { const a = src[i] < 0 ? -src[i] : src[i]; if (a > p) p = a; }
+  return p;
 }
