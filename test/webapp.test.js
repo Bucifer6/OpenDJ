@@ -184,8 +184,14 @@ test('upload: streams into the uploads folder, adds the track; extension allowli
     const uploads = path.join(dir, 'd', 'Uploads');
     assert.equal(path.dirname(t.path), uploads);
     assert.ok(app.library.data.folders.some((f) => f.path === uploads), 'uploads folder is a library folder');
-    const again = await up('Test Artist - Uploaded Song.wav', wav(0.5));
-    assert.notEqual(again.json.id, r.json.id, 'same name: kept both');
+    const again = await up('Test Artist - Uploaded Song.wav', wav(0.6));
+    assert.notEqual(again.json.id, r.json.id, 'same name, different file: kept both');
+    // F9: the identical file again (any name) returns the existing track, no "(2)" copy, no duplicate entry
+    const nTracks = app.library.allTracks().length, nFiles = fs.readdirSync(uploads).length;
+    const same = await up('Test Artist - Uploaded Song.wav', wav(0.5));
+    assert.equal(same.status, 200); assert.equal(same.json.id, r.json.id); assert.equal(same.json.duplicate, true);
+    assert.equal((await up('renamed copy.wav', wav(0.5))).json.id, r.json.id, 'identical content under another name');
+    assert.equal(app.library.allTracks().length, nTracks); assert.equal(fs.readdirSync(uploads).length, nFiles);
     const trav = await up('../../../evil.wav', wav());
     assert.equal(trav.status, 200);
     assert.equal(path.dirname(app.library.getTrack(trav.json.id).path), uploads);

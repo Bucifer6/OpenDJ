@@ -67,6 +67,9 @@ class App {
 
   async setSetting(k, v) { this.settings[k] = v; try { this.settings = { ...this.settings, ...(await api.saveSettings({ [k]: v })) }; this.engine.settings = this.settings; } catch (e) { this.toast(e.message); } }
 
+  /** Hosted mode (password login): Sign out in the top bar. */
+  updateHostedUi() { if (this.signOutBtn) this.signOutBtn.hidden = !this.auth; }
+
   showStartOverlay() {
     const o = el('div', { class: 'overlay start' }, el('button', { class: 'btn primary big-start', onclick: async () => { await this.engine.resume(); o.remove(); } }, '▶ Start audio engine'));
     document.body.append(o);
@@ -126,6 +129,7 @@ class App {
       el('button', { class: 'btn sm video-btn', title: 'Video mixer, visuals, YouTube & projector output', onclick: () => (this.videoUi ||= setupVideo(this)).toggleMixer() }, '🎬 VIDEO'),
       el('button', { class: 'btn sm light-btn', title: 'Lighting (DMX, Art-Net, sACN, WLED, Hue, OSC)', onclick: () => this.lighting?.openPanel() }, '💡 LIGHTS'),
       el('button', { class: 'btn icon', title: 'Settings', onclick: () => this.dialogs.settings() }, '⚙'),
+      this.signOutBtn = el('button', { class: 'btn sm signout-btn', hidden: true, title: 'Sign out of this OpenDJ server', onclick: async () => { if (this.engine.decks.some((d) => d.playing) && !(await this.dialogs.confirm('Music is playing. Sign out anyway?'))) return; await api.logout(); } }, 'Sign out'),
       el('button', { class: 'btn icon', title: 'Full screen', onclick: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()) }, '⛶'),
     );
     // stacked detail waveforms
