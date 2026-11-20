@@ -64,18 +64,18 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 
 - Folders on any drive; **USB sticks and NAS shares** (SMB/NFS/AFP/SSHFS mounts) are detected and added with one click
 - **Media servers**: Plex, Jellyfin, Emby, Subsonic-compatible (Navidrome, Airsonic, Gonic…) and MediaMax (including its DJ analysis). Remote playlists are imported; tracks stream through a local proxy with seeking, or **download** them for offline use.
-- Automatic analysis: BPM + beat grid, key (Camelot), energy, loudness, silence trimming, **phrases** and automatic cues
+- Automatic analysis: BPM + beat grid, key (Camelot), energy, loudness, silence trimming, **phrases** and automatic cues. New tracks are analysed **in the background** after a scan or upload, one at a time and paused while a deck loads (progress and a stop button in the library toolbar; *⋯ Library → Analyse all tracks* or right-click → *Analyse* to start it by hand; *Settings → Library* turns it off). Tracks with a locked BPM or an imported beat grid keep it; streaming-only media-server tracks are analysed when loaded or when you ask. Files that can't be decoded are flagged ⚠ in the list.
 - Playlists with folders, **smart playlists** (rules for BPM, key compatibility, genre, tags, colour, rating, energy, dates…), track **colours**, **My Tags**, ratings, **play history sessions** with setlist export (TXT/CSV/M3U)
 - Track info editor (single and multi-track), duplicate finder, missing-file relocate, library backup / restore
 - Search with filters such as `bpm:120-128`, `key:8A`, `genre:house`, and a *Matching master deck* view (harmonic key + tempo)
-- Import **rekordbox XML**, **Traktor NML**, **Serato crates**, **VirtualDJ database** and M3U; export rekordbox XML, M3U8 or playlists to a USB folder
+- Import **rekordbox XML**, **Traktor NML**, **Serato crates**, **VirtualDJ database** and M3U; export rekordbox XML, M3U8 or playlists to a USB folder. Serato keeps BPM, cues and grids inside the audio files' tags, not in its crates, so a Serato import brings in the crates (as playlists) and their tracks; OpenDJ then analyses them itself.
 
 ### Automix
 
 <img src="docs/images/automix.png" alt="Automix dialog with smart ordering, energy curve and transition options" width="60%">
 
 - Non-stop mixing of any playlist or library view on decks 1 and 2
-- Beat-matched, **phrase-aligned** transitions: bass swap, crossfade, filter fade or echo out
+- Beat-matched, **phrase-aligned** transitions: bass swap, crossfade, filter fade or echo out; afterwards the new track eases back to its original tempo over 8 bars (can be turned off), so tempo drift doesn't build up over a set
 - **Smart ordering** by key, tempo and an energy curve (harmonic, build up, peak, waves), optional Key Sync to fix key clashes, skip to next, queue tracks from the browser
 
 ### Controllers, DVS & Ableton Link
@@ -127,7 +127,7 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 
 ### Web app / NAS
 
-Run OpenDJ on a NAS or home server and open it from any computer's browser: password login, browser uploads, an installable PWA and a Docker image. The server holds the library and streams the files; **the audio is mixed and played in the browser**, so headphones and controllers plug into the computer you browse from. See [Run as a web app](#run-as-a-web-app--on-a-nas).
+Run OpenDJ on a NAS or home server and open it from any computer's browser: password login, browser uploads, an installable PWA (installing needs HTTPS or `localhost`) and a Docker image. Tablets and computers are recommended; phones get a simplified one-deck-at-a-time layout. The server holds the library and streams the files; **the audio is mixed and played in the browser**, so headphones and controllers plug into the computer you browse from. See [Run as a web app](#run-as-a-web-app--on-a-nas).
 
 ### Themes
 
@@ -166,11 +166,13 @@ Installers are built by GitHub Actions ([`build.yml`](.github/workflows/build.ym
 
 ### Desktop app
 
-Install from the [download table](#download), start OpenDJ, then add music:
+Install from the [download table](#download), start OpenDJ, then add music (the empty library shows the same options):
 
 - **Folders, USB and NAS**: in the browser's left panel, click a detected drive or use **+ Folder**. NAS shares must be mounted by your OS first (Windows: map a network drive or use `\\nas\music`; macOS: Finder → Go → Connect to Server; Linux: an SMB/NFS mount).
 - **Media servers**: click **+ Media server** and pick the type. Plex: server URL plus an X-Plex-Token, or your plex.tv login. Jellyfin, Emby, Subsonic: URL, username and password. MediaMax: URL plus username and password, or an API key (`mmk_…`). Passwords are exchanged for a token where the server supports it.
-- **rekordbox users**: in rekordbox use *File → Export Collection in xml format*, then *Settings → Library → Import rekordbox XML* in OpenDJ. Traktor, Serato and VirtualDJ libraries import from the same tab.
+- **rekordbox users**: in rekordbox use *File → Export Collection in xml format*, then *Settings → Library → Import rekordbox XML* in OpenDJ. Traktor, Serato (crates only, see [Library](#library--media-servers)) and VirtualDJ libraries import from the same tab.
+
+The desktop app keeps its library in `OpenDJ/library` inside the OS app-data folder: `%APPDATA%\OpenDJ\library` (Windows), `~/Library/Application Support/OpenDJ/library` (macOS), `~/.config/OpenDJ/library` (Linux). Set `OPENDJ_DATA` to use another folder (for example a portable library on a USB stick).
 
 ### Browser mode (from source)
 
@@ -241,7 +243,7 @@ HOST=0.0.0.0 OPENDJ_PASSWORD='choose-a-password' OPENDJ_MUSIC_ROOTS=/srv/music n
 | `PORT` / `--port` | Port, default 7380 |
 | `OPENDJ_PASSWORD` | Login password (otherwise chosen on first visit and stored hashed) |
 | `OPENDJ_MUSIC_ROOTS` | Folders the web UI may browse, add, import from and export to, separated by `:` (`;` on Windows). Default: `~/Music`, the uploads and downloads folders. Nothing outside them is ever shown. |
-| `OPENDJ_DATA` | Library data folder |
+| `OPENDJ_DATA` | Library data folder (also honoured by the desktop app) |
 | `OPENDJ_UPLOAD_DIR` | Where browser uploads go (default `<data>/Uploads`; it is added to the library as a folder) |
 | `OPENDJ_TRUST_PROXY=1` | Behind a reverse proxy: use `X-Forwarded-For` for login rate limiting and `X-Forwarded-Proto` for secure cookies |
 | `OPENDJ_ALLOWED_HOSTS` | Optional list of host names the server answers to (e.g. `dj.example.com`) |
@@ -254,7 +256,8 @@ HOST=0.0.0.0 OPENDJ_PASSWORD='choose-a-password' OPENDJ_MUSIC_ROOTS=/srv/music n
 | Adding music | any folder, USB stick or NAS mount on this computer | folders under the music roots on the server, or **upload**: drag audio/video files onto the library, or use **Upload…** |
 | Audio output, headphone cue | yes | yes (Chrome/Edge; choosing an output device needs HTTPS or localhost) |
 | MIDI controllers, HID, USB DMX | yes | Chrome or Edge, and only over **HTTPS** or on `localhost` (Web MIDI / WebHID / Web Serial are limited to secure pages) |
-| Install as an app | n/a | yes, from the browser's address bar (PWA) |
+| Install as an app | n/a | yes, from the browser's address bar (PWA); browsers only offer this over **HTTPS** or on `localhost` |
+| Phones | n/a | a simplified layout: one deck at a time (deck tabs) above the mixer, scrolling vertically. Usable for checking the library or a quick mix; for DJing use a tablet (landscape) or a computer |
 | Password | none (only reachable from this computer) | required |
 
 ### HTTPS with a reverse proxy
@@ -352,7 +355,7 @@ public/             UI (vanilla ES modules, no build step)
 scripts/            end-to-end tests (e2e-*.mjs) and README demo tooling (demo/)
 ```
 
-Library data lives in your OS app-data folder (`%APPDATA%\OpenDJ`, `~/Library/Application Support/OpenDJ`, `~/.config/opendj`), or in `OPENDJ_DATA` if set.
+Library data lives in your OS app-data folder, or in `OPENDJ_DATA` if set (desktop app and web server alike). Web server (`npm run web`): `%APPDATA%\OpenDJ`, `~/Library/Application Support/OpenDJ`, `~/.config/opendj`. Desktop app: the `library` folder inside Electron's app-data folder (`%APPDATA%\OpenDJ\library`, `~/Library/Application Support/OpenDJ/library`, `~/.config/OpenDJ/library`).
 
 ## Contributing
 
