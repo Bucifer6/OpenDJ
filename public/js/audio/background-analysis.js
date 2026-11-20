@@ -122,7 +122,7 @@ export class BackgroundAnalyser extends Emitter {
     return this._worker;
   }
 
-  analyseInWorker(mono, sampleRate, signal) {
+  analyseInWorker({ left, right }, sampleRate, signal) {
     const w = this.worker();
     return new Promise((resolve, reject) => {
       const id = ++this._wid;
@@ -131,7 +131,7 @@ export class BackgroundAnalyser extends Emitter {
       const cleanup = () => { w.removeEventListener('message', onMsg); signal?.removeEventListener('abort', onAbort); };
       w.addEventListener('message', onMsg);
       signal?.addEventListener('abort', onAbort, { once: true });
-      w.postMessage({ id, mono, sampleRate }, [mono.buffer]);
+      w.postMessage({ id, left, right, sampleRate }, right ? [left.buffer, right.buffer] : [left.buffer]);
     });
   }
 
@@ -150,11 +150,10 @@ export class BackgroundAnalyser extends Emitter {
       let buf;
       try { buf = await this.engine.ctx.decodeAudioData(ab); } catch (e) { throw Object.assign(e instanceof Error ? e : new Error(String(e)), { undecodable: true }); }
       if (ac.signal.aborted) return false;
-      const c0 = buf.getChannelData(0), c1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : null;
-      const mono = new Float32Array(c0.length);
-      if (c1) for (let i = 0; i < mono.length; i++) mono[i] = (c0[i] + c1[i]) * 0.5; else mono.set(c0);
+      // copies of the channels (a fast memcpy); the worker mixes them to mono exactly like Deck.load does
+      const left = new Float32Array(buf.getChannelData(0)), right = buf.numberOfChannels > 1 ? new Float32Array(buf.getChannelData(1)) : null;
       const duration = buf.duration, sampleRate = buf.sampleRate; buf = null;
-      const r = await this.analyseInWorker(mono, sampleRate, ac.signal);
+      const r = await this.analyseInWorker({ left, right }, sampleRate, ac.signal);
       // the track may have been analysed on a deck meanwhile (or edited): use its latest state
       const cur = this.app.library.track(track.id) || track;
       if (cur.analyzed) return true;

@@ -320,10 +320,10 @@ class App {
     let refreshT, scanDone = false;
     api.events({
       library: () => {
-        // While tracks are being analysed every one of them changes the library: refresh at most every 4 s then.
+        // While tracks are being analysed every one of them changes the library: refresh at most every 4 s then (8 s while playing).
         if (this.analyser.running && refreshT) return;
         clearTimeout(refreshT);
-        refreshT = setTimeout(async () => { refreshT = null; await this.library.refresh(); this.analyser.autoQueue({ afterScan: scanDone }); scanDone = false; }, this.analyser.running ? 4000 : 600);
+        refreshT = setTimeout(async () => { refreshT = null; await this.library.refresh(); this.analyser.autoQueue({ afterScan: scanDone }); scanDone = false; }, this.analyser.running ? (this.engine.decks.some((d) => d.playing) ? 8000 : 4000) : 600);
       },
       scan: (p) => { this.library.setJobStatus(p.done ? '' : `Scanning… ${p.scanned} files`); if (p.done) scanDone = true; },
       sync: (p) => this.library.setJobStatus(p.finished ? '' : `Syncing media server… ${p.done}${p.total ? '/' + p.total : ''}`),
