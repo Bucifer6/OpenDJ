@@ -171,11 +171,97 @@ npm run dist
 | A | Automix |
 | Ctrl+F | Search |
 
+## Supported formats
+
+| | Formats | Needs |
+|---|---|---|
+| **Played directly** | MP3, AAC/M4A, FLAC, WAV, Ogg Vorbis, Opus, WebM, AIFF (converted to WAV on the fly) | nothing |
+| **Converted on the fly** | ALAC (Apple Lossless `.m4a`), WMA, APE (Monkey's Audio), WavPack (`.wv`), DSD (`.dsf`/`.dff`), AC3/E-AC3, DTS, MP2, AMR, TTA, TAK, Musepack, Speex, MKA, AU/SND, CAF, AIFF-C (compressed), W64/RF64, 3GP | FFmpeg |
+| **Video files** (audio track for the decks, picture for video mixing) | MP4, M4V, MOV, WebM play as is; MKV, AVI, WMV, FLV, MPG, TS/M2TS, VOB, OGV are remuxed/converted to MP4 | FFmpeg for the second group |
+
+Converted audio is lossless: it becomes FLAC at the original sample rate (up to 192 kHz; DSD becomes 24-bit / 88.2 kHz PCM). The first load streams while converting; the result is cached in the library data folder (`transcode-cache/`, 4 GB by default, least recently used files are removed first), so reloading and seeking are instant afterwards.
+
+Where FFmpeg comes from:
+- **Desktop app**: included (the `ffmpeg-static` build).
+- **`npm run web`**: the `ffmpeg-static` binary installed by `npm install`, else `ffmpeg` on your `PATH`. Set `OPENDJ_FFMPEG=/path/to/ffmpeg` to choose one (or `none` to turn conversion off).
+- **Docker**: included (Debian's FFmpeg).
+
+Without FFmpeg those formats are still listed in the library, but loading one shows "Install FFmpeg or use the desktop app". Media-server tracks in such formats are converted by your Plex, Jellyfin, Emby or Subsonic server instead. `GET /api/capabilities` reports what the running server supports.
+
+## Run as a web app / on a NAS
+
+OpenDJ can run on a NAS or home server and be opened from any computer's browser. The server holds your library and streams the files; **the audio is mixed and played in the browser**, so plug your headphones and controller into the computer you browse from.
+
+### Docker (recommended)
+
+```bash
+docker build -t opendj .
+docker run -d --name opendj -p 7380:7380 \
+  -v opendj-data:/data -v /path/to/music:/music:ro \
+  -e OPENDJ_PASSWORD='choose-a-password' opendj
+```
+
+or edit and use [`docker-compose.yml`](docker-compose.yml) (`docker compose up -d`). Then open `http://<nas-address>:7380`.
+
+- `/music` is your music (read-only is fine); `/data` holds the library, analysis, transcode cache and uploads.
+- Without `OPENDJ_PASSWORD`, the first visit asks you to choose a password. It needs the one-time setup code printed in the log (`docker logs opendj`), so nobody else on the network can claim the server first.
+
+### Without Docker
+
+```bash
+npm install
+HOST=0.0.0.0 OPENDJ_PASSWORD='choose-a-password' OPENDJ_MUSIC_ROOTS=/srv/music npm run web
+# or: node server/cli.js --host 0.0.0.0 --port 7380
+```
+
+| Variable | Meaning |
+|---|---|
+| `HOST` / `--host` | Address to listen on. Default `127.0.0.1` (this computer only, no password). Anything else turns on the login. |
+| `PORT` / `--port` | Port, default 7380 |
+| `OPENDJ_PASSWORD` | Login password (otherwise chosen on first visit and stored hashed) |
+| `OPENDJ_MUSIC_ROOTS` | Folders the web UI may browse, add, import from and export to, separated by `:` (`;` on Windows). Default: `~/Music`, the uploads and downloads folders. Nothing outside them is ever shown. |
+| `OPENDJ_DATA` | Library data folder |
+| `OPENDJ_UPLOAD_DIR` | Where browser uploads go (default `<data>/Uploads`; it is added to the library as a folder) |
+| `OPENDJ_TRUST_PROXY=1` | Behind a reverse proxy: use `X-Forwarded-For` for login rate limiting and `X-Forwarded-Proto` for secure cookies |
+| `OPENDJ_ALLOWED_HOSTS` | Optional list of host names the server answers to (e.g. `dj.example.com`) |
+| `OPENDJ_FFMPEG` | FFmpeg binary, or `none` |
+
+### Desktop app vs web app
+
+| | Desktop app | Web app (browser) |
+|---|---|---|
+| Adding music | any folder, USB stick or NAS mount on this computer | folders under the music roots on the server, or **upload**: drag audio/video files onto the library, or use **Upload…** |
+| Audio output, headphone cue | yes | yes (Chrome/Edge; choosing an output device needs HTTPS or localhost) |
+| MIDI controllers, HID, USB DMX | yes | Chrome or Edge, and only over **HTTPS** or on `localhost` (Web MIDI / WebHID / Web Serial are limited to secure pages) |
+| Install as an app | n/a | yes, from the browser's address bar (PWA) |
+| Password | none (only reachable from this computer) | required |
+
+### HTTPS with a reverse proxy
+
+Controllers need a secure page, so put a TLS reverse proxy in front when you use OpenDJ from another computer. With [Caddy](https://caddyserver.com) (automatic Let's Encrypt certificates):
+
+```
+dj.example.com {
+    reverse_proxy 127.0.0.1:7380
+}
+```
+
+On a home network without a public name, `tls internal` gives a local certificate (trust Caddy's root CA on your laptop once):
+
+```
+https://opendj.lan {
+    tls internal
+    reverse_proxy 127.0.0.1:7380
+}
+```
+
+Then start OpenDJ with `OPENDJ_TRUST_PROXY=1`. Sessions use an HttpOnly, SameSite=Strict cookie (marked Secure over HTTPS); failed logins are slowed down per address.
+
 ## Architecture
 
 ```
 electron/           desktop shell (starts the server, native folder picker, MIDI/audio permissions)
-server/             Node backend, bound to 127.0.0.1 only
+server/             Node backend (127.0.0.1 by default; password login when hosted on a network)
   index.js            HTTP API + static UI + server-sent events
   library.js          JSON library store (tracks, playlists, folders, sources, settings)
   scanner.js          folder scanning + tag reading (music-metadata)

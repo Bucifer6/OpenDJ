@@ -1,4 +1,5 @@
 import { el, fmtDur, escapeHtml } from '../util.js';
+import { uploadButton } from './upload.js';
 import { api } from '../api.js';
 import { toCamelot, camelotCompatible } from '../audio/analysis-core.js';
 import { LibraryDialogs, TRACK_COLORS, colorName, flipSubmenus } from './library-dialogs.js';
@@ -150,6 +151,7 @@ export class LibraryUI {
     const tools = el('div', { class: 'lib-tools' },
       this.viewTitle, this.countEl, this.viewActions, this.search,
       el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addFolder(), title: 'Add a folder, USB drive or NAS share' }, '+ Folder'),
+      uploadButton(this.app),
       el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addSource(), title: 'Connect Plex, Jellyfin, Emby, Subsonic/Navidrome or MediaMax' }, '+ Media server'),
       el('button', { class: 'btn sm', onclick: () => this.app.dialogs.automixQueue(this.rows), title: 'Auto-mix the tracks in this view' }, '▶ Automix view'),
       el('button', { class: 'btn sm lib-menu-btn', title: 'Smart playlists, import from rekordbox / Traktor / Serato / VirtualDJ, missing files, duplicates, backup', onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); this.dlg.libraryMenu(r.left, r.bottom + 4); } }, '⋯ Library'),

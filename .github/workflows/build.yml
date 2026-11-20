@@ -24,6 +24,26 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       - run: npm test
 
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build web-app image (not pushed)
+        run: docker build -t opendj:ci .
+      - name: Smoke test the container
+        run: |
+          docker run -d --name opendj -p 7380:7380 -e OPENDJ_PASSWORD=ci-password opendj:ci
+          for i in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' opendj)" = healthy ] && break
+            curl -fsS http://127.0.0.1:7380/api/health && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:7380/api/health
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7380/api/tracks)" = 401
+          docker logs opendj
+          docker rm -f opendj
+
   build:
     needs: test
     strategy:

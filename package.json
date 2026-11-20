@@ -28,7 +28,7 @@
   "build": {
     "appId": "org.opendj.app",
     "productName": "OpenDJ",
-    "copyright": "Copyright © OpenDJ contributors",
+    "copyright": "Copyright \u00a9 OpenDJ contributors",
     "directories": {
       "buildResources": "build",
       "output": "dist"
@@ -38,6 +38,7 @@
       "server/**",
       "public/**",
       "package.json",
+      "THIRD_PARTY_NOTICES.md",
       "!**/*.map"
     ],
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
@@ -151,7 +152,9 @@
     },
     "asarUnpack": [
       "node_modules/ffmpeg-static/**"
-    ]
+    ],
+    "beforePack": "build/before-pack.cjs",
+    "afterAllArtifactBuild": "build/after-all.cjs"
   },
   "homepage": "https://github.com/Bucifer6/OpenDJ",
   "repository": {

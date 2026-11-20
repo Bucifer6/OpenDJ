@@ -1,0 +1,27 @@
+# Example: OpenDJ on a NAS / home server. Start with `docker compose up -d`, then open http://<server>:7380
+# (put a TLS reverse proxy in front for MIDI controllers and remote access; see README "Run as a web app / on a NAS").
+services:
+  opendj:
+    build: .
+    image: opendj:latest
+    container_name: opendj
+    restart: unless-stopped
+    ports:
+      - "7380:7380"
+    environment:
+      # Password for the login page. Leave it out to choose one on first visit (the setup code is in `docker logs opendj`).
+      OPENDJ_PASSWORD: "change-me"
+      # Several music folders: mount each one and list them separated by ':'.
+      OPENDJ_MUSIC_ROOTS: "/music"
+      # Behind a reverse proxy that sets X-Forwarded-For / X-Forwarded-Proto (Caddy, nginx, Traefik):
+      # OPENDJ_TRUST_PROXY: "1"
+      # Only answer to these host names (optional, recommended when exposed):
+      # OPENDJ_ALLOWED_HOSTS: "dj.example.com"
+    volumes:
+      - opendj-data:/data          # library, analysis cache, transcode cache, uploads
+      - /path/to/your/music:/music:ro
+    # Run as your NAS user so uploads/downloads are owned by you (and /music can be read):
+    # user: "1000:1000"
+
+volumes:
+  opendj-data:

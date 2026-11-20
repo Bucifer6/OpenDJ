@@ -73,6 +73,8 @@ It lists what each offers, what OpenDJ had before this pass, what this pass adde
 | Export rekordbox XML / M3U / USB folder | ✔ | — | — | ✔ | ✔ (OneLibrary) | ✅ |
 | Export **CDJ-ready USB** (PDB/ANLZ device library) | ✔ | — | — | — | ◐ | ❌ proprietary binary formats; future work using the community-documented Rekordbox PDB/ANLZ format |
 | Media servers: Plex/Jellyfin/Emby/Subsonic/MediaMax + offline download | — | — | — | ◐ | ◐ | ✅ (a strength of OpenDJ) |
+| Audio formats | ✔ | ✔ | ✔ | ✔ | ✔ | 🆕 everything browsers decode, plus FFmpeg conversion for ALAC, WMA, APE, WavPack, DSD, AC3/DTS, MP2, TTA and audio from video files |
+| Web app / NAS hosting | — | — | — | — | — | 🆕 password-protected web mode, browser uploads, installable PWA, Docker image (a strength of OpenDJ) |
 | Streaming services (Beatport, Beatsource, TIDAL, SoundCloud, Apple Music, Spotify) | ✔ | ✔ | ✔ | ✔ | ✔ | ❌ requires commercial partner agreements and DRM; not possible for a free open-source app without them |
 | Cloud library sync | ✔ (Cloud Library Sync) | ◐ | — | ✔ | ✔ | ◐ your own media server works as the cloud; no OpenDJ-hosted sync |
 | Tag writing to files (cues in ID3) | — | ✔ | ✔ | ✔ | — | ❌ OpenDJ keeps cues and analysis in its library to avoid touching files (planned: optional Serato-compatible GEOB tags) |
@@ -94,7 +96,9 @@ It lists what each offers, what OpenDJ had before this pass, what this pass adde
 | Official plug-and-play mappings for hundreds of controllers | ✔ | ✔ | ✔ | ✔ | ✔ | ◐ 1 starter preset + MIDI Learn; community mapping import/export |
 | HID controllers (Traktor Kontrol, Pioneer HID) | ✔ | ✔ | ✔ | ✔ | ✔ | ❌ device-specific protocols; WebHID is possible later per device |
 | Pro DJ Link / CDJ network | ✔ | ◐ | — | ◐ | — | ❌ proprietary protocol |
-| Video mixing / karaoke / lyrics | ✔ (video) | ✔ (Video) | — | ✔ | ✔ | ❌ out of scope for now |
+| Video mixing | ✔ (video) | ✔ (Video) | — | ✔ | ✔ | 🆕 music videos synced to the decks, visualizer for audio tracks, transitions, video FX, overlays, projector / second-screen output |
+| YouTube | — | — | — | ◐ | — | 🆕 official embedded player only, as visuals or a volume-faded jukebox. ◐ ToS forbids downloading or processing its audio, so there is no EQ/FX/sync |
+| Karaoke / lyrics | — | — | — | ✔ | — | ❌ not yet |
 | Lighting (SoundSwitch / DMX) | ✔ | ✔ | — | ✔ | — | 🆕 automatic beat- and phrase-synced light shows over Art-Net, sACN/E1.31, USB DMX (Enttec Pro-compatible), WLED, Philips Hue, OSC and MIDI. ◐ no SoundSwitch/rekordbox lighting file import, no fixture library yet |
 | Live broadcast (Icecast/Shoutcast) | — | — | ✔ | ✔ | ✔ | ❌ planned (needs an encoder; could use FFmpeg when it is installed) |
 

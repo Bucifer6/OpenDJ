@@ -12,6 +12,7 @@ import { Sequencer } from './audio/sequencer.js';
 import { applyTheme } from './ui/themes.js';
 import { Lighting } from './lighting/lighting.js';
 import { setupVideo } from './video/video-ui.js';
+import { setupUpload } from './ui/upload.js';
 
 class App {
   constructor() { this.shift = false; this._shiftKey = false; }
@@ -24,6 +25,8 @@ class App {
     await this.engine.init();
     this.dialogs = new Dialogs(this);
     this.library = new LibraryUI(this);
+    this.upload = setupUpload(this);
+    if ('serviceWorker' in navigator && !/Electron/.test(navigator.userAgent)) navigator.serviceWorker.register('/sw.js').catch(() => {});
     this.automix = new AutoMix(this);
     this.midi = new MidiManager(this);
     this.sequencer = new Sequencer(this.engine);

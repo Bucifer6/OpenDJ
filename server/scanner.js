@@ -105,7 +105,8 @@ export async function addFile(library, file, sourceId = 'files') {
 
 /** Scan a library folder. Removes tracks whose files disappeared (unless the drive itself is gone). */
 export async function scanFolder(library, folder, { onProgress, signal } = {}) {
-  if (!fs.existsSync(folder.path)) throw new Error(`Folder not reachable: ${folder.path} (is the USB drive / NAS share mounted?)`);
+  const reachable = await Promise.race([fs.promises.stat(folder.path).then((st) => st.isDirectory(), () => false), new Promise((r) => { const t = setTimeout(() => r(false), 10000); t.unref?.(); })]);
+  if (!reachable) throw new Error(`Folder not reachable: ${folder.path} (is the USB drive / NAS share mounted?)`);
   const seen = new Set();
   let n = 0;
   for await (const file of walk(folder.path, { signal })) {

@@ -255,6 +255,11 @@ export class Dialogs {
     const m3uIn = el('input', { class: 'inp', placeholder: 'Path to .m3u / .m3u8 playlist' });
     const library = el('div', { class: 'form' },
       field('Download folder (for tracks from media servers)', el('div', { class: 'row' }, dlIn, el('button', { class: 'btn', onclick: async () => { const p = await this.pickFolder('Download folder'); if (p) { dlIn.value = p; set('downloadDir', p); } } }, 'Browse…'))),
+      (() => { // hosted web app: sign out
+        const box = el('div', { class: 'row' });
+        api.authStatus?.().then((st) => { if (st?.enabled && st?.loggedIn !== false) box.append(el('button', { class: 'btn sm', onclick: async () => { await api.logout(); location.href = '/login.html'; } }, 'Sign out')); }).catch(() => {});
+        return box;
+      })(),
       el('h3', {}, 'Import'),
       el('div', { class: 'row' }, ...[['rekordbox', 'rekordbox XML'], ['traktor', 'Traktor NML'], ['serato', 'Serato crates'], ['virtualdj', 'VirtualDJ database']].map(([k, l]) => el('button', { class: 'btn sm', onclick: () => app.library.dlg.importFrom(k) }, `Import ${l}…`))),
       el('div', { class: 'row' }, rbIn, el('button', { class: 'btn', onclick: async () => {
