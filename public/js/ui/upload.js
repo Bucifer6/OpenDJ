@@ -4,6 +4,7 @@
 //   import { setupUpload, uploadButton } from './ui/upload.js';
 //   app.upload = setupUpload(app);            // drag & drop on the library + progress panel
 //   toolbar.append(uploadButton(app));        // optional button (hidden in desktop mode unless { always: true })
+import { icon } from './icons.js';
 import { api } from '../api.js';
 import { el } from '../util.js';
 
@@ -156,8 +157,8 @@ export function setupUpload(app, { target } = {}) {
  * "Upload…" button for the library toolbar. By default it only shows when the server runs hosted (web app / NAS),
  * where "+ Folder" can't reach the user's own disk; pass { always: true } to show it everywhere.
  */
-export function uploadButton(app, { always = false, label = '⇪ Upload…' } = {}) {
-  const b = el('button', { class: 'btn sm upl-btn', title: 'Upload audio or video files from this computer to the server library', onclick: () => uploader(app).pick() }, label);
+export function uploadButton(app, { always = false, label = 'Upload…' } = {}) {
+  const b = el('button', { class: 'btn sm upl-btn', title: 'Upload audio or video files from this computer to the server library', onclick: () => uploader(app).pick() }, icon('upload'), el('span', { class: 'lbl' }, label));
   if (!always) {
     b.hidden = true;
     api.capabilities().then((c) => { b.hidden = !c.hosted; }).catch(() => {});

@@ -10,6 +10,7 @@ import { AutoMix } from './automix.js';
 import { MidiManager } from './midi/midi.js';
 import { Sequencer } from './audio/sequencer.js';
 import { applyTheme } from './ui/themes.js';
+import { icon, iconLabel } from './ui/icons.js';
 import { Lighting } from './lighting/lighting.js';
 import { setupVideo } from './video/video-ui.js';
 import { setupUpload } from './ui/upload.js';
@@ -21,6 +22,14 @@ import { setupLyrics } from './lyrics/lyrics.js';
 import { dvsButton } from './dvs/dvs-ui.js';
 import { BackgroundAnalyser } from './audio/background-analysis.js';
 import { isUndecodable } from './audio/analysis-queue.js';
+
+/** The OpenDJ mark: a platter with a tone arm, drawn in the accent colour. */
+function logoMark() {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('class', 'logo-mark'); s.setAttribute('aria-hidden', 'true');
+  s.innerHTML = '<circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="5.5" fill="none" stroke="currentColor" stroke-opacity=".45" stroke-width="1.5"/><circle cx="12" cy="12" r="2" fill="currentColor"/>';
+  return s;
+}
 
 class App {
   constructor() { this.shift = false; this._shiftKey = false; }
@@ -71,7 +80,7 @@ class App {
   updateHostedUi() { if (this.signOutBtn) this.signOutBtn.hidden = !this.auth; }
 
   showStartOverlay() {
-    const o = el('div', { class: 'overlay start' }, el('button', { class: 'btn primary big-start', onclick: async () => { await this.engine.resume(); o.remove(); } }, '▶ Start audio engine'));
+    const o = el('div', { class: 'overlay start' }, el('button', { class: 'btn primary big-start', onclick: async () => { await this.engine.resume(); o.remove(); } }, iconLabel('play', 'Start audio engine')));
     document.body.append(o);
   }
 
@@ -94,7 +103,9 @@ class App {
   }
 
   toast(msg) {
-    const t = el('div', { class: 'toast' }, msg);
+    // "⚠ …" messages are warnings: shown with an icon and the warning colour instead of the emoji
+    const warn = typeof msg === 'string' && /^⚠\uFE0F?\s*/.test(msg);
+    const t = el('div', { class: `toast${warn ? ' warn' : ''}`, role: warn ? 'alert' : 'status' }, icon(warn ? 'warn' : 'info'), el('span', { class: 'toast-msg' }, warn ? msg.replace(/^⚠\uFE0F?\s*/, '') : msg));
     this.toasts.append(t);
     setTimeout(() => t.classList.add('out'), 4200); setTimeout(() => t.remove(), 4700);
   }
@@ -105,10 +116,10 @@ class App {
     this.toasts = el('div', { class: 'toasts' });
     // top bar
     this.clock = el('span', { class: 'clock' });
-    this.recBtn = el('button', { class: 'btn rec', onclick: () => this.toggleRecord(), title: 'Record your mix to disk. R = start / stop' }, '● REC');
+    this.recBtn = el('button', { class: 'btn rec', onclick: () => this.toggleRecord(), title: 'Record your mix to disk. R = start / stop' }, el('span', { class: 'rec-dot' }), 'REC');
     this.recTime = el('span', { class: 'rec-time' });
-    this.amBtn = el('button', { class: 'btn automix-btn', onclick: () => this.toggleAutomix(), title: 'Automix the current library view' }, 'AUTOMIX');
-    this.amSkip = el('button', { class: 'btn sm', onclick: () => this.automix.skip(), title: 'Mix to next track now' }, '⏭');
+    this.amBtn = el('button', { class: 'btn automix-btn', onclick: () => this.toggleAutomix(), title: 'Automix the current library view' }, iconLabel('automix', 'AUTOMIX'));
+    this.amSkip = el('button', { class: 'btn sm icon-only', onclick: () => this.automix.skip(), title: 'Mix to next track now', 'aria-label': 'Mix to next track now' }, icon('next'));
     this.amInfo = el('span', { class: 'am-info' });
     this.midiDot = el('span', { class: 'midi-dot', title: 'MIDI activity' }, 'MIDI');
     this.cpu = el('span', { class: 'cpu' });
@@ -119,18 +130,18 @@ class App {
     const shiftUp = () => { this.shift = this._shiftKey; shiftBtn.classList.remove('active'); };
     shiftBtn.addEventListener('pointerup', shiftUp); shiftBtn.addEventListener('pointerleave', shiftUp);
     const topbar = el('header', { class: 'topbar' },
-      el('div', { class: 'logo' }, el('span', { class: 'logo-mark' }, '◐'), 'Open', el('b', {}, 'DJ')),
+      el('div', { class: 'logo' }, logoMark(), el('span', { class: 'logo-word' }, 'Open', el('b', {}, 'DJ'))),
       deckSel, shiftBtn,
       el('div', { class: 'tb-group' }, this.amBtn, this.amSkip, this.amInfo),
       el('div', { class: 'tb-spacer' }),
       el('div', { class: 'tb-group' }, this.recBtn, this.recTime),
       this.midiDot, this.cpu, this.clock,
       dvsButton(this),
-      el('button', { class: 'btn sm video-btn', title: 'Video mixer, visuals, YouTube & projector output', onclick: () => (this.videoUi ||= setupVideo(this)).toggleMixer() }, '🎬 VIDEO'),
-      el('button', { class: 'btn sm light-btn', title: 'Lighting (DMX, Art-Net, sACN, WLED, Hue, OSC)', onclick: () => this.lighting?.openPanel() }, '💡 LIGHTS'),
-      el('button', { class: 'btn icon', title: 'Settings', onclick: () => this.dialogs.settings() }, '⚙'),
-      this.signOutBtn = el('button', { class: 'btn sm signout-btn', hidden: true, title: 'Sign out of this OpenDJ server', onclick: async () => { if (this.engine.decks.some((d) => d.playing) && !(await this.dialogs.confirm('Music is playing. Sign out anyway?'))) return; await api.logout(); } }, 'Sign out'),
-      el('button', { class: 'btn icon', title: 'Full screen', onclick: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()) }, '⛶'),
+      el('button', { class: 'btn sm video-btn', title: 'Video mixer, visuals, YouTube & projector output', onclick: () => (this.videoUi ||= setupVideo(this)).toggleMixer() }, iconLabel('video', 'VIDEO')),
+      el('button', { class: 'btn sm light-btn', title: 'Lighting (DMX, Art-Net, sACN, WLED, Hue, OSC)', onclick: () => this.lighting?.openPanel() }, iconLabel('lights', 'LIGHTS')),
+      el('button', { class: 'btn icon', title: 'Settings', 'aria-label': 'Settings', onclick: () => this.dialogs.settings() }, icon('settings')),
+      this.signOutBtn = el('button', { class: 'btn sm signout-btn', hidden: true, title: 'Sign out of this OpenDJ server', onclick: async () => { if (this.engine.decks.some((d) => d.playing) && !(await this.dialogs.confirm('Music is playing. Sign out anyway?'))) return; await api.logout(); } }, iconLabel('logout', 'Sign out')),
+      el('button', { class: 'btn icon', title: 'Full screen', 'aria-label': 'Full screen', onclick: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()) }, icon('fullscreen')),
     );
     // stacked detail waveforms
     this.waves = this.engine.decks.map((d, i) => {
@@ -228,7 +239,7 @@ class App {
     swing.addEventListener('input', () => { seq.swing = Number(swing.value); seq.save(); });
     const panel = el('div', { class: 'seq-panel' },
       el('div', { class: 'seq-head' }, el('b', {}, 'SEQUENCER'), playBtn, el('span', { class: 'hint' }, 'Follows the master deck tempo & beat grid · free BPM'), bpmIn, el('span', { class: 'hint' }, 'Swing'), swing,
-        el('button', { class: 'btn sm', onclick: () => seq.clear() }, 'Clear'), el('button', { class: 'btn sm', onclick: () => this.toggleSequencer() }, '✕')),
+        el('button', { class: 'btn sm', onclick: () => seq.clear() }, 'Clear'), el('button', { class: 'btn sm icon-only', title: 'Close', 'aria-label': 'Close', onclick: () => this.toggleSequencer() }, icon('x'))),
       grid);
     panel.renderNames = () => names.forEach((n, r) => { n.textContent = sampler.slots[r]?.name || '—'; });
     panel.renderNames(); paint();
@@ -285,7 +296,8 @@ class App {
     this.amBtn.classList.toggle('active', a.enabled);
     const next = a.nextTrack();
     this.amSkip.disabled = !a.enabled || !!a.transition;
-    this.amInfo.textContent = a.enabled ? (a.transition ? 'Mixing…' : next ? `Next: ${next.artist ? next.artist + ' – ' : ''}${next.title}` : 'Last track') : (a.queue.length ? `${a.queue.length - a.idx} queued` : '');
+    const info = a.enabled ? (a.transition ? 'Mixing…' : next ? `Next: ${next.artist ? next.artist + ' – ' : ''}${next.title}` : 'Last track') : (a.queue.length ? `${a.queue.length - a.idx} queued` : '');
+    if (this.amInfo.textContent !== info) this.amInfo.textContent = info;
   }
 
   toggleRecord() { return this.recording.toggle(); }
@@ -390,12 +402,13 @@ class App {
   }
 
   frame(now) {
-    for (let i = 0; i < this.deckCount; i++) { this.waves[i].wf.draw(); this.deckEls[i].frame(now); }
-    this.mixer.frame();
+    for (let i = 0; i < this.deckCount; i++) { this.waves[i].wf.draw(now); this.deckEls[i].frame(now); }
+    this.mixer.frame(now);
     if (!this._slow || now - this._slow > 250) {
       this._slow = now;
-      this.clock.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      this.recTime.textContent = this.engine.recording ? fmtTime((Date.now() - this.engine.recStarted) / 1000).slice(0, 5) : '';
+      const setText = (n, t) => { if (n.textContent !== t) n.textContent = t; };
+      setText(this.clock, new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      setText(this.recTime, this.engine.recording ? fmtTime((Date.now() - this.engine.recStarted) / 1000).slice(0, 5) : '');
       this.midiDot.classList.toggle('active', now - this.midi.activity < 150);
       this.midiDot.classList.toggle('connected', (this.midi.devices?.() || this.midi.inputs()).length > 0);
       this.midiDot.title = this.midi.inputs().map((i) => i.name).join(', ') || 'No MIDI controller';

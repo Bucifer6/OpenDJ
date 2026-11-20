@@ -62,9 +62,11 @@ export class Deck extends Emitter {
   }
 
   // ---------- derived state ----------
-  get position() {
+  get position() { return this.positionAt(this.ctx.currentTime); }
+  /** Track position at audio-clock time `t` (the UI passes a frame-smoothed clock so waveforms scroll evenly). */
+  positionAt(t) {
     if (!this.track) return 0;
-    const p = this._pos + (this.ctx.currentTime - this._t) * this._rate;
+    const p = this._pos + (t - this._t) * this._rate;
     if (this.loop?.active && p > this.loop.end && this._rate > 0) return this.loop.start + ((p - this.loop.start) % (this.loop.end - this.loop.start));
     if (this.loop?.active && p < this.loop.start && this._rate < 0 && this._pos >= this.loop.start) { const L = this.loop.end - this.loop.start; return this.loop.end - ((this.loop.start - p) % L); }
     return clamp(p, 0, this.duration);

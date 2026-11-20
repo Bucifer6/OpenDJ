@@ -5,6 +5,7 @@ import { stemsMenuItems } from '../stems/stems-ui.js';
 import { api } from '../api.js';
 import { toCamelot, camelotCompatible } from '../audio/analysis-core.js';
 import { LibraryDialogs, TRACK_COLORS, colorName, flipSubmenus } from './library-dialogs.js';
+import { icon as uiIcon, iconLabel, glyphIcon } from './icons.js';
 
 const ROW_H = 26;
 const COLS = [
@@ -196,15 +197,15 @@ export class LibraryUI {
     this.statusEl = el('span', { class: 'lib-status' });
     this.analysisText = el('span', {});
     this.analysisEl = el('span', { class: 'lib-analysis', hidden: true }, this.analysisText,
-      el('button', { class: 'btn xs', title: 'Stop analysing (Analyse all in ⋯ Library starts it again)', onclick: () => this.app.analyser?.cancel() }, '✕'));
+      el('button', { class: 'btn xs', title: 'Stop analysing (Analyse all in ⋯ Library starts it again)', onclick: () => this.app.analyser?.cancel() }, uiIcon('x')));
     this.viewActions = el('span', { class: 'lib-view-actions' });
     const tools = el('div', { class: 'lib-tools' },
       this.viewTitle, this.countEl, this.viewActions, this.search,
-      el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addFolder(), title: 'Add a folder, USB drive or NAS share' }, '+ Folder'),
+      el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addFolder(), title: 'Add a folder, USB drive or NAS share' }, iconLabel('folder-plus', 'Folder')),
       uploadButton(this.app),
-      el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addSource(), title: 'Connect Plex, Jellyfin, Emby, Subsonic/Navidrome or MediaMax' }, '+ Media server'),
-      el('button', { class: 'btn sm', onclick: () => this.app.dialogs.automixQueue(this.rows), title: 'Auto-mix the tracks in this view' }, '▶ Automix view'),
-      el('button', { class: 'btn sm lib-menu-btn', title: 'Smart playlists, import from rekordbox / Traktor / Serato / VirtualDJ, missing files, duplicates, backup', onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); this.dlg.libraryMenu(r.left, r.bottom + 4); } }, '⋯ Library'),
+      el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addSource(), title: 'Connect Plex, Jellyfin, Emby, Subsonic/Navidrome or MediaMax' }, iconLabel('server', 'Media server')),
+      el('button', { class: 'btn sm', onclick: () => this.app.dialogs.automixQueue(this.rows), title: 'Auto-mix the tracks in this view' }, iconLabel('automix', 'Automix view')),
+      el('button', { class: 'btn sm lib-menu-btn', title: 'Smart playlists, import from rekordbox / Traktor / Serato / VirtualDJ, missing files, duplicates, backup', onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); this.dlg.libraryMenu(r.left, r.bottom + 4); } }, iconLabel('more', 'Library')),
       this.statusEl, this.analysisEl,
     );
     this.header = el('div', { class: 'lib-header' });
@@ -447,9 +448,9 @@ export class LibraryUI {
     const item = (label, v, { icon = '', actions = [], count, drop, cls = '' } = {}) => {
       const active = this.view.kind === v.kind && this.view.id === v.id;
       const node = el('div', { class: `tree-item ${active ? 'active' : ''} ${cls}`, onclick: () => this.setView(v, label) },
-        el('span', { class: 'ti-icon' }, icon), el('span', { class: 'ti-label' }, label),
+        el('span', { class: 'ti-icon' }, glyphIcon(icon)), el('span', { class: 'ti-label' }, label),
         count != null ? el('span', { class: 'ti-count' }, String(count)) : null,
-        ...actions.map((a) => el('button', { class: 'ti-act', title: a.title, onclick: (e) => { e.stopPropagation(); a.fn(e); } }, a.icon)));
+        ...actions.map((a) => el('button', { class: 'ti-act', title: a.title, 'aria-label': a.title, onclick: (e) => { e.stopPropagation(); a.fn(e); } }, glyphIcon(a.icon))));
       if (actions[0]?.menu) node.addEventListener('contextmenu', (e) => { e.preventDefault(); actions[0].fn(e); });
       if (drop) {
         node.addEventListener('dragover', (e) => { e.preventDefault(); node.classList.add('drop'); });
@@ -507,7 +508,7 @@ export class LibraryUI {
         actions: [{ icon: '⟳', title: 'Rescan', fn: () => api.rescanFolder(f.id).catch((e) => this.app.toast(e.message)) }, { icon: '✕', title: 'Remove folder from library', fn: async () => { if (await this.app.dialogs.confirm(`Remove "${f.name}" from the library? (Files stay on disk.)`)) { await api.removeFolder(f.id); this.refresh(); } } }],
       })),
       ...this.drives.filter((d) => !this.folders.some((f) => f.path === d.path)).map((d) => el('div', { class: 'tree-item drive', title: `${d.path} — click to add to library`, onclick: async () => { await api.addFolder(d.path, d.name); this.refresh(); this.app.toast(`Scanning ${d.name}…`); } },
-        el('span', { class: 'ti-icon' }, d.kind === 'network' ? '🖧' : d.kind === 'home' ? '⌂' : '⛁'), el('span', { class: 'ti-label' }, `${d.name}`), el('span', { class: 'ti-count' }, d.kind === 'network' ? 'NAS +' : d.kind === 'home' ? '+' : 'USB +'))),
+        el('span', { class: 'ti-icon' }, glyphIcon(d.kind === 'network' ? '🖧' : d.kind === 'home' ? '⌂' : '⛁')), el('span', { class: 'ti-label' }, `${d.name}`), el('span', { class: 'ti-count' }, d.kind === 'network' ? 'NAS +' : d.kind === 'home' ? '+' : 'USB +'))),
       head('MEDIA SERVERS', el('button', { class: 'ti-act', title: 'Add media server', onclick: () => this.app.dialogs.addSource() }, '+')),
       ...this.sources.flatMap((s) => [
         item(s.name || s.serverName || s.type, { kind: 'source', id: s.id }, {

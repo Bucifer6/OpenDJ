@@ -4,10 +4,12 @@ import { OverviewWaveform } from './waveform.js';
 import { EFFECTS, BEAT_DIVISIONS } from '../audio/effects.js';
 import { api } from '../api.js';
 import { cssVar } from './themes.js';
+import { icon } from './icons.js';
 import { dvsModeIndicator } from '../dvs/dvs-ui.js';
 import { buildStemControls } from '../stems/stems-ui.js';
 import { HOTCUE_COLORS, TEMPO_RANGES } from '../audio/deck.js';
 import { camelotCompatible, toCamelot } from '../audio/analysis-core.js';
+import { smoothTime } from './clock.js';
 
 export const DECK_COLORS = ['var(--deck1)', 'var(--deck2)', 'var(--deck3)', 'var(--deck4)'];
 const LOOP_SIZES = [1 / 4, 1 / 2, 1, 2, 4, 8, 16, 32];
@@ -40,7 +42,7 @@ export function buildDeck(app, deck) {
 
   // ---------- transport ----------
   const cueBtn = R(button('CUE', { cls: 'btn-cue big', down: () => deck.cueDown(), up: () => deck.cueUp(), active: () => deck.cuePreview || (!deck.playing && deck.track && Math.abs(deck.position - deck.cuePoint) < 0.02) }));
-  const playBtn = R(button('▶❚❚', { cls: 'btn-play big', down: () => { app.engine.resume(); deck.togglePlay(); }, active: () => deck.playing }));
+  const playBtn = R(button(el('span', { class: 'play-glyph' }, icon('play'), icon('pause')), { cls: 'btn-play big', title: 'Play / pause', down: () => { app.engine.resume(); deck.togglePlay(); }, active: () => deck.playing }));
   const syncBtn = R(button('SYNC', { cls: 'btn-sync', click: () => deck.sync(), active: () => deck.syncOn }));
   const masterBtn = R(button('MASTER', { cls: 'btn-master', click: () => deck.setMaster(), active: () => deck.isMaster }));
   const toggles = el('div', { class: 'deck-toggles' },
@@ -93,12 +95,12 @@ export function buildDeck(app, deck) {
   let jumpBeats = 4;
   const jumpLabel = el('span', {}, '4');
   const jumpRow = el('div', { class: 'loop-row jump-row' },
-    button('◀◀', { cls: 'sm', click: () => deck.beatJump(-jumpBeats), title: 'Beat jump back' }),
+    button(icon('rewind'), { cls: 'sm', click: () => deck.beatJump(-jumpBeats), title: 'Beat jump back' }),
     button(el('span', {}, 'JUMP ', jumpLabel), { cls: 'sm', click: () => { jumpBeats = jumpBeats >= 32 ? 1 : jumpBeats * 2; jumpLabel.textContent = jumpBeats; } }),
-    button('▶▶', { cls: 'sm', click: () => deck.beatJump(jumpBeats), title: 'Beat jump forward' }),
+    button(icon('fast-forward'), { cls: 'sm', click: () => deck.beatJump(jumpBeats), title: 'Beat jump forward' }),
     button('MEM', { cls: 'sm', click: () => deck.addMemoryCue(), title: 'Add memory cue' }),
     button('GRID', { cls: 'sm', click: () => app.dialogs.gridEditor(deck), title: 'Edit beat grid' }),
-    button('⏏', { cls: 'sm', click: () => deck.eject(), title: 'Eject' }),
+    button(icon('eject'), { cls: 'sm', click: () => deck.eject(), title: 'Eject' }),
   );
 
   // ---------- performance pads ----------
@@ -175,19 +177,30 @@ export function buildDeck(app, deck) {
 
   // ---------- phase meter (beat position in the bar + offset vs master) ----------
   const phase = el('canvas', { class: 'phase-meter', height: 12 });
+  let phaseW = 0, phaseSig = '';
+  new ResizeObserver(() => { phaseW = 0; }).observe(phase);
+  window.addEventListener('opendj-theme', () => { phaseSig = ''; });
   const drawPhase = () => {
-    const dpr = devicePixelRatio || 1, W = Math.round(phase.clientWidth * dpr) || 1, H = Math.round(12 * dpr);
-    if (phase.width !== W) { phase.width = W; phase.height = H; }
+    const dpr = devicePixelRatio || 1;
+    if (!phaseW) phaseW = phase.getBoundingClientRect().width || 1;
+    const W = Math.round(phaseW * dpr) || 1, H = Math.round(12 * dpr);
+    if (phase.width !== W || phase.height !== H) { phase.width = W; phase.height = H; phaseSig = ''; }
+    const m0 = app.engine.masterDeck(deck);
+    const beat0 = deck.bpm && deck.track ? ((deck.beatIndex() % 4) + 4) % 4 : -1;
+    let d0 = 0; if (m0 && m0.bpm && m0.playing && deck.playing && beat0 >= 0) { d0 = deck.beatPhase() - m0.beatPhase(); if (d0 > 0.5) d0 -= 1; if (d0 < -0.5) d0 += 1; }
+    const sigNow = `${W}|${beat0}|${deck.playing}|${m0 && m0.playing && deck.playing ? Math.round(d0 * 200) : 'x'}`;
+    if (sigNow === phaseSig) return;
+    phaseSig = sigNow;
     const g = phase.getContext('2d'); g.clearRect(0, 0, W, H);
     if (!deck.bpm || !deck.track) return;
-    const beat = ((deck.beatIndex() % 4) + 4) % 4, seg = W / 4;
-    for (let k = 0; k < 4; k++) { g.fillStyle = k === beat && deck.playing ? cssVar(`--deck${i + 1}`) : k === beat ? cssVar('--line-2') : cssVar('--panel-3'); g.fillRect(k * seg + 1, 0, seg - 2, H * 0.45); }
+    const beat = beat0, seg = W / 4;
+    for (let k = 0; k < 4; k++) { g.fillStyle = k === beat && deck.playing ? cssVar(`--deck${i + 1}`) : k === beat ? cssVar('--line-2') : cssVar('--panel-3'); g.fillRect(Math.round(k * seg + dpr), 0, Math.round(seg - 2 * dpr), Math.round(H * 0.42)); }
     const m = app.engine.masterDeck(deck);
     if (m && m.bpm && m.playing && deck.playing) {
       let d = deck.beatPhase() - m.beatPhase(); if (d > 0.5) d -= 1; if (d < -0.5) d += 1;
       const x = W / 2 + d * W / 2; const ok = Math.abs(d) < 0.03;
-      g.fillStyle = '#2a313b'; g.fillRect(W / 2 - dpr / 2, H * 0.55, dpr, H * 0.45);
-      g.fillStyle = ok ? '#2ed47a' : Math.abs(d) < 0.1 ? '#ffb020' : '#ff3b4d';
+      g.fillStyle = cssVar('--line-2'); g.fillRect(Math.round(W / 2 - dpr / 2), H * 0.55, Math.max(1, Math.round(dpr)), H * 0.45);
+      g.fillStyle = ok ? cssVar('--green') : Math.abs(d) < 0.1 ? cssVar('--amber') : cssVar('--red');
       g.fillRect(Math.min(x, W / 2), H * 0.6, Math.max(2 * dpr, Math.abs(x - W / 2)), H * 0.35);
     }
   };
@@ -244,31 +257,33 @@ export function buildDeck(app, deck) {
     const playing = deck.playingCamelot || cam;
     const sh = Math.round(deck.pitchSemis);
     keyBadge.textContent = t?.key ? `${playing || ''}${sh ? ` (${sh > 0 ? '+' : ''}${sh})` : ''} ${t.key !== cam ? t.key : ''}`.trim() : '';
-    keyBadge.className = 'key-badge' + (playing ? ` cam-${playing.replace(/\D/g, '')}` : '');
+    keyBadge.className = 'key-badge' + (playing ? ` cam-${playing.replace(/\D/g, '')}` : ''); keyBadge._ccompatible = undefined;
     renderPads();
   };
   deck.on('key', () => { keyVal.textContent = `${deck.keyShift > 0 ? '+' : ''}${deck.keyShift}`; updateMeta(); renderPads(); });
   deck.on('load', updateMeta); deck.on('loaded', updateMeta); deck.on('error', updateMeta); deck.on('cues', renderPads);
-  const renderState = () => { for (const r of renderers) r.render(); masterBadge.style.display = deck.isMaster ? '' : 'none'; };
-  deck.on('state', renderState); deck.on('loop', () => { loopSize.textContent = deck.loop?.active ? fmtBeats(deck.loopBeats) : fmtBeats(autoLoopBeats); });
+  const renderState = () => { for (const r of renderers) r.render(); if (masterBadge.hidden === !!deck.isMaster) masterBadge.hidden = !deck.isMaster; };
+  deck.on('state', renderState); deck.on('loop', () => { loopSize._t = loopSize.textContent = deck.loop?.active ? fmtBeats(deck.loopBeats) : fmtBeats(autoLoopBeats); });
   deck.on('tempo', () => tempoFader.render());
   deck.on('tempo-range', () => { rangeSel.value = String(deck.tempoRange); tempoFader.render(); });
 
   let lastFrame = 0;
+  const setText = (node, txt) => { if (node._t !== txt) { node._t = txt; node.textContent = txt; } };
+  const setClass = (node, cls, on) => { on = !!on; if (node['_c' + cls] !== on) { node['_c' + cls] = on; node.classList.toggle(cls, on); } };
   root.frame = (now) => {
-    jog.draw(); overview.draw(); drawPhase();
+    jog.draw(now); overview.draw(now); drawPhase();
     if (now - lastFrame < 50) return; lastFrame = now;
-    const pos = deck.position;
-    elapsed.textContent = fmtTime(pos);
-    remain.textContent = deck.track && deck.duration > 0 ? fmtTime(deck.duration - pos, true) : '00:00.0'; // no "-00:00.0" on empty decks
-    remain.classList.toggle('warn', deck.duration > 0 && deck.duration - pos < 30 && deck.playing);
-    bpmBig.textContent = deck.effectiveBpm ? deck.effectiveBpm.toFixed(2) : '--';
-    bpmSub.textContent = deck.bpm ? `${deck.tempo >= 0 ? '+' : ''}${deck.tempo.toFixed(2)}%  ·  ${deck.bpm.toFixed(2)}` : '';
-    tempoVal.textContent = `${deck.tempo >= 0 ? '+' : ''}${deck.tempo.toFixed(2)}%`;
-    if (!deck.loop?.active) loopSize.textContent = fmtBeats(autoLoopBeats);
+    const pos = deck.positionAt(smoothTime(deck.ctx, now));
+    setText(elapsed, fmtTime(pos));
+    setText(remain, deck.track && deck.duration > 0 ? fmtTime(deck.duration - pos, true) : '00:00.0'); // no "-00:00.0" on empty decks
+    setClass(remain, 'warn', deck.duration > 0 && deck.duration - pos < 30 && deck.playing);
+    setText(bpmBig, deck.effectiveBpm ? deck.effectiveBpm.toFixed(2) : '--');
+    setText(bpmSub, deck.bpm ? `${deck.tempo >= 0 ? '+' : ''}${deck.tempo.toFixed(2)}%  ·  ${deck.bpm.toFixed(2)}` : '');
+    setText(tempoVal, `${deck.tempo >= 0 ? '+' : ''}${deck.tempo.toFixed(2)}%`);
+    if (!deck.loop?.active) setText(loopSize, fmtBeats(autoLoopBeats));
     // harmonic hint vs. master deck
     const m = app.engine.masterDeck(deck);
-    keyBadge.classList.toggle('compatible', !!(m && deck.playingCamelot && m.playingCamelot && camelotCompatible(deck.playingCamelot, m.playingCamelot)));
+    setClass(keyBadge, 'compatible', m && deck.playingCamelot && m.playingCamelot && camelotCompatible(deck.playingCamelot, m.playingCamelot));
     if (!deck.keyLock && deck.tempo !== deck._lastKeyTempo) { deck._lastKeyTempo = deck.tempo; updateMeta(); }
     renderState();
   };

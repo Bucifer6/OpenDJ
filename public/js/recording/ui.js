@@ -1,6 +1,7 @@
 // Recording & broadcasting UI: topbar additions (size readout, settings ▾, LIVE button) and the
 // "Record & stream" panel with Record / Recordings / Broadcast tabs.
 import { el } from '../util.js';
+import { icon } from '../ui/icons.js';
 import { MixRecorder } from './recorder.js';
 import { Broadcaster } from './broadcaster.js';
 import { recApi, castApi } from './http.js';
@@ -31,21 +32,23 @@ export function setupRecording(app) {
 
   // ---- topbar ----
   const sizeEl = el('span', { class: 'rec-size', title: 'Recording size on disk' });
-  const moreBtn = el('button', { class: 'btn sm rec-more', title: 'Recording format, folder, recordings and live streaming', onclick: () => ctl.openPanel('record') }, '▾');
-  const liveBtn = el('button', { class: 'btn sm live-btn', title: 'Broadcast live (Icecast, Shoutcast, Twitch / YouTube via RTMP)', onclick: () => ctl.toggleBroadcast() }, '📡 LIVE');
+  const moreBtn = el('button', { class: 'btn sm rec-more', title: 'Recording format, folder, recordings and live streaming', onclick: () => ctl.openPanel('record'), 'aria-label': 'Recording options' }, icon('chevron-down'));
+  const liveBtn = el('button', { class: 'btn sm live-btn', title: 'Broadcast live (Icecast, Shoutcast, Twitch / YouTube via RTMP)', onclick: () => ctl.toggleBroadcast() }, icon('live'), el('span', { class: 'lbl' }, 'LIVE'));
+  const liveLbl = liveBtn.lastChild;
   const anchor = app.recTime || app.recBtn;
   if (anchor?.parentNode) anchor.after(sizeEl, moreBtn, liveBtn);
   if (app.recBtn) app.recBtn.title = 'Record your mix to disk (WAV / FLAC / MP3 / AAC / Opus). R = start / stop';
   let lastCastError = null;
   const topbarTick = setInterval(() => {
-    sizeEl.textContent = recorder.recording ? mb(recorder.bytes) : '';
     const outs = broadcaster.status?.outputs || [];
     liveBtn.classList.toggle('active', broadcaster.live);
     liveBtn.classList.toggle('warn', broadcaster.live && outs.some((o) => o.state !== 'live'));
     const listeners = outs.reduce((s, o) => s + (o.listeners || 0), 0);
     // ON AIR only once at least one output really is live; until then say what is happening
     const onAir = outs.some((o) => o.state === 'live');
-    liveBtn.textContent = !broadcaster.live ? '📡 LIVE' : onAir ? `📡 ON AIR${listeners ? ` · ${listeners}` : ''}` : outs.some((o) => o.state === 'reconnecting' || o.state === 'error') ? '📡 RECONNECTING…' : '📡 CONNECTING…';
+    const liveTxt = !broadcaster.live ? 'LIVE' : onAir ? `ON AIR${listeners ? ` · ${listeners}` : ''}` : outs.some((o) => o.state === 'reconnecting' || o.state === 'error') ? 'RECONNECTING…' : 'CONNECTING…';
+    if (liveLbl.textContent !== liveTxt) liveLbl.textContent = liveTxt;
+    if (sizeEl.textContent !== (recorder.recording ? mb(recorder.bytes) : '')) sizeEl.textContent = recorder.recording ? mb(recorder.bytes) : '';
     if (broadcaster.live && !onAir && outs[0]?.error && outs[0].error !== lastCastError) { lastCastError = outs[0].error; toast(`⚠ Broadcast: ${outs[0].error}`); }
     if (onAir) lastCastError = null;
   }, 500);
