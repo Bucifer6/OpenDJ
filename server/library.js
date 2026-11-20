@@ -62,7 +62,7 @@ const STR_FIELDS = { title: 500, artist: 500, album: 500, genre: 200, comment: 2
 export function sanitizeField(k, v) {
   if (NUM_FIELDS.has(k)) { if (v === null || v === undefined || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
   if (Object.hasOwn(STR_FIELDS, k)) return v === null || v === undefined ? (k === 'key' || k === 'color' ? null : '') : String(v).slice(0, STR_FIELDS[k]);
-  if (k === 'analyzed' || k === 'bpmLocked') return !!v;
+  if (k === 'analyzed' || k === 'bpmLocked' || k === 'gridLocked') return !!v;
   if (['cues', 'loops', 'phrases', 'hotLoops'].includes(k)) return Array.isArray(v) ? v.slice(0, 1000) : [];
   return v;
 }
@@ -138,7 +138,7 @@ export class Library {
       cues: prev.cues, loops: prev.loops, gridOffset: prev.gridOffset, analyzed: prev.analyzed,
       rating: prev.rating, playCount: prev.playCount, lastPlayed: prev.lastPlayed, addedAt: prev.addedAt,
       localPath: prev.localPath, gain: prev.gain, color: prev.color, comment: prev.comment || t.comment,
-      tags: prev.tags, phrases: prev.phrases, mixIn: prev.mixIn, mixOut: prev.mixOut, downbeat: prev.downbeat, hotLoops: prev.hotLoops, keyShift: prev.keyShift, bpmLocked: prev.bpmLocked,
+      tags: prev.tags, phrases: prev.phrases, mixIn: prev.mixIn, mixOut: prev.mixOut, downbeat: prev.downbeat, hotLoops: prev.hotLoops, keyShift: prev.keyShift, bpmLocked: prev.bpmLocked, gridLocked: prev.gridLocked,
       ...(prev.userEdited ? { title: prev.title, artist: prev.artist, album: prev.album, genre: prev.genre, year: prev.year } : {}),
       bpm: prev.analyzed ? prev.bpm : (t.bpm || prev.bpm), key: prev.key || t.key,
     } : {};
@@ -152,7 +152,7 @@ export class Library {
     const t = this.data.tracks[tid];
     if (!t) return null;
     const allowed = ['title', 'artist', 'album', 'genre', 'year', 'bpm', 'key', 'rating', 'comment', 'cues', 'loops',
-      'gridOffset', 'analyzed', 'gain', 'color', 'playCount', 'lastPlayed', 'duration', 'endTime', 'startTime', 'energy', 'bpmLocked',
+      'gridOffset', 'analyzed', 'gain', 'color', 'playCount', 'lastPlayed', 'duration', 'endTime', 'startTime', 'energy', 'bpmLocked', 'gridLocked',
       'phrases', 'tags', 'hotLoops', 'keyShift', 'mixIn', 'mixOut', 'downbeat'];
     for (const k of allowed) if (k in patch) t[k] = sanitizeField(k, patch[k]);
     if ('tags' in patch) t.tags = normTags(patch.tags);

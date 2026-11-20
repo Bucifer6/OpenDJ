@@ -299,7 +299,7 @@ export class LibraryUI {
     items.push({ label: 'Add to playlist', sub: [{ label: '+ New playlist…', action: async () => { const n = await this.app.dialogs.prompt('New playlist', 'Playlist name'); if (n) { await api.createPlaylist(n, ids); this.refresh(); } } }, ...this.playlists.filter((p) => !p.sourceId && !p.smart).map((p) => ({ label: p.name, action: async () => { await api.addToPlaylist(p.id, ids); this.refresh(); this.app.toast(`Added ${ids.length} to ${p.name}`); } }))] });
     items.push({ label: 'Add to automix queue', action: () => this.app.queueAdd(tracks) });
     if (remote.length) items.push({ label: `Download ${remote.length > 1 ? remote.length + ' tracks' : 'for offline use'}`, action: () => this.download(remote.map((t) => t.id)) });
-    items.push({ label: 'Re-analyse (BPM, key, waveform)', action: async () => { for (const t of tracks) { await api.updateTrack(t.id, { analyzed: false }); t.analyzed = false; } this.app.toast('Tracks will be re-analysed when loaded'); } });
+    items.push({ label: 'Re-analyse (BPM, key, waveform)', action: async () => { for (const t of tracks) { await api.updateTrack(t.id, { analyzed: false, gridLocked: false }); t.analyzed = false; t.gridLocked = false; } this.app.toast('Tracks will be re-analysed when loaded'); } });
     items.push(...stemsMenuItems(this.app, tracks));
     if (window.opendjNative && tracks[0] && (tracks[0].localPath || tracks[0].path)) items.push({ label: 'Show in folder', action: () => window.opendjNative.reveal(tracks[0].localPath || tracks[0].path) });
     items.push('-');

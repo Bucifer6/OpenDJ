@@ -527,6 +527,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
         cues: (rt.cues || []).map((c) => ({ ...c, index: c.type === 'memory' ? -1 : c.index })),
         gridOffset: rt.grid?.offset ?? t.gridOffset,
         analyzed: !!rt.bpm || t.analyzed,
+        ...(rt.bpm && rt.grid ? { gridLocked: true } : rt.bpm ? { bpmLocked: true } : {}), // imported grid is authoritative
         ...(rt.color ? { color: rt.color } : {}),
       });
       imported++;

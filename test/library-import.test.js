@@ -131,6 +131,7 @@ test('import endpoints add existing files with cues, playlists into folders', as
     assert.equal(one.key, 'Am');
     assert.equal(one.cues.length, 3);
     assert.equal(one.gridOffset, 0.0525);
+    assert.equal(one.gridLocked, true, 'imported beat grid is authoritative (not replaced by analysis on first load)');
     const pl = app.library.data.playlists.find((p) => p.name === 'Friday');
     assert.equal(pl.folder, 'Traktor / Gigs');
     assert.deepEqual(pl.trackIds, [one.id]);
@@ -146,6 +147,7 @@ test('import endpoints add existing files with cues, playlists into folders', as
     const two = app.library.getTrack(early.trackIds[0]);
     assert.equal(two.bpm, 120);
     assert.equal(two.key, '5A');
+    assert.equal(two.bpmLocked, true, 'imported BPM without a grid is locked');
     assert.deepEqual(two.cues, [{ type: 'hot', index: 1, position: 3, name: '' }]);
     assert.equal(readSeratoCrates(dir).playlists.length, 1, 'parent folder of _Serato_ is accepted too');
   } finally { app.shutdown(); app.server.close(); }

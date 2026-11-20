@@ -227,6 +227,9 @@ export async function importParsed(library, addFile, parsed, { folderPrefix }) {
         if (pt.playCount && pt.playCount > (t.playCount || 0)) patch.playCount = pt.playCount;
         if (pt.cues?.length && !(t.cues || []).length) patch.cues = pt.cues;
         if (pt.gridOffset != null) patch.gridOffset = pt.gridOffset;
+        // the other app's beat grid is authoritative: re-analysis on first load must not replace it
+        if (pt.bpm && pt.gridOffset != null) patch.gridLocked = true;
+        else if (pt.bpm) patch.bpmLocked = true;
         if (Object.keys(patch).length) library.updateTrack(t.id, patch);
         imported++;
       }

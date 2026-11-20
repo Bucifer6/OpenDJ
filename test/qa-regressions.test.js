@@ -74,3 +74,23 @@ test('m1: loop length in beats is rounded (no 3.999999999)', async () => {
   assert.equal(d.loopBeats, 4);
   d.loop.end = d.loop.start + (60 / 126); assert.equal(d.loopBeats, 1);
 });
+
+test('M7: rekordbox import marks the imported grid as authoritative (gridLocked)', async () => {
+  const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
+  const { start } = await import('../server/index.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'opendj-qa-rb-'));
+  const file = path.join(dir, 'a b.wav');
+  const b = Buffer.alloc(44 + 400); b.write('RIFF', 0); b.writeUInt32LE(36 + 400, 4); b.write('WAVEfmt ', 8);
+  b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(8000, 24); b.writeUInt32LE(16000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(400, 40);
+  fs.writeFileSync(file, b);
+  const loc = 'file://localhost' + file.split('/').map(encodeURIComponent).join('/');
+  fs.writeFileSync(path.join(dir, 'rb.xml'), `<?xml version="1.0" encoding="UTF-8"?><DJ_PLAYLISTS Version="1.0.0"><COLLECTION Entries="1">
+<TRACK TrackID="1" Name="A" AverageBpm="126.00" Tonality="Gm" Location="${loc}"><TEMPO Inizio="0.300" Bpm="126.00" Metro="4/4" Battito="1"/></TRACK></COLLECTION><PLAYLISTS><NODE Type="0" Name="ROOT" Count="0"></NODE></PLAYLISTS></DJ_PLAYLISTS>`);
+  const app = await start({ port: 0, dataDir: path.join(dir, 'data') });
+  try {
+    const r = await (await fetch(app.url + 'api/import/rekordbox', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: path.join(dir, 'rb.xml') }) })).json();
+    assert.equal(r.imported, 1);
+    const t = app.library.allTracks()[0];
+    assert.equal(t.gridOffset, 0.3); assert.equal(t.bpm, 126); assert.equal(t.gridLocked, true);
+  } finally { app.shutdown(); app.server.close(); }
+});

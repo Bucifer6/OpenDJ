@@ -231,7 +231,7 @@ export function mergeDuplicates(library, groups) {
     b.playCount = (b.playCount || 0) + (a.playCount || 0);
     b.lastPlayed = Math.max(a.lastPlayed || 0, b.lastPlayed || 0) || b.lastPlayed;
     for (const k of ['cues', 'loops', 'hotLoops', 'phrases']) if (!b[k]?.length && a[k]?.length) b[k] = a[k];
-    if (!b.analyzed && a.analyzed) for (const k of ['analyzed', 'bpm', 'gridOffset', 'downbeat', 'key', 'energy', 'gain', 'bpmLocked']) if (a[k] !== undefined) b[k] = a[k];
+    if (!b.analyzed && a.analyzed) for (const k of ['analyzed', 'bpm', 'gridOffset', 'downbeat', 'key', 'energy', 'gain', 'bpmLocked', 'gridLocked']) if (a[k] !== undefined) b[k] = a[k];
     if (!b.localPath && a.localPath) b.localPath = a.localPath;
     if (a.rating > (b.rating || 0)) b.rating = a.rating;
     if (!b.comment && a.comment) b.comment = a.comment;
