@@ -128,3 +128,26 @@ test('#13 api.js encodes ids in every URL helper', async () => {
   }
   assert.equal(api.coverUrl('abc123'), '/api/tracks/abc123/cover');
 });
+
+// ---------------------------------------------------------------- #2 body limits
+test('#2 body limits: 16 KiB for the public login routes, 1 MiB by default, explicit limits where big bodies are needed', () => hosted(async ({ app, c }) => {
+  const pad = (n) => JSON.stringify({ password: 'x', pad: 'A'.repeat(n) });
+  // pre-auth: refused on Content-Length alone, without buffering
+  const big = await raw(app.port, 'POST', '/api/auth/login', { 'Content-Type': 'application/json', 'Content-Length': 45 * 2 ** 20 });
+  assert.equal(big.status, 413);
+  assert.equal((await raw(app.port, 'POST', '/api/auth/login', { 'Content-Type': 'application/json' }, pad(20 * 1024))).status, 413);
+  assert.equal((await raw(app.port, 'POST', '/api/auth/setup', { 'Content-Type': 'application/json' }, pad(20 * 1024))).status, 413);
+  // default 1 MiB
+  assert.equal((await c('PUT', '/api/lyrics/settings', { online: false, pad: 'A'.repeat(1.5 * 2 ** 20) })).status, 413);
+  assert.equal((await c('PUT', '/api/lyrics/settings', { online: false, pad: 'A'.repeat(100 * 1024) })).status, 200);
+  assert.equal((await c('POST', '/api/playlists', { name: 'x', pad: 'A'.repeat(1.5 * 2 ** 20) })).status, 200, 'playlists take long id lists');
+  // explicit bigger limits keep working
+  const ids = Array.from({ length: 60000 }, (_, i) => `t${i}`.padEnd(20, 'x')); // ~1.4 MB of ids
+  assert.equal((await c('POST', '/api/tracks/update', { ids, patch: { rating: 1 } })).status, 200);
+  assert.equal((await c('POST', '/api/tracks/delete', { ids })).status, 200);
+  assert.equal((await c('POST', '/api/import/m3u', { content: '#EXTM3U\n' + '# pad\n'.repeat(500000), name: 'big' })).status, 200);
+  const r = await c('POST', '/api/restore', backup({ playlists: [{ id: 'p', name: 'P', trackIds: ids }] }));
+  assert.equal(r.status, 200);
+  app.library.upsertTrack({ id: 'w1', sourceType: 'local', path: '/nowhere.wav', title: 'w' });
+  assert.equal((await c('PUT', '/api/tracks/w1/waveform', Buffer.alloc(4 * 2 ** 20))).status, 200);
+}));

@@ -30,7 +30,7 @@ export function registerLightingRoutes({ route, library, emit = () => {}, fetch:
     engine.setConfig(body);
     save();
     return redact(engine.config);
-  });
+ }, { bodyLimit: 8 * 2 ** 20 }); // rigs with many fixtures / cue lists
   // Renderer -> server music feed (10-20 Hz). Kept tiny.
   route('POST', '/api/lighting/state', async ({ body }) => { if (body && typeof body === 'object') engine.setState(body); return { ok: 1 }; });
   route('POST', '/api/lighting/live', async ({ body }) => {

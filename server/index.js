@@ -63,7 +63,15 @@ class HttpError extends Error { constructor(status, msg) { super(msg); this.stat
 
 const mimeOf = (req) => String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
 
-async function readBody(req, limit = 50 * 1024 * 1024) {
+// Request body limits. Bodies are buffered in memory, so the default is small; the public login routes get even
+// less (they are reachable without a session), and routes that really take big bodies opt in with `bodyLimit`.
+const KiB = 1024, MiB = 1024 * KiB;
+const DEFAULT_BODY_LIMIT = 1 * MiB;
+const AUTH_BODY_LIMIT = 16 * KiB;
+const BIG_JSON = 8 * MiB;      // long id / path lists (bulk edits, big playlists, settings with MIDI maps / lighting)
+const IMPORT_LIMIT = 50 * MiB; // rekordbox / Traktor / VirtualDJ XML, M3U sent as content
+
+async function readBody(req, limit = DEFAULT_BODY_LIMIT) {
   if (Number(req.headers['content-length']) > limit) throw new HttpError(413, 'Body too large');
   const chunks = []; let n = 0;
   for await (const c of req) { n += c.length; if (n > limit) throw new HttpError(413, 'Body too large'); chunks.push(c); }
@@ -251,10 +259,11 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   // ---------------- health / auth / capabilities ----------------
   route('GET', '/api/health', () => ({ ok: true }), { public: true });
   route('GET', '/api/auth/status', ({ req }) => ({ enabled: auth.enabled, authenticated: auth.check(req), setupRequired: auth.setupRequired }), { public: true });
-  route('POST', '/api/auth/login', async ({ req, res, body }) => { auth.login(req, res, body.password); return { ok: true }; }, { public: true });
-  route('POST', '/api/auth/setup', async ({ req, res, body }) => { auth.setup(req, res, body); return { ok: true }; }, { public: true });
-  route('POST', '/api/auth/logout', async ({ req, res }) => { auth.logout(req, res); return { ok: true }; }, { public: true });
-  route('POST', '/api/auth/password', async ({ req, res, body }) => { if (!auth.enabled) throw new HttpError(400, 'Login is not enabled'); auth.changePassword(req, res, body); return { ok: true }; });
+  const authRoute = { public: true, bodyLimit: AUTH_BODY_LIMIT };
+  route('POST', '/api/auth/login', async ({ req, res, body }) => { auth.login(req, res, body.password); return { ok: true }; }, authRoute);
+  route('POST', '/api/auth/setup', async ({ req, res, body }) => { auth.setup(req, res, body); return { ok: true }; }, authRoute);
+  route('POST', '/api/auth/logout', async ({ req, res }) => { auth.logout(req, res); return { ok: true }; }, authRoute);
+  route('POST', '/api/auth/password', async ({ req, res, body }) => { if (!auth.enabled) throw new HttpError(400, 'Login is not enabled'); auth.changePassword(req, res, body); return { ok: true }; }, { bodyLimit: AUTH_BODY_LIMIT });
   route('GET', '/api/capabilities', async () => {
     await ffReady;
     return {
@@ -277,7 +286,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     const ids = (Array.isArray(body.ids) ? body.ids : []).filter((i) => library.getTrack(i));
     for (const i of ids) library.updateTrack(i, body.patch && typeof body.patch === 'object' ? body.patch : {});
     return { updated: ids.length };
-  });
+  }, { bodyLimit: BIG_JSON });
   route('GET', '/api/tracks/missing', async () => [...await missing.missingIdsAsync(library.allTracks(), { full: true })]);
   route('POST', '/api/tracks/relocate', async ({ body }) => {
     allowPath(body.folder);
@@ -285,16 +294,16 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     const r = await relocateTracks(library, body.folder, ids, { confirm: body.confirm && typeof body.confirm === 'object' ? body.confirm : {} });
     missing.invalidate(r.relocated.map((x) => x.id));
     return r;
-  });
+  }, { bodyLimit: BIG_JSON });
   route('GET', '/api/tracks/duplicates', () => findDuplicates(library.allTracks()));
-  route('POST', '/api/tracks/dedupe', async ({ body }) => mergeDuplicates(library, body.groups));
+  route('POST', '/api/tracks/dedupe', async ({ body }) => mergeDuplicates(library, body.groups), { bodyLimit: BIG_JSON });
   route('POST', '/api/tracks/delete', async ({ body }) => {
     const ids = Array.isArray(body.ids) ? body.ids.filter((x) => typeof x === 'string') : [];
     library.removeTracks(ids);
     for (const id of ids) stems.evict(id).catch(() => {});
     for (const id of ids) transcoder.evict(id).catch(() => {});
     return { ok: true };
-  });
+  }, { bodyLimit: BIG_JSON });
   route('POST', '/api/tracks/played', async ({ body }) => {
     const t = track(body.id); t.playCount = (t.playCount || 0) + 1; t.lastPlayed = Date.now();
     history.record(t, t.lastPlayed);
@@ -420,7 +429,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     if (!Buffer.isBuffer(body)) throw new HttpError(400, 'Expected binary body');
     await fs.promises.writeFile(library.waveformPath(track(params.id).id), body);
     return { ok: true };
-  });
+  }, { bodyLimit: 16 * MiB });
   route('POST', '/api/files', async ({ body }) => {
     const added = [];
     for (const p of Array.isArray(body.paths) ? body.paths : []) {
@@ -432,7 +441,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     }
     library.changed('tracks');
     return { added };
-  });
+  }, { bodyLimit: BIG_JSON });
 
   // ---------------- browser upload (hosted mode: users can't hand us local paths) ----------------
   // Raw body, file name in `X-Filename` (URI-encoded). Saved into the uploads folder, which is a library folder.
@@ -477,17 +486,17 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     if (body.smart) extra.smart = normSmart(body.smart);
     const p = library.createPlaylist(body.name, Array.isArray(body.trackIds) ? body.trackIds.filter((x) => typeof x === 'string') : [], extra);
     return p.smart ? { ...p, trackIds: playlistTrackIds(p) } : p;
-  });
+  }, { bodyLimit: BIG_JSON });
   route('PATCH', '/api/playlists/:id', async ({ params, body }) => {
     const p = library.updatePlaylist(params.id, { ...body, ...(body.smart ? { smart: normSmart(body.smart) } : {}), ...('folder' in body ? { folder: body.folder ? String(body.folder).slice(0, 200) : body.folder } : {}) });
     if (!p) throw new HttpError(404, 'No playlist');
     return p.smart ? { ...p, trackIds: playlistTrackIds(p) } : p;
-  });
+  }, { bodyLimit: BIG_JSON });
   route('DELETE', '/api/playlists/:id', async ({ params }) => { library.deletePlaylist(params.id); return { ok: true }; });
   route('POST', '/api/playlists/:id/add', async ({ params, body }) => {
     if (library.getPlaylist(params.id)?.smart) throw new HttpError(400, 'Smart playlists are filled by their rules');
     return library.addToPlaylist(params.id, Array.isArray(body.trackIds) ? body.trackIds : []) || Promise.reject(new HttpError(404, 'No playlist'));
-  });
+  }, { bodyLimit: BIG_JSON });
   route('GET', '/api/smart/fields', () => ({ fields: SMART_FIELDS, ops: SMART_OPS, sources: SOURCE_VALUES, colors: TRACK_COLORS }));
   route('POST', '/api/smart/preview', async ({ body }) => {
     const ids = evaluateSmart(normSmart(body.smart), library.allTracks());
@@ -514,7 +523,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       if (t) ids.push(t.id);
     }
     return library.createPlaylist(body.name || (body.path ? path.basename(body.path).replace(/\.m3u8?$/i, '') : 'Imported'), ids);
-  });
+  }, { bodyLimit: IMPORT_LIMIT });
   route('POST', '/api/import/rekordbox', async ({ body }) => {
     const xml = await readImport(body, 'xml');
     const parsed = parseRekordboxXml(xml);
@@ -540,11 +549,11 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       library.createPlaylist(pl.name, ids, { folder: pl.path?.length ? pl.path.join(' / ') : 'rekordbox' }); playlists++;
     }
     return { imported, playlists, missing: parsed.tracks.length - imported };
-  });
+  }, { bodyLimit: IMPORT_LIMIT });
   route('POST', '/api/import/traktor', async ({ body }) => {
     const xml = await readImport(body, 'xml');
     return importParsed(library, addFileChecked, parseTraktorNml(xml), { folderPrefix: 'Traktor' });
-  });
+  }, { bodyLimit: IMPORT_LIMIT });
   route('POST', '/api/import/serato', async ({ body }) => {
     allowPath(body.path);
     if (!(await statOk(body.path))?.isDirectory()) throw new HttpError(400, 'Folder does not exist');
@@ -554,7 +563,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   route('POST', '/api/import/virtualdj', async ({ body }) => {
     const xml = await readImport(body, 'xml');
     return importParsed(library, addFileChecked, parseVirtualDjXml(xml), { folderPrefix: 'VirtualDJ' });
-  });
+  }, { bodyLimit: IMPORT_LIMIT });
   route('GET', '/api/export/rekordbox', async ({ res }) => {
     const tracks = library.allTracks().filter((t) => t.localPath || t.sourceType === 'local')
       .map((t) => ({ ...t, path: t.localPath || t.path }));
@@ -604,7 +613,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     const pls = (Array.isArray(body.playlistIds) ? body.playlistIds : []).map((pid) => library.getPlaylist(pid)).filter(Boolean).map((p) => ({ ...p, trackIds: playlistTrackIds(p) }));
     await fs.promises.writeFile(path.join(target, 'OpenDJ', 'rekordbox.xml'), buildRekordboxXml({ tracks, playlists: pls }));
     return { exported, files: copied.size, target };
-  });
+  }, { bodyLimit: BIG_JSON });
 
   // ---------------- history ----------------
   route('GET', '/api/history', () => history.list());
@@ -683,7 +692,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
 
   // ---------------- downloads ----------------
   route('GET', '/api/downloads', () => downloads.list());
-  route('POST', '/api/downloads', async ({ body }) => ({ queued: downloads.enqueue(Array.isArray(body.trackIds) ? body.trackIds : []) }));
+  route('POST', '/api/downloads', async ({ body }) => ({ queued: downloads.enqueue(Array.isArray(body.trackIds) ? body.trackIds : []) }), { bodyLimit: BIG_JSON });
   route('POST', '/api/downloads/cancel', async ({ body }) => { downloads.cancel(body.trackId); return { ok: true }; });
 
   // ---------------- settings / misc ----------------
@@ -696,7 +705,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     const hue = patch.lighting?.outputs?.hue;
     if (hue?.username === REDACTED) hue.username = library.settings.lighting?.outputs?.hue?.username || '';
     return redactSettings(library.updateSettings(patch));
-  });
+  }, { bodyLimit: BIG_JSON });
   route('GET', '/api/jobs', () => [...jobs.keys()]);
   route('GET', '/api/info', () => ({ version: VERSION, dataDir, platform: process.platform, tracks: Object.keys(library.data.tracks).length, hosted: restricted, auth: auth.enabled }));
   // ---------------- lighting (DMX / Art-Net / sACN / WLED / Hue / OSC) ----------------
@@ -795,6 +804,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     } catch (e) {
       if (!e.status) log.error?.('[opendj]', e);
       if (e.retryAfter) res.setHeader('Retry-After', String(e.retryAfter));
+      if (e.status === 413 && !res.headersSent) res.setHeader('Connection', 'close'); // don't read the rest of a huge body
       if (!res.headersSent) sendJson(res, e.status || 500, { error: e.status ? e.message : 'Internal error', ...(e.code && typeof e.code === 'string' && e.status ? { code: e.code } : {}) });
       else res.end();
     }
