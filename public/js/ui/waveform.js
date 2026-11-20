@@ -1,5 +1,6 @@
 // Waveform renderers: scrolling detail view (with beat grid, cues, loop) and full-track overview.
 import { el, clamp } from '../util.js';
+import { cssVar } from './themes.js';
 
 const PALETTES = {
   rgb: { low: [48, 128, 255], mid: [255, 170, 40], high: [240, 245, 255] },
@@ -53,7 +54,7 @@ export class DetailWaveform {
   draw() {
     this.resize();
     const { g, canvas, deck } = this; const W = canvas.width, H = canvas.height, mid = H / 2;
-    g.fillStyle = '#07090c'; g.fillRect(0, 0, W, H);
+    g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, W, H);
     const w = deck.waveform;
     const s = this.getSettings();
     const pal = PALETTES[s.waveformColors] || PALETTES.rgb;
@@ -162,7 +163,7 @@ export class OverviewWaveform {
     const W = Math.max(1, Math.round(r.width * dpr)), H = Math.max(1, Math.round(r.height * dpr));
     if (this.canvas.width !== W || this.canvas.height !== H) { this.canvas.width = W; this.canvas.height = H; this.cacheKey = ''; }
     const { g, deck } = this;
-    g.fillStyle = '#07090c'; g.fillRect(0, 0, W, H);
+    g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, W, H);
     if (!deck.waveform || !deck.duration) return;
     const key = `${deck.track?.id}:${W}:${H}:${this.getSettings().waveformColors}`;
     if (key !== this.cacheKey) { this.cache = this.renderCache(W, H); this.cacheKey = key; }

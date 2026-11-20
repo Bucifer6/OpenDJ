@@ -9,12 +9,14 @@ import { Dialogs } from './ui/dialogs.js';
 import { AutoMix } from './automix.js';
 import { MidiManager } from './midi/midi.js';
 import { Sequencer } from './audio/sequencer.js';
+import { applyTheme } from './ui/themes.js';
 
 class App {
   constructor() { this.shift = false; this._shiftKey = false; }
 
   async init() {
     this.settings = await api.settings();
+    applyTheme(this.settings);
     this.deckCount = this.settings.deckCount || 2;
     this.engine = new Engine(this.settings);
     await this.engine.init();
@@ -304,7 +306,7 @@ class App {
       this.clock.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       this.recTime.textContent = this.engine.recording ? fmtTime((Date.now() - this.engine.recStarted) / 1000).slice(0, 5) : '';
       this.midiDot.classList.toggle('active', now - this.midi.activity < 150);
-      this.midiDot.classList.toggle('connected', this.midi.inputs().length > 0);
+      this.midiDot.classList.toggle('connected', (this.midi.devices?.() || this.midi.inputs()).length > 0);
       this.midiDot.title = this.midi.inputs().map((i) => i.name).join(', ') || 'No MIDI controller';
       this.updateAutomixUi();
       // automix: ease the tempo back to the track's original speed between transitions

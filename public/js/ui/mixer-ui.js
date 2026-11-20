@@ -1,6 +1,7 @@
 import { el } from '../util.js';
 import { knob, fader, button } from './controls.js';
 import { DECK_COLORS } from './deck-ui.js';
+import { cssVar } from './themes.js';
 
 function vuMeter() {
   const c = el('canvas', { class: 'vu', width: 8, height: 120 });
@@ -11,7 +12,7 @@ function vuMeter() {
     const db = 20 * Math.log10(peak + 1e-9);
     const k = Math.max(0, Math.min(1, (db + 48) / 51)); // -48..+3 dB
     if (k > held || performance.now() - heldT > 900) { held = k; heldT = performance.now(); }
-    g.fillStyle = '#0a0c0f'; g.fillRect(0, 0, W, H);
+    g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, W, H);
     const segs = 24;
     for (let s = 0; s < segs; s++) {
       const on = s / segs < k;

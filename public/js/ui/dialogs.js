@@ -1,7 +1,7 @@
 import { el } from '../util.js';
 import { api } from '../api.js';
-import { describeKey } from '../midi/midi.js';
-import { PRESETS } from '../midi/presets.js';
+import { THEMES, applyTheme } from './themes.js';
+import { controllersPanel } from './controllers-panel.js';
 
 export class Dialogs {
   constructor(app) { this.app = app; }
@@ -214,7 +214,6 @@ export class Dialogs {
       field('Sync mode', sel(s.syncMode, [['beat', 'Beat sync (tempo + phase)'], ['tempo', 'Tempo sync only']], (v) => set('syncMode', v))),
       el('label', { class: 'check' }, chk(s.keyLockDefault, (v) => set('keyLockDefault', v)), ' Key lock on by default'),
       el('label', { class: 'check' }, chk(s.quantize, (v) => { set('quantize', v); for (const d of app.engine.decks) d.setQuantize(v); }), ' Quantize'),
-      field('Waveform colours', sel(s.waveformColors, [['rgb', '3-band RGB'], ['blue', 'Blue'], ['mono', 'Monochrome']], (v) => set('waveformColors', v))),
     );
     const am = s.automix;
     const automix = el('div', { class: 'form' },
@@ -246,7 +245,7 @@ export class Dialogs {
         el('button', { class: 'btn', onclick: () => this.exportUsb([]) }, 'Export playlists to USB…')),
       el('p', { class: 'hint' }, 'The rekordbox XML export (cues, loops, beat grids, playlists) can be imported into rekordbox, Serato (via plugins), Traktor or Mixxx.'),
     );
-    const controllers = this.midiPanel();
+    const controllers = controllersPanel(app);
     const shortcuts = el('div', { class: 'form shortcuts' }, el('table', {}, ...[
       ['Space', 'Play/pause deck 1'], ['Z / X / C', 'Deck 1 cue / play / sync'], ['M / , / .', 'Deck 2 cue / play / sync'],
       ['1 – 4', 'Deck 1 hot cues A–D (Shift = delete)'], ['7 – 0', 'Deck 2 hot cues A–D'], ['Q / W', 'Deck 1 loop 4 / exit'], ['O / P', 'Deck 2 loop 4 / exit'],
@@ -254,7 +253,20 @@ export class Dialogs {
       ['Ctrl + F', 'Search library'], ['R', 'Start / stop recording'], ['A', 'Automix on/off'], ['Shift (hold)', 'Shift layer (delete cues, set master…)'],
     ].map(([k, d]) => el('tr', {}, el('td', {}, el('kbd', {}, k)), el('td', {}, d)))));
 
-    const tabs = { audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], keys: ['Shortcuts', shortcuts] };
+    // ---- appearance ----
+    const cards = THEMES.map((t) => el('button', { class: `theme-card ${(s.theme || 'midnight') === t.id ? 'active' : ''}`, 'data-id': t.id, onclick: async () => {
+      await set('theme', t.id); applyTheme(app.settings);
+      for (const c of cards) c.classList.toggle('active', c.dataset.id === t.id);
+    } }, el('div', { class: 'theme-swatch' }, ...t.swatch.map((c) => el('span', { style: { background: c } }))), el('b', {}, t.name), el('small', {}, t.desc)));
+    const accent = el('input', { type: 'color', value: s.accentColor || '#3ea6ff', title: 'Custom accent colour' });
+    accent.addEventListener('input', async () => { await set('accentColor', accent.value); applyTheme(app.settings); });
+    const appearance = el('div', { class: 'form' },
+      el('div', { class: 'theme-grid' }, ...cards),
+      el('div', { class: 'row' }, field('Accent colour', accent), el('button', { class: 'btn sm', onclick: async () => { await set('accentColor', ''); applyTheme(app.settings); } }, 'Use theme accent')),
+      field('Interface size', sel(s.uiScale || 100, [80, 90, 100, 110, 125, 150].map((v) => [v, `${v}%`]), async (v) => { await set('uiScale', Number(v)); applyTheme(app.settings); }), 'Shrink for small laptop screens, enlarge for touchscreens and big displays.'),
+      field('Waveform colours', sel(s.waveformColors, [['rgb', '3-band RGB'], ['blue', 'Blue'], ['mono', 'Monochrome']], (v) => set('waveformColors', v))),
+    );
+    const tabs = { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], keys: ['Shortcuts', shortcuts] };
     const tabBar = el('div', { class: 'tabs' });
     const pane = el('div', { class: 'tab-pane' });
     const show = (k) => { pane.replaceChildren(tabs[k][1]); for (const b of tabBar.children) b.classList.toggle('active', b.dataset.k === k); };
@@ -264,54 +276,5 @@ export class Dialogs {
     app.midi.cancelLearn();
   }
 
-  midiPanel() {
-    const midi = this.app.midi;
-    const wrap = el('div', { class: 'form' });
-    if (midi.unsupported || midi.error) {
-      wrap.append(el('p', { class: 'hint' }, midi.error ? `MIDI unavailable: ${midi.error}` : 'Web MIDI is not available in this browser. Use the OpenDJ desktop app, Chrome or Edge.'));
-      return wrap;
-    }
-    const devSel = el('select', { class: 'sel' });
-    const monitor = el('div', { class: 'midi-monitor' }, 'Move a control on your controller…');
-    const filterIn = el('input', { class: 'inp', type: 'search', placeholder: 'Filter functions…' });
-    const clockSel = el('select', { class: 'sel' }, el('option', { value: '' }, 'Off'), ...midi.outputs().map((o) => el('option', { value: o.name }, o.name)));
-    clockSel.value = this.app.settings.midiClockOutput || '';
-    clockSel.addEventListener('change', () => { midi.setClockOutput(clockSel.value); this.app.setSetting('midiClockOutput', clockSel.value); });
-    const table = el('div', { class: 'midi-table' });
-    const presetSel = el('select', { class: 'sel' }, el('option', { value: '' }, 'Apply preset…'), ...PRESETS.map((p) => el('option', { value: p.name }, p.name)));
-    presetSel.addEventListener('change', () => { if (devSel.value && presetSel.value) { midi.applyPreset(devSel.value, presetSel.value); render(); } presetSel.value = ''; });
-    const fillDevices = () => {
-      const names = midi.inputs().map((i) => i.name);
-      devSel.replaceChildren(...(names.length ? names : ['(no controller connected)']).map((n) => el('option', { value: names.length ? n : '' }, n)));
-    };
-    const render = () => {
-      const dev = devSel.value;
-      const map = dev ? midi.mappings[dev] : null;
-      const q = filterIn.value.toLowerCase();
-      table.replaceChildren(...midi.targets.filter((t) => !q || t.label.toLowerCase().includes(q) || t.id.includes(q)).slice(0, 400).map((t) => {
-        const entries = map?.entries.filter((e) => e.target === t.id) || [];
-        const learning = midi.learning?.targetId === t.id;
-        return el('div', { class: `midi-row ${learning ? 'learning' : ''}` },
-          el('span', { class: 'mr-label' }, t.label), el('span', { class: 'mr-kind' }, t.kind),
-          el('span', { class: 'mr-map' }, entries.map((e) => describeKey(e.key) + (e.lsbKey ? ' (14-bit)' : '') + (e.invert ? ' ⇅' : '')).join(', ') || '—'),
-          el('button', { class: 'btn xs', disabled: !dev, onclick: () => { learning ? midi.cancelLearn() : midi.learn(dev, t.id); render(); } }, learning ? 'Listening…' : 'Learn'),
-          entries.length ? el('button', { class: 'btn xs', title: 'Invert', onclick: () => { for (const e of entries) e.invert = !e.invert; midi.save(); render(); } }, '⇅') : null,
-          entries.length ? el('button', { class: 'btn xs', title: 'Clear', onclick: () => { map.entries = map.entries.filter((e) => e.target !== t.id); midi.save(); render(); } }, '✕') : null);
-      }));
-    };
-    midi.on('message', (m) => { if (m.device === devSel.value || !devSel.value) monitor.textContent = `${m.device}: ${describeKey(m.key)} = ${m.value}`; });
-    midi.on('learning', render); midi.on('devices', () => { fillDevices(); render(); });
-    devSel.addEventListener('change', render); filterIn.addEventListener('input', render);
-    const fileIn = el('input', { type: 'file', accept: '.json', style: { display: 'none' } });
-    fileIn.addEventListener('change', async () => { try { midi.importMapping(devSel.value, await fileIn.files[0].text()); render(); this.app.toast('Mapping imported'); } catch (e) { this.app.toast(e.message); } });
-    fillDevices(); render();
-    wrap.append(
-      el('p', { class: 'hint' }, 'Plug in any MIDI DJ controller. Click "Learn" next to a function, then move the knob / press the button on your controller. 14-bit faders, relative jog wheels and LED feedback are supported.'),
-      el('div', { class: 'row' }, devSel, presetSel,
-        el('button', { class: 'btn sm', onclick: () => { const blob = new Blob([midi.exportMapping(devSel.value)], { type: 'application/json' }); const a = el('a', { href: URL.createObjectURL(blob), download: `${devSel.value || 'controller'}.opendj-midi.json` }); a.click(); } }, 'Export'),
-        el('button', { class: 'btn sm', onclick: () => fileIn.click() }, 'Import'), fileIn),
-      el('label', { class: 'field' }, el('span', {}, 'Send MIDI clock (follows the master deck tempo) to'), clockSel),
-      monitor, filterIn, table);
-    return wrap;
-  }
+
 }

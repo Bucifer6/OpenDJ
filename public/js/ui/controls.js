@@ -1,5 +1,6 @@
 // Reusable hardware-style controls. All are "controlled": they render from get() and call set(v).
 import { el, clamp } from '../util.js';
+import { cssVar } from './themes.js';
 
 /** Rotary knob. Drag vertically, wheel to fine-tune, double-click to reset. */
 export function knob({ label, min = -1, max = 1, def = 0, get, set, size = 'md', bipolar = min < 0, title, format }) {
@@ -126,7 +127,7 @@ export function jogWheel(deck) {
     const ang = (pos / 1.8) * 2 * Math.PI;
     // platter
     const grad = g.createRadialGradient(c, c, 20, c, c, c);
-    grad.addColorStop(0, '#2a2f38'); grad.addColorStop(0.75, '#14171c'); grad.addColorStop(0.77, '#0d0f12'); grad.addColorStop(1, '#1b1f26');
+    grad.addColorStop(0, cssVar('--platter-1')); grad.addColorStop(0.75, cssVar('--platter-2')); grad.addColorStop(0.77, cssVar('--platter-3')); grad.addColorStop(1, cssVar('--platter-4'));
     g.fillStyle = grad; g.beginPath(); g.arc(c, c, c - 4, 0, 2 * Math.PI); g.fill();
     // grooves
     g.strokeStyle = 'rgba(255,255,255,0.04)'; g.lineWidth = 1;
@@ -140,14 +141,14 @@ export function jogWheel(deck) {
     g.beginPath(); g.arc(c, c, c - 12, -Math.PI / 2, -Math.PI / 2 + k * 2 * Math.PI); g.stroke();
     // marker line
     g.save(); g.translate(c, c); g.rotate(ang);
-    g.strokeStyle = '#e8ecf1'; g.lineWidth = 5; g.lineCap = 'round';
+    g.strokeStyle = cssVar('--platter-mark'); g.lineWidth = 5; g.lineCap = 'round';
     g.beginPath(); g.moveTo(0, -c * 0.32); g.lineTo(0, -c * 0.72); g.stroke();
     g.restore();
     // centre label
-    g.fillStyle = deck.playing ? '#1f2630' : '#171b21'; g.beginPath(); g.arc(c, c, c * 0.28, 0, 2 * Math.PI); g.fill();
-    g.fillStyle = '#9aa4b2'; g.font = '600 26px Inter, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = deck.playing ? cssVar('--platter-1') : cssVar('--platter-4'); g.beginPath(); g.arc(c, c, c * 0.28, 0, 2 * Math.PI); g.fill();
+    g.fillStyle = cssVar('--platter-text'); g.font = '600 26px Inter, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillText(deck.effectiveBpm ? deck.effectiveBpm.toFixed(1) : '--', c, c - 8);
-    g.font = '500 16px Inter, system-ui, sans-serif'; g.fillStyle = '#6b7685';
+    g.font = '500 16px Inter, system-ui, sans-serif'; g.fillStyle = cssVar('--platter-text-2');
     g.fillText('BPM', c, c + 18);
   };
   return root;

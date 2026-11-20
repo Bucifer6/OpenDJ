@@ -6,7 +6,9 @@ import crypto from 'node:crypto';
 
 export const DEFAULT_SETTINGS = {
   deckCount: 2,
-  theme: 'dark',
+  theme: 'midnight',
+  accentColor: '',
+  uiScale: 100,
   masterDeviceId: 'default',
   cueDeviceId: '',            // '' = no separate headphone device
   cueMode: 'device',          // 'device' | 'split' (mono master L / mono cue R) | 'channels34'
@@ -30,9 +32,10 @@ export const DEFAULT_SETTINGS = {
   colorFx: 'filter',
   autoCues: true,
   sequencer: null,            // object; replaced wholesale on update (not merged)
+  lighting: null,             // lighting rig + outputs (server/lighting); replaced wholesale on update
 };
 // Object-valued settings that are replaced on update instead of shallow-merged.
-const REPLACE_SETTINGS = new Set(['midiMappings', 'sequencer']);
+const REPLACE_SETTINGS = new Set(['midiMappings', 'sequencer', 'lighting']);
 
 const id = (s) => crypto.createHash('sha1').update(String(s)).digest('hex').slice(0, 16);
 export const normTags = (v) => {

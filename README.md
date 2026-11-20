@@ -67,6 +67,14 @@ Runs as a desktop app (Windows, macOS, Linux via Electron) or in Chrome/Edge.
 - Beat-matched, phrase-aligned transitions: EQ bass-swap, crossfade, filter fade or echo-out
 - Optional **smart ordering** by harmonic key, tempo and energy; skip-to-next; queue tracks from the browser
 
+### Themes
+Nine themes in *Settings → Appearance*:
+- Midnight, Graphite, Club Red, Neon, Ocean, Black & Gold, Forest
+- **Daylight**, a light theme for outdoor gigs
+- **High Contrast**
+
+You can also set a custom accent colour and scale the interface from 80% to 150% for laptops or touchscreens.
+
 ### Controllers
 - Any class-compliant **MIDI controller** via Web MIDI
 - **MIDI Learn** for every function, including:
@@ -79,6 +87,17 @@ Runs as a desktop app (Windows, macOS, Linux via Electron) or in Chrome/Edge.
 
 ## How OpenDJ compares
 See **[docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md)** for a feature-by-feature comparison with rekordbox, Serato, Traktor, VirtualDJ, djay Pro and Engine DJ. It also lists what is still missing and why.
+
+## Download & install
+
+| Platform | Files | Notes |
+|---|---|---|
+| **Windows 10/11** (x64, ARM64) | `OpenDJ-Setup-<version>-x64.exe` (installer), `OpenDJ-Portable-<version>.exe` (no install) | Unsigned build: on the SmartScreen prompt choose *More info → Run anyway* |
+| **macOS 11+** (Apple Silicon & Intel) | `OpenDJ-<version>-mac-arm64.dmg` / `-x64.dmg` | Unsigned build: the first time, right-click the app → *Open* (or *System Settings → Privacy & Security → Open Anyway*) |
+| **Linux** (x64, ARM64) | `.AppImage` (any distro), `.deb` (Debian/Ubuntu/Mint), `.rpm` (Fedora/openSUSE, x64), `.tar.gz` | AppImage: `chmod +x OpenDJ-*.AppImage` and run it |
+| **ChromeOS / any OS with Chrome or Edge** | Browser mode | Run `npm run web` on a computer and open it in Chrome or Edge; you can install it as an app from the address bar |
+
+Installers are built automatically by GitHub Actions (`.github/workflows/build.yml`) on Windows, macOS and Linux. Push a tag like `v0.2.0` to publish them as a GitHub Release. You can also download them from the run's *Artifacts* on any branch build.
 
 ## Getting started
 
@@ -100,7 +119,7 @@ Browser mode: start the server below, then open http://localhost:7380 in Chrome 
 npm run web
 ```
 
-Build installers (Windows `.exe`, macOS `.dmg`, Linux AppImage/`.deb`):
+Build installers for the computer you're on. Windows and macOS installers must be built on those systems; CI does that for you:
 
 ```bash
 npm run dist

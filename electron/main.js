@@ -18,6 +18,7 @@ async function createWindow() {
   session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(allowed.has(perm)));
   session.defaultSession.setPermissionCheckHandler((_wc, perm) => allowed.has(perm));
   session.defaultSession.setDevicePermissionHandler(() => true);
+  setupHidChooser(session.defaultSession);
 
   const win = new BrowserWindow({
     width: 1600, height: 960, minWidth: 1100, minHeight: 700,
@@ -32,6 +33,33 @@ async function createWindow() {
     { label: 'View', submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
   ]));
   await win.loadURL(server.url);
+}
+
+// WebHID device chooser (navigator.hid.requestDevice). Chromium shows its own picker; Electron leaves it to us.
+// Keyboards, mice and security keys are skipped. One candidate is picked directly, several get a native chooser.
+const HID_SKIP = (d) => (d.collections || []).some((c) => (c.usagePage === 1 && (c.usage === 2 || c.usage === 6)) || c.usagePage === 0xf1d0);
+function setupHidChooser(ses) {
+  let pending = null; // { callback, timer, win }
+  const finish = (id) => { if (!pending) return; clearTimeout(pending.timer); const cb = pending.callback; pending = null; cb(id || ''); };
+  const choose = async (list, win) => {
+    const seen = new Set();
+    const cands = list.filter((d) => !HID_SKIP(d)).filter((d) => { const k = `${d.vendorId}:${d.productId}:${d.name}`; if (seen.has(k)) return false; seen.add(k); return true; });
+    if (!cands.length) return false;
+    if (cands.length === 1) { finish(cands[0].deviceId); return true; }
+    const label = (d) => `${d.name || 'HID device'} (${d.vendorId.toString(16).padStart(4, '0')}:${d.productId.toString(16).padStart(4, '0')})`;
+    const r = await dialog.showMessageBox(win, { type: 'question', title: 'Connect HID controller', message: 'Choose the controller to connect', buttons: [...cands.slice(0, 12).map(label), 'Cancel'], cancelId: Math.min(cands.length, 12), noLink: true });
+    finish(r.response < Math.min(cands.length, 12) ? cands[r.response].deviceId : '');
+    return true;
+  };
+  ses.on('select-hid-device', (event, details, callback) => {
+    event.preventDefault();
+    finish('');
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    pending = { callback, win, timer: setTimeout(() => finish(''), 15000) };
+    choose(details.deviceList || [], win).then((ok) => { if (!ok && pending) pending.waiting = true; });
+  });
+  // the device list can be empty at first: pick the first suitable device that shows up
+  ses.on('hid-device-added', (_e, details) => { if (pending?.waiting && details?.device && !HID_SKIP(details.device)) finish(details.device.deviceId); });
 }
 
 ipcMain.handle('pick-folder', async (_e, title) => {

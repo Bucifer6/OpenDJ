@@ -3,10 +3,11 @@ import { knob, fader, button, jogWheel } from './controls.js';
 import { OverviewWaveform } from './waveform.js';
 import { EFFECTS, BEAT_DIVISIONS } from '../audio/effects.js';
 import { api } from '../api.js';
+import { cssVar } from './themes.js';
 import { HOTCUE_COLORS } from '../audio/deck.js';
 import { camelotCompatible, toCamelot } from '../audio/analysis-core.js';
 
-export const DECK_COLORS = ['#3ea6ff', '#ff8a3d', '#2ed47a', '#c06cff'];
+export const DECK_COLORS = ['var(--deck1)', 'var(--deck2)', 'var(--deck3)', 'var(--deck4)'];
 const LOOP_SIZES = [1 / 4, 1 / 2, 1, 2, 4, 8, 16, 32];
 const fmtBeats = (b) => (b >= 1 ? String(b) : b === 0.5 ? '½' : b === 0.25 ? '¼' : b === 0.125 ? '⅛' : b === 0.75 ? '¾' : b.toFixed(2));
 
@@ -178,7 +179,7 @@ export function buildDeck(app, deck) {
     const g = phase.getContext('2d'); g.clearRect(0, 0, W, H);
     if (!deck.bpm || !deck.track) return;
     const beat = ((deck.beatIndex() % 4) + 4) % 4, seg = W / 4;
-    for (let k = 0; k < 4; k++) { g.fillStyle = k === beat && deck.playing ? DECK_COLORS[i] : k === beat ? '#3a4250' : '#1a1e25'; g.fillRect(k * seg + 1, 0, seg - 2, H * 0.45); }
+    for (let k = 0; k < 4; k++) { g.fillStyle = k === beat && deck.playing ? cssVar(`--deck${i + 1}`) : k === beat ? cssVar('--line-2') : cssVar('--panel-3'); g.fillRect(k * seg + 1, 0, seg - 2, H * 0.45); }
     const m = app.engine.masterDeck(deck);
     if (m && m.bpm && m.playing && deck.playing) {
       let d = deck.beatPhase() - m.beatPhase(); if (d > 0.5) d -= 1; if (d < -0.5) d += 1;
