@@ -443,3 +443,34 @@ test('#12 data dir 0700, library/settings JSON 0600 (existing files fixed on sta
   lib2.flush();
   assert.equal(mode(path.join(old, 'library.json')), 0o600, 'rewritten through a leftover 0644 .tmp');
 });
+
+// ---------------------------------------------------------------- #10 desktop server per-launch token
+test('#10 desktop launch token: every request needs the cookie (static, API, SSE, media); start() without one is unchanged', async () => {
+  const dir = tmpdir();
+  const f = path.join(dir, 'a.wav'); fs.writeFileSync(f, wav());
+  const app = await start({ port: 0, dataDir: path.join(dir, 'd'), ffmpeg: false, launchToken: 'tok-123456789', log: { log() {}, warn() {}, error() {} } });
+  try {
+    app.library.upsertTrack({ id: 't1', sourceType: 'local', path: f, title: 'a' });
+    const get = (p, cookie) => raw(app.port, 'GET', p, cookie ? { Cookie: cookie } : {});
+    for (const p of ['/', '/index.html', '/js/app.js', '/video.html', '/api/info', `/api/browse?path=${encodeURIComponent(os.homedir())}`, '/api/tracks/t1/stream', '/api/tracks/t1/cover', '/api/events']) {
+      assert.equal((await get(p)).status, 401, p);
+      assert.equal((await get(p, 'opendj_launch=wrong')).status, 401, p);
+    }
+    for (const p of ['/', '/video.html', '/api/info', '/api/tracks/t1/stream']) assert.equal((await get(p, 'other=1; opendj_launch=tok-123456789')).status, 200, p);
+    const ctrl = new AbortController();
+    const es = await fetch(app.url + 'api/events', { headers: { Cookie: 'opendj_launch=tok-123456789' }, signal: ctrl.signal });
+    assert.equal(es.status, 200); ctrl.abort();
+  } finally { app.server.close(); app.shutdown(); }
+  await desktop(async ({ c }) => { assert.equal((await c('GET', '/api/info')).status, 200, 'no token configured: open as before'); });
+});
+
+// ---------------------------------------------------------------- #14 Electron pop-ups (static check; run headless with xvfb + Playwright _electron)
+test('#14 electron/main.js applies the pop-up / navigation / webview policy to every webContents and sets the launch cookie', () => {
+  const src = fs.readFileSync(new URL('../electron/main.js', import.meta.url), 'utf8');
+  assert.match(src, /app\.on\('web-contents-created'/);
+  for (const ev of ['setWindowOpenHandler', "'will-navigate'", "'will-redirect'", "'will-attach-webview'"]) assert.ok(src.includes(ev), ev);
+  assert.doesNotMatch(src, /win\.webContents\.setWindowOpenHandler/, 'not only on the main window');
+  assert.match(src, /cookies\.set\(\{[^}]*httpOnly: true, sameSite: 'strict'/);
+  assert.ok(src.indexOf('cookies.set(') < src.indexOf('win.loadURL('), 'cookie before loadURL');
+});
+

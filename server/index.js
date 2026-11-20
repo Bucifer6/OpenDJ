@@ -17,7 +17,7 @@ import { aiffToWav } from './aiff.js';
 import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clientFor, isInside, uniqueName, safe } from './remote.js';
 import { findFfmpeg, needsTranscode, remoteBrowserDecodable, browserPlayableVideo, formatList, DSD_EXT, VIDEO_MIME, extOf, probe, isVideoByName, BROWSER_VIDEO_EXT } from './media.js';
 import { Transcoder } from './transcode.js';
-import { Auth } from './auth.js';
+import { Auth, parseCookies } from './auth.js';
 import { redactSettings, REDACTED } from './library-tools.js';
 import { SOURCE_TYPES, sourceConfigFromForm } from './sources/index.js';
 import { parseRekordboxXml, buildRekordboxXml } from './rekordbox.js';
@@ -56,6 +56,9 @@ export function safeMediaType(type, kind = 'audio') {
 // Every API response: never rendered as a document with scripts, even when opened directly in a tab.
 const API_CSP = "default-src 'none'; sandbox";
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+
+/** Cookie carrying the per-launch token of the desktop app (see createServer's `launchToken`). */
+export const LAUNCH_COOKIE = 'opendj_launch';
 
 export function isLoopback(host) {
   const h = String(host || '').replace(/^\[|\]$/g, '').toLowerCase();
@@ -180,8 +183,10 @@ async function proxy(req, res, { url, headers = {} }, { connectTimeout = 15000, 
  * @param {string[]} [o.allowedHosts]  extra Host names accepted (OPENDJ_ALLOWED_HOSTS)
  * @param {string[]} [o.roots]   folders the UI may browse/add (OPENDJ_MUSIC_ROOTS); setting them turns the restriction on
  * @param {string|boolean} [o.trustProxy]  reverse proxy trust (OPENDJ_TRUST_PROXY): '1' or a list of proxy addresses
+ * @param {string} [o.launchToken]  Electron only: every request must carry this token in the LAUNCH_COOKIE cookie, so
+ *   other local users / processes cannot use the password-less desktop server. Not set by `npm run web` / tests.
  */
-export function createServer({ dataDir = defaultDataDir(), log = console, auth: authOpt, ffmpeg: ffmpegOpt, allowedHosts, roots: rootsOpt, password, trustProxy } = {}) {
+export function createServer({ dataDir = defaultDataDir(), log = console, auth: authOpt, ffmpeg: ffmpegOpt, allowedHosts, roots: rootsOpt, password, trustProxy, launchToken } = {}) {
   const library = new Library(dataDir);
   const sse = new Set();
   const emit = (type, payload) => {
@@ -769,6 +774,12 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     const hosts = new Set([String(req.headers.host).toLowerCase(), String(publicHost(req)).toLowerCase()]);
     return hosts.has(u.host.toLowerCase());
   };
+  // Desktop app: per-launch token (HttpOnly cookie set by electron/main.js) required on every request
+  const launchKey = launchToken ? crypto.createHash('sha256').update(String(launchToken)).digest() : null;
+  const launchOk = (req) => {
+    const v = parseCookies(req.headers.cookie)[LAUNCH_COOKIE];
+    return typeof v === 'string' && crypto.timingSafeEqual(crypto.createHash('sha256').update(v).digest(), launchKey);
+  };
   const PUBLIC_FILES = new Set(['login.html', 'icon.svg', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest', 'sw.js', 'favicon.ico']);
 
   const server = http.createServer(async (req, res) => {
@@ -778,6 +789,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     res.setHeader('Referrer-Policy', 'same-origin');
     res.setHeader('X-Frame-Options', 'DENY'); // no clickjacking, desktop mode included (frame-ancestors below)
     if (!hostOk(req)) { res.writeHead(421, { 'Content-Type': 'text/plain' }); return res.end('Misdirected request: unknown Host'); }
+    if (launchKey && !launchOk(req)) { res.writeHead(401, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }); return res.end('This OpenDJ server only answers the OpenDJ app that started it'); }
     const isApi = url.pathname.startsWith('/api/');
     // onnxruntime-web's own module files (node_modules, not user data) may need to run as a worker script
     if (isApi && !url.pathname.startsWith('/api/stems/ort/')) res.setHeader('Content-Security-Policy', API_CSP);
