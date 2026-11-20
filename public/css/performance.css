@@ -189,3 +189,9 @@
 :root.w1300 .pad-mode { font-size: 8px; }
 :root.w1200 .key-lbl { display: none; }
 :root.w1200 .deck-toggles .btn, :root.w1200 .loop-row .btn, :root.w1200 .key-row .btn { font-size: 8.5px; }
+
+/* 4 decks: the master column is too narrow for two knob columns — stack it in one */
+.four-decks .mixer-master { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+.four-decks .mixer-master .knob-md { width: 24px; height: 24px; }
+.four-decks .mixer-master .knob-wrap .knob-label { font-size: 7.5px; white-space: nowrap; }
+.four-decks .mic-box { flex-direction: column; flex-wrap: nowrap; gap: 3px; }

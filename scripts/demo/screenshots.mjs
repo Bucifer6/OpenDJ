@@ -53,6 +53,7 @@ const sizes = [];
 async function save(name, opts = {}) {
   const jpeg = opts.type === 'jpeg';
   const file = path.join(OUT, `${name}.${jpeg ? 'jpg' : 'png'}`);
+  await ev(() => document.activeElement?.blur?.());
   await (opts.locator || page).screenshot({ path: file, ...(jpeg ? { type: 'jpeg', quality: opts.quality || 88 } : {}), ...(opts.clip ? { clip: opts.clip } : {}) });
   const kb = Math.round(fs.statSync(file).size / 1024);
   sizes.push([path.basename(file), kb]);
@@ -184,7 +185,7 @@ const shots = {
 
   async library() {
     await heroState();
-    await setBrowserHeight(470);
+    await setBrowserHeight(540);
     await view('all');
     await sleep(600);
     await sleep(300);
@@ -279,6 +280,7 @@ const shots = {
     await page.locator('.cdj-target').fill(usb);
     await page.locator('.cdj-target').dispatchEvent('change');
     await sleep(1500);
+    await ev(() => { document.querySelector('.cdj-target').value = '/Volumes/DJ-USB'; }); // cosmetic: hide the temp path
     await save('cdj-export', { locator: page.locator('.overlay .modal').last() });
   },
 
@@ -286,11 +288,16 @@ const shots = {
     await heroState();
     await ev((folder) => fetch('/api/recording/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, format: 'flac', splitTracks: true }) }), path.join(tmp, 'Recordings'));
     await ev(() => fetch('/api/broadcast/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targets: [{ type: 'icecast', name: 'Home radio', host: 'radio.example.org', port: 8000, mount: '/live', password: 'demo', format: 'mp3', bitrate: 192, enabled: true }, { type: 'rtmp', name: 'Stream (RTMP)', url: 'rtmp://live.example.com/app', key: 'demo', enabled: false }] }) }));
-    await ev(() => window.opendj.recording.openPanel('record'));
+    await ev(() => { window.opendj.recording.openPanel('record'); }); // resolves when the dialog closes: don't wait for it
     await sleep(1200);
+    await ev(() => { // cosmetic: show typical paths instead of the temp folder
+      const m = document.querySelectorAll('.overlay .modal'); const box = m[m.length - 1];
+      for (const i of box.querySelectorAll('input')) if (i.value.includes('opendj-shots-')) i.value = '~/Music/OpenDJ Recordings';
+      for (const n of box.querySelectorAll('.hint, small, p, span')) if (n.children.length === 0 && /^Default: /.test(n.textContent)) n.textContent = 'Default: ~/Music/OpenDJ Recordings';
+    });
     await save('recording', { locator: page.locator('.overlay .modal').last() });
     await closeOverlays();
-    await ev(() => window.opendj.recording.openPanel('broadcast'));
+    await ev(() => { window.opendj.recording.openPanel('broadcast'); }); // resolves when the dialog closes: don't wait for it
     await sleep(1000);
     await save('broadcast', { locator: page.locator('.overlay .modal').last() });
   },
@@ -299,13 +306,13 @@ const shots = {
     await heroState();
     await ev(() => { window.opendj.engine.decks.forEach((d) => d.pause()); });
     await view('playlist', 'Friday — Warehouse');
-    await ev(() => window.opendj.dialogs.automixQueue(window.opendj.library.rows));
+    await ev(() => { window.opendj.dialogs.automixQueue(window.opendj.library.rows); }); // resolves when the dialog closes: don't wait for it
     await sleep(800);
-    await save('automix', { type: 'jpeg' });
+    await save('automix', { locator: page.locator('.overlay .modal').last() });
   },
 
   async 'settings-appearance'() {
-    await ev(() => window.opendj.dialogs.settings('appearance'));
+    await ev(() => { window.opendj.dialogs.settings('appearance'); }); // resolves when the dialog closes: don't wait for it
     await sleep(800);
     await save('settings-appearance', { locator: page.locator('.overlay .modal').last() });
   },
@@ -365,14 +372,15 @@ const shots = {
     });
     await page.waitForSelector('.dvs-panel .dvs-scope', { timeout: 10000 });
     await sleep(2000);
-    await save('dvs', { type: 'jpeg' });
+    await ev(() => { for (const n of document.querySelectorAll('.dvs-panel *')) if (n.children.length === 0 && n.textContent.includes('Fake Default Audio Input')) n.textContent = n.textContent.replace('Fake Default Audio Input', 'USB audio interface'); }); // Chromium's fake capture device
+    await save('dvs', { locator: page.locator('.overlay .modal').last() });
   },
 };
 
 for (const name of wanted) {
   if (!shots[name]) { log(`(no shot "${name}")`); continue; }
   log(`--- ${name}`);
-  try { await shots[name](); } catch (e) { console.error(`shot ${name} failed:`, e); }
+  try { await Promise.race([shots[name](), new Promise((_, rej) => setTimeout(() => rej(new Error('timed out after 5 min')), 300000))]); } catch (e) { console.error(`shot ${name} failed:`, e); }
   await closeOverlays();
 }
 log('sizes:', sizes.map(([f, k]) => `${f} ${k} KB`).join(', '));

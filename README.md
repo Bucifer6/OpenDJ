@@ -72,7 +72,7 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 
 ### Automix
 
-<img src="docs/images/automix.jpg" alt="Automix dialog with smart ordering, energy curve and transition options" width="100%">
+<img src="docs/images/automix.png" alt="Automix dialog with smart ordering, energy curve and transition options" width="60%">
 
 - Non-stop mixing of any playlist or library view on decks 1 and 2
 - Beat-matched, **phrase-aligned** transitions: bass swap, crossfade, filter fade or echo out
@@ -83,7 +83,7 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 <table>
 <tr>
 <td width="50%"><img src="docs/images/controllers.png" alt="Settings → Controllers with a connected MIDI controller"></td>
-<td width="50%"><img src="docs/images/dvs.jpg" alt="DVS setup with the timecode scope"></td>
+<td width="50%"><img src="docs/images/dvs.png" alt="DVS setup with the timecode scope"></td>
 </tr>
 </table>
 
