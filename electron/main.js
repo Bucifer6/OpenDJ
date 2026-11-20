@@ -102,3 +102,17 @@ ipcMain.handle('reveal', (e, p) => { if (trusted(e) && typeof p === 'string') sh
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => { server?.shutdown(); app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+
+// ---- quit confirmation ----
+// The page cancels unloading (beforeunload) while decks play or a recording / broadcast runs. Electron shows no
+// prompt for that by itself, so the window close button silently did nothing: ask, and close when confirmed.
+app.on('web-contents-created', (_e, contents) => {
+  contents.on('will-prevent-unload', (event) => {
+    const win = BrowserWindow.fromWebContents(contents);
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'question', buttons: ['Quit', 'Cancel'], defaultId: 1, cancelId: 1,
+      title: 'Quit OpenDJ?', message: 'Decks are playing or a recording / broadcast is running.', detail: 'Quit anyway?',
+    });
+    if (choice === 0) event.preventDefault(); // preventDefault here = ignore the page's beforeunload and close
+  });
+});

@@ -85,7 +85,7 @@ export function controllersPanel(app) {
     const dev = d && d.kind !== 'midi-out' ? d.key : null;
     const map = dev ? mapOf(dev) : null;
     const q = filterIn.value.trim().toLowerCase();
-    const rows = midi.targets.filter((t) => (!q || t.label.toLowerCase().includes(q) || t.id.toLowerCase().includes(q)) && (!mappedOnly.checked || map?.entries.some((e) => e.target === t.id))).slice(0, 500);
+    const rows = midi.targets.filter((t) => (!q || t.label.toLowerCase().includes(q) || t.id.toLowerCase().includes(q)) && (!mappedOnly.checked || map?.entries.some((e) => e.target === t.id))); // all targets (a 500 cap hid the mixer + crossfader)
     put(table, ...rows.map((t) => {
       const entries = map?.entries.filter((e) => e.target === t.id) || [];
       const learning = midi.learning?.targetId === t.id && midi.learning?.deviceName === dev;

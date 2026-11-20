@@ -77,10 +77,10 @@ export class Dialogs {
     if (window.opendjNative?.pickFolder) return window.opendjNative.pickFolder(title);
     let cur;
     try { cur = await api.browse(); } catch (e) { this.app.toast(`Cannot browse folders: ${e.message}`); return null; }
-    const pathEl = el('input', { class: 'inp', value: cur.path });
+    const pathEl = el('input', { class: 'inp', value: cur.path ?? '', placeholder: 'Choose one of the allowed folders below' }); // hosted mode: the roots list has no path
     const list = el('div', { class: 'browse-list' });
     const render = () => {
-      pathEl.value = cur.path;
+      pathEl.value = cur.path ?? '';
       list.replaceChildren(
         cur.parent ? el('div', { class: 'browse-item', onclick: async () => { cur = await api.browse(cur.parent); render(); } }, '⬑ ..') : null,
         ...cur.entries.map((e) => el('div', { class: 'browse-item', onclick: async () => { try { cur = await api.browse(e.path); render(); } catch (err) { this.app.toast(err.message); } } }, '🗀 ' + e.name)));
