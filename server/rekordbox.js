@@ -71,6 +71,16 @@ function fromHex(color) {
   return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : null;
 }
 
+/** rekordbox track Colour "0xFF007F" <-> "#ff007f" */
+export function colourToHex(c) {
+  const m = /^(?:0x|#)?([0-9a-f]{6})$/i.exec(String(c || '').trim());
+  return m ? '#' + m[1].toLowerCase() : null;
+}
+export function hexToColour(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  return m ? '0x' + m[1].toUpperCase() : undefined;
+}
+
 /**
  * Parse a rekordbox XML export.
  * @returns {{ tracks: object[], playlists: { name, path: string[], trackKeys: string[] }[] }}
@@ -122,6 +132,7 @@ export function parseRekordboxXml(xmlString) {
       duration: num(t.TotalTime),
       rating: Math.max(0, Math.min(5, Math.round(ratingRaw / 51))),
       comments: t.Comments || '',
+      color: colourToHex(t.Colour),
       cues,
       grid: firstTempo ? { bpm: num(firstTempo.Bpm), offset: num(firstTempo.Inizio, 0) } : null,
     };
@@ -216,7 +227,8 @@ export function buildRekordboxXml({ tracks = [], playlists = [] } = {}) {
       AverageBpm: t.bpm ? fmtNum(t.bpm, 2) : '0.00',
       Tonality: t.key || '',
       Rating: rating,
-      Comments: t.comments || '',
+      Comments: t.comments ?? t.comment ?? '',
+      Colour: hexToColour(t.color),
       Location: pathToLocation(t.path),
     };
     const children = [];

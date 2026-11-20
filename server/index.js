@@ -14,6 +14,10 @@ import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clie
 import { SOURCE_TYPES } from './sources/index.js';
 import { parseRekordboxXml, buildRekordboxXml } from './rekordbox.js';
 import { parseM3U, buildM3U } from './m3u.js';
+import { evaluateSmart, normSmart, SMART_FIELDS, SMART_OPS, SOURCE_VALUES, TRACK_COLORS } from './smart.js';
+import { History, exportSession, sessionTitle } from './history.js';
+import { MissingChecker, relocateTracks, findDuplicates, mergeDuplicates, buildBackup, restoreBackup } from './library-tools.js';
+import { parseTraktorNml, readSeratoCrates, parseVirtualDjXml, importParsed } from './importers.js';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const MIME = {
@@ -94,6 +98,18 @@ export function createServer({ dataDir = defaultDataDir(), log = console } = {})
     for (const r of sse) r.write(msg);
   };
   library.listeners.add(emit);
+  const history = new History(dataDir);
+  const missing = new MissingChecker(library, { onChange: () => emit('library', { what: 'missing' }) });
+  const playlistTrackIds = (p) => (p.smart ? evaluateSmart(p.smart, library.allTracks()) : p.trackIds);
+  const resolvedPlaylists = () => {
+    const all = library.data.playlists.some((p) => p.smart) ? library.allTracks() : null;
+    return library.data.playlists.map((p) => (p.smart ? { ...p, trackIds: evaluateSmart(p.smart, all) } : p));
+  };
+  const attachment = (res, type, name, body) => {
+    res.writeHead(200, { 'Content-Type': type, 'Content-Disposition': `attachment; filename="${String(name).replace(/[^\w.\- ]+/g, '_')}"; filename*=UTF-8''${encodeURIComponent(name)}` });
+    res.end(body);
+  };
+  const localFile = (t) => (t && (t.localPath || (t.sourceType === 'local' ? t.path : null))) || null;
   const downloads = new DownloadManager(library, emit);
   const jobs = new Map(); // running scans/syncs
 
@@ -115,11 +131,32 @@ export function createServer({ dataDir = defaultDataDir(), log = console } = {})
   const track = (tid) => { const t = library.getTrack(tid); if (!t) throw new HttpError(404, 'Track not found'); return t; };
 
   // ---------------- tracks ----------------
-  route('GET', '/api/tracks', () => library.allTracks());
+  route('GET', '/api/tracks', () => {
+    const all = library.allTracks();
+    const miss = missing.missingIds(all);
+    return miss.size ? all.map((t) => (miss.has(t.id) ? { ...t, missing: true } : t)) : all;
+  });
   route('PATCH', '/api/tracks/:id', async ({ params, body }) => library.updateTrack(track(params.id).id, body));
+  // Bulk edit: apply the same patch to many tracks (multi-select track info editor).
+  route('POST', '/api/tracks/update', async ({ body }) => {
+    const ids = (body.ids || []).filter((i) => library.getTrack(i));
+    for (const i of ids) library.updateTrack(i, body.patch || {});
+    return { updated: ids.length };
+  });
+  route('GET', '/api/tracks/missing', () => [...missing.missingIds(library.allTracks(), { sync: true })]);
+  route('POST', '/api/tracks/relocate', async ({ body }) => {
+    const ids = body.ids?.length ? body.ids : [...missing.missingIds(library.allTracks(), { sync: true })];
+    const r = await relocateTracks(library, body.folder, ids);
+    missing.invalidate(r.relocated.map((x) => x.id));
+    return r;
+  });
+  route('GET', '/api/tracks/duplicates', () => findDuplicates(library.allTracks()));
+  route('POST', '/api/tracks/dedupe', async ({ body }) => mergeDuplicates(library, body.groups));
   route('POST', '/api/tracks/delete', async ({ body }) => { library.removeTracks(body.ids || []); return { ok: true }; });
   route('POST', '/api/tracks/played', async ({ body }) => {
-    const t = track(body.id); t.playCount = (t.playCount || 0) + 1; t.lastPlayed = Date.now(); library.changed('tracks'); return t;
+    const t = track(body.id); t.playCount = (t.playCount || 0) + 1; t.lastPlayed = Date.now();
+    history.record(t, t.lastPlayed);
+    library.changed('tracks'); return t;
   });
   route('GET', '/api/tracks/:id/stream', async ({ params, req, res }) => {
     const t = track(params.id);
@@ -174,14 +211,32 @@ export function createServer({ dataDir = defaultDataDir(), log = console } = {})
   });
 
   // ---------------- playlists ----------------
-  route('GET', '/api/playlists', () => library.data.playlists);
-  route('POST', '/api/playlists', async ({ body }) => library.createPlaylist(body.name, body.trackIds || [], body.folder ? { folder: body.folder } : {}));
-  route('PATCH', '/api/playlists/:id', async ({ params, body }) => library.updatePlaylist(params.id, body) || Promise.reject(new HttpError(404, 'No playlist')));
+  // Smart playlists are returned with their trackIds computed from the rules, so automix / export just work.
+  route('GET', '/api/playlists', () => resolvedPlaylists());
+  route('POST', '/api/playlists', async ({ body }) => {
+    const extra = body.folder ? { folder: body.folder } : {};
+    if (body.smart) extra.smart = normSmart(body.smart);
+    const p = library.createPlaylist(body.name, body.trackIds || [], extra);
+    return p.smart ? { ...p, trackIds: playlistTrackIds(p) } : p;
+  });
+  route('PATCH', '/api/playlists/:id', async ({ params, body }) => {
+    const p = library.updatePlaylist(params.id, { ...body, ...(body.smart ? { smart: normSmart(body.smart) } : {}) });
+    if (!p) throw new HttpError(404, 'No playlist');
+    return p.smart ? { ...p, trackIds: playlistTrackIds(p) } : p;
+  });
   route('DELETE', '/api/playlists/:id', async ({ params }) => { library.deletePlaylist(params.id); return { ok: true }; });
-  route('POST', '/api/playlists/:id/add', async ({ params, body }) => library.addToPlaylist(params.id, body.trackIds || []));
+  route('POST', '/api/playlists/:id/add', async ({ params, body }) => {
+    if (library.getPlaylist(params.id)?.smart) throw new HttpError(400, 'Smart playlists are filled by their rules');
+    return library.addToPlaylist(params.id, body.trackIds || []) || Promise.reject(new HttpError(404, 'No playlist'));
+  });
+  route('GET', '/api/smart/fields', () => ({ fields: SMART_FIELDS, ops: SMART_OPS, sources: SOURCE_VALUES, colors: TRACK_COLORS }));
+  route('POST', '/api/smart/preview', async ({ body }) => {
+    const ids = evaluateSmart(normSmart(body.smart), library.allTracks());
+    return { count: ids.length, trackIds: ids.slice(0, 500) };
+  });
   route('GET', '/api/playlists/:id/m3u', async ({ params, res }) => {
     const p = library.getPlaylist(params.id); if (!p) throw new HttpError(404, 'No playlist');
-    const m3u = buildM3U(p.trackIds.map((t) => library.getTrack(t)).filter(Boolean));
+    const m3u = buildM3U(playlistTrackIds(p).map((t) => library.getTrack(t)).filter(Boolean));
     res.writeHead(200, { 'Content-Type': 'audio/x-mpegurl; charset=utf-8', 'Content-Disposition': `attachment; filename="${encodeURIComponent(p.name)}.m3u8"` });
     res.end(m3u);
   });
@@ -211,6 +266,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console } = {})
         cues: (rt.cues || []).map((c) => ({ ...c, index: c.type === 'memory' ? -1 : c.index })),
         gridOffset: rt.grid?.offset ?? t.gridOffset,
         analyzed: !!rt.bpm || t.analyzed,
+        ...(rt.color ? { color: rt.color } : {}),
       });
       imported++;
     }
@@ -221,10 +277,23 @@ export function createServer({ dataDir = defaultDataDir(), log = console } = {})
     }
     return { imported, playlists, missing: parsed.tracks.length - imported };
   });
+  route('POST', '/api/import/traktor', async ({ body }) => {
+    const xml = body.xml ?? await fs.promises.readFile(body.path, 'utf8');
+    return importParsed(library, addFile, parseTraktorNml(xml), { folderPrefix: 'Traktor' });
+  });
+  route('POST', '/api/import/serato', async ({ body }) => {
+    if (!body.path || !fs.existsSync(body.path)) throw new HttpError(400, 'Folder does not exist');
+    const { playlists } = readSeratoCrates(body.path);
+    return importParsed(library, addFile, { tracks: [], playlists }, { folderPrefix: 'Serato' });
+  });
+  route('POST', '/api/import/virtualdj', async ({ body }) => {
+    const xml = body.xml ?? await fs.promises.readFile(body.path, 'utf8');
+    return importParsed(library, addFile, parseVirtualDjXml(xml), { folderPrefix: 'VirtualDJ' });
+  });
   route('GET', '/api/export/rekordbox', async ({ res }) => {
     const tracks = library.allTracks().filter((t) => t.localPath || t.sourceType === 'local')
       .map((t) => ({ ...t, path: t.localPath || t.path }));
-    const xml = buildRekordboxXml({ tracks, playlists: library.data.playlists });
+    const xml = buildRekordboxXml({ tracks, playlists: resolvedPlaylists().map((p) => ({ ...p, path: p.folder ? String(p.folder).split(' / ') : [] })) });
     res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8', 'Content-Disposition': 'attachment; filename="opendj-rekordbox.xml"' });
     res.end(xml);
   });
@@ -237,7 +306,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console } = {})
     for (const pid of body.playlistIds || []) {
       const p = library.getPlaylist(pid); if (!p) continue;
       const items = [];
-      for (const tid of p.trackIds) {
+      for (const tid of playlistTrackIds(p)) {
         const t = library.getTrack(tid); const src = t && (t.localPath || (t.sourceType === 'local' ? t.path : null));
         if (!src || !fs.existsSync(src)) continue;
         if (!copied.has(tid)) {
@@ -251,9 +320,33 @@ export function createServer({ dataDir = defaultDataDir(), log = console } = {})
       exported.push({ name: p.name, tracks: items.length });
     }
     const tracks = [...copied.entries()].map(([tid, p]) => ({ ...library.getTrack(tid), path: p }));
-    const pls = (body.playlistIds || []).map((pid) => library.getPlaylist(pid)).filter(Boolean);
+    const pls = (body.playlistIds || []).map((pid) => library.getPlaylist(pid)).filter(Boolean).map((p) => ({ ...p, trackIds: playlistTrackIds(p) }));
     await fs.promises.writeFile(path.join(target, 'OpenDJ', 'rekordbox.xml'), buildRekordboxXml({ tracks, playlists: pls }));
     return { exported, files: copied.size, target };
+  });
+
+  // ---------------- history ----------------
+  route('GET', '/api/history', () => history.list());
+  route('GET', '/api/history/:id', async ({ params }) => history.get(params.id) || Promise.reject(new HttpError(404, 'No session')));
+  route('PATCH', '/api/history/:id', async ({ params, body }) => { const s = history.rename(params.id, body.name); if (!s) throw new HttpError(404, 'No session'); emit('library', { what: 'history' }); return s; });
+  route('DELETE', '/api/history/:id', async ({ params }) => { history.remove(params.id); emit('library', { what: 'history' }); return { ok: true }; });
+  route('GET', '/api/history/:id/export', async ({ params, query, res }) => {
+    const s = history.get(params.id); if (!s) throw new HttpError(404, 'No session');
+    const fmt = ['txt', 'csv', 'm3u8'].includes(query.get('format')) ? query.get('format') : 'txt';
+    const body = exportSession(s, fmt, (tid) => localFile(library.getTrack(tid)));
+    const type = { txt: 'text/plain; charset=utf-8', csv: 'text/csv; charset=utf-8', m3u8: 'audio/x-mpegurl; charset=utf-8' }[fmt];
+    attachment(res, type, `${sessionTitle(s).replace(/:/g, '-')}.${fmt}`, body);
+  });
+
+  // ---------------- backup / restore ----------------
+  route('GET', '/api/backup', async ({ res }) => {
+    const d = new Date().toISOString().slice(0, 10);
+    attachment(res, 'application/json', `opendj-backup-${d}.json`, JSON.stringify(buildBackup(library, history)));
+  });
+  route('POST', '/api/restore', async ({ body }) => {
+    const r = restoreBackup(library, history, body);
+    missing.invalidate();
+    return r;
   });
 
   // ---------------- folders / drives ----------------
@@ -325,7 +418,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console } = {})
           const m = r.re.exec(url.pathname);
           if (!m) continue;
           const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
-          const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : undefined;
+          const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req, url.pathname === '/api/restore' ? 1024 * 1024 * 1024 : undefined) : undefined;
           const out = await r.handler({ req, res, params, body, query: url.searchParams });
           if (!res.headersSent && out !== undefined) sendJson(res, 200, out);
           return;
@@ -346,8 +439,8 @@ export function createServer({ dataDir = defaultDataDir(), log = console } = {})
     }
   });
 
-  const shutdown = () => { library.flush(); for (const r of sse) r.end(); };
-  return { server, library, downloads, shutdown, newId };
+  const shutdown = () => { library.flush(); history.flush(); for (const r of sse) r.end(); };
+  return { server, library, history, downloads, shutdown, newId };
 }
 
 export async function start({ port = 0, host = '127.0.0.1', dataDir } = {}) {

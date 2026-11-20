@@ -47,6 +47,25 @@ export const api = {
   settings: () => req('GET', '/api/settings'),
   saveSettings: (patch) => req('PUT', '/api/settings', patch),
   info: () => req('GET', '/api/info'),
+  // ---- library & prep ----
+  updateTracks: (ids, patch) => req('POST', '/api/tracks/update', { ids, patch }),
+  missingTracks: () => req('GET', '/api/tracks/missing'),
+  relocate: (folder, ids) => req('POST', '/api/tracks/relocate', { folder, ids }),
+  duplicates: () => req('GET', '/api/tracks/duplicates'),
+  dedupe: (groups) => req('POST', '/api/tracks/dedupe', { groups }),
+  smartFields: () => req('GET', '/api/smart/fields'),
+  smartPreview: (smart) => req('POST', '/api/smart/preview', { smart }),
+  createSmartPlaylist: (name, smart, folder) => req('POST', '/api/playlists', { name, smart, folder }),
+  history: () => req('GET', '/api/history'),
+  historySession: (id) => req('GET', `/api/history/${id}`),
+  renameHistory: (id, name) => req('PATCH', `/api/history/${id}`, { name }),
+  deleteHistory: (id) => req('DELETE', `/api/history/${id}`),
+  historyExportUrl: (id, format) => `/api/history/${id}/export?format=${format}`,
+  backupUrl: () => '/api/backup',
+  restore: (backup) => req('POST', '/api/restore', backup),
+  importTraktor: (body) => req('POST', '/api/import/traktor', body),
+  importSerato: (body) => req('POST', '/api/import/serato', body),
+  importVirtualDJ: (body) => req('POST', '/api/import/virtualdj', body),
   events(handlers) {
     const es = new EventSource('/api/events');
     for (const [ev, fn] of Object.entries(handlers)) es.addEventListener(ev, (e) => fn(JSON.parse(e.data || '{}')));

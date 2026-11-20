@@ -54,7 +54,7 @@ export async function readTags(file) {
 }
 
 export async function addFile(library, file, sourceId = 'files') {
-  const tid = Library.localId(file);
+  const tid = library.trackIdForPath ? library.trackIdForPath(file) : Library.localId(file);
   const prev = library.getTrack(tid);
   const st = await fs.promises.stat(file).catch(() => null);
   if (!st) return null;
@@ -75,7 +75,8 @@ export async function scanFolder(library, folder, { onProgress, signal } = {}) {
     } catch { /* skip unreadable file */ }
     if (++n % 25 === 0) { onProgress?.({ folder: folder.id, scanned: n, file }); library.save(); }
   }
-  const missing = library.allTracks().filter((t) => t.sourceId === folder.id && !seen.has(t.id)).map((t) => t.id);
+  const root = folder.path.endsWith(path.sep) ? folder.path : folder.path + path.sep;
+  const missing = library.allTracks().filter((t) => t.sourceId === folder.id && !seen.has(t.id) && (!t.path || t.path.startsWith(root))).map((t) => t.id);
   if (missing.length && !signal?.aborted) library.removeTracks(missing);
   folder.lastScan = Date.now();
   folder.trackCount = seen.size;

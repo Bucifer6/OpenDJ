@@ -1,0 +1,69 @@
+/* ---------- library & prep: colour labels, tags, missing files, duplicates, history, smart playlists ---------- */
+.lib-view-actions { display: inline-flex; gap: 6px; }
+.lib-view-actions:empty { display: none; }
+
+/* track table */
+.lr .lc-sw { display: inline-block; width: 4px; height: 14px; border-radius: 2px; margin-right: 6px; vertical-align: -2px; }
+.lr .lc-miss { color: var(--amber); margin-right: 5px; font-weight: 400; }
+.lr.missing > div:not(.art):not(.stars) { color: var(--text-3); }
+.lr.missing .c-title { text-decoration: line-through; text-decoration-color: rgba(255,176,32,.5); }
+.lr .lc-tags { display: flex; gap: 3px; align-items: center; }
+.tag-chip { display: inline-block; background: #1d2a38; border: 1px solid #2b3d52; color: #9cc9f5; border-radius: 9px; padding: 0 6px; font-size: 10px; line-height: 15px; white-space: nowrap; }
+button.tag-chip { cursor: pointer; font: inherit; font-size: 10.5px; line-height: 18px; }
+button.tag-chip:hover { border-color: var(--accent); color: #fff; }
+.lr.dup-a { background: #14181e; }
+.lr.dup-b { background: #181c23; }
+.lr.dup-a + .lr.dup-b, .lr.dup-b + .lr.dup-a { border-top: 1px solid var(--line-2); }
+.lr.dup-keep .c-title::before { content: 'KEEP'; font-size: 8.5px; font-weight: 800; color: var(--green); border: 1px solid var(--green); border-radius: 3px; padding: 0 3px; margin-right: 6px; vertical-align: 1px; }
+
+/* sidebar */
+.tree-item.has-missing .ti-count { color: var(--amber); }
+.tree-more, .tree-empty { padding: 3px 10px 3px 32px; font-size: 10.5px; color: var(--text-3); }
+.tree-more { cursor: pointer; }
+.tree-more:hover { color: var(--accent); }
+
+/* context-menu colour dots */
+.ctx-item.ctx-color::first-letter { color: var(--sw); }
+
+/* track info editor */
+.le-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 12px; }
+.le-grid .span2 { grid-column: span 2; }
+.le-grid .span3 { grid-column: span 3; }
+.le-grid .span4 { grid-column: 1 / -1; }
+.le-path { font-family: var(--mono); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.le-comment { resize: vertical; min-height: 44px; font: inherit; }
+.le-stars { display: flex; align-items: center; gap: 2px; height: 31px; }
+.le-stars span { font-size: 17px; color: #333a45; cursor: pointer; }
+.le-stars span.on { color: var(--amber); }
+.le-stars span:hover { color: #ffcf70; }
+.le-swatches { display: flex; gap: 6px; align-items: center; height: 31px; }
+.le-sw { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); }
+.le-sw.none { background: var(--panel-3); color: var(--text-3); font-size: 12px; line-height: 1; box-shadow: none; border-color: var(--line-2); }
+.le-sw:hover { transform: scale(1.1); }
+.le-sw.on { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
+.le-tag-sugg { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.le-tag-sugg:empty { display: none; }
+
+/* smart playlist builder */
+.sm-match { align-items: center; color: var(--text-2); }
+.sm-rules { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: #0e1115; border: 1px solid var(--line); border-radius: 8px; }
+.sm-rules:empty::after { content: 'No rules: matches the whole collection.'; color: var(--text-3); font-size: 11px; }
+.sm-rule { display: grid; grid-template-columns: 150px 170px minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.sm-rule .sel { height: 31px; }
+.sm-val { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.sm-val .inp { min-width: 0; }
+.sm-between .inp { flex: 1; }
+.sm-foot { align-items: center; justify-content: space-between; }
+.sm-limit-wrap { display: inline-flex; gap: 6px; align-items: center; }
+.sm-limit-wrap .inp.sm-limit { width: 90px; min-width: 0; flex: none; }
+.sm-count { font-weight: 700; color: var(--accent); white-space: nowrap; }
+
+@media (max-width: 700px) {
+  .le-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .le-grid .span3 { grid-column: 1 / -1; }
+  .sm-rule { grid-template-columns: 1fr 1fr; }
+}
+
+/* sub-menus open leftwards when the menu is near the right edge */
+.ctx-menu.flip-sub .ctx-sub { left: auto; right: 100%; }
+.ctx-menu.flip-sub .ctx-item.has-sub::after { content: '◂'; }
