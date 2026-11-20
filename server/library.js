@@ -23,7 +23,7 @@ export const DEFAULT_SETTINGS = {
   waveformZoom: 8,            // seconds visible
   waveformColors: 'rgb',      // 'rgb' | 'blue' | 'mono'
   downloadDir: '',
-  automix: { transitionBeats: 32, style: 'eqswap', keepSync: true, skipSilence: true, shuffle: false, keySync: false, order: 'harmonic', restoreTempo: true },
+  automix: { transitionBeats: 32, style: 'eqswap', keepSync: true, skipSilence: true, shuffle: false, keySync: false, order: 'harmonic', restoreTempo: true, varyStyles: false, onAirLoad: 'ask', shape: 'warmup', preset: 'balanced', sliders: { harmonic: 0.5, energy: 0.5, variety: 0.5 } },
   midiMappings: {},           // deviceName -> mapping object
   recordFormat: 'wav',
   limiter: true,

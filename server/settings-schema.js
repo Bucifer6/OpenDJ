@@ -41,8 +41,12 @@ const SCHEMA = {
   waveformColors: oneOf('rgb', 'blue', 'mono'),
   downloadDir: str(), uploadDir: str(),
   automix: shape({
-    transitionBeats: num(1, 256), style: oneOf('phrase', 'eqswap', 'crossfade', 'filter', 'echo'),
+    transitionBeats: num(1, 256),
+    style: oneOf('auto', 'blend', 'bassswap', 'crossfade', 'filter', 'echo', 'cut', 'backspin', 'brake', 'loop', 'reverb', 'phrase', 'eqswap'),
     keepSync: bool(), skipSilence: bool(), shuffle: bool(), keySync: bool(), order: oneOf('harmonic', 'build', 'peak', 'wave'),
+    varyStyles: bool(), onAirLoad: oneOf('ask', 'queue', 'stop'), shape: oneOf('warmup', 'rising', 'steady', 'peak', 'wave'),
+    preset: oneOf('balanced', 'harmonic', 'energy', 'variety', 'custom'), liveSetLength: num(2, 1000),
+    sliders: (v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(['harmonic', 'energy', 'variety'].map((k) => [k, num(0, 1)(v[k]) ?? 0.5])) : undefined),
   }),
   midiMappings: obj(),
   recordFormat: oneOf('wav', 'flac', 'mp3', 'aac', 'opus'),
