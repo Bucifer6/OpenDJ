@@ -8,6 +8,8 @@
 //    the first message). A rel entry on an absolute target nudges the value instead of setting it (endless knobs).
 //  - outputs: explicit LED messages (from Mixxx mappings). When present they replace the automatic per-entry LEDs.
 import { Emitter, clamp } from '../util.js';
+import { linkMidiTargets } from '../link/link.js';
+import { lyricsMidiTargets } from '../lyrics/lyrics.js';
 import { PRESETS } from './presets.js';
 import { BEATLOOPS, BEATJUMPS, ROLLS, convertMixxx, toStoredMapping } from './mixxx.js';
 import { HidManager, describeHidKey } from './hid.js';
@@ -112,6 +114,7 @@ export function buildTargets(app) {
   });
   add('automix.toggle', 'Automix on/off', 'button', (down) => down && app.toggleAutomix(), () => app.automix.enabled);
   add('record.toggle', 'Record mix on/off', 'button', (down) => down && app.toggleRecord(), () => app.engine.recording);
+  T.push(...linkMidiTargets(app), ...lyricsMidiTargets(app));
   return T;
 }
 

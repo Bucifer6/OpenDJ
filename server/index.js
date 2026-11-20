@@ -27,6 +27,8 @@ import { History, exportSession, sessionTitle } from './history.js';
 import { MissingChecker, relocateTracks, findDuplicates, mergeDuplicates, buildBackup, restoreBackup } from './library-tools.js';
 import { parseTraktorNml, readSeratoCrates, parseVirtualDjXml, importParsed } from './importers.js';
 import { registerLightingRoutes } from './lighting/routes.js';
+import { registerLinkRoutes } from './link/index.js';
+import { registerLyricsRoutes } from './lyrics.js';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const MIME = {
@@ -689,6 +691,8 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   route('GET', '/api/info', () => ({ version: VERSION, dataDir, platform: process.platform, tracks: Object.keys(library.data.tracks).length, hosted: restricted, auth: auth.enabled }));
   // ---------------- lighting (DMX / Art-Net / sACN / WLED / Hue / OSC) ----------------
   const lighting = registerLightingRoutes({ route, library, emit });
+  const link = registerLinkRoutes({ route, library, emit, log });
+  registerLyricsRoutes({ route, library, emit, dataDir, canRead: readable, canWrite: readable });
 
   route('GET', '/api/events', ({ req, res }) => {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -788,10 +792,11 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     try { history.flush(); } catch { /* reported above */ }
     for (const r of sse) r.end();
     try { lighting?.close?.(); } catch { /* already closed */ }
+    try { link?.close?.(); } catch { /* already closed */ }
     downloads.queue = [];
     for (const j of downloads.active.values()) j.ctrl.abort();
   };
-  return { server, library, history, downloads, transcoder, auth, lighting, ffmpegReady: ffReady, shutdown, newId };
+  return { server, library, history, downloads, transcoder, auth, lighting, link, ffmpegReady: ffReady, shutdown, newId };
 }
 
 /**

@@ -14,6 +14,8 @@ import { Lighting } from './lighting/lighting.js';
 import { setupVideo } from './video/video-ui.js';
 import { setupUpload } from './ui/upload.js';
 import { DvsManager } from './dvs/dvs.js';
+import { setupLink } from './link/link.js';
+import { setupLyrics } from './lyrics/lyrics.js';
 import { dvsButton } from './dvs/dvs-ui.js';
 
 class App {
@@ -35,6 +37,8 @@ class App {
     this.sequencer = new Sequencer(this.engine);
     this.buildLayout();
     this.wireEvents(); // subscribe to server events before loading the library so no change is missed
+    setupLink(this);
+    setupLyrics(this);
     await this.midi.init();
     if (this.settings.midiClockOutput) this.midi.setClockOutput(this.settings.midiClockOutput);
     this.lighting = new Lighting(this);
@@ -280,6 +284,7 @@ class App {
       scan: (p) => this.library.setJobStatus(p.done ? '' : `Scanning… ${p.scanned} files`),
       sync: (p) => this.library.setJobStatus(p.finished ? '' : `Syncing media server… ${p.done}${p.total ? '/' + p.total : ''}`),
       downloads: (d) => this.library.setDownloads(d),
+      lyrics: (e) => this.lyrics?.invalidate(e.trackId),
       'job-error': (e) => { this.library.setJobStatus(''); this.toast(`⚠ ${e.message}`); },
     });
     this.engine.on('track-updated', (t) => this.library.updateTrack(t));
