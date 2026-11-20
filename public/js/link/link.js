@@ -5,7 +5,7 @@
 //           (hard seek for big errors, tiny pitch bend for small ones), using the audio actually heard
 //           (AudioContext output timestamp + outputLatency + a user offset) against Link's host-time beat clock.
 // Server: server/link (UDP discovery + measurement); state arrives on /api/link/stream at ~20 Hz.
-import { el } from '../util.js';
+import { el, uiZoom } from '../util.js';
 import {
   browserMicros, estimateOffset, audioLagSec, heardPosition, deckBeats, linkBeatAt, followPlan, phaseError, beatScale, tempoRatio,
 } from './link-core.js';
@@ -231,7 +231,7 @@ export class LinkClient {
     this.fillPopover();
     document.body.append(this.pop);
     const r = this.wrap.getBoundingClientRect();
-    Object.assign(this.pop.style, { top: `${r.bottom + 6}px`, left: `${Math.max(8, Math.min(innerWidth - 300, r.left))}px` });
+    const z = uiZoom(); Object.assign(this.pop.style, { top: `${(r.bottom + 6) / z}px`, left: `${Math.max(8, Math.min(innerWidth - 300 * z, r.left)) / z}px` }); // zoom: see util.uiZoom
     this._outside = (e) => { if (!this.pop?.contains(e.target) && !this.wrap.contains(e.target)) this.togglePopover(); };
     document.addEventListener('pointerdown', this._outside, true);
   }

@@ -1,4 +1,4 @@
-import { el } from '../util.js';
+import { el, uiZoom } from '../util.js';
 import { api } from '../api.js';
 import { THEMES, applyTheme } from './themes.js';
 import { controllersPanel } from './controllers-panel.js';
@@ -43,18 +43,19 @@ export class Dialogs {
           sub.style.top = ''; sub.style.left = ''; sub.style.right = '';
           requestAnimationFrame(() => {
             const sr = sub.getBoundingClientRect();
-            if (sr.bottom > innerHeight - 8) sub.style.top = `${Math.min(-4, innerHeight - 8 - sr.bottom - 4)}px`;
+            if (sr.bottom > innerHeight - 8) sub.style.top = `${Math.min(-4, innerHeight - 8 - sr.bottom - 4) / uiZoom()}px`;
             if (sr.right > innerWidth - 8) { sub.style.left = 'auto'; sub.style.right = '100%'; }
           });
         });
       }
-      else row.addEventListener('click', () => { m.remove(); it.action(); });
+      else row.addEventListener('click', () => { close(); it.action(); }); // close(): also drops the Esc / outside-click listeners
       return row;
     }));
     const m = build(items);
     document.body.append(m);
     const r = m.getBoundingClientRect();
-    m.style.left = `${Math.min(x, innerWidth - r.width - 8)}px`; m.style.top = `${Math.min(y, innerHeight - r.height - 8)}px`;
+    const z = uiZoom(); // window px -> zoomed CSS px
+    m.style.left = `${Math.max(8, Math.min(x, innerWidth - r.width - 8)) / z}px`; m.style.top = `${Math.max(8, Math.min(y, innerHeight - r.height - 8)) / z}px`;
     const close = () => { m.remove(); document.removeEventListener('mousedown', off); document.removeEventListener('keydown', esc, true); };
     const off = (e) => { if (!m.contains(e.target)) close(); };
     const esc = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); close(); } };
@@ -74,7 +75,8 @@ export class Dialogs {
   // ---------- folder picker (native in Electron, server-side browser otherwise) ----------
   async pickFolder(title = 'Choose folder') {
     if (window.opendjNative?.pickFolder) return window.opendjNative.pickFolder(title);
-    let cur = await api.browse();
+    let cur;
+    try { cur = await api.browse(); } catch (e) { this.app.toast(`Cannot browse folders: ${e.message}`); return null; }
     const pathEl = el('input', { class: 'inp', value: cur.path });
     const list = el('div', { class: 'browse-list' });
     const render = () => {

@@ -67,3 +67,8 @@ button.tag-chip:hover { border-color: var(--accent); color: #fff; }
 /* sub-menus open leftwards when the menu is near the right edge */
 .ctx-menu.flip-sub .ctx-sub { left: auto; right: 100%; }
 .ctx-menu.flip-sub .ctx-item.has-sub::after { content: '◂'; }
+
+/* playlist order: # column + drag-to-reorder drop marker */
+.lr .ord { color: var(--text-3); text-align: right; padding-right: 6px; }
+.lr.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.lr.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }

@@ -26,7 +26,7 @@ class App {
   async init() {
     this.settings = await api.settings();
     applyTheme(this.settings);
-    this.deckCount = this.settings.deckCount || 2;
+    this.deckCount = Number(this.settings.deckCount) === 4 ? 4 : 2; // only 2 or 4 decks exist
     this.engine = new Engine(this.settings);
     await this.engine.init();
     this.dvs = new DvsManager(this);
@@ -88,7 +88,7 @@ class App {
     this.toasts = el('div', { class: 'toasts' });
     // top bar
     this.clock = el('span', { class: 'clock' });
-    this.recBtn = el('button', { class: 'btn rec', onclick: () => this.toggleRecord(), title: 'Record your mix (WAV)' }, '● REC');
+    this.recBtn = el('button', { class: 'btn rec', onclick: () => this.toggleRecord(), title: 'Record your mix to disk. R = start / stop' }, '● REC');
     this.recTime = el('span', { class: 'rec-time' });
     this.amBtn = el('button', { class: 'btn automix-btn', onclick: () => this.toggleAutomix(), title: 'Automix the current library view' }, 'AUTOMIX');
     this.amSkip = el('button', { class: 'btn sm', onclick: () => this.automix.skip(), title: 'Mix to next track now' }, '⏭');
@@ -211,6 +211,7 @@ class App {
   }
 
   async setDeckCount(n, save = true) {
+    n = Number(n) === 4 ? 4 : 2;
     // decks that would be hidden must not keep playing without any visible controls
     const hiddenPlaying = this.engine.decks.slice(n).filter((d) => d.playing);
     if (hiddenPlaying.length) {

@@ -8,6 +8,7 @@ import { LibraryDialogs, TRACK_COLORS, colorName, flipSubmenus } from './library
 
 const ROW_H = 26;
 const COLS = [
+  { id: '#', label: '#', w: 34, ordered: true }, // position in a playlist / set / history view (only shown there)
   { id: 'art', label: '', w: 30, sort: null },
   { id: 'title', label: 'Title', w: 'minmax(160px, 2.2fr)' },
   { id: 'artist', label: 'Artist', w: 'minmax(120px, 1.5fr)' },
@@ -22,6 +23,8 @@ const COLS = [
   { id: 'source', label: 'Source', w: 96 },
   { id: 'addedAt', label: 'Added', w: 86 },
 ];
+/** Views whose tracks have an intrinsic order (shown in the # column, the default sort there). */
+const ORDERED_VIEWS = new Set(['playlist', 'session', 'played', 'history']);
 const SOURCE_ICONS = { plex: 'Plex', jellyfin: 'Jellyfin', emby: 'Emby', subsonic: 'Subsonic', mediamax: 'MediaMax', local: 'Local' };
 
 export class LibraryUI {
@@ -95,8 +98,10 @@ export class LibraryUI {
     let q = this.query.trim().toLowerCase();
     if (!q) return list;
     const tests = [];
-    q = q.replace(/bpm:(\d+(?:\.\d+)?)(?:-(\d+(?:\.\d+)?))?/g, (_, a, b) => { const lo = +a, hi = b ? +b : +a + 0.999; tests.push((t) => t.bpm >= lo && t.bpm <= hi); return ''; });
-    q = q.replace(/key:(\S+)/g, (_, k) => { const c = toCamelot(k); tests.push((t) => toCamelot(t.key) === c); return ''; });
+    // a whole-number upper bound includes its decimals: bpm:120-128 matches 128.5 like bpm:128 does
+    const upper = (v) => (v.includes('.') ? +v : +v + 0.999);
+    q = q.replace(/bpm:(\d+(?:\.\d+)?)(?:-(\d+(?:\.\d+)?))?/g, (_, a, b) => { const lo = +a, hi = upper(b ?? a); tests.push((t) => t.bpm >= lo && t.bpm <= hi); return ''; });
+    q = q.replace(/key:(\S*)/g, (_, k) => { const c = toCamelot(k); tests.push(c ? (t) => toCamelot(t.key) === c : () => false); return ''; }); // unknown key: no match
     q = q.replace(/genre:(\S+)/g, (_, g) => { tests.push((t) => (t.genre || '').toLowerCase().includes(g)); return ''; });
     q = q.replace(/tag:(\S+)/g, (_, g) => { tests.push((t) => (t.tags || []).some((x) => x.toLowerCase().includes(g))); return ''; });
     const words = q.split(/\s+/).filter(Boolean);
@@ -107,10 +112,14 @@ export class LibraryUI {
     });
   }
 
+  get showOrder() { return ORDERED_VIEWS.has(this.view.kind); }
   applyView() {
-    let list = this.filter(this.viewTracks());
+    const base = this.viewTracks();
+    this.orderOf = new Map(); base.forEach((t, i) => { if (!this.orderOf.has(t)) this.orderOf.set(t, i); });
+    let list = this.filter(base);
     const { col, dir } = this.sort;
-    if (col && !(this.view.kind === 'playlist' && col === '#') && this.view.kind !== 'duplicates') {
+    if (col === '#') { if (dir < 0) list = [...list].reverse(); } // the view's own order (playlist / set / history)
+    else if (col && this.view.kind !== 'duplicates') {
       const session = this.view.kind === 'session';
       const val = (t) => (col === 'key' ? (toCamelot(t.key) ? toCamelot(t.key).padStart(3, '0') : '') : col === 'source' ? (t.sourceKind || 'local')
         : col === 'tags' ? (t.tags || []).join(', ') : col === 'addedAt' && session ? t._playedAt : t[col]);
@@ -171,11 +180,12 @@ export class LibraryUI {
     this.root = el('section', { class: 'library' }, this.tree, el('div', { class: 'lib-main' }, tools, this.header, this.scroller));
   }
 
-  gridTemplate() { return COLS.map((c) => (typeof c.w === 'number' ? `${c.w}px` : c.w)).join(' '); }
+  cols() { return COLS.filter((c) => !c.ordered || this.showOrder); }
+  gridTemplate() { return this.cols().map((c) => (typeof c.w === 'number' ? `${c.w}px` : c.w)).join(' '); }
   renderHeader() {
     this.header.style.gridTemplateColumns = this.gridTemplate();
     const label = (c) => (c.id === 'addedAt' && this.view.kind === 'session' ? 'Played' : c.label);
-    this.header.replaceChildren(...COLS.map((c) => el('div', {
+    this.header.replaceChildren(...this.cols().map((c) => el('div', {
       class: `lh ${this.sort.col === c.id ? 'sorted' : ''}`,
       onclick: () => { if (c.sort === null) return; this.sort = { col: c.id, dir: this.sort.col === c.id ? -this.sort.dir : 1 }; this.renderHeader(); this.applyView(); },
     }, label(c), this.sort.col === c.id ? (this.sort.dir > 0 ? ' ▲' : ' ▼') : '')));
@@ -207,7 +217,7 @@ export class LibraryUI {
         title: t.missing ? `File missing: ${t.path}` : null,
         style: { top: `${i * ROW_H}px`, gridTemplateColumns: this.gridTemplate() },
         draggable: 'true', 'data-i': i,
-        html: `<div class="art" style="background-image:url(${api.coverUrl(t.id)})"></div>`
+        html: (this.showOrder ? `<div class="num ord">${(this.orderOf?.get(t) ?? i) + 1}</div>` : '') + `<div class="art" style="background-image:url(${api.coverUrl(t.id)})"></div>`
           + `<div class="c-title" title="${escapeHtml(t.title)}">${sw}${t.missing ? '<span class="lc-miss">⚠</span>' : ''}${escapeHtml(t.title)}</div><div title="${escapeHtml(t.artist)}">${escapeHtml(t.artist)}</div>`
           + `<div class="num ${bpmClose ? 'match' : ''}">${Number(t.bpm) > 0 ? Number(t.bpm).toFixed(Number(t.bpm) % 1 ? 1 : 0) : ''}</div>`
           + `<div class="key ${cam ? `cam-${cam.replace(/\D/g, '')}` : ''} ${comp ? 'match' : ''}">${escapeHtml(cam || t.key || '')}</div>`
@@ -230,7 +240,7 @@ export class LibraryUI {
       const i = idx(e); if (i < 0) return;
       if (e.detail === 2 && !e.target.closest('[data-s]')) { this.loadToFreeDeck(this.rows[i].id); return; }
       const star = e.target.closest('[data-s]');
-      if (star) { const t = this.rows[i]; const r = +star.dataset.s === t.rating ? 0 : +star.dataset.s; t.rating = r; api.updateTrack(t.id, { rating: r }); this.renderRows(true); return; }
+      if (star) { const t = this.rows[i]; const r = +star.dataset.s === t.rating ? 0 : +star.dataset.s; t.rating = r; api.updateTrack(t.id, { rating: r }).catch((err) => this.app.toast(`Could not save the rating: ${err.message}`)); this.renderRows(true); return; }
       const id = this.rows[i].id;
       if (e.shiftKey && this.cursor >= 0) { const [a, b] = [Math.min(this.cursor, i), Math.max(this.cursor, i)]; for (let k = a; k <= b; k++) this.selected.add(this.rows[k].id); }
       else if (e.ctrlKey || e.metaKey) { this.selected.has(id) ? this.selected.delete(id) : this.selected.add(id); }
@@ -245,6 +255,25 @@ export class LibraryUI {
       e.dataTransfer.setData('text/x-opendj-tracks', JSON.stringify([...this.selected]));
       e.dataTransfer.effectAllowed = 'copyMove';
     });
+    // drag tracks within a playlist (shown in its own order, no search filter) to reorder it
+    const clearMark = () => this.rowsEl.querySelectorAll('.drop-before, .drop-after').forEach((r) => r.classList.remove('drop-before', 'drop-after'));
+    const dropSlot = (e) => {
+      const r = e.target.closest('.lr'); if (!r) return null;
+      const b = r.getBoundingClientRect(), after = e.clientY > b.top + b.height / 2;
+      return { row: r, after, index: +r.dataset.i + (after ? 1 : 0) };
+    };
+    this.rowsEl.addEventListener('dragover', (e) => {
+      if (!this.canReorder() || !e.dataTransfer.types.includes('text/x-opendj-tracks')) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+      const slot = dropSlot(e); clearMark(); if (slot) slot.row.classList.add(slot.after ? 'drop-after' : 'drop-before');
+    });
+    this.rowsEl.addEventListener('dragleave', (e) => { if (!this.rowsEl.contains(e.relatedTarget)) clearMark(); });
+    this.rowsEl.addEventListener('drop', (e) => {
+      if (!this.canReorder() || !e.dataTransfer.types.includes('text/x-opendj-tracks')) return;
+      e.preventDefault(); const slot = dropSlot(e); clearMark();
+      if (slot) this.reorderPlaylist(slot.index);
+    });
+    this.rowsEl.addEventListener('dragend', clearMark);
     this.rowsEl.addEventListener('contextmenu', (e) => {
       e.preventDefault(); const i = idx(e); if (i < 0) return;
       const id = this.rows[i].id; if (!this.selected.has(id)) { this.selected = new Set([id]); this.cursor = i; this.renderRows(true); }
@@ -272,6 +301,27 @@ export class LibraryUI {
     const n = this.app.deckCount;
     const d = this.app.engine.decks.slice(0, n).find((x) => !x.playing && !x.track) || this.app.engine.decks.slice(0, n).find((x) => !x.playing);
     if (d) this.app.loadTrack(d.index, id).catch(() => {}); else this.app.toast('All decks are playing');
+  }
+
+  /** The current view is a normal playlist shown in its own order (# ascending, no search filter). */
+  canReorder() {
+    if (this.view.kind !== 'playlist' || this.sort.col !== '#' || this.sort.dir !== 1 || this.query.trim()) return false;
+    const p = this.playlists.find((x) => x.id === this.view.id);
+    return !!p && !p.smart && !p.sourceId;
+  }
+  /** Move the selected tracks so they start at row `index` (0..rows.length) of the playlist. */
+  async reorderPlaylist(index) {
+    const p = this.playlists.find((x) => x.id === this.view.id); if (!p) return;
+    const ids = p.trackIds, sel = this.selected;
+    const moving = ids.filter((id) => sel.has(id));
+    if (!moving.length) return;
+    const before = ids.slice(0, index).filter((id) => !sel.has(id)).length; // non-moving tracks above the drop point
+    const rest = ids.filter((id) => !sel.has(id));
+    const next = [...rest.slice(0, before), ...moving, ...rest.slice(before)];
+    if (next.every((id, i) => id === ids[i])) return;
+    p.trackIds = next; this.applyView(); // instant feedback, then save
+    try { await api.updatePlaylist(p.id, { trackIds: next }); } catch (e) { this.app.toast(`Could not reorder: ${e.message}`); }
+    this.refresh();
   }
 
   async removeFromPlaylist() {
@@ -341,10 +391,11 @@ export class LibraryUI {
 
   // ---------------- sidebar tree ----------------
   async setView(v, title) {
-    const wasSession = this.view.kind === 'session';
+    const wasOrdered = ORDERED_VIEWS.has(this.view.kind);
     this.view = v; this.viewTitle.textContent = title; this.selected.clear(); this.cursor = -1; this.scroller.scrollTop = 0;
-    if (v.kind === 'session' && !wasSession) { this._prevSort = this.sort; this.sort = { col: 'addedAt', dir: 1 }; }
-    else if (v.kind !== 'session' && wasSession && this._prevSort) this.sort = this._prevSort;
+    // playlists, sets and play history open in their own order (# column); other views get the user's sort back
+    if (ORDERED_VIEWS.has(v.kind)) { if (!wasOrdered) this._prevSort = this.sort; this.sort = { col: '#', dir: 1 }; }
+    else if (wasOrdered && this._prevSort) { this.sort = this._prevSort; this._prevSort = null; }
     this.renderHeader(); this.renderTree();
     await this.loadViewData();
     if (this.view === v) this.applyView();
@@ -436,7 +487,7 @@ export class LibraryUI {
       ...(p.smart ? [{ label: 'Edit rules…', action: () => this.dlg.smartPlaylist(p) }] : []),
       { label: 'Automix this playlist', action: () => this.app.dialogs.automixQueue(p.trackIds.map((i) => this.tracks.get(i)).filter(Boolean)) },
       { label: 'Download all for offline use', action: () => this.download(p.trackIds.filter((i) => { const t = this.tracks.get(i); return t?.sourceType === 'remote' && !t.localPath; })) },
-      { label: 'Export as M3U8', action: () => { location.href = api.m3uUrl(p.id); } },
+      { label: 'Export as M3U8', action: () => { const a = el('a', { href: api.m3uUrl(p.id), download: '' }); document.body.append(a); a.click(); a.remove(); } }, // no navigation: beforeunload would ask while decks play
       { label: 'Export to USB / folder…', action: () => this.app.dialogs.exportUsb([p.id]) },
       { label: 'Export to CDJ USB (rekordbox)…', action: () => openCdjExport(this.app, [p.id]) },
       { label: 'Prepare AI stems for playlist', action: () => this.app.stems?.enqueue(p.trackIds).catch((e) => this.app.toast(e.message)) },

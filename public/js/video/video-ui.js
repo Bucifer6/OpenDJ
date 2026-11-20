@@ -1,6 +1,6 @@
 // Video panel: live preview of the video mix + controls (transitions, per-deck FX, overlay, YouTube, outputs).
 // setupVideo(app) → { openPanel, openOutputWindow, toggleMixer }
-import { el } from '../util.js';
+import { el, uiZoom } from '../util.js';
 import { VideoMixer, RESOLUTIONS } from './mixer.js';
 import { TRANSITIONS, FX, parseYouTube } from './video-core.js';
 import { YouTubeSource, searchYouTube } from './youtube.js';
@@ -88,7 +88,7 @@ export function setupVideo(app) {
     head.addEventListener('pointermove', (e) => {
       if (!drag) return;
       const x = Math.max(0, Math.min(innerWidth - 120, e.clientX - drag.dx)), y = Math.max(0, Math.min(innerHeight - 40, e.clientY - drag.dy));
-      Object.assign(root.style, { left: `${x}px`, top: `${y}px`, right: 'auto' });
+      const z = uiZoom(); Object.assign(root.style, { left: `${x / z}px`, top: `${y / z}px`, right: 'auto' });
     });
     head.addEventListener('pointerup', () => { drag = null; });
 
