@@ -14,6 +14,8 @@ export function startMobileRuntime({ plugins = {}, native = false, os = 'web', w
   const unlock = () => { win.opendj?.engine?.resume?.(); };
   doc.addEventListener('pointerdown', unlock, { capture: true, passive: true });
   doc.addEventListener('touchend', unlock, { capture: true, passive: true });
+  // back from the background / a phone call: the AudioContext may have been suspended by the system
+  doc.addEventListener('visibilitychange', () => { if (doc.visibilityState === 'visible') unlock(); });
 
   // ---- playing state ----
   let silent = null, playing = false, idleSince = 0, fgService = false;

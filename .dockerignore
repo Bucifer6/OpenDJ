@@ -10,3 +10,5 @@ electron
 test
 scripts
 *.log
+mobile
+capacitor.config.json

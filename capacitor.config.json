@@ -1,0 +1,29 @@
+{
+  "appId": "io.github.bucifer6.opendj",
+  "appName": "OpenDJ",
+  "webDir": "mobile/www",
+  "backgroundColor": "#0b0d10",
+  "android": {
+    "path": "mobile/android",
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  },
+  "ios": {
+    "path": "mobile/ios",
+    "contentInset": "never",
+    "scrollEnabled": false,
+    "allowsLinkPreview": false,
+    "backgroundColor": "#0b0d10",
+    "preferredContentMode": "mobile"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": false
+    },
+    "SystemBars": {
+      "insetsHandling": "css",
+      "initialViewportFitValueHint": "cover",
+      "style": "DARK"
+    }
+  }
+}
