@@ -27,6 +27,7 @@ window.addEventListener('opendj-theme', () => { themeRev++; });
 
 /** Max of a band over bins [a, b). */
 function binMax(arr, a, b) { let m = 0; for (let i = a; i < b; i++) if (arr[i] > m) m = arr[i]; return m; }
+function binBlend(arr, a, b) { let m = 0, s = 0; for (let i = a; i < b; i++) { const v = arr[i]; s += v; if (v > m) m = v; } return 0.35 * m + 0.65 * s / (b - a); }
 
 /**
  * Paint columns [x0, x1) of a 3-band waveform into g (device pixels). `binAt(x)` maps a column to its first bin.
@@ -42,7 +43,10 @@ function paintBands(g, w, pal, x0, x1, H, binAt, opts = {}) {
     if (a < 0 || a >= n) continue;
     const b = Math.min(Math.max(binAt(x + 1), a + 1), n);
     const k = x - x0, p = binMax(w.peak, a, b) / 255;
-    P[k] = p; L[k] = p * binMax(w.low, a, b) / 255; M[k] = p * binMax(w.mid, a, b) / 255; Hh[k] = p * binMax(w.high, a, b) / 255;
+    // bands: max when a column covers a couple of bins, else a max/mean blend so a zoomed-out view (overview) keeps
+    // its 3-band character instead of saturating to the top layer
+    const band = b - a <= 2 ? binMax : binBlend;
+    P[k] = p; L[k] = p * band(w.low, a, b) / 255; M[k] = p * band(w.mid, a, b) / 255; Hh[k] = p * band(w.high, a, b) / 255;
   }
   const layer = (arr, scale, style) => {
     g.fillStyle = style; g.beginPath();

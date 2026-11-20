@@ -210,11 +210,11 @@ body:not(.four-decks) .deck-col > .deck:nth-child(2) { display: none; }
 /* Knob: a ridged cap with a pointer, a 270° value track around it, the value arc in the deck colour (from the centre
    for bipolar knobs like EQ / filter, with a detent tick at 12 o'clock) */
 .knob-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.knob { --arc-a: -135deg; --arc-b: 0deg; --arc-c: var(--deck-color, var(--accent)); position: relative; border-radius: 50%; cursor: ns-resize; background: radial-gradient(circle at 50% 30%, var(--knob-hi), var(--knob-lo) 72%); box-shadow: 0 2px 4px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.12), 0 0 0 2px var(--deep), 0 0 0 3.5px var(--knob-ring); touch-action: none; }
-.knob::before { content: ''; position: absolute; inset: -5px; border-radius: 50%; pointer-events: none;
+.knob { --arc-a: -135deg; --arc-b: 0deg; --arc-c: var(--deck-color, var(--accent)); position: relative; border-radius: 50%; cursor: ns-resize; background: radial-gradient(circle at 50% 30%, var(--knob-hi), var(--knob-lo) 72%); box-shadow: 0 2px 4px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.12), 0 0 0 1px var(--deep), 0 0 0 2px var(--knob-ring); touch-action: none; }
+.knob::before { content: ''; position: absolute; inset: -4px; border-radius: 50%; pointer-events: none;
   background: conic-gradient(from var(--arc-a), var(--arc-c) 0deg var(--arc-b), transparent var(--arc-b)), conic-gradient(from -135deg, var(--led-off) 0deg 270deg, transparent 270deg);
-  -webkit-mask: radial-gradient(circle, transparent 60%, #000 62%, #000 73%, transparent 75%); mask: radial-gradient(circle, transparent 60%, #000 62%, #000 73%, transparent 75%); }
-.knob.bipolar::after { content: ''; position: absolute; left: 50%; top: -7px; width: 2px; height: 3px; margin-left: -1px; border-radius: 1px; background: var(--text-3); pointer-events: none; }
+  -webkit-mask: radial-gradient(circle, transparent 61%, #000 63%, #000 73%, transparent 75%); mask: radial-gradient(circle, transparent 61%, #000 63%, #000 73%, transparent 75%); }
+.knob.bipolar::after { content: ''; position: absolute; left: 50%; top: -6px; width: 2px; height: 3px; margin-left: -1px; border-radius: 1px; background: var(--text-3); pointer-events: none; }
 .knob.bipolar.off-center::after { background: var(--line-2); }
 .knob-md { width: 34px; height: 34px; }
 .knob-sm { width: 26px; height: 26px; }

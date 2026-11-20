@@ -10,38 +10,47 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icon-192.png">
   <style>
+    /* Same design tokens and bundled font as the app (css/app.css). */
+    @font-face { font-family: "Inter OpenDJ"; font-style: normal; font-display: swap; font-weight: 100 900; src: url(fonts/inter-latin-wght-normal.woff2) format("woff2"); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+    @font-face { font-family: "Inter OpenDJ"; font-style: normal; font-display: swap; font-weight: 100 900; src: url(fonts/inter-latin-ext-wght-normal.woff2) format("woff2"); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+1E00-1E9F,U+20A0-20AB,U+20AD-20C0,U+2C60-2C7F,U+A720-A7FF; }
     :root {
-      --bg: #0b0d10; --panel: #13161b; --panel-2: #191d23; --panel-3: #20252d; --line: #262c35; --line-2: #313844;
-      --text: #e6eaef; --text-2: #9aa4b2; --text-3: #6b7685; --accent: #3ea6ff; --on-accent: #04121f; --red: #ff3b4d; --green: #2ed47a;
-      --radius: 6px; --font: Inter, "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+      --bg: #090b0e; --panel: #111419; --panel-2: #171b21; --panel-3: #1f242c; --line: #232931; --line-2: #2f3640;
+      --text: #e9edf2; --text-2: #9ea8b6; --text-3: #6a7584; --accent: #3d9cff; --on-accent: #03111f; --red: #ff3d50; --green: #2fd67b;
+      --radius: 6px; --font: "Inter OpenDJ", Inter, "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
       color-scheme: dark;
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
     body {
-      background: radial-gradient(1200px 600px at 50% -10%, #16202c 0%, var(--bg) 60%) fixed, var(--bg);
-      color: var(--text); font: 14px/1.45 var(--font);
+      background: radial-gradient(900px 520px at 50% -12%, color-mix(in srgb, var(--accent) 14%, var(--bg)) 0%, var(--bg) 62%) fixed, var(--bg);
+      color: var(--text); font: 14px/1.45 var(--font); -webkit-font-smoothing: antialiased;
       display: grid; place-items: center; padding: 16px;
     }
     main {
-      width: min(380px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-      padding: 28px 24px 22px; box-shadow: 0 20px 60px rgba(0, 0, 0, .55);
+      width: min(380px, 100%); background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--line-2); border-radius: 14px;
+      padding: 28px 26px 22px; box-shadow: 0 18px 50px rgba(0, 0, 0, .55), 0 2px 8px rgba(0, 0, 0, .4), inset 0 1px 0 rgba(255, 255, 255, .04);
+      animation: pop 160ms cubic-bezier(.2, .7, .2, 1);
     }
-    .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
-    .brand img { width: 36px; height: 36px; }
-    .brand b { font-size: 20px; letter-spacing: .02em; }
+    @keyframes pop { from { opacity: 0; transform: translateY(6px); } }
+    @media (prefers-reduced-motion: reduce) { main { animation: none; } }
+    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+    .brand img { width: 38px; height: 38px; border-radius: 10px; }
+    .brand b { font-size: 20px; font-weight: 500; letter-spacing: -.01em; }
+    .brand b i { font-style: normal; font-weight: 800; color: var(--accent); }
     .brand span { color: var(--text-3); font-size: 12px; display: block; }
-    h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+    h1 { font-size: 16px; font-weight: 650; margin: 0 0 4px; letter-spacing: -.01em; }
     p.hint { color: var(--text-2); margin: 0 0 16px; font-size: 13px; }
-    label { display: block; font-size: 12px; color: var(--text-2); margin: 12px 0 5px; }
+    code { font-family: "JetBrains Mono", "SF Mono", Consolas, monospace; font-size: 12px; background: var(--panel-3); border: 1px solid var(--line-2); border-radius: 4px; padding: 0 4px; }
+    label { display: block; font-size: 12px; font-weight: 600; color: var(--text-2); margin: 14px 0 6px; }
     input {
       width: 100%; padding: 10px 11px; border-radius: var(--radius); border: 1px solid var(--line-2);
-      background: var(--panel-2); color: var(--text); font: inherit; outline: none;
+      background: #0c0f13; color: var(--text); font: inherit; outline: none; transition: border-color 120ms, box-shadow 120ms;
     }
-    input:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(62, 166, 255, .25); }
+    input:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
     button {
-      margin-top: 18px; width: 100%; padding: 10px; border: 0; border-radius: var(--radius);
-      background: var(--accent); color: var(--on-accent); font: 600 14px var(--font); cursor: pointer;
+      margin-top: 20px; width: 100%; padding: 10px; border: 1px solid color-mix(in srgb, var(--accent) 80%, #000); border-radius: var(--radius);
+      background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 100%, #fff 10%), var(--accent)); color: var(--on-accent);
+      font: 650 14px var(--font); cursor: pointer; box-shadow: 0 1px 0 rgba(0, 0, 0, .4), inset 0 1px 0 rgba(255, 255, 255, .25); transition: filter 120ms;
     }
     button:hover { filter: brightness(1.08); }
     button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
@@ -53,7 +62,7 @@
 </head>
 <body>
   <main>
-    <div class="brand"><img src="icon.svg" alt=""><div><b>OpenDJ</b><span>Free, open-source DJ software</span></div></div>
+    <div class="brand"><img src="icon.svg" alt=""><div><b>Open<i>DJ</i></b><span>Free, open-source DJ software</span></div></div>
 
     <form id="login" hidden>
       <h1>Sign in</h1>
