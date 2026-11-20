@@ -113,12 +113,6 @@
           ]
         },
         {
-          "target": "rpm",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
           "target": "tar.gz",
           "arch": [
             "x64",
@@ -154,7 +148,13 @@
       "node_modules/ffmpeg-static/**"
     ],
     "beforePack": "build/before-pack.cjs",
-    "afterAllArtifactBuild": "build/after-all.cjs"
+    "afterAllArtifactBuild": "build/after-all.cjs",
+    "rpm": {
+      "fpm": [
+        "--rpm-rpmbuild-define=_build_id_links none",
+        "--rpm-rpmbuild-define=debug_package %{nil}"
+      ]
+    }
   },
   "homepage": "https://github.com/Bucifer6/OpenDJ",
   "repository": {
