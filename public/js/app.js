@@ -19,6 +19,8 @@ import { setupStems } from './stems/stems-ui.js';
 import { setupRecording } from './recording/index.js';
 import { setupLyrics } from './lyrics/lyrics.js';
 import { dvsButton } from './dvs/dvs-ui.js';
+import { BackgroundAnalyser } from './audio/background-analysis.js';
+import { isUndecodable } from './audio/analysis-queue.js';
 
 class App {
   constructor() { this.shift = false; this._shiftKey = false; }
@@ -26,12 +28,13 @@ class App {
   async init() {
     this.settings = await api.settings();
     applyTheme(this.settings);
-    this.deckCount = this.settings.deckCount || 2;
+    this.deckCount = Number(this.settings.deckCount) === 4 ? 4 : 2; // only 2 or 4 decks exist
     this.engine = new Engine(this.settings);
     await this.engine.init();
     this.dvs = new DvsManager(this);
     this.dialogs = new Dialogs(this);
     this.library = new LibraryUI(this);
+    this.analyser = new BackgroundAnalyser(this);
     this.upload = setupUpload(this);
     if ('serviceWorker' in navigator && !/Electron/.test(navigator.userAgent)) navigator.serviceWorker.register('/sw.js').catch(() => {});
     this.automix = new AutoMix(this);
@@ -48,6 +51,8 @@ class App {
     this.lighting = new Lighting(this);
     try { await this.lighting.init(); } catch (e) { console.warn('lighting init failed', e); }
     await this.library.refresh();
+    this.analyser.autoQueue(); // tracks added earlier (or by another device) that were never analysed
+    api.capabilities().then((c) => { this.hosted = !!c.hosted; this.auth = !!c.auth; this.library.renderEmpty(); this.updateHostedUi?.(); }).catch(() => {});
     this.library.refreshDrives();
     setInterval(() => this.library.refreshDrives(), 15000); // notice USB sticks being plugged in
     this.setDeckCount(this.deckCount, false);
@@ -62,6 +67,9 @@ class App {
 
   async setSetting(k, v) { this.settings[k] = v; try { this.settings = { ...this.settings, ...(await api.saveSettings({ [k]: v })) }; this.engine.settings = this.settings; } catch (e) { this.toast(e.message); } }
 
+  /** Hosted mode (password login): Sign out in the top bar. */
+  updateHostedUi() { if (this.signOutBtn) this.signOutBtn.hidden = !this.auth; }
+
   showStartOverlay() {
     const o = el('div', { class: 'overlay start' }, el('button', { class: 'btn primary big-start', onclick: async () => { await this.engine.resume(); o.remove(); } }, '▶ Start audio engine'));
     document.body.append(o);
@@ -72,8 +80,17 @@ class App {
     const deck = this.engine.decks[deckIndex];
     if (!t) { this.toast('That track is no longer in the library'); throw new Error('Track not found in the library'); }
     if (deck.playing && !this.automix.enabled && !(await this.dialogs.confirm(`Deck ${deckIndex + 1} is playing. Load "${t.title}" anyway?`))) return;
-    try { await deck.load({ ...t }); this.library.renderRows(true); }
-    catch (e) { this.toast(`Could not load "${t.title}": ${e.message}`); throw e; }
+    try {
+      if (!(await deck.load({ ...t }))) return;
+      if (t.unreadable) api.updateTrack(t.id, { unreadable: false }).then((x) => this.library.updateTrack(x)).catch(() => {});
+      this.library.renderRows(true);
+    } catch (e) {
+      const file = String(t.path || t.localPath || '').split(/[\\/]/).pop();
+      const bad = isUndecodable(e);
+      this.toast(`⚠ Could not load "${t.title}"${file && file !== t.title ? ` (${file})` : ''}: ${bad ? 'the file could not be decoded (corrupt, empty or unsupported)' : e.message}`);
+      if (bad && !t.unreadable) api.updateTrack(t.id, { unreadable: true }).then((x) => this.library.updateTrack(x)).catch(() => {});
+      throw e;
+    }
   }
 
   toast(msg) {
@@ -88,7 +105,7 @@ class App {
     this.toasts = el('div', { class: 'toasts' });
     // top bar
     this.clock = el('span', { class: 'clock' });
-    this.recBtn = el('button', { class: 'btn rec', onclick: () => this.toggleRecord(), title: 'Record your mix (WAV)' }, '● REC');
+    this.recBtn = el('button', { class: 'btn rec', onclick: () => this.toggleRecord(), title: 'Record your mix to disk. R = start / stop' }, '● REC');
     this.recTime = el('span', { class: 'rec-time' });
     this.amBtn = el('button', { class: 'btn automix-btn', onclick: () => this.toggleAutomix(), title: 'Automix the current library view' }, 'AUTOMIX');
     this.amSkip = el('button', { class: 'btn sm', onclick: () => this.automix.skip(), title: 'Mix to next track now' }, '⏭');
@@ -112,6 +129,7 @@ class App {
       el('button', { class: 'btn sm video-btn', title: 'Video mixer, visuals, YouTube & projector output', onclick: () => (this.videoUi ||= setupVideo(this)).toggleMixer() }, '🎬 VIDEO'),
       el('button', { class: 'btn sm light-btn', title: 'Lighting (DMX, Art-Net, sACN, WLED, Hue, OSC)', onclick: () => this.lighting?.openPanel() }, '💡 LIGHTS'),
       el('button', { class: 'btn icon', title: 'Settings', onclick: () => this.dialogs.settings() }, '⚙'),
+      this.signOutBtn = el('button', { class: 'btn sm signout-btn', hidden: true, title: 'Sign out of this OpenDJ server', onclick: async () => { if (this.engine.decks.some((d) => d.playing) && !(await this.dialogs.confirm('Music is playing. Sign out anyway?'))) return; await api.logout(); } }, 'Sign out'),
       el('button', { class: 'btn icon', title: 'Full screen', onclick: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()) }, '⛶'),
     );
     // stacked detail waveforms
@@ -128,7 +146,11 @@ class App {
     // decks + mixer
     this.deckEls = this.engine.decks.map((d) => buildDeck(this, d));
     this.mixer = buildMixer(this);
-    this.deckArea = el('section', { class: 'deck-area' },
+    // small screens show one deck at a time (css/mobile.css): these tabs pick it
+    this.deckTabs = el('div', { class: 'deck-tabs', role: 'tablist' }, ...this.engine.decks.map((d, i) => el('button', {
+      class: 'deck-tab', role: 'tab', style: { '--deck-color': DECK_COLORS[i] }, onclick: () => this.showDeckTab(i),
+    }, el('b', {}, `DECK ${i + 1}`), el('span', {}))));
+    this.deckArea = el('section', { class: 'deck-area' }, this.deckTabs,
       el('div', { class: 'deck-col left' }, this.deckEls[0], this.deckEls[2]),
       this.mixer,
       el('div', { class: 'deck-col right' }, this.deckEls[1], this.deckEls[3]));
@@ -142,6 +164,24 @@ class App {
       const h = Math.max(120, Math.min(Math.max(120, room), startH - (e.clientY - startY))); document.documentElement.style.setProperty('--browser-h', `${h}px`); });
     for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) handle.addEventListener(ev, () => { startY = null; });
     root.replaceChildren(topbar, this.waveArea, this.deckArea, this.samplerBar, handle, this.library.root, this.toasts);
+  }
+
+  /** Small screens: show deck i (the others stay loaded and playing, just hidden). */
+  showDeckTab(i) {
+    this.mobileDeck = Math.min(i, this.deckCount - 1);
+    this.deckEls.forEach((d, j) => d.classList.toggle('m-hide', j !== this.mobileDeck));
+    this.updateDeckTabs();
+  }
+  updateDeckTabs() {
+    [...this.deckTabs.children].forEach((b, j) => {
+      const d = this.engine.decks[j];
+      b.hidden = j >= this.deckCount;
+      b.classList.toggle('active', j === (this.mobileDeck || 0));
+      b.classList.toggle('playing', !!d.playing);
+      const name = d.track ? d.track.title || '' : '';
+      if (b.lastChild.textContent !== name) b.lastChild.textContent = name;
+      b.setAttribute('aria-selected', String(j === (this.mobileDeck || 0)));
+    });
   }
 
   buildSamplerBar() {
@@ -211,6 +251,7 @@ class App {
   }
 
   async setDeckCount(n, save = true) {
+    n = Number(n) === 4 ? 4 : 2;
     // decks that would be hidden must not keep playing without any visible controls
     const hiddenPlaying = this.engine.decks.slice(n).filter((d) => d.playing);
     if (hiddenPlaying.length) {
@@ -223,6 +264,7 @@ class App {
     this.waves.forEach((w, i) => { w.style.display = i < n ? '' : 'none'; });
     this.mixer.setDeckCount(n);
     for (const b of this.deckSel.children) b.classList.toggle('active', Number(b.dataset.n) === n);
+    this.showDeckTab(this.mobileDeck || 0);
     if (save) this.setSetting('deckCount', n);
   }
 
@@ -276,16 +318,29 @@ class App {
 
   // ---------------- events / input ----------------
   wireEvents() {
-    let refreshT;
+    let refreshT, scanDone = false;
     api.events({
-      library: () => { clearTimeout(refreshT); refreshT = setTimeout(() => this.library.refresh(), 600); },
-      scan: (p) => this.library.setJobStatus(p.done ? '' : `Scanning… ${p.scanned} files`),
+      library: () => {
+        // While tracks are being analysed every one of them changes the library: refresh at most every 4 s then (8 s while playing).
+        if (this.analyser.running && refreshT) return;
+        clearTimeout(refreshT);
+        refreshT = setTimeout(async () => { refreshT = null; await this.library.refresh(); this.analyser.autoQueue({ afterScan: scanDone }); scanDone = false; }, this.analyser.running ? (this.engine.decks.some((d) => d.playing) ? 8000 : 4000) : 600);
+      },
+      scan: (p) => { this.library.setJobStatus(p.done ? '' : `Scanning… ${p.scanned} files`); if (p.done) scanDone = true; },
       sync: (p) => this.library.setJobStatus(p.finished ? '' : `Syncing media server… ${p.done}${p.total ? '/' + p.total : ''}`),
       downloads: (d) => this.library.setDownloads(d),
       lyrics: (e) => this.lyrics?.invalidate(e.trackId),
       'job-error': (e) => { this.library.setJobStatus(''); this.toast(`⚠ ${e.message}`); },
     });
     this.engine.on('track-updated', (t) => this.library.updateTrack(t));
+    this.analyser.on('progress', (st) => this.library.setAnalysisStatus(st));
+    let unreadable = [];
+    this.analyser.on('unreadable', (t) => unreadable.push(t.title || t.path));
+    this.analyser.on('idle', () => {
+      if (unreadable.length) this.toast(`⚠ ${unreadable.length === 1 ? `"${unreadable[0]}" could not be decoded` : `${unreadable.length} files could not be decoded (${unreadable.slice(0, 3).map((x) => `"${x}"`).join(', ')}${unreadable.length > 3 ? '…' : ''})`}: marked ⚠ in the library`);
+      unreadable = [];
+      this.library.applyView(); // views that depend on analysis (bpm:, smart playlists) are complete now
+    });
     this.engine.on('warning', (m) => this.toast(`⚠ ${m}`));
     this.engine.on('recording', (on) => this.recBtn.classList.toggle('active', on));
     this.engine.on('master-deck', () => this.library.renderRows(true));
@@ -345,9 +400,7 @@ class App {
       this.midiDot.classList.toggle('connected', (this.midi.devices?.() || this.midi.inputs()).length > 0);
       this.midiDot.title = this.midi.inputs().map((i) => i.name).join(', ') || 'No MIDI controller';
       this.updateAutomixUi();
-      // automix: ease the tempo back to the track's original speed between transitions
-      const a = this.automix;
-      if (a.enabled && !a.transition && a.current && Math.abs(a.current.tempo) > 0.02 && !a.current.syncOn) a.current.setTempo(a.current.tempo * 0.995);
+      this.updateDeckTabs();
     }
   }
 }

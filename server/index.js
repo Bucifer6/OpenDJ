@@ -17,21 +17,22 @@ import { aiffToWav } from './aiff.js';
 import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clientFor, isInside, uniqueName, safe } from './remote.js';
 import { findFfmpeg, needsTranscode, remoteBrowserDecodable, browserPlayableVideo, formatList, DSD_EXT, VIDEO_MIME, extOf, probe, isVideoByName, BROWSER_VIDEO_EXT } from './media.js';
 import { Transcoder } from './transcode.js';
-import { Auth } from './auth.js';
+import { Auth, parseCookies, parseTrustProxy } from './auth.js';
 import { redactSettings, REDACTED } from './library-tools.js';
-import { SOURCE_TYPES } from './sources/index.js';
+import { SOURCE_TYPES, sourceConfigFromForm } from './sources/index.js';
 import { parseRekordboxXml, buildRekordboxXml } from './rekordbox.js';
 import { parseM3U, buildM3U } from './m3u.js';
 import { evaluateSmart, normSmart, SMART_FIELDS, SMART_OPS, SOURCE_VALUES, TRACK_COLORS } from './smart.js';
 import { History, exportSession, sessionTitle } from './history.js';
 import { MissingChecker, relocateTracks, findDuplicates, mergeDuplicates, buildBackup, restoreBackup } from './library-tools.js';
-import { parseTraktorNml, readSeratoCrates, parseVirtualDjXml, importParsed } from './importers.js';
+import { parseTraktorNml, readSeratoCrates, parseVirtualDjXml, importParsed, mergeImportedCues } from './importers.js';
 import { registerLightingRoutes } from './lighting/routes.js';
 import { registerLinkRoutes } from './link/index.js';
 import { registerLyricsRoutes } from './lyrics.js';
 import { registerRecordingRoutes } from './recorder.js';
 import { registerBroadcastRoutes } from './broadcast.js';
 import { registerCdjRoutes } from './cdj/routes.js';
+import { findIdenticalTrack } from './upload-dedupe.js';
 import { registerStemRoutes } from './stems.js';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -43,7 +44,22 @@ const MIME = {
   '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.webm': 'audio/webm', '.aif': 'audio/wav', '.aiff': 'audio/wav', '.m4b': 'audio/mp4',
   '.m4v': 'video/mp4', '.mov': 'video/mp4',
 };
+// Content types we pass on for media from files / media servers. Anything else (text/html, image/svg+xml, XML…)
+// could run script on the app's origin if opened directly, so it is sent as application/octet-stream.
+const SAFE_IMAGE = /^image\/(jpeg|png|gif|webp|bmp|avif)$/;
+export function safeMediaType(type, kind = 'audio') {
+  let t = String(type || '').split(';')[0].trim().toLowerCase();
+  if (t === 'image/jpg' || t === 'image/pjpeg') t = 'image/jpeg';
+  if (kind === 'image') return SAFE_IMAGE.test(t) ? t : 'application/octet-stream';
+  if (/^(audio|video)\/[\w.+-]+$/.test(t) || t === 'application/ogg') return t;
+  return 'application/octet-stream';
+}
+// Every API response: never rendered as a document with scripts, even when opened directly in a tab.
+const API_CSP = "default-src 'none'; sandbox";
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+
+/** Cookie carrying the per-launch token of the desktop app (see createServer's `launchToken`). */
+export const LAUNCH_COOKIE = 'opendj_launch';
 
 export function isLoopback(host) {
   const h = String(host || '').replace(/^\[|\]$/g, '').toLowerCase();
@@ -63,7 +79,15 @@ class HttpError extends Error { constructor(status, msg) { super(msg); this.stat
 
 const mimeOf = (req) => String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
 
-async function readBody(req, limit = 50 * 1024 * 1024) {
+// Request body limits. Bodies are buffered in memory, so the default is small; the public login routes get even
+// less (they are reachable without a session), and routes that really take big bodies opt in with `bodyLimit`.
+const KiB = 1024, MiB = 1024 * KiB;
+const DEFAULT_BODY_LIMIT = 1 * MiB;
+const AUTH_BODY_LIMIT = 16 * KiB;
+const BIG_JSON = 8 * MiB;      // long id / path lists (bulk edits, big playlists, settings with MIDI maps / lighting)
+const IMPORT_LIMIT = 50 * MiB; // rekordbox / Traktor / VirtualDJ XML, M3U sent as content
+
+async function readBody(req, limit = DEFAULT_BODY_LIMIT) {
   if (Number(req.headers['content-length']) > limit) throw new HttpError(413, 'Body too large');
   const chunks = []; let n = 0;
   for await (const c of req) { n += c.length; if (n > limit) throw new HttpError(413, 'Body too large'); chunks.push(c); }
@@ -124,7 +148,7 @@ function sendPlaceholder(res) {
 }
 
 /** Stream a remote media-server URL to the client (Range passed through). Aborts upstream when the client leaves. */
-async function proxy(req, res, { url, headers = {} }, { connectTimeout = 15000 } = {}) {
+async function proxy(req, res, { url, headers = {} }, { connectTimeout = 15000, kind = 'audio' } = {}) {
   const h = { ...headers };
   if (req.headers.range) h.Range = req.headers.range;
   const ctrl = new AbortController();
@@ -142,8 +166,8 @@ async function proxy(req, res, { url, headers = {} }, { connectTimeout = 15000 }
     res.off('close', onClose);
     throw new HttpError(502, `Media server answered HTTP ${up.status}`);
   }
-  const out = {};
-  for (const k of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+  const out = { 'content-type': safeMediaType(up.headers.get('content-type'), kind) };
+  for (const k of ['content-length', 'content-range', 'accept-ranges']) {
     const v = up.headers.get(k); if (v) out[k] = v;
   }
   res.writeHead(up.status, out);
@@ -159,8 +183,11 @@ async function proxy(req, res, { url, headers = {} }, { connectTimeout = 15000 }
  * @param {string|false} [o.ffmpeg]  ffmpeg path, or false to disable (default: OPENDJ_FFMPEG / bundled / PATH)
  * @param {string[]} [o.allowedHosts]  extra Host names accepted (OPENDJ_ALLOWED_HOSTS)
  * @param {string[]} [o.roots]   folders the UI may browse/add (OPENDJ_MUSIC_ROOTS); setting them turns the restriction on
+ * @param {string|boolean} [o.trustProxy]  reverse proxy trust (OPENDJ_TRUST_PROXY): '1' or a list of proxy addresses
+ * @param {string} [o.launchToken]  Electron only: every request must carry this token in the LAUNCH_COOKIE cookie, so
+ *   other local users / processes cannot use the password-less desktop server. Not set by `npm run web` / tests.
  */
-export function createServer({ dataDir = defaultDataDir(), log = console, auth: authOpt, ffmpeg: ffmpegOpt, allowedHosts, roots: rootsOpt, password } = {}) {
+export function createServer({ dataDir = defaultDataDir(), log = console, auth: authOpt, ffmpeg: ffmpegOpt, allowedHosts, roots: rootsOpt, password, trustProxy, launchToken } = {}) {
   const library = new Library(dataDir);
   const sse = new Set();
   const emit = (type, payload) => {
@@ -174,9 +201,16 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   const missing = new MissingChecker(library, { onChange: () => emit('library', { what: 'missing' }) });
 
   // ---------------- hosting / security config ----------------
-  const authEnabled = authOpt ?? process.env.OPENDJ_AUTH === '1';
-  const auth = new Auth({ dataDir, enabled: authEnabled, password: password ?? process.env.OPENDJ_PASSWORD, log });
+  const pw = password ?? process.env.OPENDJ_PASSWORD;
+  const trust = trustProxy ?? process.env.OPENDJ_TRUST_PROXY;
   const extraHosts = new Set((allowedHosts || csv(process.env.OPENDJ_ALLOWED_HOSTS)).map((h) => h.toLowerCase()));
+  // Login turns on when asked for (auth: true, OPENDJ_AUTH=1, --auth, a non-loopback HOST via start()), and also
+  // whenever the configuration says the server is reached from elsewhere: a password, a trusted reverse proxy or
+  // extra host names. A reverse proxy on the same machine connects from 127.0.0.1, so HOST alone can't tell.
+  const exposed = !!pw || !!parseTrustProxy(trust) || extraHosts.size > 0;
+  const authEnabled = authOpt === true || (authOpt !== false && (process.env.OPENDJ_AUTH === '1' || exposed));
+  if (extraHosts.size && !authEnabled) throw new Error('OPENDJ_ALLOWED_HOSTS is set but login is off: remove it, or turn login on (OPENDJ_AUTH=1 / --auth / OPENDJ_PASSWORD)');
+  const auth = new Auth({ dataDir, enabled: authEnabled, password: pw, trustProxy: trust, log });
   const envRoots = rootsOpt || (process.env.OPENDJ_MUSIC_ROOTS ? process.env.OPENDJ_MUSIC_ROOTS.split(path.delimiter).filter(Boolean) : null);
   const restricted = authEnabled || !!envRoots; // hosted mode: never expose the whole filesystem
   const uploadDir = () => path.resolve(library.settings.uploadDir || process.env.OPENDJ_UPLOAD_DIR || path.join(dataDir, 'Uploads'));
@@ -194,8 +228,11 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     return path.resolve(p);
   };
   const pathAllowed = (p) => !restricted || within(p, allowedRoots());
-  /** Local files that may be served: allowed roots + library folders + download/upload folders. */
-  const readable = (file) => !restricted || within(file, [...allowedRoots(), ...library.data.folders.map((f) => realish(f.path)), realish(library.settings.downloadDir), realish(uploadDir())]);
+  /**
+   * Local files that may be served / written next to (lyrics): allowed roots + download/upload folders. Library
+   * folders are NOT trusted on their own: they come from library.json, which a restored backup can rewrite.
+   */
+  const readable = (file) => !restricted || within(file, [...allowedRoots(), realish(library.settings.downloadDir), realish(uploadDir())]);
   // imports only add media files inside the allowed roots
   const addFileChecked = (lib, file, ...a) => (pathAllowed(file) ? addFile(lib, file, ...a) : Promise.resolve(null));
 
@@ -248,10 +285,11 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   // ---------------- health / auth / capabilities ----------------
   route('GET', '/api/health', () => ({ ok: true }), { public: true });
   route('GET', '/api/auth/status', ({ req }) => ({ enabled: auth.enabled, authenticated: auth.check(req), setupRequired: auth.setupRequired }), { public: true });
-  route('POST', '/api/auth/login', async ({ req, res, body }) => { auth.login(req, res, body.password); return { ok: true }; }, { public: true });
-  route('POST', '/api/auth/setup', async ({ req, res, body }) => { auth.setup(req, res, body); return { ok: true }; }, { public: true });
-  route('POST', '/api/auth/logout', async ({ req, res }) => { auth.logout(req, res); return { ok: true }; }, { public: true });
-  route('POST', '/api/auth/password', async ({ req, res, body }) => { if (!auth.enabled) throw new HttpError(400, 'Login is not enabled'); auth.changePassword(req, res, body); return { ok: true }; });
+  const authRoute = { public: true, bodyLimit: AUTH_BODY_LIMIT };
+  route('POST', '/api/auth/login', async ({ req, res, body }) => { await auth.login(req, res, body.password); return { ok: true }; }, authRoute);
+  route('POST', '/api/auth/setup', async ({ req, res, body }) => { await auth.setup(req, res, body); return { ok: true }; }, authRoute);
+  route('POST', '/api/auth/logout', async ({ req, res }) => { auth.logout(req, res); return { ok: true }; }, authRoute);
+  route('POST', '/api/auth/password', async ({ req, res, body }) => { if (!auth.enabled) throw new HttpError(400, 'Login is not enabled'); await auth.changePassword(req, res, body); return { ok: true }; }, { bodyLimit: AUTH_BODY_LIMIT });
   route('GET', '/api/capabilities', async () => {
     await ffReady;
     return {
@@ -274,7 +312,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     const ids = (Array.isArray(body.ids) ? body.ids : []).filter((i) => library.getTrack(i));
     for (const i of ids) library.updateTrack(i, body.patch && typeof body.patch === 'object' ? body.patch : {});
     return { updated: ids.length };
-  });
+  }, { bodyLimit: BIG_JSON });
   route('GET', '/api/tracks/missing', async () => [...await missing.missingIdsAsync(library.allTracks(), { full: true })]);
   route('POST', '/api/tracks/relocate', async ({ body }) => {
     allowPath(body.folder);
@@ -282,16 +320,16 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     const r = await relocateTracks(library, body.folder, ids, { confirm: body.confirm && typeof body.confirm === 'object' ? body.confirm : {} });
     missing.invalidate(r.relocated.map((x) => x.id));
     return r;
-  });
+  }, { bodyLimit: BIG_JSON });
   route('GET', '/api/tracks/duplicates', () => findDuplicates(library.allTracks()));
-  route('POST', '/api/tracks/dedupe', async ({ body }) => mergeDuplicates(library, body.groups));
+  route('POST', '/api/tracks/dedupe', async ({ body }) => mergeDuplicates(library, body.groups), { bodyLimit: BIG_JSON });
   route('POST', '/api/tracks/delete', async ({ body }) => {
     const ids = Array.isArray(body.ids) ? body.ids.filter((x) => typeof x === 'string') : [];
     library.removeTracks(ids);
     for (const id of ids) stems.evict(id).catch(() => {});
     for (const id of ids) transcoder.evict(id).catch(() => {});
     return { ok: true };
-  });
+  }, { bodyLimit: BIG_JSON });
   route('POST', '/api/tracks/played', async ({ body }) => {
     const t = track(body.id); t.playCount = (t.playCount || 0) + 1; t.lastPlayed = Date.now();
     history.record(t, t.lastPlayed);
@@ -306,7 +344,10 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     if (!readable(file)) throw new HttpError(403, 'File is outside the allowed music folders');
     const st = await statOk(file);
     if (st === undefined) throw new HttpError(504, 'The drive holding this file does not respond');
-    if (!st) throw new HttpError(404, 'File missing (drive disconnected?)');
+    if (!st) { // tell the library right away (the Missing files view, the ⚠ in the row), not 15 s and a refresh later
+      missing.invalidate([t.id]); missing.missingIdsAsync([t]).then((m) => { if (m.has(t.id)) emit('library', { what: 'missing' }); }).catch(() => {});
+      throw new HttpError(404, 'File missing (drive disconnected?)');
+    }
     if (!st.isFile()) throw new HttpError(404, 'Not a file');
     return { file, st };
   };
@@ -399,12 +440,12 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       const mm = await parseFile(file, { duration: false }).catch(() => null);
       const pic = mm?.common.picture?.[0];
       if (!pic) return sendPlaceholder(res);
-      res.writeHead(200, { 'Content-Type': /^image\/[\w.+-]+$/.test(pic.format) ? pic.format : 'application/octet-stream', 'Cache-Control': 'max-age=86400' });
+      res.writeHead(200, { 'Content-Type': safeMediaType(pic.format, 'image'), 'Cache-Control': 'max-age=86400' });
       return res.end(Buffer.from(pic.data));
     }
     const r = t.sourceType === 'remote' ? remoteCover(library, t) : null;
     if (!r) return sendPlaceholder(res);
-    return proxy(req, res, r).catch(() => sendPlaceholder(res));
+    return proxy(req, res, r, { kind: 'image' }).catch(() => sendPlaceholder(res));
   });
   route('GET', '/api/tracks/:id/waveform', async ({ params, req, res }) => {
     const f = library.waveformPath(track(params.id).id);
@@ -417,7 +458,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     if (!Buffer.isBuffer(body)) throw new HttpError(400, 'Expected binary body');
     await fs.promises.writeFile(library.waveformPath(track(params.id).id), body);
     return { ok: true };
-  });
+  }, { bodyLimit: 16 * MiB });
   route('POST', '/api/files', async ({ body }) => {
     const added = [];
     for (const p of Array.isArray(body.paths) ? body.paths : []) {
@@ -429,7 +470,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     }
     library.changed('tracks');
     return { added };
-  });
+  }, { bodyLimit: BIG_JSON });
 
   // ---------------- browser upload (hosted mode: users can't hand us local paths) ----------------
   // Raw body, file name in `X-Filename` (URI-encoded). Saved into the uploads folder, which is a library folder.
@@ -446,11 +487,15 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     await fs.promises.mkdir(dir, { recursive: true });
     const tmp = path.join(dir, `.upload-${crypto.randomBytes(8).toString('hex')}.part`);
     let n = 0;
+    const sha = crypto.createHash('sha256');
     try {
       await pipeline(req, async function* (src) {
-        for await (const c of src) { n += c.length; if (n > limit) throw new HttpError(413, `File too large (limit ${Math.round(limit / 1048576)} MB)`); yield c; }
+        for await (const c of src) { n += c.length; if (n > limit) throw new HttpError(413, `File too large (limit ${Math.round(limit / 1048576)} MB)`); sha.update(c); yield c; }
       }, fs.createWriteStream(tmp, { flags: 'wx' }));
       if (!n) throw new HttpError(400, 'Empty file');
+      // the same file uploaded again: keep the existing track instead of adding "name (2).ext"
+      const same = await findIdenticalTrack(library, { size: n, hash: sha.digest('hex') });
+      if (same) { await fs.promises.rm(tmp, { force: true }); return { id: same.id, track: same, duplicate: true }; }
       const stem = safe(path.basename(name, ext)).slice(0, 180);
       const dest = await uniqueName(dir, stem, ext.slice(1));
       await fs.promises.rename(tmp, dest);
@@ -474,17 +519,17 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     if (body.smart) extra.smart = normSmart(body.smart);
     const p = library.createPlaylist(body.name, Array.isArray(body.trackIds) ? body.trackIds.filter((x) => typeof x === 'string') : [], extra);
     return p.smart ? { ...p, trackIds: playlistTrackIds(p) } : p;
-  });
+  }, { bodyLimit: BIG_JSON });
   route('PATCH', '/api/playlists/:id', async ({ params, body }) => {
     const p = library.updatePlaylist(params.id, { ...body, ...(body.smart ? { smart: normSmart(body.smart) } : {}), ...('folder' in body ? { folder: body.folder ? String(body.folder).slice(0, 200) : body.folder } : {}) });
     if (!p) throw new HttpError(404, 'No playlist');
     return p.smart ? { ...p, trackIds: playlistTrackIds(p) } : p;
-  });
+  }, { bodyLimit: BIG_JSON });
   route('DELETE', '/api/playlists/:id', async ({ params }) => { library.deletePlaylist(params.id); return { ok: true }; });
   route('POST', '/api/playlists/:id/add', async ({ params, body }) => {
     if (library.getPlaylist(params.id)?.smart) throw new HttpError(400, 'Smart playlists are filled by their rules');
     return library.addToPlaylist(params.id, Array.isArray(body.trackIds) ? body.trackIds : []) || Promise.reject(new HttpError(404, 'No playlist'));
-  });
+  }, { bodyLimit: BIG_JSON });
   route('GET', '/api/smart/fields', () => ({ fields: SMART_FIELDS, ops: SMART_OPS, sources: SOURCE_VALUES, colors: TRACK_COLORS }));
   route('POST', '/api/smart/preview', async ({ body }) => {
     const ids = evaluateSmart(normSmart(body.smart), library.allTracks());
@@ -500,8 +545,12 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   const readImport = async (body, key) => {
     if (body[key] != null) return String(body[key]);
     allowPath(body.path, 'This file');
-    return fs.promises.readFile(body.path, 'utf8');
+    try { return await fs.promises.readFile(body.path, 'utf8'); } catch (e) {
+      throw new HttpError(400, e.code === 'ENOENT' ? 'File not found' : e.code === 'EISDIR' ? 'That is a folder, not a file' : `Cannot read the file (${e.code || e.message})`);
+    }
   };
+  /** Parser errors ("Not a Traktor collection", malformed XML) are the user's file, not a server fault: 400 with the message. */
+  const parseImport = (fn, xml) => { try { return fn(xml); } catch (e) { throw new HttpError(400, e.message || 'Could not read this file'); } };
   route('POST', '/api/import/m3u', async ({ body }) => {
     const content = await readImport(body, 'content');
     const baseDir = body.path ? path.dirname(body.path) : (typeof body.baseDir === 'string' ? body.baseDir : os.homedir());
@@ -511,22 +560,28 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       if (t) ids.push(t.id);
     }
     return library.createPlaylist(body.name || (body.path ? path.basename(body.path).replace(/\.m3u8?$/i, '') : 'Imported'), ids);
-  });
+  }, { bodyLimit: IMPORT_LIMIT });
   route('POST', '/api/import/rekordbox', async ({ body }) => {
     const xml = await readImport(body, 'xml');
-    const parsed = parseRekordboxXml(xml);
+    const parsed = parseImport(parseRekordboxXml, xml);
     const byLoc = new Map();
-    let imported = 0;
+    let imported = 0, cuesAdded = 0, cuesSkipped = 0;
     for (const rt of parsed.tracks) {
       if (!rt.location) continue;
       const t = await addFileChecked(library, rt.location).catch(() => null);
       if (!t) continue;
       byLoc.set(rt.location, t.id);
+      // cues: merged only when the XML has some (auto cues replaceable, the user's own kept); tags only fill empty ones
+      const m = mergeImportedCues(t.cues, (rt.cues || []).map((c) => ({ ...c, index: c.type === 'memory' ? -1 : c.index })));
+      cuesAdded += m.added; cuesSkipped += m.skipped;
+      const fill = Object.fromEntries([['title', rt.title], ['artist', rt.artist], ['album', rt.album], ['genre', rt.genre]].filter(([k, v]) => v && !t[k]));
       library.updateTrack(t.id, {
+        ...fill,
         bpm: rt.bpm || t.bpm, key: rt.key || t.key, rating: rt.rating ?? t.rating, comment: rt.comments || t.comment,
-        cues: (rt.cues || []).map((c) => ({ ...c, index: c.type === 'memory' ? -1 : c.index })),
+        ...(rt.cues?.length ? { cues: m.cues } : {}),
         gridOffset: rt.grid?.offset ?? t.gridOffset,
         analyzed: !!rt.bpm || t.analyzed,
+        ...(rt.bpm && rt.grid ? { gridLocked: true } : rt.bpm ? { bpmLocked: true } : {}), // imported grid is authoritative
         ...(rt.color ? { color: rt.color } : {}),
       });
       imported++;
@@ -536,12 +591,12 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       const ids = pl.trackKeys.map((k) => byLoc.get(k)).filter(Boolean);
       library.createPlaylist(pl.name, ids, { folder: pl.path?.length ? pl.path.join(' / ') : 'rekordbox' }); playlists++;
     }
-    return { imported, playlists, missing: parsed.tracks.length - imported };
-  });
+    return { imported, playlists, missing: parsed.tracks.length - imported, cuesAdded, cuesSkipped };
+  }, { bodyLimit: IMPORT_LIMIT });
   route('POST', '/api/import/traktor', async ({ body }) => {
     const xml = await readImport(body, 'xml');
-    return importParsed(library, addFileChecked, parseTraktorNml(xml), { folderPrefix: 'Traktor' });
-  });
+    return importParsed(library, addFileChecked, parseImport(parseTraktorNml, xml), { folderPrefix: 'Traktor' });
+  }, { bodyLimit: IMPORT_LIMIT });
   route('POST', '/api/import/serato', async ({ body }) => {
     allowPath(body.path);
     if (!(await statOk(body.path))?.isDirectory()) throw new HttpError(400, 'Folder does not exist');
@@ -550,8 +605,8 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   });
   route('POST', '/api/import/virtualdj', async ({ body }) => {
     const xml = await readImport(body, 'xml');
-    return importParsed(library, addFileChecked, parseVirtualDjXml(xml), { folderPrefix: 'VirtualDJ' });
-  });
+    return importParsed(library, addFileChecked, parseImport(parseVirtualDjXml, xml), { folderPrefix: 'VirtualDJ' });
+  }, { bodyLimit: IMPORT_LIMIT });
   route('GET', '/api/export/rekordbox', async ({ res }) => {
     const tracks = library.allTracks().filter((t) => t.localPath || t.sourceType === 'local')
       .map((t) => ({ ...t, path: t.localPath || t.path }));
@@ -601,7 +656,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     const pls = (Array.isArray(body.playlistIds) ? body.playlistIds : []).map((pid) => library.getPlaylist(pid)).filter(Boolean).map((p) => ({ ...p, trackIds: playlistTrackIds(p) }));
     await fs.promises.writeFile(path.join(target, 'OpenDJ', 'rekordbox.xml'), buildRekordboxXml({ tracks, playlists: pls }));
     return { exported, files: copied.size, target };
-  });
+  }, { bodyLimit: BIG_JSON });
 
   // ---------------- history ----------------
   route('GET', '/api/history', () => history.list());
@@ -622,7 +677,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     attachment(res, 'application/json', `opendj-backup-${d}.json`, JSON.stringify(buildBackup(library, history)));
   });
   route('POST', '/api/restore', async ({ body }) => {
-    const r = restoreBackup(library, history, body);
+    const r = restoreBackup(library, history, body, { pathAllowed: readable });
     missing.invalidate();
     return r;
   }, { bodyLimit: 200 * 1024 * 1024 });
@@ -637,7 +692,8 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     return f;
   });
   route('POST', '/api/folders/:id/scan', async ({ params }) => {
-    const f = library.data.folders.find((x) => x.id === params.id); if (!f) throw new HttpError(404, 'No folder');
+    const f = library.getFolder(params.id); if (!f) throw new HttpError(404, 'No folder');
+    if (!readable(f.path)) throw new HttpError(403, 'This folder is outside the allowed music folders');
     runJob('scan:' + f.id, () => scanFolder(library, f, { onProgress: (p) => emit('scan', p) }));
     return { started: true };
   });
@@ -662,10 +718,13 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   route('GET', '/api/source-types', () => SOURCE_TYPES);
   route('GET', '/api/sources', () => library.data.sources.map((s) => library.publicSource(s)));
   route('POST', '/api/sources', async ({ body }) => {
-    const prev = body.id ? library.getSource(body.id) : null;
-    const cfg = { ...(prev || {}), ...body };
-    if (prev && !body.password) cfg.password = prev.password; // keep stored secret when editing
-    const result = await addSource(library, cfg);
+    const prev = typeof body.id === 'string' ? library.getSource(body.id) : null;
+    if (body.id !== undefined && !prev) throw new HttpError(404, 'No source');
+    // stored secrets are only reused for the same endpoint (see sourceConfigFromForm)
+    let result;
+    try { result = await addSource(library, sourceConfigFromForm(body, prev)); } catch (e) {
+      throw e.status ? e : new HttpError(502, `Could not connect: ${String(e.message).slice(0, 300)}`);
+    }
     runJob('sync:' + result.source.id, () => syncSource(library, result.source.id, { onProgress: (p) => emit('sync', p) }));
     return result;
   });
@@ -679,7 +738,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
 
   // ---------------- downloads ----------------
   route('GET', '/api/downloads', () => downloads.list());
-  route('POST', '/api/downloads', async ({ body }) => ({ queued: downloads.enqueue(Array.isArray(body.trackIds) ? body.trackIds : []) }));
+  route('POST', '/api/downloads', async ({ body }) => ({ queued: downloads.enqueue(Array.isArray(body.trackIds) ? body.trackIds : []) }), { bodyLimit: BIG_JSON });
   route('POST', '/api/downloads/cancel', async ({ body }) => { downloads.cancel(body.trackId); return { ok: true }; });
 
   // ---------------- settings / misc ----------------
@@ -689,16 +748,17 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     delete patch.allowedRoots; // set in settings.json or OPENDJ_MUSIC_ROOTS, never from the web UI
     delete patch.recording; delete patch.broadcast; // only via their own validated endpoints
     for (const k of ['downloadDir', 'uploadDir']) if (k in patch && patch[k]) allowPath(String(patch[k]), 'This folder');
-    const hue = patch.lighting?.outputs?.hue;
-    if (hue?.username === REDACTED) hue.username = library.settings.lighting?.outputs?.hue?.username || '';
+    const hue = patch.lighting?.outputs?.hue, curHue = library.settings.lighting?.outputs?.hue;
+    // the redacted Hue key stands for the stored one, but only for the same bridge
+    if (hue?.username === REDACTED) hue.username = curHue?.username && String(hue.bridge || '') === String(curHue.bridge || '') ? curHue.username : '';
     return redactSettings(library.updateSettings(patch));
-  });
+  }, { bodyLimit: BIG_JSON });
   route('GET', '/api/jobs', () => [...jobs.keys()]);
   route('GET', '/api/info', () => ({ version: VERSION, dataDir, platform: process.platform, tracks: Object.keys(library.data.tracks).length, hosted: restricted, auth: auth.enabled }));
   // ---------------- lighting (DMX / Art-Net / sACN / WLED / Hue / OSC) ----------------
   const lighting = registerLightingRoutes({ route, library, emit });
   const link = registerLinkRoutes({ route, library, emit, log });
-  const stems = registerStemRoutes({ route, library, emit });
+  const stems = registerStemRoutes({ route, library, emit, restricted });
   registerLyricsRoutes({ route, library, emit, dataDir, canRead: readable, canWrite: readable });
   const recording = registerRecordingRoutes({ route, library, emit, pathAllowed, allowedRoots });
   const broadcast = registerBroadcastRoutes({ route, library, emit, pathAllowed: readable, log });
@@ -727,7 +787,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     if (auth.enabled) return extraHosts.size === 0 || LOCAL_NAMES.has(h.name); // hosted: password protects; optional allowlist
     return LOCAL_NAMES.has(h.name) && (boundPort == null || h.port === boundPort);
   };
-  const publicHost = (req) => (auth.trustProxy && req.headers['x-forwarded-host'] ? String(req.headers['x-forwarded-host']).split(',')[0].trim() : req.headers.host);
+  const publicHost = (req) => auth.forwarded(req, 'x-forwarded-host') || req.headers.host;
   /** CSRF guard: a browser Origin must be this very server (exact match; "null" and other sites are refused). */
   const originOk = (req) => {
     const site = req.headers['sec-fetch-site'];
@@ -739,6 +799,12 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     const hosts = new Set([String(req.headers.host).toLowerCase(), String(publicHost(req)).toLowerCase()]);
     return hosts.has(u.host.toLowerCase());
   };
+  // Desktop app: per-launch token (HttpOnly cookie set by electron/main.js) required on every request
+  const launchKey = launchToken ? crypto.createHash('sha256').update(String(launchToken)).digest() : null;
+  const launchOk = (req) => {
+    const v = parseCookies(req.headers.cookie)[LAUNCH_COOKIE];
+    return typeof v === 'string' && crypto.timingSafeEqual(crypto.createHash('sha256').update(v).digest(), launchKey);
+  };
   const PUBLIC_FILES = new Set(['login.html', 'icon.svg', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest', 'sw.js', 'favicon.ico']);
 
   const server = http.createServer(async (req, res) => {
@@ -746,9 +812,12 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     try { url = new URL(req.url, 'http://localhost'); } catch { res.writeHead(400); return res.end('Bad request'); }
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
-    if (auth.enabled) res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-Frame-Options', 'DENY'); // no clickjacking, desktop mode included (frame-ancestors below)
     if (!hostOk(req)) { res.writeHead(421, { 'Content-Type': 'text/plain' }); return res.end('Misdirected request: unknown Host'); }
+    if (launchKey && !launchOk(req)) { res.writeHead(401, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }); return res.end('This OpenDJ server only answers the OpenDJ app that started it'); }
     const isApi = url.pathname.startsWith('/api/');
+    // onnxruntime-web's own module files (node_modules, not user data) may need to run as a worker script
+    if (isApi && !url.pathname.startsWith('/api/stems/ort/')) res.setHeader('Content-Security-Policy', API_CSP);
     const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
     // Block cross-site requests from web pages to this API (state-changing ones, and any API read a page attempts).
     if ((mutating || isApi) && !originOk(req)) { res.writeHead(403, { 'Content-Type': 'text/plain' }); return res.end('Forbidden origin'); }
@@ -785,12 +854,15 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       if (!st?.isFile()) throw new HttpError(404, 'Not found');
       const headers = { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' };
       if (rel === 'sw.js') headers['Service-Worker-Allowed'] = '/';
+      // frame-ancestors only works as a header (the pages' own CSP is a <meta> tag); both policies apply
+      if (path.extname(file) === '.html') headers['Content-Security-Policy'] = "frame-ancestors 'none'";
       res.writeHead(200, headers);
       if (req.method === 'HEAD') return res.end();
       await pipeQuiet(fs.createReadStream(file), res);
     } catch (e) {
       if (!e.status) log.error?.('[opendj]', e);
       if (e.retryAfter) res.setHeader('Retry-After', String(e.retryAfter));
+      if (e.status === 413 && !res.headersSent) res.setHeader('Connection', 'close'); // don't read the rest of a huge body
       if (!res.headersSent) sendJson(res, e.status || 500, { error: e.status ? e.message : 'Internal error', ...(e.code && typeof e.code === 'string' && e.status ? { code: e.code } : {}) });
       else res.end();
     }
@@ -817,7 +889,10 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
  * opts: { port, host, dataDir, auth, ffmpeg, allowedHosts, roots, password }
  */
 export async function start({ port = 0, host = '127.0.0.1', dataDir, ...opts } = {}) {
-  const auth = opts.auth || !isLoopback(host) || process.env.OPENDJ_AUTH === '1';
+  // undefined lets createServer decide from the environment (password / proxy / allowed hosts turn login on)
+  // Electron passes auth:false with a launch token (loopback only): the token guards it, env vars must not add a login.
+  const desktop = opts.auth === false && !!opts.launchToken && isLoopback(host);
+  const auth = desktop ? false : opts.auth === true || !isLoopback(host) || process.env.OPENDJ_AUTH === '1' ? true : opts.auth;
   const app = createServer({ dataDir, ...opts, auth });
   await new Promise((resolve, reject) => { app.server.once('error', reject); app.server.listen(port, host, resolve); });
   app.port = app.server.address().port;

@@ -20,6 +20,42 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **macOS:** right-click the app → *Open*.
 - **Linux AppImage:** `chmod +x` the file, then run it.
 
+**Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
+
+### New in 0.3
+This release follows a full security audit, an in-depth QA pass and end-to-end testing with six kinds of users.
+
+**New**
+- **Automatic library analysis:** new tracks get BPM, beat grid, key, energy and waveforms in the background, with progress shown in the library ("Analysing 12 / 2,000", stoppable). `bpm:`/`key:` search and smart playlists work straight after adding music. Also *⋯ Library → Analyse all tracks*.
+- **Playlists:** shown in their own order with a `#` column; drag rows to reorder.
+- **Phones and tablets:** narrow screens show one deck at a time with deck tabs.
+- **Automix** eases each track back to its original tempo after the transition (can be turned off).
+- **First launch:** an empty library now explains how to add music.
+- **Web app:** Sign out in the top bar; uploading the same file twice no longer duplicates it; rejected files are listed.
+
+**Security** (please update if you run the web app)
+- Backup restore can no longer reach files outside the allowed music folders.
+- Login requests are size-limited, rate limiting can't be bypassed through proxy headers, and passwords are checked without blocking the server.
+- Setting `OPENDJ_PASSWORD`, `OPENDJ_TRUST_PROXY` or `OPENDJ_ALLOWED_HOSTS` now always turns the login on, so the reverse-proxy setup in the README is password-protected.
+- `OPENDJ_PASSWORD` must be at least 8 characters and not an example value; the Docker Compose file no longer ships a password.
+- Saved media-server passwords, stream keys and the Hue key are only reused for the same server; pointing an entry somewhere else asks for the secret again.
+- Album art and proxied media can no longer run script in the app; the app can't be embedded in other sites.
+- The desktop app's built-in server now only answers its own window (per-launch key), and all its windows are locked down.
+- Library files are private to your user account on disk; the bundled FFmpeg and Docker base image are checksum-pinned; release files come with SHA-256 checksums.
+- Custom AI-stems model URLs need their SHA-256 checksum.
+
+**Fixes**
+- Loud tracks no longer distort with the memory-saving 16-bit decks.
+- Imported rekordbox / Traktor / VirtualDJ beat grids are kept; re-importing no longer wipes your cues or ratings; import errors say what went wrong.
+- Hot-cue pads and the FX unit fit on laptop screens; the 4-deck mixer is no longer clipped; right-click menus open in the right place at any interface size.
+- One bad setting can no longer stop the app from starting (all settings are validated).
+- The desktop app asks before quitting while decks are playing or a recording runs.
+- No fake "Drop" cue at the start of every track; silence and steady tones no longer get a BPM.
+- Unreadable files are marked ⚠ and keep their name when a load fails.
+- Loop sizes, reverse inside loops, same-minute recordings, the LIVE/ON AIR state, key search, Most played order, Daylight theme contrast, MP3 lyrics written by FFmpeg, and many smaller fixes.
+
+**Heads-up:** Node.js 22 or newer is now required to run from source. Subsonic servers that need the old password login have a new *Legacy password auth* checkbox.
+
 ### New in 0.2
 - **AI stems:** right-click a track → *Prepare AI stems*. Decks get vocals/drums/bass/melody mute and level, acapella, instrumental and vocal echo. The model (HT-Demucs, ~98 MB) downloads on first use after you agree.
 - **Recording straight to disk:** WAV, FLAC, MP3, AAC or Opus, with no memory limit. Auto-split option, plus `.cue`/`.txt` tracklists.

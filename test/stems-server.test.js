@@ -27,7 +27,7 @@ async function harness(opts = {}) {
     const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)'; }) + '$');
     routes.push({ method, re, keys, handler, ...o });
   };
-  const stems = registerStemRoutes({ route, library, emit: (t, p) => events.push([t, p]), ortDir: opts.ortDir ?? null, fetch: opts.fetch });
+  const stems = registerStemRoutes({ route, library, emit: (t, p) => events.push([t, p]), ortDir: opts.ortDir ?? null, fetch: opts.fetch, restricted: opts.restricted, lookup: opts.lookup });
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     try {
@@ -222,7 +222,8 @@ test('stems server: model settings', () => {
   assert.match(DEFAULT_MODEL.sha256, /^[0-9a-f]{64}$/); assert.match(DEFAULT_MODEL.archiveSha256, /^[0-9a-f]{64}$/);
   const c = modelSpec({ stemsModelUrl: 'https://x.example/a/model.onnx', stemsModelSha256: 'AB'.repeat(32) });
   assert.equal(c.entry, null); assert.equal(c.sha256, 'ab'.repeat(32));
-  assert.equal(modelSpec({ stemsModelUrl: 'https://x.example/p.tgz#entry=package/x.onnx' }).entry, 'package/x.onnx');
+  assert.equal(modelSpec({ stemsModelUrl: 'https://x.example/p.tgz#entry=package/x.onnx', stemsModelSha256: 'ab'.repeat(32) }).entry, 'package/x.onnx');
+  assert.throws(() => modelSpec({ stemsModelUrl: 'https://x.example/p.tgz#entry=package/x.onnx' }), /SHA-256/, 'custom URLs must be pinned');
   assert.throws(() => modelSpec({ stemsModelUrl: 'file:///etc/passwd' }), /http/);
   assert.throws(() => modelSpec({ stemsModelUrl: 'not a url' }));
 });
@@ -243,4 +244,44 @@ test('stems server: serves onnxruntime-web files from its dist folder only', asy
     assert.equal((await h.call('GET', '/api/stems/ort/..%2Fpackage.json')).status, 404);
     assert.equal((await h.call('GET', '/api/stems/ort/missing.mjs')).status, 404);
   } finally { h.close(); fs.rmSync(ort, { recursive: true, force: true }); }
+});
+
+test('stems server: hosted mode refuses model URLs that resolve to this server / link-local, on every redirect hop; only verified models are served', async () => {
+  const model = crypto.randomBytes(5000);
+  const calls = [];
+  const lookup = async (host) => [{ address: { 'public.example': '93.184.216.34', 'local.example': '127.0.0.1' }[host] || '10.0.0.5', family: 4 }];
+  const fetchy = async (url) => {
+    calls.push(url);
+    if (url.startsWith('https://public.example/redirect')) return new Response(null, { status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data' } });
+    return new Response(model, { status: 200 });
+  };
+  for (const [u, expect] of [['https://local.example/m.onnx', /Refusing/], ['https://public.example/redirect.onnx', /Refusing/], ['http://[::1]:7380/api/info', /Refusing/]]) {
+    calls.length = 0;
+    const h = await harness({ fetch: fetchy, lookup, restricted: true, settings: { stemsModelUrl: u, stemsModelSha256: sha(model) } });
+    try {
+      await h.json('POST', '/api/stems/model/download');
+      const st = await waitFor(async () => { const s = await h.json('GET', '/api/stems/status'); return !s.model.downloading && s.model.error && s; });
+      assert.match(st.model.error, expect, u);
+      assert.equal(calls.some((c) => /169\.254|local\.example|::1/.test(c)), false, 'blocked hop never fetched');
+    } finally { h.close(); }
+  }
+  // a LAN address is fine (NAS installs fetch from the local network), and redirects to it are followed
+  calls.length = 0;
+  const h = await harness({ fetch: fetchy, lookup, restricted: true, settings: { stemsModelUrl: 'https://lan.example/m.onnx', stemsModelSha256: sha(model) } });
+  try {
+    await h.json('POST', '/api/stems/model/download');
+    await waitFor(async () => (await h.json('GET', '/api/stems/status')).model.ready);
+    assert.equal((await h.call('GET', '/api/stems/model')).status, 200);
+    // a cached file whose hash does not match the pinned one is not served
+    const dir = path.join(h.dir, 'stems', 'models');
+    const meta = path.join(dir, `${sha(model)}.onnx.json`);
+    fs.writeFileSync(meta, JSON.stringify({ ...JSON.parse(fs.readFileSync(meta, 'utf8')), sha256: 'f'.repeat(64) }));
+    assert.equal((await h.call('GET', '/api/stems/model')).status, 404);
+  } finally { h.close(); }
+  // unpinned custom URLs are refused outright
+  const u = await harness({ fetch: fetchy, settings: { stemsModelUrl: 'https://public.example/m.onnx' } });
+  try {
+    assert.equal((await u.call('POST', '/api/stems/model/download')).status, 400);
+    assert.equal((await u.call('GET', '/api/stems/model')).status, 400);
+  } finally { u.close(); }
 });

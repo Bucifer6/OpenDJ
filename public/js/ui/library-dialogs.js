@@ -225,7 +225,7 @@ export class LibraryDialogs {
       traktor: { title: 'Import Traktor collection', label: 'collection.nml', accept: '.nml', ext: ['nml'], hint: 'Usually in Documents/Native Instruments/Traktor <version>/collection.nml. Imports BPM, key, rating, hot cues, loops, beat grid and playlists.', run: (b) => api.importTraktor(b), content: 'xml' },
       virtualdj: { title: 'Import VirtualDJ database', label: 'database.xml', accept: '.xml', ext: ['xml'], hint: 'Usually in Documents/VirtualDJ/database.xml (external drives have their own VirtualDJ/database.xml). Imports BPM, key, cues and beat grid.', run: (b) => api.importVirtualDJ(b), content: 'xml' },
       m3u: { title: 'Import M3U playlist', label: '.m3u / .m3u8 playlist', accept: '.m3u,.m3u8', ext: ['m3u', 'm3u8'], hint: 'Tracks that exist on disk are added to the library and to a new playlist.', run: (b) => api.importM3U(b), content: 'content' },
-      serato: { title: 'Import Serato crates', label: '_Serato_ folder', folder: true, hint: 'Pick the _Serato_ folder (in your Music folder, or at the root of an external drive). Every crate becomes a playlist; subcrates become folders.', run: (b) => api.importSerato(b) },
+      serato: { title: 'Import Serato crates', label: '_Serato_ folder', folder: true, hint: 'Pick the _Serato_ folder (in your Music folder, or at the root of an external drive). Imports crates only: every crate becomes a playlist and subcrates become folders. Serato cues, beat grids and BPMs (stored in the files) are not imported; OpenDJ analyses the tracks itself.', run: (b) => api.importSerato(b) },
     }[kind];
   }
 
@@ -262,7 +262,7 @@ export class LibraryDialogs {
     ]);
     if (!r) return;
     if (kind === 'm3u') this.toast(`Imported playlist "${r.name}" (${r.trackIds.length} tracks)`);
-    else this.toast(`Imported ${r.imported} tracks${r.playlists ? `, ${r.playlists} playlists` : ''}${r.missing ? ` (${r.missing} files not found)` : ''}`);
+    else this.toast(`Imported ${r.imported} tracks${r.playlists ? `, ${r.playlists} playlists` : ''}${r.missing ? ` (${r.missing} files not found)` : ''}${r.cuesSkipped ? ` · ${r.cuesSkipped} cue(s) skipped (pads taken or already there)` : ''}`);
     this.lib.refresh();
   }
 
@@ -347,6 +347,8 @@ export class LibraryDialogs {
     this.dialogs.menu(x, y, [
       { label: 'New smart playlist…', action: () => this.smartPlaylist() },
       { label: 'Edit selected track info…', action: () => this.editTracks(this.lib.selectedTracks()) },
+      { label: 'Analyse all tracks', action: () => { const n = this.app.analyser.request([...this.lib.tracks.values()]); this.app.toast(n ? `Analysing ${n.toLocaleString()} track(s) in the background` : 'All tracks are analysed'); } },
+      { label: 'Analyse selected tracks', action: () => { const n = this.app.analyser.request(this.lib.selectedTracks()); this.app.toast(n ? `Analysing ${n} track(s)` : 'Select tracks that are not analysed yet'); } },
       '-',
       { label: 'Import', sub: [
         { label: 'rekordbox XML…', action: () => this.importFrom('rekordbox') },

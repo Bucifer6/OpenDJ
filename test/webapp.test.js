@@ -90,14 +90,14 @@ test('login: required for API, SSE and app assets; cookie flags; logout; session
     const stored = fs.readFileSync(path.join(dir, 'd', 'auth.json'), 'utf8');
     assert.equal(stored.includes(c.cookie().split('=')[1]), false);
     // a new server on the same data dir accepts the session
-    const auth2 = new Auth({ dataDir: path.join(dir, 'd'), enabled: true, password: 'x', log: {} });
+    const auth2 = new Auth({ dataDir: path.join(dir, 'd'), enabled: true, password: 'correct horse', log: {} });
     assert.equal(auth2.check({ headers: { cookie: c.cookie() } }), true);
     const saved = c.cookie();
     await c('POST', '/api/auth/logout');
     c.setCookie(saved);
     assert.equal((await c('GET', '/api/tracks')).status, 401, 'logout revokes the session server-side');
     // behind a TLS reverse proxy (trusted), the cookie is Secure
-    const auth3 = new Auth({ dataDir: path.join(dir, 'd3'), enabled: true, password: 'x', trustProxy: true, log: {} });
+    const auth3 = new Auth({ dataDir: path.join(dir, 'd3'), enabled: true, password: 'correct horse', trustProxy: true, log: {} });
     assert.match(auth3.cookie({ socket: {}, headers: { 'x-forwarded-proto': 'https' } }, 'v', 10), /; Secure$/);
   } finally { app.server.close(); app.shutdown(); }
 });
@@ -184,8 +184,14 @@ test('upload: streams into the uploads folder, adds the track; extension allowli
     const uploads = path.join(dir, 'd', 'Uploads');
     assert.equal(path.dirname(t.path), uploads);
     assert.ok(app.library.data.folders.some((f) => f.path === uploads), 'uploads folder is a library folder');
-    const again = await up('Test Artist - Uploaded Song.wav', wav(0.5));
-    assert.notEqual(again.json.id, r.json.id, 'same name: kept both');
+    const again = await up('Test Artist - Uploaded Song.wav', wav(0.6));
+    assert.notEqual(again.json.id, r.json.id, 'same name, different file: kept both');
+    // F9: the identical file again (any name) returns the existing track, no "(2)" copy, no duplicate entry
+    const nTracks = app.library.allTracks().length, nFiles = fs.readdirSync(uploads).length;
+    const same = await up('Test Artist - Uploaded Song.wav', wav(0.5));
+    assert.equal(same.status, 200); assert.equal(same.json.id, r.json.id); assert.equal(same.json.duplicate, true);
+    assert.equal((await up('renamed copy.wav', wav(0.5))).json.id, r.json.id, 'identical content under another name');
+    assert.equal(app.library.allTracks().length, nTracks); assert.equal(fs.readdirSync(uploads).length, nFiles);
     const trav = await up('../../../evil.wav', wav());
     assert.equal(trav.status, 200);
     assert.equal(path.dirname(app.library.getTrack(trav.json.id).path), uploads);

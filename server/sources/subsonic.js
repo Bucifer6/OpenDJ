@@ -20,7 +20,8 @@ export class SubsonicError extends Error {
 export class SubsonicClient extends SourceClient {
   constructor(config, opts) {
     super(config, opts);
-    // Legacy (hex-encoded password) auth for servers that reject token auth (error 41).
+    // Legacy (hex-encoded password) auth for servers that reject token auth (error 41). Only when the user turned
+    // it on: it puts the password itself in every URL, so it is never switched on automatically.
     this.legacyAuth = !!config.legacyAuth;
   }
 
@@ -43,7 +44,7 @@ export class SubsonicClient extends SourceClient {
     return `${this.config.url}/rest/${method}?${q}`;
   }
 
-  async _call(method, params = {}, { retried = false } = {}) {
+  async _call(method, params = {}) {
     const res = await this.fetch(this._url(method, params), { headers: { Accept: 'application/json' } });
     if (!res.ok) throw new Error(`Subsonic ${method} -> HTTP ${res.status}`);
     const body = await res.json();
@@ -51,9 +52,8 @@ export class SubsonicClient extends SourceClient {
     if (!r) throw new Error(`Subsonic ${method}: unexpected response`);
     if (r.status !== 'ok') {
       const code = r.error?.code;
-      if (code === 41 && !this.legacyAuth && !retried) {
-        this.legacyAuth = true;
-        return this._call(method, params, { retried: true });
+      if (code === 41 && !this.legacyAuth) {
+        throw new SubsonicError(code, `${r.error?.message || 'token authentication is not supported'}. This server needs "Legacy password auth" (edit the connection and turn it on).`);
       }
       throw new SubsonicError(code, r.error?.message || 'unknown error');
     }
@@ -72,7 +72,7 @@ export class SubsonicClient extends SourceClient {
   }
 
   persistable() {
-    return this.legacyAuth ? { legacyAuth: true } : {};
+    return {};
   }
 
   async listLibraries() {

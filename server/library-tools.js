@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { AUDIO_EXT } from './scanner.js';
 import { DEFAULT_SETTINGS, newId } from './library.js';
+import { sourceEndpoint } from './sources/index.js';
 
 // ---------------------------------------------------------------- missing files
 
@@ -231,7 +232,7 @@ export function mergeDuplicates(library, groups) {
     b.playCount = (b.playCount || 0) + (a.playCount || 0);
     b.lastPlayed = Math.max(a.lastPlayed || 0, b.lastPlayed || 0) || b.lastPlayed;
     for (const k of ['cues', 'loops', 'hotLoops', 'phrases']) if (!b[k]?.length && a[k]?.length) b[k] = a[k];
-    if (!b.analyzed && a.analyzed) for (const k of ['analyzed', 'bpm', 'gridOffset', 'downbeat', 'key', 'energy', 'gain', 'bpmLocked']) if (a[k] !== undefined) b[k] = a[k];
+    if (!b.analyzed && a.analyzed) for (const k of ['analyzed', 'bpm', 'gridOffset', 'downbeat', 'key', 'energy', 'gain', 'bpmLocked', 'gridLocked']) if (a[k] !== undefined) b[k] = a[k];
     if (!b.localPath && a.localPath) b.localPath = a.localPath;
     if (a.rating > (b.rating || 0)) b.rating = a.rating;
     if (!b.comment && a.comment) b.comment = a.comment;
@@ -270,7 +271,16 @@ export function buildBackup(library, history) {
   };
 }
 
-export function restoreBackup(library, history, backup) {
+/** Ids that may appear in URLs / file names (track, folder and playlist ids are hex or short slugs). */
+export const ID_RE = /^[\w-]{1,64}$/;
+const BAD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+export const validId = (id) => typeof id === 'string' && ID_RE.test(id) && !BAD_KEYS.has(id);
+
+/**
+ * Restore a backup. `pathAllowed(p)` is the hosted-mode path check (always true on the desktop): library folders
+ * and track files outside the allowed roots are dropped, so a crafted backup cannot point the server at /etc.
+ */
+export function restoreBackup(library, history, backup, { pathAllowed = () => true } = {}) {
   const prevLighting = library.settings.lighting;
   if (!backup || backup.app !== 'OpenDJ' || backup.type !== 'library-backup' || !backup.library || typeof backup.library.tracks !== 'object') {
     throw Object.assign(new Error('Not an OpenDJ library backup'), { status: 400 });
@@ -278,27 +288,31 @@ export function restoreBackup(library, history, backup) {
   const lib = backup.library;
   const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
   if (!isObj(lib.tracks)) throw Object.assign(new Error('Not an OpenDJ library backup'), { status: 400 });
+  const okPath = (p) => typeof p === 'string' && p.length > 0 && !p.includes('\0') && pathAllowed(p);
   const tracks = {};
   for (const [id, t] of Object.entries(lib.tracks)) {
-    if (!isObj(t) || id === '__proto__') continue;
-    tracks[id] = { ...t, id, cues: Array.isArray(t.cues) ? t.cues : [], loops: Array.isArray(t.loops) ? t.loops : [] };
+    if (!isObj(t) || !validId(id)) continue;
+    const r = { ...t, id, cues: Array.isArray(t.cues) ? t.cues : [], loops: Array.isArray(t.loops) ? t.loops : [] };
+    for (const k of ['path', 'localPath']) if (k in r && !okPath(r[k])) delete r[k];
+    tracks[id] = r;
   }
   const playlists = (Array.isArray(lib.playlists) ? lib.playlists : []).filter(isObj).map((p) => ({
-    ...p, id: String(p.id || newId()), name: String(p.name ?? 'Playlist').slice(0, 200),
-    trackIds: Array.isArray(p.trackIds) ? p.trackIds.filter((x) => typeof x === 'string') : [],
+    ...p, id: validId(p.id) ? p.id : newId(), name: String(p.name ?? 'Playlist').slice(0, 200),
+    trackIds: Array.isArray(p.trackIds) ? p.trackIds.filter(validId) : [],
     ...(p.smart && !isObj(p.smart) ? { smart: undefined } : {}),
   }));
-  const folders = (Array.isArray(lib.folders) ? lib.folders : []).filter((f) => isObj(f) && typeof f.path === 'string' && f.id);
+  const folders = (Array.isArray(lib.folders) ? lib.folders : [])
+    .filter((f) => isObj(f) && validId(f.id) && typeof f.path === 'string' && path.isAbsolute(f.path) && okPath(f.path));
   const oldSources = new Map(library.data.sources.map((s) => [s.id, s]));
   library.data = {
     version: 1, tracks, playlists, folders,
-    sources: (Array.isArray(lib.sources) ? lib.sources : []).filter((s) => isObj(s) && s.id).map((s) => {
+    sources: (Array.isArray(lib.sources) ? lib.sources : []).filter((s) => isObj(s) && validId(s.id)).map((s) => {
       const old = oldSources.get(s.id);
-      if (!old) return s;
+      if (!old || sourceEndpoint(old) !== sourceEndpoint(s)) return s; // secrets stay bound to their endpoint
       const keep = Object.fromEntries(SECRET_KEYS.filter((k) => old[k]).map((k) => [k, old[k]]));
       return { ...s, ...keep };
     }),
-    ...(isObj(lib.pathAlias) ? { pathAlias: Object.fromEntries(Object.entries(lib.pathAlias).filter(([, v]) => typeof v === 'string')) } : {}),
+    ...(isObj(lib.pathAlias) ? { pathAlias: Object.fromEntries(Object.entries(lib.pathAlias).filter(([k, v]) => validId(v) && okPath(k))) } : {}),
   };
   if (isObj(backup.settings)) {
     const s = Object.fromEntries(Object.entries(backup.settings).filter(([k]) => Object.hasOwn(DEFAULT_SETTINGS, k) && !LOCAL_ONLY_SETTINGS.has(k)));

@@ -25,11 +25,25 @@ export function readJsonSafe(file) {
 
 function tryParse(f) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } }
 
-/** Atomic write: tmp + fsync + rename, keeping the previous good version as `<file>.bak`. */
-export function writeJsonAtomic(file, obj, { mode } = {}) {
+const POSIX = process.platform !== 'win32';
+
+/** chmod that is skipped on Windows (modes don't apply there) and never throws. */
+export function chmodQuiet(file, mode) {
+  if (!POSIX) return;
+  try { fs.chmodSync(file, mode); } catch { /* missing / not ours */ }
+}
+
+/**
+ * Atomic write: tmp + fsync + rename, keeping the previous good version as `<file>.bak`. Files are private to the
+ * user by default (0600): library.json / settings.json hold media-server passwords, tokens and API keys.
+ */
+export function writeJsonAtomic(file, obj, { mode = 0o600 } = {}) {
   const tmp = file + '.tmp';
   const fd = fs.openSync(tmp, 'w', mode);
-  try { fs.writeSync(fd, JSON.stringify(obj)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-  try { if (fs.existsSync(file)) fs.copyFileSync(file, file + '.bak'); } catch { /* best effort */ }
+  try {
+    if (POSIX) fs.fchmodSync(fd, mode); // a leftover .tmp keeps its old mode otherwise
+    fs.writeSync(fd, JSON.stringify(obj)); fs.fsyncSync(fd);
+  } finally { fs.closeSync(fd); }
+  try { if (fs.existsSync(file)) { fs.copyFileSync(file, file + '.bak'); chmodQuiet(file + '.bak', mode); } } catch { /* best effort */ }
   fs.renameSync(tmp, file);
 }

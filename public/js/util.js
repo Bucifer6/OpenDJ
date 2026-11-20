@@ -27,3 +27,9 @@ export const el = (tag, attrs = {}, ...kids) => {
 };
 export const dbToGain = (db) => Math.pow(10, db / 20);
 export const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/**
+ * Effective UI zoom (Settings → Interface size sets CSS zoom on <html>). Mouse coordinates and getBoundingClientRect()
+ * are in window pixels, but style.left/top inside the zoomed page are multiplied by the zoom: divide by this first.
+ */
+export function uiZoom() { return parseFloat(document.documentElement.style.zoom) || 1; }

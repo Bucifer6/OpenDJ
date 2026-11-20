@@ -130,7 +130,7 @@ export function parseRekordboxXml(xmlString) {
       bpm: num(t.AverageBpm),
       key: t.Tonality || '',
       duration: num(t.TotalTime),
-      rating: Math.max(0, Math.min(5, Math.round(ratingRaw / 51))),
+      rating: t.Rating == null || t.Rating === '' ? null : Math.max(0, Math.min(5, Math.round(ratingRaw / 51))), // missing: keep the track's own
       comments: t.Comments || '',
       color: colourToHex(t.Colour),
       cues,

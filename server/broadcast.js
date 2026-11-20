@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { readJsonSafe, writeJsonAtomic } from './jsonstore.js';
 import { ChunkReorderer, readRaw, configStore, httpError } from './recorder.js';
 
-const VERSION = '0.1.0';
+export const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const DEFAULT_IMAGE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'icon-512.png');
 
 export const STREAM_FORMATS = {
@@ -247,6 +247,25 @@ export function normTarget(t, prev = {}) {
   return out;
 }
 
+/** What a target's stored password / stream key is bound to (type, server, port, TLS, user; RTMP: URL origin). */
+export function targetEndpoint(t) {
+  if (t.type === 'rtmp') {
+    let origin = String(t.rtmpUrl || '').toLowerCase();
+    try { const u = new URL(t.rtmpUrl); origin = `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '')}`.toLowerCase(); } catch { /* keep raw */ }
+    return JSON.stringify(['rtmp', origin]);
+  }
+  return JSON.stringify([t.type, String(t.host || '').toLowerCase(), Number(t.port) || 0, !!t.tls, t.type === 'icecast' ? String(t.username || 'source') : '',
+    t.type === 'shoutcast' ? [t.shoutcastVersion, t.sourcePort || 0, t.sid] : '']);
+}
+
+/** FFmpeg stderr may echo the RTMP URL; never keep the stream key in logs / status. */
+export function redactKey(text, key) {
+  let s = String(text ?? '');
+  if (key && key.length >= 3) s = s.split(key).join('***');
+  if (key) { try { const enc = encodeURIComponent(key); if (enc !== key) s = s.split(enc).join('***'); } catch { /* */ } }
+  return s.replace(/(rtmps?:\/\/[^\s'"]+\/)[^\s/'"]{12,}/gi, '$1***');
+}
+
 // ------------------------------------------------------------------ one output (target) of a broadcast
 
 const backoff = (n) => Math.min(30000, 1000 * 2 ** Math.min(n, 5));
@@ -262,6 +281,7 @@ export class BroadcastOutput extends EventEmitter {
   }
   get t() { return this.target; }
   setState(state, error) {
+    if (typeof error === 'string' && this.t.type === 'rtmp') error = redactKey(error, this.secret('streamKey'));
     if (this.state === state && (error ?? null) === this.error) return;
     this.state = state; if (error !== undefined) this.error = error;
     this.emit('change', this.status());
@@ -364,7 +384,7 @@ export class BroadcastOutput extends EventEmitter {
       if (this.proc !== p) return;
       this.proc = null;
       if (!this.running) return;
-      const msg = err.trim().split('\n').filter(Boolean).slice(-1)[0]?.slice(0, 200) || `encoder exited (${code})`;
+      const msg = redactKey(err.trim().split('\n').filter(Boolean).slice(-1)[0], this.t.type === 'rtmp' ? this.secret('streamKey') : '').slice(0, 200) || `encoder exited (${code})`;
       this.dropped(this.t.type === 'rtmp' ? `RTMP connection lost: ${msg}` : `Encoder stopped: ${msg}`);
     });
   }
@@ -478,10 +498,14 @@ export function registerBroadcastRoutes({ route, library, emit = () => {}, pathA
         if (n.type === 'rtmp' && n.image && !pathAllowed(n.image)) throw httpError(403, 'The image is outside the allowed folders');
         return { n, t };
       }).map(({ n, t }) => {
-        // secrets: a non-empty value replaces, `clearPassword` / `clearStreamKey` removes, anything else keeps
+        // secrets: a non-empty value replaces, `clearPassword` / `clearStreamKey` removes, anything else keeps -
+        // but only for the same endpoint: a target pointed at another server (or a new target) needs them again
+        const old = prev.get(n.id);
+        const moved = !old || targetEndpoint(normTarget(old, {})) !== targetEndpoint(n);
         for (const k of SECRET_KEYS) {
-          if (typeof t[k] === 'string' && t[k] && t[k] !== '••••••') secrets.set('broadcast', n.id, k, t[k].slice(0, 500));
-          if (t[`clear${k[0].toUpperCase()}${k.slice(1)}`]) secrets.set('broadcast', n.id, k, '');
+          const given = typeof t[k] === 'string' && t[k] && t[k] !== '••••••';
+          if (given) secrets.set('broadcast', n.id, k, t[k].slice(0, 500));
+          else if (moved || t[`clear${k[0].toUpperCase()}${k.slice(1)}`]) { if (secrets.has('broadcast', n.id, k)) secrets.set('broadcast', n.id, k, ''); }
         }
         return n;
       });

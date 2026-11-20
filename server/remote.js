@@ -25,9 +25,20 @@ export function clientFor(library, sourceId) {
 
 /** Connect with new credentials, persist the resulting token (not raw password where avoidable). */
 export async function addSource(library, cfg) {
-  const client = createClient(cfg);
-  const info = await client.connect();
-  const saved = library.saveSource({ ...cfg, ...client.persistable(), serverName: info?.serverName || cfg.name });
+  // a wrong URL or an offline server is the user's input, not a server fault: 400 / 502 with a readable reason
+  const bad = (status, msg) => Object.assign(new Error(msg), { status });
+  let u = null; try { u = new URL(String(cfg.url || '')); } catch { /* checked below */ }
+  if (!u || !/^https?:$/.test(u.protocol)) throw bad(400, 'Enter the server address as a full URL, e.g. http://192.168.1.10:8096');
+  let client, info;
+  try { client = createClient(cfg); } catch (e) { throw bad(400, e.message); }
+  try { info = await client.connect(); } catch (e) {
+    if (e.status) throw bad(e.status === 401 || e.status === 403 ? 400 : 502, e.status === 401 || e.status === 403 ? 'The server refused the login (check user name / password / token)' : e.message); // never pass a remote 401 through (the UI would ask for the OpenDJ login)
+    const c = e.cause?.code || e.code;
+    if (!c && !(e instanceof TypeError)) throw bad(400, e.message); // login refused, wrong library… (the client's message)
+    const why = c === 'ECONNREFUSED' ? 'connection refused' : c === 'ENOTFOUND' || c === 'EAI_AGAIN' ? 'host not found' : c === 'ETIMEDOUT' || c === 'UND_ERR_CONNECT_TIMEOUT' ? 'timed out' : (e.cause?.message || e.message);
+    throw bad(502, `Could not reach ${u.host}: ${why}`);
+  }
+  const saved = library.saveSource({ ...cfg, ...client.persistable(), serverName: info?.serverName || cfg.name }, { replace: true });
   // Plex/Jellyfin/Emby never sign in again once they have a token: don't keep the raw password around.
   // (Subsonic signs every request with it; MediaMax re-logs in when its session expires.)
   if (TOKEN_ONLY.has(saved.type) && saved.token) delete saved.password;
@@ -98,6 +109,8 @@ export const safe = (s) => {
 /** A file extension from a (server-controlled) string: 1-5 alphanumerics, else the fallback. */
 export const safeExt = (e, fallback = 'mp3') => { const v = String(e || '').replace(/^\./, '').toLowerCase(); return /^[a-z0-9]{1,5}$/.test(v) ? v : fallback; };
 const DONE_CAP = 200;
+/** Largest file a media server may send for an offline copy (settings.downloadMaxMB, default 4 GiB). */
+const downloadLimit = (library) => Math.max(1, Number(library.settings?.downloadMaxMB) || 4096) * 1024 * 1024;
 
 export class DownloadManager {
   constructor(library, emit) {
@@ -150,6 +163,9 @@ export class DownloadManager {
     const res = await fetch(req.url, { headers: req.headers || {}, signal: job.ctrl.signal });
     if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
     job.total = Number(res.headers.get('content-length')) || t.size || 0;
+    const limit = downloadLimit(this.library);
+    const tooBig = () => new Error(`Download is larger than the ${Math.round(limit / 1048576)} MB limit (downloadMaxMB)`);
+    if (Number(res.headers.get('content-length')) > limit) { job.ctrl.abort(); throw tooBig(); }
     const ext = safeExt(req.ext, safeExt(t.format));
     const root = path.resolve(this.library.settings.downloadDir);
     const dir = path.join(root, safe(t.albumArtist || t.artist), safe(t.album || 'Singles'));
@@ -157,11 +173,13 @@ export class DownloadManager {
     await fs.promises.mkdir(dir, { recursive: true });
     const stem = `${t.trackNumber ? String(t.trackNumber).padStart(2, '0') + ' ' : ''}${safe(t.artist)} - ${safe(t.title)}`.slice(0, 200);
     // per-track temp file: two tracks with the same name never write the same .part
-    const tmp = path.join(dir, `.${t.id}.part`);
+    const tmp = path.join(dir, `.${String(t.id).replace(/[^\w-]/g, '_')}.part`);
+    if (!isInside(dir, tmp)) throw new Error('Refusing to download outside the download folder');
     let last = 0;
     const body = Readable.fromWeb(res.body);
     body.on('data', (chunk) => {
       job.received += chunk.length;
+      if (job.received > limit) { job.ctrl.abort(); body.destroy(tooBig()); } // a server that lies about (or omits) the length
       if (Date.now() - last > 250) { last = Date.now(); this.emit('downloads', this.list()); }
     });
     let file;

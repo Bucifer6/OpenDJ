@@ -81,6 +81,8 @@ export function syltToLines(syncText, { timeStampFormat = 2, sampleRate = 44100,
   }).filter((l) => l.text || l.words);
 }
 
+const TXXX_LYRICS = new Set(['LYRICS', 'UNSYNCEDLYRICS', 'UNSYNCED LYRICS', 'SYNCEDLYRICS', 'SYNCED LYRICS', 'USLT', 'LYRICS-XXX']);
+
 /** Lyrics from a music-metadata result (common + native tags). */
 export function lyricsFromMetadata(mm) {
   if (!mm) return null;
@@ -101,7 +103,14 @@ export function lyricsFromMetadata(mm) {
   };
   for (const tags of Object.values(mm.native || {})) {
     for (const { id, value } of tags || []) {
-      const k = String(id).toUpperCase();
+      let k = String(id).toUpperCase();
+      // ID3 user text frames: ffmpeg / Mp3tag / foobar2000 store lyrics as TXXX:LYRICS, TXXX:USLT, TXXX:UNSYNCEDLYRICS…
+      if (k.startsWith('TXXX:')) {
+        k = k.slice(5).trim();
+        if (!TXXX_LYRICS.has(k)) continue;
+        for (const v of Array.isArray(value) ? value : [value]) takeText(v);
+        continue;
+      }
       if (k === 'SYLT') takeSylt(value);
       else if (k === 'USLT' || k === 'ULT' || k === 'LYRICS' || k === 'UNSYNCEDLYRICS' || k === 'UNSYNCED LYRICS' || k === '©LYR' || k === 'LYRICS-XXX' || k === 'WM/LYRICS') takeText(value);
     }
