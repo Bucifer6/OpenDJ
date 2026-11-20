@@ -292,10 +292,18 @@ export class Dialogs {
     } }, el('div', { class: 'theme-swatch' }, ...t.swatch.map((c) => el('span', { style: { background: c } }))), el('b', {}, t.name), el('small', {}, t.desc)));
     const accent = el('input', { type: 'color', value: s.accentColor || '#3ea6ff', title: 'Custom accent colour' });
     accent.addEventListener('input', async () => { await set('accentColor', accent.value); applyTheme(app.settings); });
+    // the size is capped so the effective window stays at least 1100x700: say so instead of silently ignoring it
+    const scaleNoteEl = el('p', { class: 'hint scale-note' });
+    const scaleNote = () => {
+      const want = app.settings.uiScale || 100, eff = Math.round(uiZoom() * 100);
+      scaleNoteEl.textContent = eff < want ? `Limited to ${eff}% at this window size (the layout needs at least 1100 × 700 points); enlarge the window to use ${want}%.` : '';
+    };
+    scaleNote();
     const appearance = el('div', { class: 'form' },
       el('div', { class: 'theme-grid' }, ...cards),
       el('div', { class: 'row' }, field('Accent colour', accent), el('button', { class: 'btn sm', onclick: async () => { await set('accentColor', ''); applyTheme(app.settings); } }, 'Use theme accent')),
-      field('Interface size', sel(s.uiScale || 100, [80, 90, 100, 110, 125, 150].map((v) => [v, `${v}%`]), async (v) => { await set('uiScale', Number(v)); applyTheme(app.settings); }), 'Shrink for small laptop screens, enlarge for touchscreens and big displays.'),
+      field('Interface size', sel(s.uiScale || 100, [80, 90, 100, 110, 125, 150].map((v) => [v, `${v}%`]), async (v) => { await set('uiScale', Number(v)); applyTheme(app.settings); scaleNote(); }), 'Shrink for small laptop screens, enlarge for touchscreens and big displays.'),
+      scaleNoteEl,
       field('Waveform colours', sel(s.waveformColors, [['rgb', '3-band RGB'], ['blue', 'Blue'], ['mono', 'Monochrome']], (v) => set('waveformColors', v))),
     );
     const dvsTab = el('div', { class: 'form' }, el('p', { class: 'hint' }, 'Control decks with Serato or Traktor timecode vinyl / CDs through your audio interface inputs.'), el('button', { class: 'btn', onclick: () => import('../dvs/dvs-ui.js').then((m) => m.openDvsPanel(app)) }, 'Open DVS setup…'));

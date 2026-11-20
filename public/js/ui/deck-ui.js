@@ -92,7 +92,7 @@ export function buildDeck(app, deck) {
   );
   let jumpBeats = 4;
   const jumpLabel = el('span', {}, '4');
-  const jumpRow = el('div', { class: 'loop-row' },
+  const jumpRow = el('div', { class: 'loop-row jump-row' },
     button('◀◀', { cls: 'sm', click: () => deck.beatJump(-jumpBeats), title: 'Beat jump back' }),
     button(el('span', {}, 'JUMP ', jumpLabel), { cls: 'sm', click: () => { jumpBeats = jumpBeats >= 32 ? 1 : jumpBeats * 2; jumpLabel.textContent = jumpBeats; } }),
     button('▶▶', { cls: 'sm', click: () => deck.beatJump(jumpBeats), title: 'Beat jump forward' }),
