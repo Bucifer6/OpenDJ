@@ -572,3 +572,18 @@ test('N7 a malformed (bad percent-encoding) cookie is treated as no session, not
   const d = await start({ port: 0, dataDir: path.join(tmpdir(), 'd'), ffmpeg: false, launchToken: 'tok', log: { log() {}, warn() {}, error() {} } });
   try { assert.equal((await raw(d.port, 'GET', '/', { Cookie: 'opendj_launch=%E0' })).status, 401); } finally { d.server.close(); d.shutdown(); }
 }, { login: false }));
+
+test('desktop (launch token, auth:false) ignores hosted-mode login env vars but still requires the token', async () => {
+  const keys = ['OPENDJ_PASSWORD', 'OPENDJ_AUTH', 'OPENDJ_ALLOWED_HOSTS', 'OPENDJ_TRUST_PROXY'];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  Object.assign(process.env, { OPENDJ_PASSWORD: 'longenough123', OPENDJ_AUTH: '1', OPENDJ_ALLOWED_HOSTS: 'x.example', OPENDJ_TRUST_PROXY: '1' });
+  const quiet = { log() {}, info() {}, warn() {}, error() {} };
+  try {
+    const s = await start({ port: 0, dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'odj-desk-')), launchToken: 'tok', auth: false, password: '', trustProxy: '', allowedHosts: [], log: quiet });
+    try {
+      const u = `http://127.0.0.1:${s.port}/api/tracks`;
+      assert.equal((await fetch(u)).status, 401);
+      assert.equal((await fetch(u, { headers: { cookie: 'opendj_launch=tok' } })).status, 200);
+    } finally { await s.close?.(); s.server?.close?.(); }
+  } finally { for (const k of keys) if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+});

@@ -872,7 +872,9 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
  */
 export async function start({ port = 0, host = '127.0.0.1', dataDir, ...opts } = {}) {
   // undefined lets createServer decide from the environment (password / proxy / allowed hosts turn login on)
-  const auth = opts.auth === true || !isLoopback(host) || process.env.OPENDJ_AUTH === '1' ? true : opts.auth;
+  // Electron passes auth:false with a launch token (loopback only): the token guards it, env vars must not add a login.
+  const desktop = opts.auth === false && !!opts.launchToken && isLoopback(host);
+  const auth = desktop ? false : opts.auth === true || !isLoopback(host) || process.env.OPENDJ_AUTH === '1' ? true : opts.auth;
   const app = createServer({ dataDir, ...opts, auth });
   await new Promise((resolve, reject) => { app.server.once('error', reject); app.server.listen(port, host, resolve); });
   app.port = app.server.address().port;
