@@ -17,7 +17,7 @@ import { aiffToWav } from './aiff.js';
 import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clientFor, isInside, uniqueName, safe } from './remote.js';
 import { findFfmpeg, needsTranscode, remoteBrowserDecodable, browserPlayableVideo, formatList, DSD_EXT, VIDEO_MIME, extOf, probe, isVideoByName, BROWSER_VIDEO_EXT } from './media.js';
 import { Transcoder } from './transcode.js';
-import { Auth, parseCookies } from './auth.js';
+import { Auth, parseCookies, parseTrustProxy } from './auth.js';
 import { redactSettings, REDACTED } from './library-tools.js';
 import { SOURCE_TYPES, sourceConfigFromForm } from './sources/index.js';
 import { parseRekordboxXml, buildRekordboxXml } from './rekordbox.js';
@@ -200,9 +200,16 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   const missing = new MissingChecker(library, { onChange: () => emit('library', { what: 'missing' }) });
 
   // ---------------- hosting / security config ----------------
-  const authEnabled = authOpt ?? process.env.OPENDJ_AUTH === '1';
-  const auth = new Auth({ dataDir, enabled: authEnabled, password: password ?? process.env.OPENDJ_PASSWORD, trustProxy: trustProxy ?? process.env.OPENDJ_TRUST_PROXY, log });
+  const pw = password ?? process.env.OPENDJ_PASSWORD;
+  const trust = trustProxy ?? process.env.OPENDJ_TRUST_PROXY;
   const extraHosts = new Set((allowedHosts || csv(process.env.OPENDJ_ALLOWED_HOSTS)).map((h) => h.toLowerCase()));
+  // Login turns on when asked for (auth: true, OPENDJ_AUTH=1, --auth, a non-loopback HOST via start()), and also
+  // whenever the configuration says the server is reached from elsewhere: a password, a trusted reverse proxy or
+  // extra host names. A reverse proxy on the same machine connects from 127.0.0.1, so HOST alone can't tell.
+  const exposed = !!pw || !!parseTrustProxy(trust) || extraHosts.size > 0;
+  const authEnabled = authOpt === true || (authOpt !== false && (process.env.OPENDJ_AUTH === '1' || exposed));
+  if (extraHosts.size && !authEnabled) throw new Error('OPENDJ_ALLOWED_HOSTS is set but login is off: remove it, or turn login on (OPENDJ_AUTH=1 / --auth / OPENDJ_PASSWORD)');
+  const auth = new Auth({ dataDir, enabled: authEnabled, password: pw, trustProxy: trust, log });
   const envRoots = rootsOpt || (process.env.OPENDJ_MUSIC_ROOTS ? process.env.OPENDJ_MUSIC_ROOTS.split(path.delimiter).filter(Boolean) : null);
   const restricted = authEnabled || !!envRoots; // hosted mode: never expose the whole filesystem
   const uploadDir = () => path.resolve(library.settings.uploadDir || process.env.OPENDJ_UPLOAD_DIR || path.join(dataDir, 'Uploads'));
@@ -864,7 +871,8 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
  * opts: { port, host, dataDir, auth, ffmpeg, allowedHosts, roots, password }
  */
 export async function start({ port = 0, host = '127.0.0.1', dataDir, ...opts } = {}) {
-  const auth = opts.auth || !isLoopback(host) || process.env.OPENDJ_AUTH === '1';
+  // undefined lets createServer decide from the environment (password / proxy / allowed hosts turn login on)
+  const auth = opts.auth === true || !isLoopback(host) || process.env.OPENDJ_AUTH === '1' ? true : opts.auth;
   const app = createServer({ dataDir, ...opts, auth });
   await new Promise((resolve, reject) => { app.server.once('error', reject); app.server.listen(port, host, resolve); });
   app.port = app.server.address().port;

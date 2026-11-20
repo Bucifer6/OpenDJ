@@ -524,3 +524,51 @@ test('(suspected) media-server downloads are capped (declared and actual size); 
     assert.equal((await c('POST', '/api/stems/trk/begin', { frames: 44100 * 60 * 29, sampleRate: 44100 })).status, 200);
   });
 });
+
+// ---------------------------------------------------------------- B1 README reverse-proxy recipe / N7 malformed cookie
+test('B1 the README reverse-proxy recipe (HOST=127.0.0.1 + proxy env) requires login and limits paths', async () => {
+  const keys = ['OPENDJ_TRUST_PROXY', 'OPENDJ_PASSWORD', 'OPENDJ_ALLOWED_HOSTS', 'OPENDJ_AUTH'];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  const set = (env) => { for (const k of keys) { if (env[k] === undefined) delete process.env[k]; else process.env[k] = env[k]; } };
+  try {
+    for (const env of [
+      { OPENDJ_TRUST_PROXY: '1', OPENDJ_PASSWORD: PW, OPENDJ_ALLOWED_HOSTS: 'dj.example.com' },
+      { OPENDJ_TRUST_PROXY: '127.0.0.1', OPENDJ_ALLOWED_HOSTS: 'dj.example.com' },
+      { OPENDJ_PASSWORD: PW },
+      { OPENDJ_ALLOWED_HOSTS: 'dj.example.com' },
+    ]) {
+      set(env);
+      const app = await start({ port: 0, host: '127.0.0.1', dataDir: path.join(tmpdir(), 'd'), ffmpeg: false, log: { log() {}, warn() {}, error() {} } });
+      try {
+        const h = { Host: env.OPENDJ_ALLOWED_HOSTS || `127.0.0.1:${app.port}`, 'X-Forwarded-For': '203.0.113.7', 'X-Forwarded-Proto': 'https' };
+        const tag = JSON.stringify(env);
+        assert.equal(app.auth.enabled, true, tag);
+        assert.equal((await raw(app.port, 'GET', '/', h)).status, 302, tag);
+        assert.equal((await raw(app.port, 'GET', '/api/tracks', h)).status, 401, tag);
+        assert.equal((await raw(app.port, 'GET', '/api/browse?path=%2F', h)).status, 401, tag);
+        assert.equal((await raw(app.port, 'POST', '/api/folders', { ...h, 'Content-Type': 'application/json' }, JSON.stringify({ path: '/etc' }))).status, 401, tag);
+        if (env.OPENDJ_PASSWORD) {
+          const c = client(app);
+          await c('POST', '/api/auth/login', { password: PW }, h);
+          assert.equal((await c('POST', '/api/folders', { path: '/etc' }, h)).status, 403, 'signed in: still limited to the music roots');
+          assert.equal((await c('GET', '/api/browse?path=%2F', undefined, h)).status, 403);
+        }
+      } finally { app.server.close(); app.shutdown(); }
+    }
+    set({ OPENDJ_ALLOWED_HOSTS: 'dj.example.com' });
+    await assert.rejects(start({ port: 0, dataDir: path.join(tmpdir(), 'd'), auth: false, ffmpeg: false, log: {} }), /OPENDJ_ALLOWED_HOSTS/);
+    set({});
+    const plain = await start({ port: 0, dataDir: path.join(tmpdir(), 'd'), ffmpeg: false, log: { log() {}, warn() {}, error() {} } });
+    try { assert.equal(plain.auth.enabled, false, 'plain npm run web on loopback is unchanged'); } finally { plain.server.close(); plain.shutdown(); }
+  } finally { set(saved); }
+});
+
+test('N7 a malformed (bad percent-encoding) cookie is treated as no session, not a 500', () => hosted(async ({ app }) => {
+  for (const cookie of ['opendj_session=%E0%A4%A', 'opendj_session=%; other=%zz', 'opendj_device=%%%; opendj_session=%C0']) {
+    assert.equal((await raw(app.port, 'GET', '/api/tracks', { Cookie: cookie })).status, 401, cookie);
+    assert.equal((await raw(app.port, 'GET', '/api/auth/status', { Cookie: cookie })).status, 200, cookie);
+    assert.equal((await raw(app.port, 'POST', '/api/auth/login', { Cookie: cookie, 'Content-Type': 'application/json' }, JSON.stringify({ password: PW }))).status, 200, cookie);
+  }
+  const d = await start({ port: 0, dataDir: path.join(tmpdir(), 'd'), ffmpeg: false, launchToken: 'tok', log: { log() {}, warn() {}, error() {} } });
+  try { assert.equal((await raw(d.port, 'GET', '/', { Cookie: 'opendj_launch=%E0' })).status, 401); } finally { d.server.close(); d.shutdown(); }
+}, { login: false }));
