@@ -132,6 +132,22 @@ try {
   await page.waitForFunction(() => !window.opendj.analyser.running && window.opendj.library.tracks.size && [...window.opendj.library.tracks.values()].find((x) => x.title === 'Track 122').analyzed, null, { timeout: 30000 });
   check(true, 'explicit analysis finished');
 
+  // small screens: one deck at a time via tabs, nothing pushed off-screen
+  for (const [w, h] of [[390, 844], [768, 1024]]) {
+    await page.setViewportSize({ width: w, height: h }); await page.waitForTimeout(300);
+    const m = await page.evaluate(() => {
+      const vis = (e) => e.offsetParent !== null && e.getBoundingClientRect().width > 0;
+      const off = [...document.querySelectorAll('.topbar button, .topbar .clock, .deck button, .mixer button, .lib-tools > *')].filter(vis).filter((e) => { const r = e.getBoundingClientRect(); return r.right > innerWidth + 1 || r.left < -1; });
+      const decks = window.opendj.deckEls.filter(vis).length;
+      return { off: off.map((e) => e.textContent.trim().slice(0, 12)), decks, sw: document.documentElement.scrollWidth, tabs: [...document.querySelectorAll('.deck-tab')].filter(vis).length };
+    });
+    check(!m.off.length && m.sw <= w, `${w}x${h}: no controls off-screen (${m.off.join(', ')})`);
+    check(m.decks === 1 && m.tabs === 2, `${w}x${h}: one deck shown, ${m.tabs} deck tabs`);
+  }
+  await page.locator('.deck-tab').nth(1).click();
+  check(await page.evaluate(() => window.opendj.deckEls[1].offsetParent !== null && window.opendj.deckEls[0].offsetParent === null), 'deck tab switches to deck 2');
+  await page.setViewportSize({ width: 1600, height: 960 });
+
   check(!errors.length, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
   console.log('\nE2E ANALYSIS PASSED');
   await done(0);

@@ -146,7 +146,11 @@ class App {
     // decks + mixer
     this.deckEls = this.engine.decks.map((d) => buildDeck(this, d));
     this.mixer = buildMixer(this);
-    this.deckArea = el('section', { class: 'deck-area' },
+    // small screens show one deck at a time (css/mobile.css): these tabs pick it
+    this.deckTabs = el('div', { class: 'deck-tabs', role: 'tablist' }, ...this.engine.decks.map((d, i) => el('button', {
+      class: 'deck-tab', role: 'tab', style: { '--deck-color': DECK_COLORS[i] }, onclick: () => this.showDeckTab(i),
+    }, el('b', {}, `DECK ${i + 1}`), el('span', {}))));
+    this.deckArea = el('section', { class: 'deck-area' }, this.deckTabs,
       el('div', { class: 'deck-col left' }, this.deckEls[0], this.deckEls[2]),
       this.mixer,
       el('div', { class: 'deck-col right' }, this.deckEls[1], this.deckEls[3]));
@@ -160,6 +164,24 @@ class App {
       const h = Math.max(120, Math.min(Math.max(120, room), startH - (e.clientY - startY))); document.documentElement.style.setProperty('--browser-h', `${h}px`); });
     for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) handle.addEventListener(ev, () => { startY = null; });
     root.replaceChildren(topbar, this.waveArea, this.deckArea, this.samplerBar, handle, this.library.root, this.toasts);
+  }
+
+  /** Small screens: show deck i (the others stay loaded and playing, just hidden). */
+  showDeckTab(i) {
+    this.mobileDeck = Math.min(i, this.deckCount - 1);
+    this.deckEls.forEach((d, j) => d.classList.toggle('m-hide', j !== this.mobileDeck));
+    this.updateDeckTabs();
+  }
+  updateDeckTabs() {
+    [...this.deckTabs.children].forEach((b, j) => {
+      const d = this.engine.decks[j];
+      b.hidden = j >= this.deckCount;
+      b.classList.toggle('active', j === (this.mobileDeck || 0));
+      b.classList.toggle('playing', !!d.playing);
+      const name = d.track ? d.track.title || '' : '';
+      if (b.lastChild.textContent !== name) b.lastChild.textContent = name;
+      b.setAttribute('aria-selected', String(j === (this.mobileDeck || 0)));
+    });
   }
 
   buildSamplerBar() {
@@ -241,6 +263,7 @@ class App {
     this.waves.forEach((w, i) => { w.style.display = i < n ? '' : 'none'; });
     this.mixer.setDeckCount(n);
     for (const b of this.deckSel.children) b.classList.toggle('active', Number(b.dataset.n) === n);
+    this.showDeckTab(this.mobileDeck || 0);
     if (save) this.setSetting('deckCount', n);
   }
 
@@ -376,6 +399,7 @@ class App {
       this.midiDot.classList.toggle('connected', (this.midi.devices?.() || this.midi.inputs()).length > 0);
       this.midiDot.title = this.midi.inputs().map((i) => i.name).join(', ') || 'No MIDI controller';
       this.updateAutomixUi();
+      this.updateDeckTabs();
     }
   }
 }
