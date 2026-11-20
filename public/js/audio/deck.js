@@ -118,7 +118,7 @@ export class Deck extends Emitter {
         for (const k of ['phrases', 'mixIn', 'mixOut', 'downbeat']) if (r.result[k] !== undefined) patch[k] = r.result[k];
         // automatic cue creation (like rekordbox auto cue / SMART CUE) for tracks without any cues yet
         if (!(track.cues || []).length && Array.isArray(r.result.autoCues) && r.result.autoCues.length && this.engine.settings.autoCues !== false) {
-          patch.cues = r.result.autoCues;
+          patch.cues = r.result.autoCues.map((c) => ({ ...c, auto: true })); // auto: replaceable by imported cues
         }
         Object.assign(track, patch);
         api.saveWaveform(track.id, r.wave).catch(() => {});

@@ -127,3 +127,48 @@ test('m6/M9: settings are validated on update and when settings.json is loaded',
   assert.equal(lib.settings.crossfaderCurve, 'sharp');
   clearTimeout(lib._t);
 });
+
+test('UAT M4/M5: imported cues merge with existing ones (auto cues replaceable, free pads, skipped counted)', async () => {
+  const { mergeImportedCues } = await import('../server/importers.js');
+  const existing = [{ index: 0, type: 'hot', position: 5, name: 'Mine' }, { index: 1, type: 'hot', position: 9, auto: true }, { index: -1, type: 'memory', position: 2 }];
+  const imported = [{ index: 0, type: 'hot', position: 30 }, { index: 1, type: 'hot', position: 40 }, { index: -1, type: 'memory', position: 2 }];
+  const m = mergeImportedCues(existing, imported);
+  assert.deepEqual(m.cues.filter((c) => c.index >= 0).map((c) => [c.index, c.position]).sort(), [[0, 5], [1, 40], [2, 30]]);
+  assert.equal(m.added, 2); assert.equal(m.skipped, 1);
+  assert.equal(m.cues.some((c) => c.auto), false, 'auto cues replaced');
+  assert.deepEqual(mergeImportedCues(existing, []).cues, existing, 'no imported cues: unchanged');
+  const full = Array.from({ length: 8 }, (_, i) => ({ index: i, type: 'hot', position: i }));
+  assert.equal(mergeImportedCues(full, [{ index: 2, type: 'hot', position: 99 }]).skipped, 1);
+});
+
+test('UAT M4/N4/N5: rekordbox import keeps cues & rating when the XML has none, fills empty tags, 400 on bad files', async () => {
+  const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
+  const { start } = await import('../server/index.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'opendj-qa-rb2-'));
+  const file = path.join(dir, 'x.wav');
+  const b = Buffer.alloc(44 + 400); b.write('RIFF', 0); b.writeUInt32LE(36 + 400, 4); b.write('WAVEfmt ', 8);
+  b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(8000, 24); b.writeUInt32LE(16000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(400, 40);
+  fs.writeFileSync(file, b);
+  const loc = 'file://localhost' + file.split('/').map(encodeURIComponent).join('/');
+  fs.writeFileSync(path.join(dir, 'rb.xml'), `<?xml version="1.0"?><DJ_PLAYLISTS><COLLECTION><TRACK TrackID="1" Name="RB Title" Genre="Techno" Location="${loc}"/></COLLECTION><PLAYLISTS/></DJ_PLAYLISTS>`);
+  fs.writeFileSync(path.join(dir, 'bad.nml'), '<foo/>');
+  const app = await start({ port: 0, dataDir: path.join(dir, 'data') });
+  const post = async (u, body) => { const r = await fetch(app.url + u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return { s: r.status, j: await r.json() }; };
+  try {
+    const t0 = (await app.library.addFile?.(file)) || null;
+    const first = await post('api/import/rekordbox', { path: path.join(dir, 'rb.xml') });
+    assert.equal(first.s, 200);
+    const t = app.library.allTracks()[0];
+    app.library.updateTrack(t.id, { rating: 4, cues: [{ index: 0, type: 'hot', position: 3 }], title: '' });
+    await post('api/import/rekordbox', { path: path.join(dir, 'rb.xml') });
+    const u = app.library.getTrack(t.id);
+    assert.equal(u.rating, 4, 'missing Rating keeps the track rating');
+    assert.equal(u.cues.length, 1, 'no cue points in the XML: cues kept');
+    assert.equal(u.genre, 'Techno'); assert.equal(u.title, 'RB Title');
+    const bad = await post('api/import/traktor', { path: path.join(dir, 'bad.nml') });
+    assert.equal(bad.s, 400); assert.match(bad.j.error, /Traktor/);
+    const gone = await post('api/import/traktor', { path: path.join(dir, 'nope.nml') });
+    assert.equal(gone.s, 400); assert.equal(gone.j.error, 'File not found');
+    void t0;
+  } finally { app.shutdown(); app.server.close(); }
+});

@@ -126,7 +126,8 @@ test('import endpoints add existing files with cues, playlists into folders', as
   const J = async (u, b) => (await fetch(app.url + u.slice(1), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) })).json();
   try {
     const r1 = await J('/api/import/traktor', { path: path.join(dir, 'collection.nml') });
-    assert.deepEqual(r1, { imported: 1, playlists: 1, missing: 1 });
+    assert.deepEqual({ ...r1, cuesAdded: undefined, cuesSkipped: undefined }, { imported: 1, playlists: 1, missing: 1, cuesAdded: undefined, cuesSkipped: undefined });
+    assert.equal(r1.cuesAdded, 3);
     const one = app.library.allTracks().find((t) => t.path.endsWith('one.wav'));
     assert.equal(one.key, 'Am');
     assert.equal(one.cues.length, 3);
@@ -137,7 +138,7 @@ test('import endpoints add existing files with cues, playlists into folders', as
     assert.deepEqual(pl.trackIds, [one.id]);
 
     const r2 = await J('/api/import/serato', { path: path.join(dir, '_Serato_') });
-    assert.deepEqual(r2, { imported: 1, playlists: 1, missing: 1 });
+    assert.deepEqual({ imported: r2.imported, playlists: r2.playlists, missing: r2.missing }, { imported: 1, playlists: 1, missing: 1 });
     const early = app.library.data.playlists.find((p) => p.name === 'Early');
     assert.equal(early.folder, 'Serato / Warmup');
     assert.equal(early.trackIds.length, 1);
