@@ -8,6 +8,7 @@ import { LibraryUI } from './ui/library-ui.js';
 import { Dialogs } from './ui/dialogs.js';
 import { AutoMix } from './automix.js';
 import { MidiManager } from './midi/midi.js';
+import { Sequencer } from './audio/sequencer.js';
 
 class App {
   constructor() { this.shift = false; this._shiftKey = false; }
@@ -21,18 +22,21 @@ class App {
     this.library = new LibraryUI(this);
     this.automix = new AutoMix(this);
     this.midi = new MidiManager(this);
+    this.sequencer = new Sequencer(this.engine);
     this.buildLayout();
+    this.wireEvents(); // subscribe to server events before loading the library so no change is missed
     await this.midi.init();
+    if (this.settings.midiClockOutput) this.midi.setClockOutput(this.settings.midiClockOutput);
     await this.library.refresh();
     this.library.refreshDrives();
     setInterval(() => this.library.refreshDrives(), 15000); // notice USB sticks being plugged in
-    this.wireEvents();
     this.setDeckCount(this.deckCount, false);
     this.engine.setMasterVolume(0.8); this.engine.setHeadphoneVolume(0.8);
     if (this.engine.ctx.state !== 'running') this.showStartOverlay();
     const frame = (now) => { this.frame(now); requestAnimationFrame(frame); };
     requestAnimationFrame(frame);
     document.getElementById('boot')?.remove();
+    this.ready = true;
   }
 
   async setSetting(k, v) { this.settings[k] = v; try { this.settings = { ...this.settings, ...(await api.saveSettings({ [k]: v })) }; this.engine.settings = this.settings; } catch (e) { this.toast(e.message); } }
@@ -127,10 +131,55 @@ class App {
       b.addEventListener('contextmenu', (e) => { e.preventDefault(); target = i; fileIn.click(); });
       return b;
     });
-    const render = () => pads.forEach((b, i) => { b.textContent = s.slots[i]?.name || '—'; });
+    const render = () => { pads.forEach((b, i) => { b.textContent = s.slots[i]?.name || '—'; }); this.seqPanel?.renderNames?.(); };
     render();
-    bar.append(...pads, fileIn);
+    const seqBtn = el('button', { class: 'btn sm seq-btn', title: 'Step sequencer (synced to the master deck)', onclick: () => this.toggleSequencer() }, 'SEQ');
+    bar.append(...pads, seqBtn, fileIn);
     return bar;
+  }
+
+  toggleSequencer() {
+    if (this.seqPanel) { this.seqPanel.remove(); this.seqPanel = null; return; }
+    const seq = this.sequencer, sampler = this.engine.sampler;
+    const cells = [];
+    const grid = el('div', { class: 'seq-grid' });
+    const names = [];
+    for (let r = 0; r < seq.rows; r++) {
+      const name = el('button', { class: 'seq-name', title: 'Click: mute row', onclick: () => { seq.mute[r] = !seq.mute[r]; name.classList.toggle('muted', seq.mute[r]); } });
+      names.push(name);
+      const row = el('div', { class: 'seq-row' }, name);
+      cells[r] = [];
+      for (let c = 0; c < seq.steps; c++) {
+        const cell = el('button', { class: `seq-cell ${c % 4 === 0 ? 'beat' : ''}`, onclick: () => { seq.toggle(r, c); } });
+        cells[r][c] = cell; row.append(cell);
+      }
+      grid.append(row);
+    }
+    const paint = () => { for (let r = 0; r < seq.rows; r++) for (let c = 0; c < seq.steps; c++) cells[r][c].classList.toggle('on', !!seq.pattern[r][c]); };
+    const playBtn = el('button', { class: 'btn sm', onclick: () => (seq.running ? seq.stop() : (this.engine.resume(), seq.start())) }, 'PLAY');
+    const bpmIn = el('input', { class: 'inp seq-bpm', type: 'number', min: 60, max: 200, value: seq.bpm, title: 'Tempo when no deck is playing' });
+    bpmIn.addEventListener('change', () => { seq.bpm = Number(bpmIn.value) || 120; });
+    const swing = el('input', { type: 'range', min: 0, max: 0.6, step: 0.05, value: seq.swing, title: 'Swing' });
+    swing.addEventListener('input', () => { seq.swing = Number(swing.value); seq.save(); });
+    const panel = el('div', { class: 'seq-panel' },
+      el('div', { class: 'seq-head' }, el('b', {}, 'SEQUENCER'), playBtn, el('span', { class: 'hint' }, 'Follows the master deck tempo & beat grid · free BPM'), bpmIn, el('span', { class: 'hint' }, 'Swing'), swing,
+        el('button', { class: 'btn sm', onclick: () => seq.clear() }, 'Clear'), el('button', { class: 'btn sm', onclick: () => this.toggleSequencer() }, '✕')),
+      grid);
+    panel.renderNames = () => names.forEach((n, r) => { n.textContent = sampler.slots[r]?.name || '—'; });
+    panel.renderNames(); paint();
+    const offP = seq.on('pattern', paint);
+    const offS = seq.on('state', () => playBtn.classList.toggle('active', seq.running));
+    const offStep = seq.on('step', (k) => { grid.querySelectorAll('.seq-cell.now').forEach((x) => x.classList.remove('now')); for (let r = 0; r < seq.rows; r++) cells[r][k].classList.add('now'); });
+    playBtn.classList.toggle('active', seq.running);
+    const origRemove = panel.remove.bind(panel);
+    panel.remove = () => { offP(); offS(); offStep(); origRemove(); };
+    document.body.append(panel);
+    this.seqPanel = panel;
+  }
+
+  async toggleMic() {
+    try { await this.engine.setMic(!this.engine.micOn); this.toast(this.engine.micOn ? 'Microphone on' : 'Microphone off'); }
+    catch (e) { this.toast(`Microphone: ${e.message}`); }
   }
 
   setDeckCount(n, save = true) {

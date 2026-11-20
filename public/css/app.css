@@ -2,7 +2,7 @@
   --bg: #0b0d10; --panel: #13161b; --panel-2: #191d23; --panel-3: #20252d; --line: #262c35; --line-2: #313844;
   --text: #e6eaef; --text-2: #9aa4b2; --text-3: #6b7685;
   --accent: #3ea6ff; --green: #2ed47a; --red: #ff3b4d; --amber: #ffb020; --purple: #c06cff;
-  --browser-h: 300px; --wave-h: 66px;
+  --browser-h: clamp(170px, 31vh, 340px); --wave-h: 66px;
   --radius: 6px; --font: Inter, "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; --mono: "JetBrains Mono", "SF Mono", Consolas, monospace;
   color-scheme: dark;
 }

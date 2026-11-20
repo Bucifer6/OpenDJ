@@ -197,6 +197,9 @@ const FX = {
   },
 };
 
+/** Create a standalone effect instance (used by Color FX). */
+export function createEffect(ctx, id) { const f = FX[id]; if (!f) return null; const e = f.create(ctx); e.kind = f.kind; return e; }
+
 export const EFFECTS = Object.entries(FX).map(([id, e]) => ({ id, label: e.label }));
 // Deck-level performance effects handled by the deck itself (not audio nodes)
 export const DECK_FX = [{ id: 'roll', label: 'Loop Roll' }, { id: 'brake', label: 'Vinyl Brake' }, { id: 'backspin', label: 'Backspin' }, { id: 'censor', label: 'Reverse (Censor)' }];

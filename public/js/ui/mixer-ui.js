@@ -47,7 +47,10 @@ export function buildMixer(app) {
       R(knob({ label: 'HI', ...S('eqHigh'), def: 0, size: 'sm', title: 'High EQ (fully left = kill)' })),
       R(knob({ label: 'MID', ...S('eqMid'), def: 0, size: 'sm' })),
       R(knob({ label: 'LOW', ...S('eqLow'), def: 0, size: 'sm' })),
-      R(knob({ label: 'FILTER', ...S('filter'), def: 0, size: 'md', title: 'Left: low-pass, right: high-pass' })),
+      R(knob({ label: 'FILTER', ...S('filter'), def: 0, size: 'md', title: 'Filter / Color FX amount. Left: low-pass, right: high-pass' })),
+      el('div', { class: 'stem-knobs' },
+        R(knob({ label: 'VOC', min: 0, max: 1, def: 1, bipolar: false, ...S('vocal'), size: 'xs', title: 'Quick stems: vocal level (DSP centre-channel estimate)' })),
+        R(knob({ label: 'INST', min: 0, max: 1, def: 1, bipolar: false, ...S('inst'), size: 'xs', title: 'Quick stems: instrumental level' }))),
       R(button('CUE', { cls: 'btn-pfl', click: () => ch.set('cue', !ch.state.cue), active: () => ch.state.cue, title: 'Headphone cue (PFL)' })),
       el('div', { class: 'fader-row' }, R(fader({ ...S('volume'), def: 0.8, cls: 'ch-fader' })), vu),
       xf,
@@ -65,6 +68,10 @@ export function buildMixer(app) {
     R(knob({ label: 'CUE/MST', min: 0, max: 1, def: 0, bipolar: false, get: () => eng.cueMix ?? 0, set: (v) => eng.setCueMix(v), size: 'sm', title: 'Headphone mix: cue ↔ master' })),
     R(knob({ label: 'PHONES', min: 0, max: 1, def: 0.8, get: () => eng.hpVolume ?? 0.8, set: (v) => eng.setHeadphoneVolume(v), size: 'sm' })),
     R(knob({ label: 'SAMPLER', min: 0, max: 1, def: 0.8, get: () => eng.sampler.out.gain.value, set: (v) => eng.sampler.setVolume(v), size: 'sm' })),
+    el('div', { class: 'mic-box' },
+      R(button('MIC', { cls: 'xs mic-on', click: () => app.toggleMic(), active: () => eng.micOn, title: 'Microphone / aux input on/off' })),
+      R(knob({ label: 'MIC', min: 0, max: 1, def: 0.7, bipolar: false, get: () => eng.micVolume ?? 0.7, set: (v) => eng.setMicVolume(v), size: 'sm' })),
+      R(button('TALK', { cls: 'xs talk', click: () => eng.setTalkover(!eng.talkover), active: () => eng.talkover, title: 'Talkover: duck the music while you speak' }))),
   );
   const xfader = R(fader({ min: -1, max: 1, def: 0, get: () => eng.crossfader, set: (v) => eng.setCrossfader(v), horizontal: true, cls: 'crossfader', title: 'Crossfader' }));
   const curveSel = el('select', { class: 'sel tiny', title: 'Crossfader curve' },
@@ -72,13 +79,18 @@ export function buildMixer(app) {
   curveSel.value = app.settings.crossfaderCurve;
   curveSel.addEventListener('change', () => { app.setSetting('crossfaderCurve', curveSel.value); eng.applyCrossfader(); });
 
+  const colorSel = el('select', { class: 'sel tiny', title: 'Color FX: what the filter knobs do' },
+    ...[['filter', 'Filter'], ['space', 'Space'], ['dubecho', 'Dub Echo'], ['noise', 'Noise'], ['crush', 'Crush'], ['pitch', 'Jet']].map(([v, l]) => el('option', { value: v }, l)));
+  colorSel.value = app.settings.colorFx || 'filter';
+  colorSel.addEventListener('change', () => { for (const ch of eng.channels) ch.set('colorFx', colorSel.value); app.setSetting('colorFx', colorSel.value); });
   const root = el('section', { class: 'mixer' },
     el('div', { class: 'mixer-top' }, stripsWrap, master),
-    el('div', { class: 'xfader-row' }, el('span', { class: 'xf-l' }, 'A'), xfader, el('span', { class: 'xf-l' }, 'B'), curveSel),
+    el('div', { class: 'xfader-row' }, colorSel, el('span', { class: 'xf-l' }, 'A'), xfader, el('span', { class: 'xf-l' }, 'B'), curveSel),
   );
 
   eng.on('mixer', () => { for (const r of renderers) r.render(); });
   eng.on('master', () => { for (const r of renderers) r.render(); });
+  eng.on('mic', () => { for (const r of renderers) r.render(); });
   root.setDeckCount = (n) => { for (const s of strips) s.style.display = s.idx < n ? '' : 'none'; };
   root.frame = () => {
     for (const s of strips) if (s.style.display !== 'none') s.vu.draw(s.ch.level());

@@ -16,6 +16,7 @@ class DeckProcessor extends AudioWorkletProcessor {
     this.startTime = 0.0;     // motor start/stop speeds (0 = instant, like CDJ)
     this.dir = 1;
     this.keyLock = false;
+    this.pitch = 1;           // key shift as a frequency ratio (2^(semitones/12))
     this.slip = false;
     this.loop = null;         // { start, end } in frames
     this.scratch = null;      // { velocity } when the jog is touched
@@ -42,6 +43,7 @@ class DeckProcessor extends AudioWorkletProcessor {
         this.pos = Math.max(0, Math.min(Math.max(0, this.len - 1), f)); if (!this.slip) this.shadow = this.pos; this.resetGrains(); break;
       }
       case 'keylock': this.keyLock = m.value; this.resetGrains(); break;
+      case 'pitch': this.pitch = m.value; this.resetGrains(); break;
       case 'reverse': this.dir = m.value ? -1 : 1; if (!m.value && this.slip) this.endSlip(); break;
       case 'slip': this.slip = m.value; if (m.value) this.shadow = this.pos; else this.endSlip(true); break;
       case 'loop': this.loop = m.value; if (!m.value && this.slip) this.endSlip(); break;
@@ -52,6 +54,24 @@ class DeckProcessor extends AudioWorkletProcessor {
   }
 
   endSlip(force) { if (this.slip || force) { this.pos = this.shadow; this.resetGrains(); } }
+  /** WSOLA: start the new grain near the play head, at the offset whose waveform best continues the other grain. */
+  wsolaSeed(other, speed) {
+    const target = this.pos, L = this.L, R = this.R, n = this.len;
+    const win = 192, search = 320, stride = 3, sp = this.step * this.dir * speed;
+    const ref = other.p;
+    if (ref < 0 || ref + win * sp >= n || target - search < 1 || target + search + win * sp >= n) return target;
+    let best = 0, bestScore = -Infinity;
+    for (let d = -search; d <= search; d += 4) {
+      let c = 0;
+      for (let k = 0; k < win; k += stride) {
+        const a = Math.floor(ref + k * sp), b = Math.floor(target + d + k * sp);
+        c += (L[a] + R[a]) * (L[b] + R[b]);
+      }
+      if (c > bestScore) { bestScore = c; best = d; }
+    }
+    return target + best;
+  }
+
   resetGrains() { this.grains[0].p = this.pos; this.grains[0].age = 0; this.grains[1].p = this.pos; this.grains[1].age = GRAIN / 2; }
 
   // 4-point Hermite interpolation
@@ -90,14 +110,16 @@ class DeckProcessor extends AudioWorkletProcessor {
       const speed = this.curRate * this.step;
       let l = 0, r = 0;
       if (speed !== 0 && this.pos >= 0 && this.pos < this.len) {
-        const pitchLocked = this.keyLock && !this.scratch && this.brake === 0 && Math.abs(this.curRate - 1) > 0.002 && this.curRate > 0;
-        if (pitchLocked) {
-          // granular time-stretch: grains read at natural speed, re-seeded from the (rate-scaled) play head
+        // grains read at the speed that gives the wanted pitch; the play head moves at the tempo rate
+        const readSpeed = (this.keyLock ? 1 : Math.abs(this.curRate)) * this.pitch;
+        const granular = !this.scratch && this.brake === 0 && this.curRate > 0 && Math.abs(readSpeed - this.curRate) > 0.002;
+        if (granular) {
+          // granular time-stretch / pitch-shift, re-seeded from the (rate-scaled) play head
           for (const g of this.grains) {
             const w = Math.sin(Math.PI * g.age / GRAIN); const ww = w * w;
             l += this.sample(this.L, g.p) * ww; r += this.sample(this.R, g.p) * ww;
-            g.p += this.step * this.dir; g.age++;
-            if (g.age >= GRAIN) { g.age = 0; g.p = this.pos; }
+            g.p += this.step * this.dir * readSpeed; g.age++;
+            if (g.age >= GRAIN) { g.age = 0; g.p = this.wsolaSeed(g === this.grains[0] ? this.grains[1] : this.grains[0], readSpeed); }
           }
         } else {
           l = this.sample(this.L, this.pos); r = this.sample(this.R, this.pos);

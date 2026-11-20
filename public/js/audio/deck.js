@@ -1,7 +1,7 @@
 // A playback deck: transport, cue logic (CDJ-style), hot cues, loops, beat jump, sync, key lock, scratch.
 import { Emitter, clamp } from '../util.js';
 import { api } from '../api.js';
-import { decodeWaveform, toCamelot } from './analysis-core.js';
+import { decodeWaveform, toCamelot, camelotCompatible } from './analysis-core.js';
 
 export class Deck extends Emitter {
   constructor(engine, index) {
@@ -12,7 +12,7 @@ export class Deck extends Emitter {
     this.reset();
     this.tempoRange = 8; this.tempo = 0; this.bend = 0; this.keyLock = true;
     this.quantize = true; this.slip = false; this.reverse = false; this.syncOn = false; this.isMaster = false;
-    this.vinylMode = true;
+    this.vinylMode = true; this.keyShift = 0;
   }
 
   reset() {
@@ -83,6 +83,11 @@ export class Deck extends Emitter {
           key: track.key || r.result.key, gain: r.result.gain, startTime: r.result.startTime, endTime: r.result.endTime,
           energy: r.result.energy, duration: buf.duration, analyzed: true,
         };
+        for (const k of ['phrases', 'mixIn', 'mixOut', 'downbeat']) if (r.result[k] !== undefined) patch[k] = r.result[k];
+        // automatic cue creation (like rekordbox auto cue / SMART CUE) for tracks without any cues yet
+        if (!(track.cues || []).length && Array.isArray(r.result.autoCues) && r.result.autoCues.length && this.engine.settings.autoCues !== false) {
+          patch.cues = r.result.autoCues;
+        }
         Object.assign(track, patch);
         api.saveWaveform(track.id, r.wave).catch(() => {});
         api.updateTrack(track.id, patch).then((t) => this.engine.emit('track-updated', t)).catch(() => {});
@@ -91,6 +96,7 @@ export class Deck extends Emitter {
       this.bpm = track.bpm || 0; this.gridOffset = track.gridOffset || 0;
       this.node.port.postMessage({ type: 'load', left, right, sampleRate: buf.sampleRate }, right ? [left.buffer, right.buffer] : [left.buffer]);
       this.post('rate', { value: this.rate }); this.post('keylock', { value: this.keyLock });
+      this.keyShift = 0; this.post('pitch', { value: 1 });
       // first memory cue, else first beat, becomes the cue point
       const mem = (track.cues || []).filter((c) => c.index < 0).sort((a, b) => a.position - b.position)[0];
       this.cuePoint = mem ? mem.position : Math.max(0, this.bpm ? this.snap(track.startTime || 0) : track.startTime || 0);
@@ -151,22 +157,45 @@ export class Deck extends Emitter {
   hotCueDown(i) {
     if (!this.track) return;
     const c = this.hotCue(i);
+    if (!c && this.loop?.active) { this.saveLoopToHotCue(i); return; }
     if (!c) {
       const position = this.snap(this.position);
       this.track.cues = [...(this.track.cues || []), { index: i, type: 'hot', position, name: '', color: HOTCUE_COLORS[i % 8] }];
       this.saveCues();
       return;
     }
-    this.seek(c.position);
+    if (c.loopEnd > c.position) { // saved loop: jump in and engage it
+      this.setLoop(c.position, c.loopEnd);
+      this.seek(this.playing ? this.phaseTarget(c.position) : c.position);
+      if (!this.playing) { this.hotPreview = i; this.playing = true; this.post('play', { value: true }); this.emit('state'); }
+      return;
+    }
+    this.seek(this.playing ? this.phaseTarget(c.position) : c.position);
     if (!this.playing) { this.hotPreview = i; this.playing = true; this.post('play', { value: true }); this.emit('state'); }
   }
+  /** Quantized jump: keep the current position within the beat so the mix stays in phase. */
+  phaseTarget(t) {
+    if (!this.quantize || !this.bpm) return t;
+    const b = this.beatLen;
+    const frac = (x) => (((x - this.gridOffset) % b) + b) % b;
+    let d = frac(this.position) - frac(t);
+    if (d > b / 2) d -= b; if (d < -b / 2) d += b;
+    return Math.max(0, t + d);
+  }
+  /** Store the active loop on a hot cue pad (saved loop). */
+  saveLoopToHotCue(i) {
+    if (!this.track || !this.loop) return;
+    this.track.cues = [...(this.track.cues || []).filter((c) => c.index !== i), { index: i, type: 'loop', position: this.loop.start, loopEnd: this.loop.end, name: `Loop ${this.loopBeats >= 1 ? Math.round(this.loopBeats) : this.loopBeats.toFixed(2)}`, color: '#2ed47a' }];
+    this.saveCues();
+  }
   hotCueUp(i) {
-    if (this.hotPreview === i) { this.hotPreview = null; this.pause(); this.seek(this.hotCue(i).position); }
+    if (this.hotPreview === i) { this.hotPreview = null; this.pause(); const c = this.hotCue(i); if (c?.loopEnd) this.exitLoop(); this.seek(c.position); }
   }
   deleteHotCue(i) { if (!this.track) return; this.track.cues = (this.track.cues || []).filter((c) => c.index !== i); this.saveCues(); }
   addMemoryCue() {
     if (!this.track) return;
-    this.track.cues = [...(this.track.cues || []), { index: -1, type: 'memory', position: this.snap(this.position), name: '' }];
+    const loop = this.loop?.active ? { position: this.loop.start, loopEnd: this.loop.end } : { position: this.snap(this.position) };
+    this.track.cues = [...(this.track.cues || []), { index: -1, type: loop.loopEnd ? 'loop' : 'memory', name: '', ...loop }];
     this.saveCues();
   }
   saveCues() { this.emit('cues'); api.updateTrack(this.track.id, { cues: this.track.cues }).catch(() => {}); }
@@ -315,6 +344,66 @@ export class Deck extends Emitter {
   gridScale(f) { this.setGrid(Math.round(this.bpm * f * 100) / 100, this.gridOffset); }
 
   get camelot() { return toCamelot(this.track?.key); }
+
+  // ---------- key shift / key sync ----------
+  /** Total pitch change in semitones: key shift plus the tempo's pitch change when key lock is off. */
+  get pitchSemis() { return this.keyShift + (this.keyLock ? 0 : 12 * Math.log2(this.rate || 1)); }
+  /** Camelot code of what is actually heard (after key shift / tempo). */
+  get playingCamelot() { return shiftCamelot(this.camelot, Math.round(this.pitchSemis)); }
+  setKeyShift(semis) {
+    this.keyShift = Math.max(-12, Math.min(12, Math.round(semis * 100) / 100));
+    this.post('pitch', { value: Math.pow(2, this.keyShift / 12) });
+    if (this.track) { this.track.keyShift = this.keyShift; }
+    this.emit('state'); this.emit('key');
+  }
+  /** Shift this deck's key by the smallest amount that makes it harmonically compatible with another deck. */
+  keySyncTo(other) {
+    other = other || this.engine.masterDeck(this);
+    const mine = this.camelot, target = other?.playingCamelot;
+    if (!mine || !target) return false;
+    const base = this.keyLock ? 0 : 12 * Math.log2(this.rate || 1);
+    let best = null;
+    for (const s of [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6]) {
+      const cam = shiftCamelot(mine, Math.round(base + s));
+      if (camelotCompatible(cam, target)) { best = s; break; } // smallest shift that mixes harmonically
+    }
+    if (best === null) return false;
+    if (!this.keyLock) this.setKeyLock(true);
+    this.setKeyShift(best);
+    return true;
+  }
+
+  // ---------- slicer: 8 slices of the current 8-beat window ----------
+  sliceDown(n) {
+    if (!this.track || !this.bpm) return;
+    const b = this.beatLen;
+    if (this._sliceStart == null || this.position > this._sliceStart + 8 * b || this.position < this._sliceStart) this._sliceStart = this.floorBeat(this.position - ((this.beatIndex() % 8) + 8) % 8 * b);
+    this._slicePrevSlip = this._slicing ? this._slicePrevSlip : this.slip;
+    this._slicing = true; this.setSlip(true);
+    const start = this._sliceStart + n * b;
+    this.setLoop(start, start + b); this.seek(start + (this.position - this.floorBeat(this.position)));
+  }
+  sliceUp() {
+    if (!this._slicing) return;
+    this._slicing = false; this.exitLoop(); this.loop = null; this.setSlip(this._slicePrevSlip); this.emit('loop');
+  }
+
+  // ---------- instant doubles ----------
+  async cloneFrom(src) {
+    if (!src?.track || src === this) return;
+    await this.load({ ...src.track });
+    this.setTempo(src.tempo); this.setKeyLock(src.keyLock); this.setKeyShift(src.keyShift);
+    if (src.loop?.active) this.setLoop(src.loop.start, src.loop.end);
+    this.seek(src.position);
+    if (src.playing) this.play();
+  }
 }
 
 export const HOTCUE_COLORS = ['#2ecc71', '#e74c3c', '#f39c12', '#3498db', '#9b59b6', '#1abc9c', '#e67e22', '#ecf0f1'];
+
+/** Move a Camelot key by n semitones (each semitone is 7 steps around the wheel). */
+export function shiftCamelot(cam, n) {
+  const m = /^(\d+)([AB])$/.exec(cam || '');
+  if (!m) return null;
+  return `${((((+m[1] - 1 + 7 * n) % 12) + 12) % 12) + 1}${m[2]}`;
+}

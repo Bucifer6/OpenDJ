@@ -44,7 +44,7 @@ const check = (cond, msg) => { if (!cond) throw new CheckError(msg); console.log
 
 try {
   await page.goto(app.url);
-  await page.waitForFunction(() => window.opendj?.library && document.querySelector('.deck'), null, { timeout: 15000 });
+  await page.waitForFunction(() => window.opendj?.ready, null, { timeout: 15000 });
   await page.evaluate(() => window.opendj.engine.resume());
   await page.locator('.overlay.start button').click({ timeout: 1000 }).catch(() => {});
 

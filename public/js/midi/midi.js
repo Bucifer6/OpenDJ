@@ -46,6 +46,14 @@ export function buildTargets(app) {
       add(`${P}.beatjump${p + 1}`, `Deck ${n} Beat jump pad ${p + 1}`, 'button', (down) => down && deck.beatJump([1, 2, 4, 8][p % 4] * (p < 4 ? -1 : 1)));
     }
     for (const m of ['hotcue', 'roll', 'jump', 'sampler', 'fx']) add(`${P}.padMode.${m}`, `Deck ${n} Pad mode: ${m}`, 'button', (down) => down && deck.padMode?.(m));
+    add(`${P}.keySync`, `Deck ${n} Key sync`, 'button', (down) => down && (app.shift ? deck.setKeyShift(0) : deck.keySyncTo()), () => deck.keyShift !== 0);
+    add(`${P}.keyUp`, `Deck ${n} Key +1 semitone`, 'button', (down) => down && deck.setKeyShift(deck.keyShift + 1));
+    add(`${P}.keyDown`, `Deck ${n} Key −1 semitone`, 'button', (down) => down && deck.setKeyShift(deck.keyShift - 1));
+    add(`${P}.keyReset`, `Deck ${n} Key reset`, 'button', (down) => down && deck.setKeyShift(0));
+    for (let p = 0; p < 8; p++) add(`${P}.slice${p + 1}`, `Deck ${n} Slicer pad ${p + 1}`, 'button', (down) => (down ? deck.sliceDown(p) : deck.sliceUp()));
+    add(`${P}.instantDouble`, `Deck ${n} Instant double from other deck`, 'button', (down) => down && deck.cloneFrom(eng.decks[d % 2 === 0 ? d + 1 : d - 1]));
+    add(`${M}.vocal`, `Channel ${n} Vocal level (quick stems)`, 'abs', (v) => ch.set('vocal', v));
+    add(`${M}.inst`, `Channel ${n} Instrumental level (quick stems)`, 'abs', (v) => ch.set('inst', v));
     add(`${M}.volume`, `Channel ${n} Fader`, 'abs', (v) => ch.set('volume', v));
     add(`${M}.trim`, `Channel ${n} Trim`, 'abs', (v) => ch.set('trim', v * 2 - 1));
     add(`${M}.eqHigh`, `Channel ${n} EQ High`, 'abs', (v) => ch.set('eqHigh', v * 2 - 1));
@@ -62,6 +70,10 @@ export function buildTargets(app) {
   add('master.cueMix', 'Headphone cue/master mix', 'abs', (v) => eng.setCueMix(v));
   add('master.hpVolume', 'Headphone volume', 'abs', (v) => eng.setHeadphoneVolume(v));
   add('global.shift', 'Shift', 'button', (down) => { app.shift = down; });
+  add('mic.on', 'Microphone on/off', 'button', (down) => down && app.toggleMic(), () => eng.micOn);
+  add('mic.talkover', 'Talkover (duck music)', 'button', (down) => down && eng.setTalkover(!eng.talkover), () => eng.talkover);
+  add('mic.volume', 'Microphone level', 'abs', (v) => eng.setMicVolume(v));
+  add('sequencer.toggle', 'Sequencer start/stop', 'button', (down) => down && (app.sequencer.running ? app.sequencer.stop() : app.sequencer.start()), () => app.sequencer?.running);
   add('browser.scroll', 'Browser: scroll tracks', 'rel', (delta) => app.library.moveSelection(Math.sign(delta)));
   add('browser.up', 'Browser: previous track', 'button', (down) => down && app.library.moveSelection(-1));
   add('browser.down', 'Browser: next track', 'button', (down) => down && app.library.moveSelection(1));
@@ -181,6 +193,39 @@ export class MidiManager extends Emitter {
         const [type, ch, num] = e.key.split(':').map((x, i) => (i ? +x : x));
         try { out.send([(type === 'cc' ? 0xb0 : 0x90) | ch, num, on ? 127 : 0]); } catch { /* port closed */ }
       }
+    }
+  }
+
+  // ---------- MIDI clock out (24 ppqn) following the master deck, for drum machines / lights / Ableton ----------
+  setClockOutput(name) {
+    this.clockOut = name || '';
+    clearInterval(this._clockTimer); this._clockTick = null;
+    if (!this.clockOut) return;
+    this._clockTimer = setInterval(() => this.clockSchedule(), 20);
+  }
+  clockSchedule() {
+    const out = this.outputs().find((o) => o.name === this.clockOut);
+    const eng = this.app.engine, m = eng.masterDeck();
+    if (!out) return;
+    const running = !!(m?.playing && m.bpm);
+    if (running !== this._clockRunning) {
+      this._clockRunning = running; this._clockTick = null;
+      try { out.send([running ? 0xfa : 0xfc]); } catch { /* port closed */ }
+    }
+    // map audio-clock time to performance.now() for timestamped sends
+    const ts = eng.ctx.getOutputTimestamp?.() || {};
+    const ctxNow = ts.contextTime ?? eng.ctx.currentTime, perfNow = ts.performanceTime ?? performance.now();
+    const bpm = running ? m.effectiveBpm : (this.app.sequencer?.bpm || 120);
+    const tickSec = 60 / bpm / 24;
+    let tickPos; // ticks since grid start, at ctxNow
+    if (running) tickPos = ((m.position - m.gridOffset) / m.beatLen) * 24;
+    else { if (!this._freeT0) this._freeT0 = ctxNow; tickPos = (ctxNow - this._freeT0) / tickSec; }
+    if (this._clockTick == null || this._clockTick < Math.floor(tickPos) - 2 || this._clockTick > tickPos + 30) this._clockTick = Math.ceil(tickPos);
+    const horizon = 0.1;
+    while ((this._clockTick - tickPos) * tickSec < horizon) {
+      const when = perfNow + (this._clockTick - tickPos) * tickSec * 1000;
+      try { out.send([0xf8], Math.max(performance.now(), when)); } catch { return; }
+      this._clockTick++;
     }
   }
 

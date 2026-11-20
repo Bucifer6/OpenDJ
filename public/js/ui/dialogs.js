@@ -187,6 +187,7 @@ export class Dialogs {
     const field = (label, ctrl, hint) => el('label', { class: 'field' }, el('span', {}, label), ctrl, hint ? el('small', { class: 'hint' }, hint) : null);
 
     const outputs = await app.engine.listOutputs();
+    const inputs = await navigator.mediaDevices?.enumerateDevices?.().then((ds) => ds.filter((d) => d.kind === 'audioinput' && d.deviceId !== 'default').map((d) => ({ id: d.deviceId, label: d.label || `Input ${d.deviceId.slice(0, 6)}` }))).catch(() => []) || [];
     const outOpts = [['default', 'System default'], ...outputs.filter((o) => o.id !== 'default').map((o) => [o.id, o.label])];
     const audio = el('div', { class: 'form' },
       field('Master output', sel(s.masterDeviceId || 'default', outOpts, async (v) => { await set('masterDeviceId', v); app.engine.applyOutputs(); })),
@@ -194,6 +195,10 @@ export class Dialogs {
         'Most DJ controllers with a built-in sound card expose 4 channels: choose "channels 3-4" and select the controller as master output.'),
       field('Headphone output (separate device mode)', sel(s.cueDeviceId || '', [['', '— none —'], ...outOpts.filter(([v]) => v !== 'default')], async (v) => { await set('cueDeviceId', v); app.engine.applyOutputs(); })),
       el('button', { class: 'btn sm', onclick: async () => { try { const st = await navigator.mediaDevices.getUserMedia({ audio: true }); st.getTracks().forEach((t) => t.stop()); this.app.toast('Device names unlocked — reopen settings'); } catch (e) { this.app.toast(e.message); } } }, 'Show device names (asks for permission)'),
+      field('Microphone / aux input', sel(s.micDeviceId || '', [['', 'System default input'], ...inputs.map((d) => [d.id, d.label])], async (v) => { await set('micDeviceId', v); if (app.engine.micOn) { await app.engine.setMic(false); await app.engine.setMic(true); } })),
+      field('Talkover ducking', sel(s.talkoverDb ?? -12, [[-6, '−6 dB'], [-12, '−12 dB'], [-18, '−18 dB'], [-24, '−24 dB']], (v) => set('talkoverDb', Number(v)))),
+      field('Audio latency', sel(s.latencyHint || 'interactive', [['interactive', 'Lowest (interactive)'], ['10', '10 ms'], ['20', '20 ms'], ['balanced', 'Balanced'], ['playback', 'Safe (high latency, no dropouts)']], (v) => { set('latencyHint', v); this.app.toast('Restart OpenDJ to apply the new latency'); }),
+        'Raise this if you hear crackles; lower it for tighter scratching and cueing.'),
       el('label', { class: 'check' }, chk(s.limiter, (v) => { set('limiter', v); app.engine.setLimiter(v); }), ' Master limiter (prevents clipping)'),
       el('label', { class: 'check' }, chk(s.autoGain, (v) => set('autoGain', v)), ' Auto gain (level-match tracks on load)'),
       el('p', { class: 'hint' }, `Sample rate ${app.engine.ctx.sampleRate} Hz · output latency ≈ ${Math.round(((app.engine.ctx.outputLatency || 0) + (app.engine.ctx.baseLatency || 0)) * 1000)} ms`),
@@ -261,6 +266,9 @@ export class Dialogs {
     const devSel = el('select', { class: 'sel' });
     const monitor = el('div', { class: 'midi-monitor' }, 'Move a control on your controller…');
     const filterIn = el('input', { class: 'inp', type: 'search', placeholder: 'Filter functions…' });
+    const clockSel = el('select', { class: 'sel' }, el('option', { value: '' }, 'Off'), ...midi.outputs().map((o) => el('option', { value: o.name }, o.name)));
+    clockSel.value = this.app.settings.midiClockOutput || '';
+    clockSel.addEventListener('change', () => { midi.setClockOutput(clockSel.value); this.app.setSetting('midiClockOutput', clockSel.value); });
     const table = el('div', { class: 'midi-table' });
     const presetSel = el('select', { class: 'sel' }, el('option', { value: '' }, 'Apply preset…'), ...PRESETS.map((p) => el('option', { value: p.name }, p.name)));
     presetSel.addEventListener('change', () => { if (devSel.value && presetSel.value) { midi.applyPreset(devSel.value, presetSel.value); render(); } presetSel.value = ''; });
@@ -294,6 +302,7 @@ export class Dialogs {
       el('div', { class: 'row' }, devSel, presetSel,
         el('button', { class: 'btn sm', onclick: () => { const blob = new Blob([midi.exportMapping(devSel.value)], { type: 'application/json' }); const a = el('a', { href: URL.createObjectURL(blob), download: `${devSel.value || 'controller'}.opendj-midi.json` }); a.click(); } }, 'Export'),
         el('button', { class: 'btn sm', onclick: () => fileIn.click() }, 'Import'), fileIn),
+      el('label', { class: 'field' }, el('span', {}, 'Send MIDI clock (follows the master deck tempo) to'), clockSel),
       monitor, filterIn, table);
     return wrap;
   }

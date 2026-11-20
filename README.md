@@ -8,10 +8,13 @@ Runs as a desktop app (Windows, macOS, Linux via Electron) or in Chrome/Edge.
 
 ### Decks
 - 2 or 4 decks, sample-accurate AudioWorklet playback engine
-- **Key lock** (master tempo), tempo ranges ±6/8/10/16/25/50/100 %, pitch bend, nudge
+- **Key lock** (master tempo) using WSOLA time-stretching; tempo ranges ±6/8/10/16/25/50/100 %, pitch bend, nudge
+- **Key shift** (±12 semitones) and **Key Sync**: shifts to the nearest harmonically compatible key of the master deck
+- **Phase meter**, phase-locked (quantized) hot cue jumps, and **instant doubles** (drag a deck header onto another deck)
 - **Sync** (tempo + phase, half/double-time aware) with master deck
 - CDJ-style **cue** (set / return / hold-to-preview)
-- 8 **hot cues** per deck (colour coded, saved with the track), memory cues
+- 8 **hot cues** per deck (colour coded, saved with the track), memory cues, and **saved loops**: press an empty hot cue pad while a loop is active, or press MEM
+- Pad modes: Hot Cue, Roll, **Slicer**, Beat Jump, **Pitch Play** (play a hot cue at different pitches), Sampler, Pad FX
 - **Loops**: auto beat loops (⅛ to 64 beats), loop in/out, reloop, halve/double, **loop roll**
 - **Beat jump**, quantize, **slip mode**, reverse, censor
 - Jog wheels: scratch (vinyl mode) or nudge (outer ring), with motor brake and **backspin**
@@ -28,7 +31,12 @@ Runs as a desktop app (Windows, macOS, Linux via Electron) or in Chrome/Edge.
   - split cue on a single stereo jack
 - Auto-gain level matching
 
-### Effects & sampler
+### Effects, stems & sampler
+- **Color FX** on the filter knob: Filter, Space, Dub Echo, Noise, Crush, Jet
+- **Quick stems**: VOC / INST knobs per channel. This is DSP mid/side vocal isolation, not AI separation (see docs/GAP_ANALYSIS.md).
+- **Step sequencer**: 16 steps × 8 sampler sounds, locked to the master deck's beat grid, with swing
+- **Microphone / aux input** with EQ, compressor and **talkover** ducking
+- **MIDI clock out**, phase-locked to the master deck (drives drum machines, lighting software and DAWs)
 - Per-channel beat-synced FX: Echo, Ping Pong, Reverb, Flanger, Phaser, Auto Filter, Trans (gate), Bit Crusher, Distortion, Noise Sweep
 - Pad FX: vinyl brake, tape stop, backspin, censor, echo out, filter sweep, loop rolls
 - 8-slot sampler with synthesised built-in sounds (air horn, siren, riser…). Right-click a slot to load your own sample.
@@ -68,6 +76,9 @@ Runs as a desktop app (Windows, macOS, Linux via Electron) or in Chrome/Edge.
   - a shift layer
 - Mappings auto-load per device and can be exported and imported as JSON
 - Includes a best-effort Pioneer DDJ-400 / DDJ-FLX4 preset. If a control doesn't respond, fix it with Learn.
+
+## How OpenDJ compares
+See **[docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md)** for a feature-by-feature comparison with rekordbox, Serato, Traktor, VirtualDJ, djay Pro and Engine DJ. It also lists what is still missing and why.
 
 ## Getting started
 
@@ -151,10 +162,16 @@ Unit tests (analysis, the media-server clients against mock servers, rekordbox r
 npm test
 ```
 
-End-to-end check in headless Chromium (scan → load → analyse → play → sync → FX → record → automix):
+End-to-end checks in headless Chromium. The first covers scan → load → analyse → play → sync → FX → record → automix:
 
 ```bash
 npm run test:e2e
+```
+
+The second measures pitch for key shift and key lock, and checks key sync, quantized cues, saved loops, slicer, instant doubles, stems, Color FX, mic/talkover and the sequencer:
+
+```bash
+node scripts/e2e-performance.mjs
 ```
 
 ## Licence
