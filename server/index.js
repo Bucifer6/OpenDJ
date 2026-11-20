@@ -791,7 +791,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     downloads.queue = [];
     for (const j of downloads.active.values()) j.ctrl.abort();
   };
-  return { server, library, history, downloads, transcoder, auth, ffmpegReady: ffReady, shutdown, newId };
+  return { server, library, history, downloads, transcoder, auth, lighting, ffmpegReady: ffReady, shutdown, newId };
 }
 
 /**

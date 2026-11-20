@@ -1,5 +1,4 @@
 // Play history grouped into sessions (a new session starts after a gap of more than 2 hours), with setlist export.
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { readJsonSafe, writeJsonAtomic } from './jsonstore.js';

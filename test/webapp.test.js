@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import http from 'node:http';
 import { start, isLoopback } from '../server/index.js';
 import { Auth } from '../server/auth.js';
 
@@ -15,6 +16,15 @@ function wav(seconds = 0.2, sr = 8000) {
   b.writeUInt32LE(sr, 24); b.writeUInt32LE(sr * 2, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(n * 2, 40);
   return b;
 }
+/** Raw request (fetch can't set the Host header). */
+export const raw = (app, method, url, headers = {}, body) => new Promise((resolve) => {
+  const r = http.request({ host: '127.0.0.1', port: app.port, path: url, method, headers }, (res) => {
+    let d = ''; res.on('data', (c) => { d += c; }); res.on('end', () => resolve({ status: res.statusCode, body: d, headers: res.headers }));
+  });
+  r.on('error', (e) => resolve({ status: 0, error: e.message }));
+  if (body) r.write(body);
+  r.end();
+});
 const client = (app) => {
   let cookie = '';
   const f = async (method, url, body, headers = {}) => {
@@ -196,9 +206,9 @@ test('loopback mode: no password, but Host (DNS rebinding) and Origin (CSRF) are
     assert.equal(app.auth.enabled, false);
     assert.equal((await c('GET', '/api/tracks')).status, 200);
     assert.equal((await c('GET', '/api/auth/status')).json.enabled, false);
-    assert.equal((await c('GET', `/api/tracks`, undefined, { Host: `localhost:${app.port}` })).status, 200);
-    assert.equal((await c('GET', '/api/settings', undefined, { Host: `evil.example:${app.port}` })).status, 421);
-    assert.equal((await c('GET', '/api/settings', undefined, { Host: `127.0.0.1:${app.port + 1}` })).status, 421);
+    assert.equal((await raw(app, 'GET', '/api/tracks', { Host: `localhost:${app.port}` })).status, 200);
+    assert.equal((await raw(app, 'GET', '/api/settings', { Host: `evil.example:${app.port}` })).status, 421);
+    assert.equal((await raw(app, 'GET', '/api/settings', { Host: `127.0.0.1:${app.port + 1}` })).status, 421);
     assert.equal((await c('POST', '/api/playlists', { name: 'x' }, { Origin: 'null' })).status, 403);
     assert.equal((await c('POST', '/api/playlists', { name: 'x' }, { Origin: `http://127.0.0.1:${app.port}` })).status, 200);
     assert.equal((await c('GET', '/api/health')).json.ok, true);
