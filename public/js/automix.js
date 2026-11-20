@@ -188,6 +188,14 @@ export function mixLevels(style, k, kSwap = null) {
 
 const structureCache = new WeakMap();
 
+/** Bars over which the incoming track eases back to its original tempo after a transition. */
+export const TEMPO_RESTORE_BARS = 8;
+/** Tempo (%) during the ease-back: smooth (ease-in-out) from `from` to 0 as k goes 0 → 1. */
+export function tempoRampValue(from, k) {
+  k = Math.min(1, Math.max(0, k));
+  return from * (1 - k * k * (3 - 2 * k));
+}
+
 export class AutoMix extends Emitter {
   constructor(app) {
     super();
@@ -307,6 +315,7 @@ export class AutoMix extends Emitter {
     const cur = this.current;
     if (!cur) return;
     if (this.transition) return this.stepTransition();
+    if (this.tempoRamp) this.stepTempoRamp();
     const next = this.nextTrack();
     if (!cur.playing && !cur.loading && cur.track && cur.position >= cur.duration - 0.05) {
       // track ended without a transition (e.g. next track failed to load)
@@ -321,7 +330,28 @@ export class AutoMix extends Emitter {
     if (cur.position >= start) this.beginTransition();
   }
 
+  /**
+   * After a transition the incoming track keeps the outgoing track's tempo; without this every track would
+   * inherit the previous one's speed and the drift adds up. Ease it back to 0 % over a few bars (setting
+   * automix.restoreTempo, default on). Moving the tempo fader / sync by hand cancels it.
+   */
+  startTempoRamp(deck) {
+    this.tempoRamp = null;
+    if (this.opts.restoreTempo === false || !deck || Math.abs(deck.tempo) < 0.01 || deck.syncOn) return;
+    const bpm = deck.effectiveBpm || 120;
+    this.tempoRamp = { deck, from: deck.tempo, last: deck.tempo, t0: performance.now(), dur: (TEMPO_RESTORE_BARS * 4 * 60 / bpm) * 1000 };
+  }
+  stepTempoRamp() {
+    const r = this.tempoRamp, d = r.deck;
+    if (d !== this.current || d.syncOn || Math.abs(d.tempo - r.last) > 0.05) { this.tempoRamp = null; return; } // user took over
+    const k = (performance.now() - r.t0) / r.dur;
+    r.last = tempoRampValue(r.from, k);
+    d.setTempo(k >= 1 ? 0 : r.last);
+    if (k >= 1) this.tempoRamp = null;
+  }
+
   beginTransition(immediate = false) {
+    this.tempoRamp = null;
     const out = this.current, inn = this.other(out);
     const next = this.nextTrack();
     if (!next) { if (!out.playing) this.stop(); return; }
@@ -393,6 +423,7 @@ export class AutoMix extends Emitter {
     chI.set('eqLow', 0); chI.set('eqHigh', 0);
     inn.setMaster(); inn.syncOn = false;
     this.current = inn;
+    this.startTempoRamp(inn);
     if (this.nextTrack()) setTimeout(() => this.preloadNext(), 500);
     else this.emit('ending');
     this.emit('state');

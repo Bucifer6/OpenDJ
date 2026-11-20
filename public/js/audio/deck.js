@@ -1,7 +1,7 @@
 // A playback deck: transport, cue logic (CDJ-style), hot cues, loops, beat jump, sync, key lock, scratch.
 import { Emitter, clamp } from '../util.js';
 import { api } from '../api.js';
-import { decodeWaveform, toCamelot, camelotCompatible, analyzeStructure } from './analysis-core.js';
+import { decodeWaveform, toCamelot, camelotCompatible, analyzeStructure, analysisPatch } from './analysis-core.js';
 import { effectiveGains, LOADED_STEMS } from '../stems/stem-mix.js';
 import { floatToInt16 } from '../stems/stem-dsp.js';
 import { StemEcho } from '../stems/stem-fx.js';
@@ -29,7 +29,7 @@ export class Deck extends Emitter {
     this.track = null; this.duration = 0; this.sr = this.ctx.sampleRate;
     this._pos = 0; this._t = 0; this._rate = 0; this._seekGuard = 0; this.playing = false;
     this.cuePoint = 0; this.loop = null; this.loopIn = null; this.waveform = null;
-    this.bpm = 0; this.gridOffset = 0; this.loading = false; this.error = null;
+    this.bpm = 0; this.gridOffset = 0; this.loading = false; this.error = null; this.failedTrack = null;
     this._countedPlay = false;
     this.frames = 0; this._stemSeq = (this._stemSeq || 0) + 1;
     if (this.stemsReady || this.stemsLoading) { this.stemsReady = false; this.engine.channels?.[this.index]?.setAiStems?.(false); }
@@ -108,18 +108,7 @@ export class Deck extends Emitter {
         const r = await this.engine.analyze(mono, buf.sampleRate);
         if (stale()) return false;
         wave = decodeWaveform(r.wave.buffer);
-        const patch = {
-          // imported grids (rekordbox / Traktor / Serato / VirtualDJ: gridLocked) and locked BPMs are authoritative
-          bpm: track.bpm && (track.bpmLocked || track.gridLocked) ? track.bpm : r.result.bpm,
-          gridOffset: track.gridLocked && Number.isFinite(track.gridOffset) ? track.gridOffset : r.result.gridOffset,
-          key: track.key || r.result.key, gain: r.result.gain, startTime: r.result.startTime, endTime: r.result.endTime,
-          energy: r.result.energy, duration: buf.duration, analyzed: true,
-        };
-        for (const k of ['phrases', 'mixIn', 'mixOut', 'downbeat']) if (r.result[k] !== undefined) patch[k] = r.result[k];
-        // automatic cue creation (like rekordbox auto cue / SMART CUE) for tracks without any cues yet
-        if (!(track.cues || []).length && Array.isArray(r.result.autoCues) && r.result.autoCues.length && this.engine.settings.autoCues !== false) {
-          patch.cues = r.result.autoCues.map((c) => ({ ...c, auto: true })); // auto: replaceable by imported cues
-        }
+        const patch = analysisPatch(track, r.result, { duration: buf.duration, autoCues: this.engine.settings.autoCues });
         Object.assign(track, patch);
         api.saveWaveform(track.id, r.wave).catch(() => {});
         api.updateTrack(track.id, patch).then((t) => this.engine.emit('track-updated', t)).catch(() => {});
@@ -155,7 +144,7 @@ export class Deck extends Emitter {
       return true;
     } catch (e) {
       if (stale()) return false;
-      this.loading = false; this.error = e.message; this.track = null;
+      this.loading = false; this.error = e.message; this.track = null; this.failedTrack = track; // keep the name for the deck title
       this.emit('error', e); this.emit('state');
       throw e;
     }

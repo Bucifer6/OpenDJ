@@ -101,8 +101,8 @@ try {
     zone.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true }));
     zone.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
   });
-  await page.waitForFunction(() => [...document.querySelectorAll('.toast')].some((t) => /Skipped 1 file/.test(t.textContent)), null, { timeout: 5000 });
-  check(true, 'non-media drop is refused client-side with a message');
+  await page.waitForFunction(() => [...document.querySelectorAll('.toast')].some((t) => /Not uploaded.*"notes\.txt"/.test(t.textContent)), null, { timeout: 5000 });
+  check(true, 'non-media drop is refused client-side with a toast naming the file');
 
   // ---- load to a deck and play
   await page.evaluate((tid) => window.opendj.loadTrack(0, tid), id);

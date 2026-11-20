@@ -6,11 +6,14 @@
   "license": "MIT",
   "type": "module",
   "main": "electron/main.js",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "electron .",
     "web": "node server/cli.js",
     "test": "node --test test/*.test.js",
-    "test:e2e": "node scripts/e2e-smoke.mjs && node scripts/e2e-performance.mjs && node scripts/e2e-regressions.mjs && node scripts/e2e-controllers.mjs && node scripts/e2e-lighting.mjs && node scripts/e2e-video.mjs && node scripts/e2e-webapp.mjs && node scripts/e2e-dvs.mjs && node scripts/e2e-link-lyrics.mjs && node scripts/e2e-recording.mjs && node scripts/e2e-stems.mjs",
+    "test:e2e": "node scripts/e2e-smoke.mjs && node scripts/e2e-performance.mjs && node scripts/e2e-regressions.mjs && node scripts/e2e-controllers.mjs && node scripts/e2e-lighting.mjs && node scripts/e2e-video.mjs && node scripts/e2e-webapp.mjs && node scripts/e2e-dvs.mjs && node scripts/e2e-link-lyrics.mjs && node scripts/e2e-recording.mjs && node scripts/e2e-stems.mjs && node scripts/e2e-analysis.mjs",
     "dist": "electron-builder --publish never",
     "dist:win": "electron-builder --win --publish never",
     "dist:mac": "electron-builder --mac --publish never",

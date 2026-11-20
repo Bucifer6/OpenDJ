@@ -451,13 +451,32 @@ export function mixPoints(phrases, downbeat, bpm, { startTime = 0, endTime } = {
   return { mixIn: r3(mixIn), mixOut: r3(mixOut) };
 }
 
-/** Hot cue (max 8) + memory cue suggestions from the structure, like rekordbox auto cue / SMART CUE. */
+// A "Drop" cue needs a real energy jump well into the track: at least this many seconds in, after a
+// quieter intro / build / breakdown or at least this much louder (relative section energy, 0..1) than the section before.
+export const DROP_MIN_START = 20;
+export const DROP_MIN_JUMP = 0.2;
+
+/**
+ * Hot cue (max 8) + memory cue suggestions from the structure, like rekordbox auto cue / SMART CUE.
+ * Every cue is marked `auto: true` so imports / re-analysis know they may replace it.
+ */
 export function autoCuesFor(phrases, { mixIn, mixOut, downbeat } = {}) {
   const cands = [];
   const counts = {};
   // contiguous phrases of one section share a type: only cue section starts
   phrases.forEach((p, i) => {
     if (i > 0 && phrases[i - 1].type === p.type) return;
+    if (p.type === 'drop') {
+      // a full-energy start (or a section no louder than the one before) is not a drop: cue it as the start
+      // of the track if it is the first section, else not at all
+      const prev = phrases[i - 1];
+      const real = i > 0 && p.start >= DROP_MIN_START
+        && (['intro', 'buildup', 'breakdown'].includes(prev.type) || (p.energy ?? 1) - (prev.energy ?? 0) >= DROP_MIN_JUMP);
+      if (!real) {
+        if (i === 0) cands.push({ position: downbeat != null ? downbeat : p.start, type: 'intro', name: 'Start', prio: 10 });
+        return;
+      }
+    }
     counts[p.type] = (counts[p.type] || 0) + 1;
     const nth = counts[p.type];
     const position = i === 0 && downbeat != null ? downbeat : p.start;
@@ -466,10 +485,30 @@ export function autoCuesFor(phrases, { mixIn, mixOut, downbeat } = {}) {
   });
   if (!cands.length && mixIn != null) cands.push({ position: mixIn, type: 'intro', name: 'Start', prio: 10 });
   const chosen = cands.sort((a, b) => b.prio - a.prio || a.position - b.position).slice(0, 8).sort((a, b) => a.position - b.position);
-  const cues = chosen.map((c, i) => ({ index: i, type: 'hot', position: r3(c.position), name: c.name, color: PHRASE_CUE_COLORS[c.type] || '#2ecc71' }));
-  if (mixIn != null) cues.push({ index: -1, type: 'memory', position: r3(mixIn), name: 'Mix in' });
-  if (mixOut != null && mixOut > (mixIn ?? -1) + 1) cues.push({ index: -1, type: 'memory', position: r3(mixOut), name: 'Mix out' });
+  const cues = chosen.map((c, i) => ({ index: i, type: 'hot', position: r3(c.position), name: c.name, color: PHRASE_CUE_COLORS[c.type] || '#2ecc71', auto: true }));
+  if (mixIn != null) cues.push({ index: -1, type: 'memory', position: r3(mixIn), name: 'Mix in', auto: true });
+  if (mixOut != null && mixOut > (mixIn ?? -1) + 1) cues.push({ index: -1, type: 'memory', position: r3(mixOut), name: 'Mix out', auto: true });
   return cues;
+}
+
+/**
+ * The library patch for a finished analysis (`r` = analyzeTrack() result without the waveform), shared by
+ * deck load and background analysis so both store exactly the same thing. User / imported data wins:
+ * a locked BPM or imported grid (bpmLocked / gridLocked) keeps its BPM and grid, an existing key is kept,
+ * existing cues are kept (auto cues are only added to tracks without any cues).
+ */
+export function analysisPatch(track, r, { duration, autoCues = true } = {}) {
+  const locked = !!(track.bpm && (track.bpmLocked || track.gridLocked));
+  const patch = {
+    bpm: locked ? track.bpm : r.bpm,
+    gridOffset: locked && track.gridOffset != null ? track.gridOffset : r.gridOffset,
+    key: track.key || r.key, gain: r.gain, startTime: r.startTime, endTime: r.endTime,
+    energy: r.energy, duration: duration ?? r.duration, analyzed: true, unreadable: false,
+  };
+  for (const k of ['phrases', 'mixIn', 'mixOut', 'downbeat']) if (r[k] !== undefined) patch[k] = r[k];
+  if (locked && track.downbeat != null) patch.downbeat = track.downbeat;
+  if (!(track.cues || []).length && Array.isArray(r.autoCues) && r.autoCues.length && autoCues !== false) patch.cues = r.autoCues;
+  return patch;
 }
 
 /** Everything structure-related from an existing waveform: phrases, downbeat, mixIn, mixOut, autoCues. */

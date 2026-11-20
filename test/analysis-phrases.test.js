@@ -179,3 +179,41 @@ test('DJ-style layout: kick-only intro, breakdown + riser buildup, long outro', 
   assert.deepEqual(got, [[0, 'intro'], [16, 'drop'], [48, 'breakdown'], [64, 'buildup'], [72, 'drop'], [104, 'outro']]);
   assert.ok(Math.abs(r.mixOut - (tr.downbeat + 104 * tr.bar)) <= BEAT);
 });
+
+test('auto cues: no "Drop" at the start of the track; every auto cue is marked auto', () => {
+  // full-energy from the first bar (one section, or a loud intro): hot cue A must not be a "Drop" near 0 s
+  const one = autoCuesFor([{ start: 0.1, end: 200, type: 'drop', energy: 1, bars: 100 }], { mixIn: 0.1, mixOut: 170, downbeat: 0.1 });
+  assert.ok(!one.some((c) => /^Drop/.test(c.name)), JSON.stringify(one));
+  assert.equal(one.find((c) => c.index === 0).name, 'Start');
+  // a "drop" right after a section of the same loudness is not a real drop either
+  const flat = autoCuesFor([
+    { start: 0.2, end: 30, type: 'verse', energy: 0.95, bars: 16 },
+    { start: 30, end: 90, type: 'drop', energy: 1, bars: 32 },
+    { start: 90, end: 120, type: 'outro', energy: 0.4, bars: 16 },
+  ], { mixIn: 0.2, mixOut: 90, downbeat: 0.2 });
+  assert.ok(!flat.some((c) => /^Drop/.test(c.name)), JSON.stringify(flat));
+  // a drop 1.6 s in (after a tiny "intro") is not one
+  const early = autoCuesFor([{ start: 0, end: 1.6, type: 'intro', energy: 0.2, bars: 1 }, { start: 1.6, end: 200, type: 'drop', energy: 1, bars: 100 }], { mixIn: 0, downbeat: 0 });
+  assert.ok(!early.some((c) => /^Drop/.test(c.name)));
+  // the real thing: quiet intro, then a big jump 30 s in
+  const real = autoCuesFor([
+    { start: 0.2, end: 30, type: 'intro', energy: 0.4, bars: 16 },
+    { start: 30, end: 90, type: 'drop', energy: 1, bars: 32 },
+    { start: 90, end: 120, type: 'outro', energy: 0.4, bars: 16 },
+  ], { mixIn: 0.2, mixOut: 90, downbeat: 0.2 });
+  assert.equal(real.find((c) => c.name === 'Drop').position, 30);
+  for (const c of [...one, ...flat, ...real]) assert.equal(c.auto, true);
+});
+
+test('analysisPatch: same patch for deck load and background analysis; locked grids and user data win', async () => {
+  const { analysisPatch } = await import('../public/js/audio/analysis-core.js');
+  const r = { bpm: 128, gridOffset: 0.12, key: 'Am', gain: -3, startTime: 0.1, endTime: 199, energy: 6, duration: 200, phrases: [], mixIn: 0.1, mixOut: 170, downbeat: 0.1, autoCues: [{ index: 0, type: 'hot', position: 0.1, name: 'Start', auto: true }] };
+  const p = analysisPatch({ id: 'a', cues: [] }, r);
+  assert.equal(p.bpm, 128); assert.equal(p.key, 'Am'); assert.equal(p.analyzed, true); assert.equal(p.unreadable, false);
+  assert.equal(p.cues.length, 1);
+  const locked = analysisPatch({ bpm: 125, gridOffset: 0.3, bpmLocked: true, key: '8A', cues: [{ index: 0, position: 5 }] }, r);
+  assert.equal(locked.bpm, 125); assert.equal(locked.gridOffset, 0.3); assert.equal(locked.key, '8A'); assert.equal(locked.cues, undefined);
+  const imported = analysisPatch({ bpm: 124, gridOffset: 0.05, gridLocked: true }, r);
+  assert.equal(imported.bpm, 124); assert.equal(imported.gridOffset, 0.05);
+  assert.equal(analysisPatch({}, r, { autoCues: false }).cues, undefined);
+});

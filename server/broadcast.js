@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { readJsonSafe, writeJsonAtomic } from './jsonstore.js';
 import { ChunkReorderer, readRaw, configStore, httpError } from './recorder.js';
 
-const VERSION = '0.1.0';
+export const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const DEFAULT_IMAGE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'icon-512.png');
 
 export const STREAM_FORMATS = {

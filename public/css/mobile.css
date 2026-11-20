@@ -1,0 +1,52 @@
+/* ---------- small screens ----------
+   Tablets in portrait (< 900 px) and phones (< 700 px) get a simplified layout: one deck at a time, picked with
+   the deck tabs, next to (tablet) or above (phone) the mixer. The top bar wraps instead of pushing controls
+   off-screen. Phones scroll vertically: top bar, waveforms, deck, mixer, sampler, library.
+   A full DJ set is best played on a tablet in landscape or a computer. */
+.deck-tabs { display: none; }
+/* .btn sets display, which would otherwise beat the hidden attribute (Upload / Sign out only show when hosted) */
+.btn[hidden], .deck-tab[hidden] { display: none !important; }
+
+@media (max-width: 899px) {
+  #app { grid-template-rows: auto auto minmax(0, 1fr) 34px 6px var(--browser-h); }
+  .topbar { flex-wrap: wrap; row-gap: 6px; padding: 6px 8px; }
+  .topbar .tb-spacer, .topbar .midi-dot, .topbar .am-info { display: none; }
+  .deck-tabs { display: flex; gap: 4px; grid-column: 1 / -1; grid-row: 1; }
+  .deck-tab { flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: var(--radius); padding: 6px 8px; color: var(--text-2); font-weight: 700; font-size: 11px; cursor: pointer; display: flex; gap: 6px; align-items: center; }
+  .deck-tab b { color: var(--deck-color); }
+  .deck-tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .deck-tab.active { border-color: var(--deck-color); background: color-mix(in srgb, var(--deck-color) 16%, var(--panel-2)); color: var(--text); }
+  .deck-tab.playing b::after { content: ' ▶'; color: var(--green); }
+  .deck-area { grid-template-columns: minmax(0, 1fr) minmax(260px, 300px); grid-template-rows: auto minmax(0, 1fr); }
+  .deck-col { display: contents; }
+  .deck-area .deck { grid-column: 1; grid-row: 2; }
+  .deck-area .deck.m-hide { display: none !important; }
+  .deck-area .mixer { grid-column: 2; grid-row: 2; }
+  .lib-tools { flex-wrap: wrap; row-gap: 6px; }
+  .lib-search { min-width: 160px; flex: 1 1 160px; }
+  .sampler-bar { overflow-x: auto; scrollbar-width: none; }
+  .sampler-bar .spad { flex: 0 0 auto; min-width: 64px; }
+}
+
+@media (max-width: 699px) {
+  html, body { height: auto; min-height: 100%; overflow-x: hidden; overflow-y: auto; }
+  #app { display: flex; flex-direction: column; height: auto; min-height: 100vh; }
+  .topbar { gap: 6px; }
+  .topbar .logo { margin-right: auto; }
+  .topbar .shift-btn, .topbar .seg { display: none; }
+  .waves { flex: none; }
+  .deck-area { display: flex; flex-direction: column; overflow: visible; padding: 6px; }
+  .deck-area .deck { flex: none; overflow: visible; }
+  .deck-area .mixer { flex: none; }
+  .deck-body { grid-template-columns: minmax(118px, 0.8fr) minmax(0, 1.6fr) 52px; }
+  .deck-header { grid-template-columns: 26px minmax(0, 1fr) auto auto; gap: 6px; }
+  .deck-cover { display: none; }
+  .deck-bpmbox { min-width: 70px; }
+  .sampler-bar { flex: none; min-height: 34px; }
+  .resize-handle { display: none; }
+  .library { flex: none; height: 82vh; grid-template-columns: 1fr; grid-template-rows: minmax(0, 130px) minmax(0, 1fr); }
+  .lib-tree { border-right: 0; border-bottom: 1px solid var(--line); }
+  .toasts { left: 8px; right: 8px; }
+  .toast { max-width: none; }
+  .modal { max-width: calc(100vw - 16px); }
+}

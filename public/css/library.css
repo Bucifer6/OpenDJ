@@ -72,3 +72,18 @@ button.tag-chip:hover { border-color: var(--accent); color: #fff; }
 .lr .ord { color: var(--text-3); text-align: right; padding-right: 6px; }
 .lr.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .lr.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+/* unreadable (undecodable / 0-byte) files */
+.lr.unreadable > div:not(.art):not(.stars) { color: var(--text-3); }
+.lr .lc-unreadable { color: var(--red, #ff4d5e); }
+/* background analysis progress (library toolbar) */
+.lib-analysis { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-2); white-space: nowrap; }
+.lib-analysis[hidden] { display: none; }
+.lib-analysis::before { content: ''; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--accent); border-right-color: transparent; animation: lib-spin 1s linear infinite; }
+@keyframes lib-spin { to { transform: rotate(360deg); } }
+/* empty library / empty view explanation */
+.lib-empty { position: absolute; inset: 0; padding: 22px 26px; color: var(--text-2); overflow: auto; }
+.lib-empty[hidden] { display: none; }
+.lib-empty h3 { margin: 0 0 6px; color: var(--text); font-size: 15px; }
+.lib-empty p { margin: 4px 0 8px; }
+.lib-empty ul { margin: 0; padding-left: 18px; display: grid; gap: 7px; }
+.lib-empty li .btn { margin-right: 6px; }

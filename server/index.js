@@ -32,6 +32,7 @@ import { registerLyricsRoutes } from './lyrics.js';
 import { registerRecordingRoutes } from './recorder.js';
 import { registerBroadcastRoutes } from './broadcast.js';
 import { registerCdjRoutes } from './cdj/routes.js';
+import { findIdenticalTrack } from './upload-dedupe.js';
 import { registerStemRoutes } from './stems.js';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -486,11 +487,15 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     await fs.promises.mkdir(dir, { recursive: true });
     const tmp = path.join(dir, `.upload-${crypto.randomBytes(8).toString('hex')}.part`);
     let n = 0;
+    const sha = crypto.createHash('sha256');
     try {
       await pipeline(req, async function* (src) {
-        for await (const c of src) { n += c.length; if (n > limit) throw new HttpError(413, `File too large (limit ${Math.round(limit / 1048576)} MB)`); yield c; }
+        for await (const c of src) { n += c.length; if (n > limit) throw new HttpError(413, `File too large (limit ${Math.round(limit / 1048576)} MB)`); sha.update(c); yield c; }
       }, fs.createWriteStream(tmp, { flags: 'wx' }));
       if (!n) throw new HttpError(400, 'Empty file');
+      // the same file uploaded again: keep the existing track instead of adding "name (2).ext"
+      const same = await findIdenticalTrack(library, { size: n, hash: sha.digest('hex') });
+      if (same) { await fs.promises.rm(tmp, { force: true }); return { id: same.id, track: same, duplicate: true }; }
       const stem = safe(path.basename(name, ext)).slice(0, 180);
       const dest = await uniqueName(dir, stem, ext.slice(1));
       await fs.promises.rename(tmp, dest);

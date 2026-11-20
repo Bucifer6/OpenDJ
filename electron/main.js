@@ -41,7 +41,7 @@ async function createWindow() {
   const launchToken = crypto.randomBytes(32).toString('base64url');
   // The desktop server is guarded by the launch token, so the hosted-mode login variables (OPENDJ_PASSWORD,
   // OPENDJ_TRUST_PROXY, OPENDJ_ALLOWED_HOSTS, OPENDJ_AUTH) must not switch a login page on in the app window.
-  server = await start({ port: 0, dataDir: path.join(app.getPath('userData'), 'library'), launchToken, auth: false, password: '', trustProxy: '', allowedHosts: [] });
+  server = await start({ port: 0, dataDir: process.env.OPENDJ_DATA || path.join(app.getPath('userData'), 'library'), launchToken, auth: false, password: '', trustProxy: '', allowedHosts: [] });
   appOrigin = new URL(server.url).origin;
   await session.defaultSession.cookies.set({ url: server.url, name: LAUNCH_COOKIE, value: launchToken, path: '/', httpOnly: true, sameSite: 'strict', secure: false });
   const allowed = new Set(['midi', 'midiSysex', 'media', 'speaker-selection', 'hid', 'clipboard-sanitized-write', 'fullscreen', 'serial', 'window-management']);

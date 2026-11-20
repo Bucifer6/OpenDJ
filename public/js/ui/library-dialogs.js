@@ -347,6 +347,8 @@ export class LibraryDialogs {
     this.dialogs.menu(x, y, [
       { label: 'New smart playlist…', action: () => this.smartPlaylist() },
       { label: 'Edit selected track info…', action: () => this.editTracks(this.lib.selectedTracks()) },
+      { label: 'Analyse all tracks', action: () => { const n = this.app.analyser.request([...this.lib.tracks.values()]); this.app.toast(n ? `Analysing ${n.toLocaleString()} track(s) in the background` : 'All tracks are analysed'); } },
+      { label: 'Analyse selected tracks', action: () => { const n = this.app.analyser.request(this.lib.selectedTracks()); this.app.toast(n ? `Analysing ${n} track(s)` : 'Select tracks that are not analysed yet'); } },
       '-',
       { label: 'Import', sub: [
         { label: 'rekordbox XML…', action: () => this.importFrom('rekordbox') },

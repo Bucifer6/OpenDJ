@@ -45,7 +45,13 @@ class Uploader {
     files = [...files];
     const skipped = files.filter((f) => !this.allowed(f));
     const ok = files.filter((f) => this.allowed(f));
-    if (skipped.length) this.app.toast?.(`Skipped ${skipped.length} file(s) that are not audio/video: ${skipped.slice(0, 3).map((f) => f.name).join(', ')}`);
+    if (skipped.length) {
+      // rejected files stay visible: a toast naming them and a failed row each in the uploads panel
+      const names = skipped.slice(0, 5).map((f) => `"${f.name}"`).join(', ') + (skipped.length > 5 ? ` and ${skipped.length - 5} more` : '');
+      this.app.toast?.(`⚠ Not uploaded (not an audio or video file): ${names}`);
+      for (const file of skipped) { const job = { file, resolve() {}, ctrl: new AbortController() }; this.row(job); this.finish(job, null, 'Not an audio / video file'); }
+      this.panel.hidden = false;
+    }
     const maxMB = this.caps?.upload?.maxMB;
     const jobs = ok.map((file) => new Promise((resolve) => {
       if (maxMB && file.size > maxMB * 1048576) { this.app.toast?.(`${file.name} is larger than the ${maxMB} MB upload limit`); return resolve(null); }
@@ -55,7 +61,9 @@ class Uploader {
     }));
     if (ok.length) { this.panel.hidden = false; this.pump(); }
     const ids = (await Promise.all(jobs)).filter(Boolean);
-    if (ids.length) this.app.toast?.(`Uploaded ${ids.length} file(s) to the library`);
+    const dup = this.duplicates || 0; this.duplicates = 0;
+    const added = Math.max(0, ids.length - dup);
+    if (ids.length) this.app.toast?.(added ? `Uploaded ${added} file(s) to the library${dup ? ` (${dup} already there, not added again)` : ''}` : `${dup} file(s) already in the library: not added again`);
     return ids;
   }
 
@@ -82,13 +90,14 @@ class Uploader {
           job.ui.bar.style.width = `${(f * 100).toFixed(1)}%`;
           job.ui.info.textContent = f >= 1 ? 'Reading tags…' : `${fmtMB(loaded)} / ${fmtMB(total)}`;
         },
-      }).then((r) => this.finish(job, r.id, 'Done'), (e) => this.finish(job, null, e.name === 'AbortError' ? 'Cancelled' : e.message))
+      }).then((r) => this.finish(job, r.id, r.duplicate ? 'Already in the library' : 'Done', r.duplicate), (e) => this.finish(job, null, e.name === 'AbortError' ? 'Cancelled' : e.message))
         .finally(() => { this.active--; this.pump(); });
     }
     this.updateTitle();
   }
 
-  finish(job, id, msg) {
+  finish(job, id, msg, duplicate = false) {
+    if (duplicate) this.duplicates = (this.duplicates || 0) + 1;
     job.ui.info.textContent = msg;
     job.ui.cancel.remove();
     job.ui.row.classList.add(id ? 'done' : 'failed');

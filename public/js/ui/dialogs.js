@@ -258,6 +258,7 @@ export class Dialogs {
       el('label', { class: 'check' }, chk(am.skipSilence, (v) => set('automix', { ...app.settings.automix, skipSilence: v })), ' Skip silence at track ends'),
       el('label', { class: 'check' }, chk(am.shuffle, (v) => set('automix', { ...app.settings.automix, shuffle: v })), ' Shuffle'),
       el('label', { class: 'check' }, chk(am.keySync, (v) => set('automix', { ...app.settings.automix, keySync: v })), ' Fix key clashes with Key Sync'),
+      el('label', { class: 'check' }, chk(am.restoreTempo !== false, (v) => set('automix', { ...app.settings.automix, restoreTempo: v })), ' Ease each track back to its original tempo after the transition'),
       field('Smart order energy curve', sel(am.order || 'harmonic', [['harmonic', 'Harmonic'], ['build', 'Build up'], ['peak', 'Peak'], ['wave', 'Waves']], (v) => set('automix', { ...app.settings.automix, order: v }))),
     );
     const dlIn = el('input', { class: 'inp', value: s.downloadDir });
@@ -266,6 +267,7 @@ export class Dialogs {
     const m3uIn = el('input', { class: 'inp', placeholder: 'Path to .m3u / .m3u8 playlist' });
     const library = el('div', { class: 'form' },
       field('Download folder (for tracks from media servers)', el('div', { class: 'row' }, dlIn, el('button', { class: 'btn', onclick: async () => { const p = await this.pickFolder('Download folder'); if (p) { dlIn.value = p; set('downloadDir', p); } } }, 'Browse…'))),
+      el('label', { class: 'check' }, chk(s.autoAnalyse !== false, (v) => { set('autoAnalyse', v); if (v) app.analyser?.autoQueue({ afterScan: true }); else app.analyser?.cancel(); }), ' Analyse new tracks in the background (BPM, key, waveform, cues)'),
       (() => { // hosted web app: sign out
         const box = el('div', { class: 'row' });
         api.authStatus?.().then((st) => { if (st?.enabled && st?.loggedIn !== false) box.append(el('button', { class: 'btn sm', onclick: async () => { await api.logout(); location.href = '/login.html'; } }, 'Sign out')); }).catch(() => {});

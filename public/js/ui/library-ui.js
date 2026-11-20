@@ -133,6 +133,42 @@ export class LibraryUI {
     this.countEl.textContent = `${list.length.toLocaleString()} tracks`;
     this.renderRows(true);
     this.renderViewActions();
+    this.renderEmpty();
+  }
+
+  /** Why a view is empty: first launch (how to add music), or analysis still running for views that need BPM / key. */
+  renderEmpty() {
+    const e = this.emptyEl;
+    if (this.rows.length) { e.hidden = true; return; }
+    const an = this.app.analyser?.status?.();
+    const needsAnalysis = /bpm:|key:/.test(this.query) || ['matching'].includes(this.view.kind)
+      || (this.view.kind === 'playlist' && this.playlists.find((p) => p.id === this.view.id)?.smart);
+    if (!this.tracks.size && this.view.kind === 'all' && !this.query.trim()) {
+      const hosted = !!this.app.hosted;
+      e.replaceChildren(
+        el('h3', {}, 'Your library is empty'),
+        el('p', {}, 'Add music to get started:'),
+        el('ul', {},
+          el('li', {}, el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addFolder() }, '+ Folder'), ' add a folder, USB stick or NAS share (it is scanned and kept in sync)'),
+          hosted ? el('li', {}, el('button', { class: 'btn sm', onclick: () => this.app.upload?.pick?.() || document.querySelector('.upload-btn')?.click() }, '⇪ Upload'), ' upload files from this device') : null,
+          el('li', {}, 'drop audio files or folders anywhere on this window'),
+          el('li', {}, 'import from rekordbox, Serato, Traktor or VirtualDJ: ', el('button', { class: 'btn sm', onclick: (ev) => { const r = ev.currentTarget.getBoundingClientRect(); this.dlg.libraryMenu(r.left, r.bottom + 4); } }, '⋯ Library → Import')),
+          el('li', {}, el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addSource() }, '+ Media server'), ' Plex, Jellyfin, Emby, Subsonic / Navidrome')),
+        el('p', { class: 'hint' }, 'New tracks are analysed in the background (BPM, key, waveform, cues).'));
+    } else if (an?.running && (needsAnalysis || this.view.kind === 'unanalysed' || this.query.trim())) {
+      e.replaceChildren(el('h3', {}, 'Nothing here yet'), el('p', {}, `Tracks are still being analysed (${an.remaining.toLocaleString()} to go). BPM, key and energy fill in as each one finishes.`));
+    } else if (needsAnalysis && [...this.tracks.values()].some((t) => !t.analyzed)) {
+      e.replaceChildren(el('h3', {}, 'No matches'), el('p', {}, 'Some tracks are not analysed yet, so they have no BPM / key. Use ⋯ Library → Analyse all tracks.'));
+    } else { e.hidden = true; return; }
+    e.hidden = false;
+  }
+
+  setAnalysisStatus(st) {
+    const show = st.running || st.remaining > 0;
+    this.analysisEl.hidden = !show;
+    this.analysisText.textContent = show ? `${st.label || 'Analysing…'}${st.paused ? ' (paused)' : ''}` : '';
+    this.analysisEl.title = 'Analysing the library in the background: BPM, key, energy, waveform and cues';
+    if (!this.rows.length) this.renderEmpty();
   }
 
   /** Buttons for the current view (relocate, dedupe, setlist export, smart rules…). */
@@ -158,6 +194,9 @@ export class LibraryUI {
     this.countEl = el('span', { class: 'lib-count' });
     this.viewTitle = el('span', { class: 'lib-view-title' }, 'Collection');
     this.statusEl = el('span', { class: 'lib-status' });
+    this.analysisText = el('span', {});
+    this.analysisEl = el('span', { class: 'lib-analysis', hidden: true }, this.analysisText,
+      el('button', { class: 'btn xs', title: 'Stop analysing (Analyse all in ⋯ Library starts it again)', onclick: () => this.app.analyser?.cancel() }, '✕'));
     this.viewActions = el('span', { class: 'lib-view-actions' });
     const tools = el('div', { class: 'lib-tools' },
       this.viewTitle, this.countEl, this.viewActions, this.search,
@@ -166,13 +205,14 @@ export class LibraryUI {
       el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addSource(), title: 'Connect Plex, Jellyfin, Emby, Subsonic/Navidrome or MediaMax' }, '+ Media server'),
       el('button', { class: 'btn sm', onclick: () => this.app.dialogs.automixQueue(this.rows), title: 'Auto-mix the tracks in this view' }, '▶ Automix view'),
       el('button', { class: 'btn sm lib-menu-btn', title: 'Smart playlists, import from rekordbox / Traktor / Serato / VirtualDJ, missing files, duplicates, backup', onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); this.dlg.libraryMenu(r.left, r.bottom + 4); } }, '⋯ Library'),
-      this.statusEl,
+      this.statusEl, this.analysisEl,
     );
     this.header = el('div', { class: 'lib-header' });
     this.renderHeader();
     this.spacer = el('div', { class: 'lib-spacer' });
     this.rowsEl = el('div', { class: 'lib-rows' });
-    this.scroller = el('div', { class: 'lib-scroll', tabindex: 0 }, this.spacer, this.rowsEl);
+    this.emptyEl = el('div', { class: 'lib-empty', hidden: true });
+    this.scroller = el('div', { class: 'lib-scroll', tabindex: 0 }, this.spacer, this.rowsEl, this.emptyEl);
     this.scroller.addEventListener('scroll', () => this.renderRows());
     this.scroller.addEventListener('keydown', (e) => this.onKey(e));
     new ResizeObserver(() => this.renderRows(true)).observe(this.scroller);
@@ -213,12 +253,12 @@ export class LibraryUI {
       const sw = t.color ? `<i class="lc-sw" style="background:${escapeHtml(t.color)}" title="${escapeHtml(colorName(t.color) || t.color)}"></i>` : '';
       const when = this.view.kind === 'session' ? (t._playedAt ? new Date(t._playedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') : (t.addedAt ? new Date(t.addedAt).toLocaleDateString() : '');
       const row = el('div', {
-        class: `lr ${this.selected.has(t.id) ? 'sel' : ''} ${i === this.cursor ? 'cursor' : ''} ${loaded.has(t.id) ? 'loaded' : ''} ${t.playCount ? 'played' : ''} ${t.missing ? 'missing' : ''}${dup}`,
-        title: t.missing ? `File missing: ${t.path}` : null,
+        class: `lr ${this.selected.has(t.id) ? 'sel' : ''} ${i === this.cursor ? 'cursor' : ''} ${loaded.has(t.id) ? 'loaded' : ''} ${t.playCount ? 'played' : ''} ${t.missing ? 'missing' : ''} ${t.unreadable ? 'unreadable' : ''}${dup}`,
+        title: t.missing ? `File missing: ${t.path}` : t.unreadable ? `Could not decode this file: ${t.path || t.title}` : null,
         style: { top: `${i * ROW_H}px`, gridTemplateColumns: this.gridTemplate() },
         draggable: 'true', 'data-i': i,
         html: (this.showOrder ? `<div class="num ord">${(this.orderOf?.get(t) ?? i) + 1}</div>` : '') + `<div class="art" style="background-image:url(${api.coverUrl(t.id)})"></div>`
-          + `<div class="c-title" title="${escapeHtml(t.title)}">${sw}${t.missing ? '<span class="lc-miss">⚠</span>' : ''}${escapeHtml(t.title)}</div><div title="${escapeHtml(t.artist)}">${escapeHtml(t.artist)}</div>`
+          + `<div class="c-title" title="${escapeHtml(t.title)}">${sw}${t.missing ? '<span class="lc-miss">⚠</span>' : t.unreadable ? '<span class="lc-miss lc-unreadable" title="Unreadable: the file could not be decoded">⚠</span>' : ''}${escapeHtml(t.title)}</div><div title="${escapeHtml(t.artist)}">${escapeHtml(t.artist)}</div>`
           + `<div class="num ${bpmClose ? 'match' : ''}">${Number(t.bpm) > 0 ? Number(t.bpm).toFixed(Number(t.bpm) % 1 ? 1 : 0) : ''}</div>`
           + `<div class="key ${cam ? `cam-${cam.replace(/\D/g, '')}` : ''} ${comp ? 'match' : ''}">${escapeHtml(cam || t.key || '')}</div>`
           + `<div class="num">${fmtDur(t.duration)}</div><div class="num">${escapeHtml(t.energy ?? '')}</div>`
@@ -349,7 +389,9 @@ export class LibraryUI {
     items.push({ label: 'Add to playlist', sub: [{ label: '+ New playlist…', action: async () => { const n = await this.app.dialogs.prompt('New playlist', 'Playlist name'); if (n) { await api.createPlaylist(n, ids); this.refresh(); } } }, ...this.playlists.filter((p) => !p.sourceId && !p.smart).map((p) => ({ label: p.name, action: async () => { await api.addToPlaylist(p.id, ids); this.refresh(); this.app.toast(`Added ${ids.length} to ${p.name}`); } }))] });
     items.push({ label: 'Add to automix queue', action: () => this.app.queueAdd(tracks) });
     if (remote.length) items.push({ label: `Download ${remote.length > 1 ? remote.length + ' tracks' : 'for offline use'}`, action: () => this.download(remote.map((t) => t.id)) });
-    items.push({ label: 'Re-analyse (BPM, key, waveform)', action: async () => { for (const t of tracks) { await api.updateTrack(t.id, { analyzed: false, gridLocked: false }); t.analyzed = false; t.gridLocked = false; } this.app.toast('Tracks will be re-analysed when loaded'); } });
+    const unanalysed = tracks.filter((t) => !t.analyzed);
+    if (unanalysed.length) items.push({ label: `Analyse ${unanalysed.length > 1 ? `${unanalysed.length} tracks` : 'now'} (BPM, key, waveform)`, action: () => { const n = this.app.analyser.request(unanalysed); this.app.toast(n ? `Analysing ${n} track(s) in the background` : 'Nothing to analyse (locked BPM / imported grid)'); } });
+    else items.push({ label: 'Re-analyse (BPM, key, waveform)', action: async () => { const ok = tracks.filter((t) => !t.bpmLocked); for (const t of ok) { await api.updateTrack(t.id, { analyzed: false, gridLocked: false }); t.analyzed = false; t.gridLocked = false; } const n = this.app.analyser.request(ok); this.app.toast(`Re-analysing ${n} track(s) in the background${ok.length < tracks.length ? ' (locked BPMs kept)' : ''}`); } });
     items.push(...stemsMenuItems(this.app, tracks));
     if (window.opendjNative && tracks[0] && (tracks[0].localPath || tracks[0].path)) items.push({ label: 'Show in folder', action: () => window.opendjNative.reveal(tracks[0].localPath || tracks[0].path) });
     items.push('-');
