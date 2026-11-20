@@ -18,18 +18,18 @@
     "test:webapp": "node scripts/e2e-webapp.mjs"
   },
   "dependencies": {
-    "fast-xml-parser": "^4.5.0",
-    "music-metadata": "^10.6.0",
-    "onnxruntime-web": "1.23.2"
+    "fast-xml-parser": "^5.12.1",
+    "music-metadata": "^12.7.0",
+    "onnxruntime-web": "1.31.1"
   },
   "devDependencies": {
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8"
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0"
   },
   "build": {
     "appId": "org.opendj.app",
     "productName": "OpenDJ",
-    "copyright": "Copyright \u00a9 OpenDJ contributors",
+    "copyright": "Copyright © OpenDJ contributors",
     "directories": {
       "buildResources": "build",
       "output": "dist"
@@ -129,9 +129,11 @@
       "synopsis": "Free DJ software",
       "description": "Free, open-source DJ software: decks, mixer, effects, auto-mix, MIDI controllers, and a library that pulls from local/USB/NAS folders, Plex, Jellyfin, Emby and Subsonic.",
       "desktop": {
-        "Name": "OpenDJ",
-        "Comment": "Free DJ software",
-        "Keywords": "dj;mix;music;audio;midi;"
+        "entry": {
+          "Name": "OpenDJ",
+          "Comment": "Free DJ software",
+          "Keywords": "dj;mix;music;audio;midi;"
+        }
       },
       "maintainer": "OpenDJ contributors <opendj@users.noreply.github.com>"
     },
