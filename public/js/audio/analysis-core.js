@@ -103,8 +103,18 @@ export function detectBpm(mono, sr, { min = 70, max = 180 } = {}) {
     if (v > best.v) best = { lag, v };
   }
   if (!best.lag) return { bpm: null, offset: 0, confidence: 0 };
+  // 1b) 3:2 check: off-beat bass (kick + bass on the "and") makes the ACF favour 1.5 beats (2/3 of the tempo).
+  // Folding the onsets at the true beat period is much sharper than at 1.5 beats, so switch when it clearly is.
+  let coarseLag = best.lag;
+  const l23 = best.lag * 2 / 3;
+  const sharpest = (lag) => { // best fold score within ±3 % (integer lags are too coarse to fold a whole track)
+    const b0 = 60 * fps / lag; let m = 0;
+    for (let b = b0 * 0.97; b <= b0 * 1.03; b += 0.05) m = Math.max(m, foldScore(env, fps * 60 / b).score);
+    return m;
+  };
+  if (l23 >= minLag && sharpest(l23) > 1.25 * sharpest(best.lag)) coarseLag = l23;
   // 2) refine with phase folding over the whole track (sub-hop precision)
-  let coarse = 60 * fps / best.lag;
+  let coarse = 60 * fps / coarseLag;
   let top = { bpm: coarse, score: 0, phase: 0 };
   for (let b = coarse * 0.97; b <= coarse * 1.03; b += 0.02) {
     const r = foldScore(env, fps * 60 / b);
@@ -256,6 +266,217 @@ export function trimPoints(mono, sr) {
   return { startTime: start / sr, endTime: Math.min(mono.length, end) / sr };
 }
 
+// ---------------- phrase / structure analysis ----------------
+// Works on the 3-band waveform only (no audio needed), so it is cheap (a few ms for a 7-minute track)
+// and can also be run on the client for tracks analysed before phrase analysis existed.
+
+export const PHRASE_TYPES = ['intro', 'verse', 'buildup', 'drop', 'breakdown', 'outro'];
+const PHRASE_NAMES = { intro: 'Intro', verse: 'Verse', buildup: 'Build', drop: 'Drop', breakdown: 'Breakdown', outro: 'Outro' };
+const PHRASE_CUE_COLORS = { intro: '#3ea6ff', verse: '#8a96a8', buildup: '#ffb020', drop: '#ff3b4d', breakdown: '#2ed47a', outro: '#c06cff' };
+const BAND_W = [1.5, 1, 0.8]; // low / mid / high weights for distances
+
+/** Mean low / mid / high level (0..1) of each beat, beats starting at t0. */
+function beatBands(waveform, t0, beat, nb) {
+  const { rate, low, mid, high } = waveform; const n = low.length;
+  const lo = new Float32Array(nb), mi = new Float32Array(nb), hi = new Float32Array(nb);
+  for (let b = 0; b < nb; b++) {
+    const i0 = Math.max(0, Math.round((t0 + b * beat) * rate)), i1 = Math.min(n, Math.round((t0 + (b + 1) * beat) * rate));
+    if (i1 <= i0) continue;
+    let sl = 0, sm = 0, sh = 0;
+    for (let i = i0; i < i1; i++) { sl += low[i]; sm += mid[i]; sh += high[i]; }
+    const c = (i1 - i0) * 255;
+    lo[b] = sl / c; mi[b] = sm / c; hi[b] = sh / c;
+  }
+  return [lo, mi, hi];
+}
+
+function prefix(a) { const p = new Float64Array(a.length + 1); for (let i = 0; i < a.length; i++) p[i + 1] = p[i] + a[i]; return p; }
+
+/** Weighted distance between the mean feature vectors of [a0,a1) and [b0,b1) using prefix sums P (one per band). */
+function segDist(P, a0, a1, b0, b1) {
+  let d = 0;
+  for (let j = 0; j < P.length; j++) {
+    const x = (P[j][a1] - P[j][a0]) / (a1 - a0), y = (P[j][b1] - P[j][b0]) / (b1 - b0);
+    d += BAND_W[j] * (x - y) * (x - y);
+  }
+  return Math.sqrt(d);
+}
+
+/**
+ * Bar / phrase structure.
+ * @returns {{ phrases: {start:number,end:number,type:string,energy:number,bars:number}[], downbeat: number }}
+ * phrase.energy is the section's relative energy 0..1 (1 = loudest section of the track).
+ */
+export function detectPhrases(mono, sr, bpm, gridOffset = 0, waveform = null, opts = {}) {
+  if (!waveform && mono) waveform = computeWaveform(mono, sr);
+  const duration = opts.duration ?? (mono && sr ? mono.length / sr : waveform ? waveform.peak.length / waveform.rate : 0);
+  const startTime = Math.max(0, opts.startTime ?? 0), endTime = Math.min(duration, opts.endTime ?? duration);
+  if (!bpm || !waveform || !(endTime > startTime)) return { phrases: [], downbeat: startTime };
+  const beat = 60 / bpm, bar = beat * 4;
+  // beat lattice covering the whole track
+  const t0 = gridOffset - Math.floor(gridOffset / beat) * beat;
+  const nb = Math.max(0, Math.floor((duration - t0) / beat));
+  const bands = beatBands(waveform, t0, beat, nb);
+  const PB = bands.map(prefix);
+
+  // ---- 1) downbeat phase: the bar phase where big energy changes line up ----
+  const firstBeat = Math.max(0, Math.ceil((startTime - t0) / beat - 0.25));
+  const lastBeat = Math.min(nb, Math.floor((endTime - t0) / beat));
+  const score = [0, 0, 0, 0];
+  for (let b = firstBeat + 4; b <= lastBeat - 4; b++) {
+    const d = segDist(PB, b - 4, b, b, b + 4);
+    score[b % 4] += d * d;
+  }
+  const fallback = firstBeat % 4; // prior: music starts on a downbeat
+  score[fallback] *= 1.1;
+  let phase = fallback;
+  for (let p = 0; p < 4; p++) if (score[p] > score[phase] + 1e-9) phase = p;
+  let db = phase; while (db < firstBeat) db += 4;
+  const downbeat = t0 + db * beat;
+
+  // ---- 2) per-bar features ----
+  const K = Math.floor((lastBeat - db) / 4);
+  if (K < 4) {
+    return { phrases: [{ start: r3(Math.min(downbeat, startTime)), end: r3(endTime), type: 'verse', energy: 1, bars: Math.max(0, K) }], downbeat: r3(downbeat) };
+  }
+  const F = [new Float32Array(K), new Float32Array(K), new Float32Array(K)];
+  for (let j = 0; j < 3; j++) {
+    const P = PB[j];
+    let mx = 1e-6;
+    for (let k = 0; k < K; k++) { F[j][k] = (P[db + 4 * k + 4] - P[db + 4 * k]) / 4; if (F[j][k] > mx) mx = F[j][k]; }
+    for (let k = 0; k < K; k++) F[j][k] /= mx;
+  }
+  const PF = F.map(prefix);
+
+  // ---- 3) novelty between bars (multi-scale before/after contrast ≈ checkerboard kernel on the SSM) ----
+  const nov = new Float32Array(K + 1);
+  let maxNov = 0;
+  for (let k = 1; k < K; k++) {
+    let v = 0;
+    for (const [W, wt] of [[2, 0.5], [4, 1], [8, 1]]) {
+      const w = Math.min(W, k, K - k);
+      if (w < Math.min(2, W)) continue;
+      v += wt * (w / W) * segDist(PF, k - w, k, k, k + w);
+    }
+    nov[k] = v; if (v > maxNov) maxNov = v;
+  }
+  const thr = Math.max(0.06, 0.2 * maxNov);
+  const prior = (k) => (k % 16 === 0 ? 1.3 : k % 8 === 0 ? 1.2 : k % 4 === 0 ? 1.05 : 1);
+  const cands = [];
+  for (let k = 2; k <= K - 2; k++) {
+    if (nov[k] < thr) continue;
+    let isMax = true;
+    for (let j = Math.max(1, k - 2); j <= Math.min(K - 1, k + 2); j++) if (j !== k && (nov[j] > nov[k] || (nov[j] === nov[k] && j < k))) { isMax = false; break; }
+    if (isMax) cands.push({ k, s: nov[k] * prior(k) });
+  }
+  cands.sort((a, b) => b.s - a.s);
+  const bounds = [];
+  for (const c of cands) {
+    if (c.k < 4 || K - c.k < 4) continue;
+    if (bounds.every((k) => Math.abs(k - c.k) >= 8)) bounds.push(c.k);
+  }
+  bounds.sort((a, b) => a - b);
+  const edges = [0, ...bounds, K];
+
+  // ---- 4) section stats + labels ----
+  const secs = [];
+  for (let i = 0; i + 1 < edges.length; i++) {
+    const a = edges[i], b = edges[i + 1];
+    const m = (j, x, y) => (PF[j][y] - PF[j][x]) / (y - x);
+    const e = (x, y) => 0.5 * m(0, x, y) + 0.3 * m(1, x, y) + 0.2 * m(2, x, y);
+    const q = Math.max(1, Math.floor((b - a) / 4));
+    secs.push({ a, b, lo: m(0, a, b), e: e(a, b), slope: e(b - q, b) - e(a, a + q) });
+  }
+  const maxE = Math.max(...secs.map((s) => s.e), 1e-6), maxLo = Math.max(...secs.map((s) => s.lo), 1e-6);
+  for (const s of secs) { s.eRel = s.e / maxE; s.loRel = s.lo / maxLo; s.full = s.loRel >= 0.7 && s.eRel >= 0.75; }
+  const n = secs.length;
+  let hadDrop = false;
+  secs.forEach((s, i) => {
+    if (n === 1) s.type = s.full ? 'drop' : 'verse';
+    else if (i === 0) s.type = 'intro';
+    else if (i === n - 1) s.type = 'outro';
+    else if (s.full) s.type = 'drop';
+    else {
+      const next = secs[i + 1], nextDrop = i + 1 < n - 1 && next.full;
+      if (nextDrop && (s.slope > 0.06 || s.b - s.a <= 8) && !(hadDrop && s.loRel < 0.35 && s.b - s.a > 8)) s.type = 'buildup';
+      else if (hadDrop && s.loRel < 0.6) s.type = 'breakdown';
+      else if (nextDrop) s.type = 'buildup';
+      else s.type = 'verse';
+    }
+    if (s.type === 'drop' || s.full) hadDrop = true; // a full-energy intro counts as a drop for what follows
+  });
+
+  // ---- 5) phrases (sections longer than 32 bars are split into 16-bar phrases) ----
+  const phrases = [];
+  for (const s of secs) {
+    let a = s.a;
+    if (s.b - a > 32) while (s.b - a >= 24) { phrases.push({ a, b: a + 16, s }); a += 16; }
+    phrases.push({ a, b: s.b, s });
+  }
+  const out = phrases.map(({ a, b, s }, i) => ({
+    start: r3(i === 0 ? Math.max(0, Math.min(downbeat, startTime)) : downbeat + a * bar),
+    end: r3(i === phrases.length - 1 ? Math.max(downbeat + b * bar, endTime) : downbeat + b * bar),
+    type: s.type, energy: Math.round(s.eRel * 100) / 100, bars: b - a,
+  }));
+  return { phrases: out, downbeat: r3(downbeat) };
+}
+
+function r3(x) { return Math.round(x * 1000) / 1000; }
+
+/** Where to start the next track (mixIn) and where to start mixing out of this one (mixOut), in seconds. */
+export function mixPoints(phrases, downbeat, bpm, { startTime = 0, endTime } = {}) {
+  const end = endTime ?? (phrases.length ? phrases.at(-1).end : startTime);
+  if (!bpm || !phrases.length) return { mixIn: r3(startTime), mixOut: r3(Math.max(startTime, end - 30)) };
+  const bar = 240 / bpm;
+  const mixIn = downbeat;
+  const K = Math.floor((end - downbeat) / bar + 1e-6);
+  const last = phrases.at(-1);
+  // trailing outro (possibly split into several 16-bar phrases)
+  let oi = phrases.length - 1;
+  while (oi > 0 && phrases[oi - 1].type === 'outro') oi--;
+  const outroBars = Math.round((end - phrases[oi].start) / bar);
+  let mixOut;
+  if (last.type === 'outro' && oi > 0 && outroBars >= 8 && outroBars <= 64) mixOut = phrases[oi].start;
+  else { // last 32 (short tracks: 16) bars, on an 8-bar phrase boundary
+    const L = K >= 64 ? 32 : K >= 24 ? 16 : Math.max(1, Math.floor(K / 2));
+    const k = Math.max(0, L >= 8 ? Math.floor((K - L) / 8) * 8 : K - L);
+    mixOut = downbeat + k * bar;
+  }
+  if (mixOut <= mixIn) mixOut = Math.max(mixIn, end - Math.min(30, (end - mixIn) / 2));
+  return { mixIn: r3(mixIn), mixOut: r3(mixOut) };
+}
+
+/** Hot cue (max 8) + memory cue suggestions from the structure, like rekordbox auto cue / SMART CUE. */
+export function autoCuesFor(phrases, { mixIn, mixOut, downbeat } = {}) {
+  const cands = [];
+  const counts = {};
+  // contiguous phrases of one section share a type: only cue section starts
+  phrases.forEach((p, i) => {
+    if (i > 0 && phrases[i - 1].type === p.type) return;
+    counts[p.type] = (counts[p.type] || 0) + 1;
+    const nth = counts[p.type];
+    const position = i === 0 && downbeat != null ? downbeat : p.start;
+    const prio = { intro: 10, drop: nth === 1 ? 9 : nth === 2 ? 7 : 5, outro: 8, breakdown: nth === 1 ? 7 : 5, buildup: 4, verse: 3 }[p.type] ?? 1;
+    cands.push({ position, type: p.type, name: PHRASE_NAMES[p.type] + (nth > 1 && p.type !== 'intro' && p.type !== 'outro' ? ` ${nth}` : ''), prio });
+  });
+  if (!cands.length && mixIn != null) cands.push({ position: mixIn, type: 'intro', name: 'Start', prio: 10 });
+  const chosen = cands.sort((a, b) => b.prio - a.prio || a.position - b.position).slice(0, 8).sort((a, b) => a.position - b.position);
+  const cues = chosen.map((c, i) => ({ index: i, type: 'hot', position: r3(c.position), name: c.name, color: PHRASE_CUE_COLORS[c.type] || '#2ecc71' }));
+  if (mixIn != null) cues.push({ index: -1, type: 'memory', position: r3(mixIn), name: 'Mix in' });
+  if (mixOut != null && mixOut > (mixIn ?? -1) + 1) cues.push({ index: -1, type: 'memory', position: r3(mixOut), name: 'Mix out' });
+  return cues;
+}
+
+/** Everything structure-related from an existing waveform: phrases, downbeat, mixIn, mixOut, autoCues. */
+export function analyzeStructure(waveform, bpm, gridOffset, { startTime = 0, endTime, duration } = {}) {
+  duration = duration ?? (waveform ? waveform.peak.length / waveform.rate : 0);
+  endTime = endTime ?? duration;
+  const { phrases, downbeat } = detectPhrases(null, 0, bpm, gridOffset, waveform, { startTime, endTime, duration });
+  const { mixIn, mixOut } = mixPoints(phrases, downbeat, bpm, { startTime, endTime });
+  const autoCues = autoCuesFor(phrases, { mixIn, mixOut, downbeat: bpm ? downbeat : undefined });
+  return { phrases, downbeat, mixIn, mixOut, autoCues };
+}
+
 export function analyzeTrack(mono, sr) {
   const waveform = computeWaveform(mono, sr);
   const beat = detectBpm(mono, sr);
@@ -265,7 +486,9 @@ export function analyzeTrack(mono, sr) {
   let energy = 0;
   for (let i = 0; i < waveform.peak.length; i++) energy += waveform.low[i] + waveform.mid[i];
   energy = Math.round(Math.min(10, Math.max(1, energy / waveform.peak.length / 25)));
-  return { waveform, bpm: beat.bpm, gridOffset: beat.offset, bpmConfidence: beat.confidence, key: key.key, camelot: key.camelot, gain: loud.gainDb, ...trim, energy, duration: mono.length / sr };
+  const duration = mono.length / sr;
+  const structure = analyzeStructure(waveform, beat.bpm, beat.offset, { ...trim, duration });
+  return { waveform, bpm: beat.bpm, gridOffset: beat.offset, bpmConfidence: beat.confidence, key: key.key, camelot: key.camelot, gain: loud.gainDb, ...trim, energy, duration, ...structure };
 }
 
 // ---------- waveform (de)serialisation for the server cache ----------

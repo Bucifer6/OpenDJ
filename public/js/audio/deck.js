@@ -1,7 +1,7 @@
 // A playback deck: transport, cue logic (CDJ-style), hot cues, loops, beat jump, sync, key lock, scratch.
 import { Emitter, clamp } from '../util.js';
 import { api } from '../api.js';
-import { decodeWaveform, toCamelot, camelotCompatible } from './analysis-core.js';
+import { decodeWaveform, toCamelot, camelotCompatible, analyzeStructure } from './analysis-core.js';
 
 export class Deck extends Emitter {
   constructor(engine, index) {
@@ -94,6 +94,7 @@ export class Deck extends Emitter {
       }
       this.waveform = wave;
       this.bpm = track.bpm || 0; this.gridOffset = track.gridOffset || 0;
+      if (!track.phrases && wave && this.bpm) this.refreshStructure(false); // tracks analysed before phrase detection existed
       this.node.port.postMessage({ type: 'load', left, right, sampleRate: buf.sampleRate }, right ? [left.buffer, right.buffer] : [left.buffer]);
       this.post('rate', { value: this.rate }); this.post('keylock', { value: this.keyLock });
       this.keyShift = 0; this.post('pitch', { value: 1 });
@@ -337,7 +338,20 @@ export class Deck extends Emitter {
     Object.assign(this.track, { bpm, gridOffset: offset });
     api.updateTrack(this.track.id, { bpm, gridOffset: offset }).catch(() => {});
     if (this.syncOn) this.matchTempo();
+    this.refreshStructure(true);
     this.emit('grid'); this.engine.onTempoChange(this);
+  }
+  /** Recompute phrases / mix points from the waveform (cheap; no audio needed). */
+  refreshStructure(save) {
+    if (!this.track || !this.waveform || !this.bpm) return;
+    try {
+      const t = this.track;
+      const st = analyzeStructure(this.waveform, this.bpm, this.gridOffset, { startTime: t.startTime, endTime: t.endTime, duration: this.duration || t.duration });
+      const patch = { phrases: st.phrases, mixIn: st.mixIn, mixOut: st.mixOut, downbeat: st.downbeat };
+      Object.assign(t, patch);
+      api.updateTrack(t.id, patch).catch(() => {});
+      this.emit('cues');
+    } catch (e) { console.warn('structure analysis failed', e); }
   }
   gridSetDownbeatHere() { this.setGrid(this.bpm, this.position); }
   gridShift(sec) { this.setGrid(this.bpm, this.gridOffset + sec); }

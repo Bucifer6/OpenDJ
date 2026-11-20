@@ -80,10 +80,11 @@ try {
   check(ph < 0.08, `sync aligned phase (Δ ${ph.toFixed(3)} beats)`);
 
   // hot cue + loop + fx via UI
+  await page.evaluate(() => window.opendj.engine.decks[0].deleteHotCue(0)); // auto cues may already fill pad A
   await page.locator('.deck[data-deck="0"] .pad').first().dispatchEvent('pointerdown');
   await page.locator('.deck[data-deck="0"] .pad').first().dispatchEvent('pointerup');
-  const hc = await page.evaluate(() => window.opendj.engine.decks[0].hotCues.length);
-  check(hc === 1, 'hot cue set from pad');
+  const hc = await page.evaluate(() => { const d = window.opendj.engine.decks[0]; const c = d.hotCue(0); return c && Math.abs(c.position - d.snap(c.position)) < 0.002; });
+  check(hc, 'hot cue set from pad (on the beat grid)');
   await page.evaluate(() => window.opendj.engine.decks[0].autoLoop(4));
   const loop = await page.evaluate(() => window.opendj.engine.decks[0].loopBeats);
   check(Math.abs(loop - 4) < 0.01, 'auto loop 4 beats');
@@ -104,7 +105,7 @@ try {
 
   // persisted analysis
   const saved = await page.evaluate(async (id) => (await (await fetch('/api/tracks')).json()).find((t) => t.id === id), ids[0]);
-  check(saved.analyzed && saved.cues.length === 1, 'analysis + cues persisted to library');
+  check(saved.analyzed && saved.cues.some((c) => c.index === 0) && Array.isArray(saved.phrases) && saved.phrases.length > 0, `analysis, phrases (${saved.phrases?.map((p) => p.type).join(' ')}) + cues persisted to library`);
 
   // automix with a short transition
   await page.evaluate(async () => {

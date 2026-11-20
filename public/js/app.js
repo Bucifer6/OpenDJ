@@ -199,6 +199,7 @@ class App {
   }
   queueAdd(tracks) {
     if (!this.automix.enabled) { this.automix.queue = [...this.automix.queue.slice(this.automix.idx), ...tracks]; this.automix.idx = 0; }
+    else if (this.shift) this.automix.insertNext(tracks); // Shift = play next
     else this.automix.queue.push(...tracks);
     this.toast(`${tracks.length} track(s) queued for automix`);
     this.updateAutomixUi();

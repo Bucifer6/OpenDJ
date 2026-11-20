@@ -140,19 +140,24 @@ export class Dialogs {
     if (!tracks?.length) return this.app.toast('No tracks in this view');
     const smart = el('input', { type: 'checkbox', checked: true });
     const o = this.app.settings.automix;
-    const style = el('select', { class: 'sel' }, ...[['eqswap', 'EQ swap (bass swap)'], ['crossfade', 'Smooth crossfade'], ['filter', 'Filter fade'], ['echo', 'Echo out']].map(([v, l]) => el('option', { value: v }, l)));
+    const style = el('select', { class: 'sel' }, ...[['phrase', 'Phrase-aligned bass swap'], ['eqswap', 'EQ swap (bass swap)'], ['crossfade', 'Smooth crossfade'], ['filter', 'Filter fade'], ['echo', 'Echo out']].map(([v, l]) => el('option', { value: v }, l)));
     style.value = o.style;
+    const order = el('select', { class: 'sel' }, ...[['harmonic', 'Harmonic (key + tempo)'], ['build', 'Build up (rising energy)'], ['peak', 'Peak (rise, then cool down)'], ['wave', 'Waves (up and down)']].map(([v, l]) => el('option', { value: v }, l)));
+    order.value = o.order || 'harmonic';
+    const keySync = el('input', { type: 'checkbox', checked: !!o.keySync });
     const beats = el('select', { class: 'sel' }, ...[8, 16, 32, 64].map((b) => el('option', { value: b }, `${b} beats`)));
     beats.value = String(o.transitionBeats);
     const body = el('div', { class: 'form' },
       el('p', {}, `Auto-mix ${tracks.length} tracks on decks 1 & 2 with beat-matched transitions.`),
-      el('label', { class: 'check' }, smart, ' Smart order (harmonic key + tempo + energy)'),
+      el('label', { class: 'check' }, smart, ' Smart order'),
+      el('label', { class: 'field' }, el('span', {}, 'Energy curve'), order),
+      el('label', { class: 'check' }, keySync, ' Fix key clashes with Key Sync'),
       el('label', { class: 'field' }, el('span', {}, 'Transition style'), style),
       el('label', { class: 'field' }, el('span', {}, 'Transition length'), beats));
     const r = await this.modal('Automix', body, [{ label: 'Cancel', value: null }, { label: 'Start automix', primary: true, value: true }]);
     if (!r) return;
-    this.app.setSetting('automix', { ...o, style: style.value, transitionBeats: Number(beats.value) });
-    try { await this.app.automix.start(tracks, { smart: smart.checked }); } catch (e) { this.app.toast(e.message); }
+    this.app.setSetting('automix', { ...o, style: style.value, transitionBeats: Number(beats.value), order: order.value, keySync: keySync.checked });
+    try { await this.app.automix.start(tracks, { smart: smart.checked, order: order.value }); } catch (e) { this.app.toast(e.message); }
   }
 
   gridEditor(deck) {
@@ -213,11 +218,13 @@ export class Dialogs {
     );
     const am = s.automix;
     const automix = el('div', { class: 'form' },
-      field('Transition style', sel(am.style, [['eqswap', 'EQ swap (bass swap)'], ['crossfade', 'Smooth crossfade'], ['filter', 'Filter fade'], ['echo', 'Echo out']], (v) => set('automix', { ...app.settings.automix, style: v }))),
+      field('Transition style', sel(am.style, [['phrase', 'Phrase-aligned bass swap'], ['eqswap', 'EQ swap (bass swap)'], ['crossfade', 'Smooth crossfade'], ['filter', 'Filter fade'], ['echo', 'Echo out']], (v) => set('automix', { ...app.settings.automix, style: v }))),
       field('Transition length', sel(am.transitionBeats, [8, 16, 32, 64].map((b) => [b, `${b} beats`]), (v) => set('automix', { ...app.settings.automix, transitionBeats: Number(v) }))),
       el('label', { class: 'check' }, chk(am.keepSync, (v) => set('automix', { ...app.settings.automix, keepSync: v })), ' Beat-match transitions'),
       el('label', { class: 'check' }, chk(am.skipSilence, (v) => set('automix', { ...app.settings.automix, skipSilence: v })), ' Skip silence at track ends'),
       el('label', { class: 'check' }, chk(am.shuffle, (v) => set('automix', { ...app.settings.automix, shuffle: v })), ' Shuffle'),
+      el('label', { class: 'check' }, chk(am.keySync, (v) => set('automix', { ...app.settings.automix, keySync: v })), ' Fix key clashes with Key Sync'),
+      field('Smart order energy curve', sel(am.order || 'harmonic', [['harmonic', 'Harmonic'], ['build', 'Build up'], ['peak', 'Peak'], ['wave', 'Waves']], (v) => set('automix', { ...app.settings.automix, order: v }))),
     );
     const dlIn = el('input', { class: 'inp', value: s.downloadDir });
     dlIn.addEventListener('change', () => set('downloadDir', dlIn.value));
