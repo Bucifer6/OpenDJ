@@ -79,8 +79,12 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - name: Build .rpm (Fedora/openSUSE; optional)
         if: runner.os == 'Linux'
-        continue-on-error: true
-        run: npx electron-builder --linux rpm --x64 --publish never
+        run: |
+          if ! npx electron-builder --linux rpm --x64 --publish never > rpm-build.log 2>&1; then
+            echo "::warning::rpm build failed (release continues without .rpm)"
+            tail -n 80 rpm-build.log
+          fi
+          ls -la dist/*.rpm || true
       - uses: actions/upload-artifact@v4
         with:
           name: OpenDJ-${{ runner.os }}
@@ -99,6 +103,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -106,6 +111,7 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
+          body_path: docs/RELEASE_NOTES.md
           generate_release_notes: true
           # manual runs create the tag on the commit that was built
           tag_name: ${{ inputs.release_tag || github.ref_name }}
