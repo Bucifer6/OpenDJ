@@ -422,3 +422,24 @@ test('#9 ids like __proto__ / constructor never reach Object.prototype', () => d
   assert.throws(() => app.library.upsertTrack({ id: '__proto__', title: 'x' }), /Bad track id/);
   assert.equal({}.playCount, undefined);
 }));
+
+// ---------------------------------------------------------------- #12 private files on disk
+test('#12 data dir 0700, library/settings JSON 0600 (existing files fixed on startup)', { skip: process.platform === 'win32' }, async () => {
+  const { Library } = await import('../server/library.js');
+  const root = tmpdir();
+  const dir = path.join(root, 'data');
+  const lib = new Library(dir);
+  lib.saveSource({ id: 's', type: 'subsonic', url: 'http://x', password: 'pw' });
+  lib.flush(); lib.flush(); // second flush also writes .bak
+  const mode = (f) => fs.statSync(f).mode & 0o777;
+  assert.equal(mode(dir), 0o700);
+  for (const f of ['library.json', 'settings.json', 'library.json.bak', 'settings.json.bak']) assert.equal(mode(path.join(dir, f)), 0o600, f);
+  // an older install with world-readable files
+  const old = path.join(root, 'old'); fs.mkdirSync(old);
+  for (const f of ['library.json', 'settings.json', 'auth.json']) fs.writeFileSync(path.join(old, f), '{}', { mode: 0o644 });
+  fs.writeFileSync(path.join(old, 'library.json.tmp'), '{}', { mode: 0o644 });
+  const lib2 = new Library(old);
+  for (const f of ['library.json', 'settings.json', 'auth.json']) assert.equal(mode(path.join(old, f)), 0o600, f);
+  lib2.flush();
+  assert.equal(mode(path.join(old, 'library.json')), 0o600, 'rewritten through a leftover 0644 .tmp');
+});

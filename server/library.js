@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { readJsonSafe, writeJsonAtomic } from './jsonstore.js';
+import { readJsonSafe, writeJsonAtomic, chmodQuiet } from './jsonstore.js';
 
 export const DEFAULT_SETTINGS = {
   deckCount: 2,
@@ -74,10 +74,14 @@ export const okId = (id) => typeof id === 'string' && id.length > 0 && !BAD_IDS.
 export class Library {
   constructor(dataDir) {
     this.dataDir = dataDir;
-    fs.mkdirSync(dataDir, { recursive: true });
+    fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 }); // new data dirs are private to the user
     fs.mkdirSync(path.join(dataDir, 'waveforms'), { recursive: true });
     this.file = path.join(dataDir, 'library.json');
     this.settingsFile = path.join(dataDir, 'settings.json');
+    // files written by older versions were 0644: they hold source passwords / tokens and API keys
+    for (const f of [this.file, this.settingsFile, path.join(dataDir, 'auth.json'), path.join(dataDir, 'secrets.json')]) {
+      for (const x of [f, f + '.bak', f + '.tmp']) chmodQuiet(x, 0o600);
+    }
     this.listeners = new Set();
     this.data = { version: 1, tracks: {}, playlists: [], folders: [], sources: [] };
     this.settings = structuredClone(DEFAULT_SETTINGS);
