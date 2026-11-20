@@ -95,7 +95,7 @@ It lists what each offers, what OpenDJ had before this pass, what this pass adde
 | HID controllers (Traktor Kontrol, Pioneer HID) | ✔ | ✔ | ✔ | ✔ | ✔ | ❌ device-specific protocols; WebHID is possible later per device |
 | Pro DJ Link / CDJ network | ✔ | ◐ | — | ◐ | — | ❌ proprietary protocol |
 | Video mixing / karaoke / lyrics | ✔ (video) | ✔ (Video) | — | ✔ | ✔ | ❌ out of scope for now |
-| Lighting (SoundSwitch / DMX) | ✔ | ✔ | — | ✔ | — | ◐ MIDI clock out can drive lighting software; no DMX |
+| Lighting (SoundSwitch / DMX) | ✔ | ✔ | — | ✔ | — | 🆕 automatic beat- and phrase-synced light shows over Art-Net, sACN/E1.31, USB DMX (Enttec Pro-compatible), WLED, Philips Hue, OSC and MIDI. ◐ no SoundSwitch/rekordbox lighting file import, no fixture library yet |
 | Live broadcast (Icecast/Shoutcast) | — | — | ✔ | ✔ | ✔ | ❌ planned (needs an encoder; could use FFmpeg when it is installed) |
 
 ## Summary

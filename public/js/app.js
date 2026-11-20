@@ -10,6 +10,7 @@ import { AutoMix } from './automix.js';
 import { MidiManager } from './midi/midi.js';
 import { Sequencer } from './audio/sequencer.js';
 import { applyTheme } from './ui/themes.js';
+import { Lighting } from './lighting/lighting.js';
 
 class App {
   constructor() { this.shift = false; this._shiftKey = false; }
@@ -29,6 +30,8 @@ class App {
     this.wireEvents(); // subscribe to server events before loading the library so no change is missed
     await this.midi.init();
     if (this.settings.midiClockOutput) this.midi.setClockOutput(this.settings.midiClockOutput);
+    this.lighting = new Lighting(this);
+    try { await this.lighting.init(); } catch (e) { console.warn('lighting init failed', e); }
     await this.library.refresh();
     this.library.refreshDrives();
     setInterval(() => this.library.refreshDrives(), 15000); // notice USB sticks being plugged in
@@ -89,6 +92,7 @@ class App {
       el('div', { class: 'tb-spacer' }),
       el('div', { class: 'tb-group' }, this.recBtn, this.recTime),
       this.midiDot, this.cpu, this.clock,
+      el('button', { class: 'btn sm light-btn', title: 'Lighting (DMX, Art-Net, sACN, WLED, Hue, OSC)', onclick: () => this.lighting?.openPanel() }, '💡 LIGHTS'),
       el('button', { class: 'btn icon', title: 'Settings', onclick: () => this.dialogs.settings() }, '⚙'),
       el('button', { class: 'btn icon', title: 'Full screen', onclick: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()) }, '⛶'),
     );

@@ -22,7 +22,7 @@ export const TEMPLATES = [
 
 export const EFFECTS = {
   wash: 'Colour wash', pulse: 'Beat pulse', chase: 'Chase', pingpong: 'Left / right', build: 'Build-up',
-  drop: 'Drop (chase + strobe)', fade: 'Slow fade', outro: 'Wash fade-out', rainbow: 'Rainbow', strobe: 'Strobe', static: 'Static colour',
+  drop: 'Drop chase', fade: 'Slow fade', outro: 'Wash fade-out', rainbow: 'Rainbow', strobe: 'Strobe', static: 'Static colour',
 };
 
 export const DEFAULT_MAP = { intro: 'wash', verse: 'pulse', buildup: 'build', drop: 'drop', breakdown: 'fade', outro: 'outro' };

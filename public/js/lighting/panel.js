@@ -194,7 +194,7 @@ export function openLightingPanel(L, tab = 'live') {
         for (const f of cfg.fixtures) { if (f.channels?.length) Object.assign(f, nextAddress(placed, f.channels.length)); placed.push(f); }
         save(); render();
       };
-      wrap.replaceChildren(
+      wrap.replaceChildren(...[
         el('div', { class: 'row lt-addbar' }, field('Template', tpl), field('Count', count), field('Group', group),
           el('button', { class: 'btn primary', onclick: add }, 'Add fixtures'),
           el('button', { class: 'btn', onclick: readdress, title: 'Pack all DMX fixtures from address 1 in patch order' }, 'Auto-address all')),
@@ -205,7 +205,7 @@ export function openLightingPanel(L, tab = 'live') {
           : el('p', { class: 'hint' }, 'No fixtures yet. Pick a template and click Add: addresses are assigned automatically.'),
         bad.size ? el('p', { class: 'hint lt-warn' }, '⚠ Highlighted fixtures overlap another fixture\'s channels or run past channel 512.') : null,
         el('p', { class: 'hint' }, 'Patch order is chase order. Left/right groups are used by the left/right effect. Channel functions: dim r g b w strobe rate pan tilt speed mode none, or =N for a fixed value (e.g. =255 to open a shutter).'),
-      );
+      ].filter(Boolean));
     };
     render();
     return wrap;
@@ -275,7 +275,7 @@ export function openLightingPanel(L, tab = 'live') {
         field('Net', num(o.artnet, 'net', { min: 0, max: 127 })), field('Subnet', num(o.artnet, 'subnet', { min: 0, max: 15 })), field('Universe', num(o.artnet, 'universe', { min: 0, max: 15 })))),
       card('sacn', 'sACN / E1.31', el('div', { class: 'row' },
         check('Multicast', o.sacn.multicast, (v) => { o.sacn.multicast = v; save(); }),
-        field('Unicast IP (if not multicast)', txt(o.sacn, 'host')), field('First universe', num(o.sacn, 'universe', { min: 1 })), field('Priority', num(o.sacn, 'priority', { min: 0, max: 200 })))),
+        field('Unicast IP (when multicast is off)', txt(o.sacn, 'host')), field('First universe', num(o.sacn, 'universe', { min: 1 })), field('Priority', num(o.sacn, 'priority', { min: 0, max: 200 })))),
       card('wled', 'WLED (LED strips)', el('div', { class: 'form' },
         strips.length ? el('div', { class: 'lt-inline-list' }, ...strips.map((f) => el('div', { class: 'row' }, el('b', { class: 'lt-strip-name' }, f.name), field('IP', txt(f, 'host', { placeholder: '192.168.1.50' })), field('LEDs', num(f, 'pixels', { min: 1, max: 1500 })))))
           : el('p', { class: 'hint' }, 'No WLED strips patched.'),
@@ -312,8 +312,9 @@ export function openLightingPanel(L, tab = 'live') {
       el('h3', {}, 'Behaviour'),
       el('div', { class: 'row' },
         field('When the music stops', select(s.idle, [['dim', 'Dim colour cycle'], ['wash', 'Colour wash'], ['blackout', 'Blackout']], (v) => { s.idle = v; save(); })),
-        field('Latency offset (ms)', input(s.latencyMs, (v) => { s.latencyMs = v; save(); }, { type: 'number', class: 'inp lt-num', min: -500, max: 500 }), 'Positive fires lights earlier, to make up for slow fixtures or networks.'),
+        field('Latency offset (ms)', input(s.latencyMs, (v) => { s.latencyMs = v; save(); }, { type: 'number', class: 'inp lt-num', min: -500, max: 500 })),
         field('Frame rate', select(cfg.fps, [[25, '25 fps'], [30, '30 fps'], [40, '40 fps'], [44, '44 fps']], (v) => { cfg.fps = Number(v); save(); }))),
+      el('p', { class: 'hint' }, 'A positive latency offset fires the lights earlier, to make up for slow fixtures or networks. Audio output latency is already compensated.'),
       check('Strobe accents on drop downbeats', s.strobeAccents, (v) => { s.strobeAccents = v; save(); }),
       el('p', { class: 'hint' }, 'Phrases come from the track analysis (intro, verse, build-up, drop, breakdown, outro). Without phrase data the show uses the Verse effect.'),
     );

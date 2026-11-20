@@ -67,6 +67,25 @@ Runs as a desktop app (Windows, macOS, Linux via Electron) or in Chrome/Edge.
 - Beat-matched, phrase-aligned transitions: EQ bass-swap, crossfade, filter fade or echo-out
 - Optional **smart ordering** by harmonic key, tempo and energy; skip-to-next; queue tracks from the browser
 
+### Lighting
+Lights follow the music automatically. The show changes with each phrase:
+- **intro**: colour wash
+- **build-up**: accelerating chase
+- **drop**: full chase with strobe accents
+- **breakdown**: dim fade
+
+Colours come from the track's key or energy.
+
+Outputs:
+- **Art-Net** and **sACN (E1.31)** for DMX nodes and lighting desks
+- **USB DMX** with Enttec DMX USB Pro-compatible widgets
+- **WLED** LED strips
+- **Philips Hue**
+- **OSC** for QLC+, Resolume, TouchDesigner and similar
+- **MIDI** notes and MIDI clock
+
+You can patch fixtures from templates. Live pads cover blackout, strobe, full, freeze, colour, intensity and speed. Open the panel with **💡 LIGHTS** in the top bar.
+
 ### Themes
 Nine themes in *Settings → Appearance*:
 - Midnight, Graphite, Club Red, Neon, Ocean, Black & Gold, Forest

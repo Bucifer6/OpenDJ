@@ -14,11 +14,17 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 
 async function createWindow() {
   server = await start({ port: 0, dataDir: path.join(app.getPath('userData'), 'library') });
-  const allowed = new Set(['midi', 'midiSysex', 'media', 'speaker-selection', 'hid', 'clipboard-sanitized-write', 'fullscreen']);
+  const allowed = new Set(['midi', 'midiSysex', 'media', 'speaker-selection', 'hid', 'clipboard-sanitized-write', 'fullscreen', 'serial']);
   session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(allowed.has(perm)));
   session.defaultSession.setPermissionCheckHandler((_wc, perm) => allowed.has(perm));
   session.defaultSession.setDevicePermissionHandler(() => true);
   setupHidChooser(session.defaultSession);
+  // USB DMX (Enttec DMX USB Pro-compatible) via Web Serial: prefer FTDI / Enttec / DMX ports
+  session.defaultSession.on('select-serial-port', (e, ports, _wc, cb) => {
+    e.preventDefault();
+    const p = ports.find((x) => /\b(0403|1027)\b|ftdi|enttec|dmx/i.test(`${x.vendorId} ${x.displayName} ${x.portName}`)) || ports[0];
+    cb(p ? p.portId : '');
+  });
 
   const win = new BrowserWindow({
     width: 1600, height: 960, minWidth: 1100, minHeight: 700,

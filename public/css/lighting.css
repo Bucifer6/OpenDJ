@@ -59,3 +59,5 @@
 .lt-inline-list { display: flex; flex-direction: column; gap: 6px; }
 .lt-map { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .lt-color { width: 46px !important; min-width: 0 !important; height: 30px; padding: 2px !important; flex: 0 0 auto !important; }
+.lt-out .lt-check { align-self: center; }
+.lt-out .row > .hint { align-self: center; }
