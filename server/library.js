@@ -258,8 +258,10 @@ export class Library {
     return { ...rest, hasPassword: !!password, hasToken: !!token };
   }
   getSource(sid) { return this.data.sources.find((s) => s.id === sid); }
-  saveSource(cfg) {
+  /** Add or update a source. `replace`: the stored entry becomes exactly `cfg` (dropped secrets stay dropped). */
+  saveSource(cfg, { replace = false } = {}) {
     const existing = cfg.id && this.getSource(cfg.id);
+    if (existing && replace) for (const k of Object.keys(existing)) if (k !== 'id' && k !== 'addedAt' && !(k in cfg)) delete existing[k];
     if (existing) Object.assign(existing, cfg);
     else this.data.sources.push({ ...cfg, id: cfg.id || newId(), addedAt: Date.now() });
     this.changed('sources');

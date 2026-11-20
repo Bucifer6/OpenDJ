@@ -236,3 +236,97 @@ test('#4 a short or example OPENDJ_PASSWORD refuses to start', async () => {
     }
   }
 });
+
+// ---------------------------------------------------------------- #5 write-only secrets vs. new targets
+const fakeSubsonic = async () => {
+  const log = [];
+  const srv = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x'); log.push(u.searchParams);
+    res.setHeader('Content-Type', 'application/json');
+    if (!u.searchParams.get('p')) return res.end(JSON.stringify({ 'subsonic-response': { status: 'failed', error: { code: 41, message: 'token auth not supported' } } }));
+    res.end(JSON.stringify({ 'subsonic-response': { status: 'ok', type: 'fake', musicFolders: {}, searchResult3: {}, playlists: {} } }));
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  return { url: `http://127.0.0.1:${srv.address().port}`, log, close: () => srv.close() };
+};
+const md5 = async (s) => (await import('node:crypto')).createHash('md5').update(s).digest('hex');
+
+test('#5 media sources: a saved password/token is never sent to a new URL; server-only fields are ignored', () => desktop(async ({ app, c }) => {
+  const { sourceConfigFromForm } = await import('../server/sources/index.js');
+  const prev = { id: 's1', type: 'jellyfin', name: 'J', url: 'http://a.example:8096', username: 'dj', password: 'PW', token: 'TOK', userId: 'U1', pathPrefix: '', lastSync: 5 };
+  assert.deepEqual([sourceConfigFromForm({ id: 's1', type: 'jellyfin', name: 'J2', url: 'http://a.example:8096/', username: 'dj' }, prev)].map((x) => [x.password, x.token, x.userId, x.name, x.lastSync]), [['PW', 'TOK', 'U1', 'J2', 5]], 'same endpoint keeps them');
+  for (const change of [{ url: 'http://evil.example:8096' }, { username: 'other' }, { type: 'emby' }]) {
+    const cfg = sourceConfigFromForm({ id: 's1', type: 'jellyfin', url: prev.url, username: 'dj', ...change }, prev);
+    assert.equal(cfg.password, undefined, JSON.stringify(change)); assert.equal(cfg.token, undefined); assert.equal(cfg.userId, undefined);
+  }
+  const injected = sourceConfigFromForm({ type: 'jellyfin', url: 'http://x', username: 'u', token: 'T', userId: 'U', legacyAuth: true, deviceId: 'D' }, null);
+  assert.deepEqual([injected.token, injected.userId, injected.legacyAuth, injected.deviceId], [undefined, undefined, undefined, undefined]);
+  assert.equal(sourceConfigFromForm({ type: 'plex', url: 'http://x', token: 'PLEXTOKEN' }, null).token, 'PLEXTOKEN', 'the Plex form has a token field');
+
+  // end to end: re-point a saved legacy-auth Subsonic source at another server without retyping the password
+  const a = await fakeSubsonic(), b = await fakeSubsonic();
+  try {
+    const r1 = await c('POST', '/api/sources', { type: 'subsonic', name: 'S', url: a.url, username: 'dj', password: 'TOPSECRET', legacyAuth: true });
+    assert.equal(r1.status, 200);
+    const id = r1.json.source.id;
+    const r2 = await c('POST', '/api/sources', { id, type: 'subsonic', name: 'S', url: b.url, username: 'dj' });
+    assert.notEqual(r2.status, 200, 'cannot connect without the password');
+    for (const q of b.log) {
+      assert.notEqual(q.get('p'), 'enc:' + Buffer.from('TOPSECRET').toString('hex'));
+      if (q.get('t')) assert.notEqual(q.get('t'), await md5('TOPSECRET' + q.get('s')));
+    }
+    assert.equal(app.library.getSource(id).url, a.url, 'stored source unchanged');
+    // without the legacy checkbox, error 41 does not make the server send the password in the URL
+    const r3 = await c('POST', '/api/sources', { type: 'subsonic', name: 'S2', url: b.url, username: 'dj', password: 'OTHERSECRET' });
+    assert.notEqual(r3.status, 200);
+    assert.equal(b.log.some((q) => q.get('p')), false);
+    // restore: a backup that moves a source keeps no secret
+    const bk = JSON.parse((await c('GET', '/api/backup')).body);
+    bk.library.sources[0].url = b.url;
+    await c('POST', '/api/restore', bk);
+    assert.equal(app.library.getSource(id).password, undefined);
+  } finally { a.close(); b.close(); }
+}));
+
+test('#5 broadcast secrets and the Hue key are dropped when the target changes', () => desktop(async ({ app, c }) => {
+  let r = await c('PUT', '/api/broadcast/config', { targets: [{ id: 'ice', type: 'icecast', host: 'radio.example.com', port: 8000, password: 'ICEPW' }, { id: 'tw', type: 'rtmp', rtmpUrl: 'rtmp://live.twitch.tv/app', streamKey: 'live_KEY_123' }] });
+  assert.deepEqual(r.json.config.targets.map((t) => [t.hasPassword, t.hasStreamKey]), [[true, false], [false, true]]);
+  r = await c('PUT', '/api/broadcast/config', { targets: [{ id: 'ice', type: 'icecast', host: 'radio.example.com', port: 8000, stationName: 'renamed' }, { id: 'tw', type: 'rtmp', rtmpUrl: 'rtmp://live.twitch.tv/app' }] });
+  assert.deepEqual(r.json.config.targets.map((t) => [t.hasPassword, t.hasStreamKey]), [[true, false], [false, true]], 'same endpoint: kept');
+  for (const change of [{ host: 'evil.example' }, { port: 8001 }, { tls: true }, { username: 'admin' }]) {
+    await c('PUT', '/api/broadcast/config', { targets: [{ id: 'ice', type: 'icecast', host: 'radio.example.com', port: 8000, password: 'ICEPW' }] });
+    r = await c('PUT', '/api/broadcast/config', { targets: [{ id: 'ice', type: 'icecast', host: 'radio.example.com', port: 8000, ...change }] });
+    assert.equal(r.json.config.targets[0].hasPassword, false, JSON.stringify(change));
+  }
+  await c('PUT', '/api/broadcast/config', { targets: [{ id: 'tw', type: 'rtmp', rtmpUrl: 'rtmp://live.twitch.tv/app', streamKey: 'live_KEY_123' }] });
+  r = await c('PUT', '/api/broadcast/config', { targets: [{ id: 'tw', type: 'rtmp', rtmpUrl: 'rtmp://evil.example/app' }] });
+  assert.equal(r.json.config.targets[0].hasStreamKey, false);
+  // Hue: the redacted key only stands for the stored one on the same bridge
+  app.library.updateSettings({ lighting: { outputs: { hue: { bridge: '10.0.0.2', username: 'HUESECRET' } } } });
+  app.lighting.engine?.setConfig?.(app.library.settings.lighting);
+  await c('PUT', '/api/settings', { lighting: { outputs: { hue: { bridge: '10.6.6.6', username: '••••••' } } } });
+  assert.equal(app.library.settings.lighting.outputs.hue.username, '');
+  app.library.updateSettings({ lighting: { outputs: { hue: { bridge: '10.0.0.2', username: 'HUESECRET' } } } });
+  await c('PUT', '/api/settings', { lighting: { outputs: { hue: { bridge: '10.0.0.2', username: '••••••' } } } });
+  assert.equal(app.library.settings.lighting.outputs.hue.username, 'HUESECRET');
+}));
+
+test('#5 lighting config: a new Hue bridge address needs pairing again', async () => {
+  const { registerLightingRoutes } = await import('../server/lighting/routes.js');
+  const routes = {};
+  const library = { settings: { lighting: { outputs: { hue: { bridge: '10.0.0.2', username: 'HUESECRET' } } } }, updateSettings(p) { Object.assign(this.settings, p); } };
+  const l = registerLightingRoutes({ route: (m, p, h) => { routes[`${m} ${p}`] = h; }, library, fetch: async () => { throw new Error('offline'); } });
+  try {
+    const put = (hue) => routes['PUT /api/lighting/config']({ body: { ...l.engine?.config, outputs: { ...(library.settings.lighting.outputs), hue } } });
+    await put({ bridge: '10.6.6.6', username: '••••••' });
+    assert.equal(library.settings.lighting.outputs.hue.username, '');
+    library.settings.lighting.outputs.hue = { bridge: '10.0.0.2', username: 'HUESECRET' };
+    l.engine?.setConfig?.(library.settings.lighting);
+  } finally { l.close?.(); }
+});
+
+test('#5 (suspected) RTMP stream key is redacted from FFmpeg errors', async () => {
+  const { redactKey } = await import('../server/broadcast.js');
+  assert.equal(redactKey('Error opening output rtmp://live.twitch.tv/app/live_KEY_123: I/O error', 'live_KEY_123'), 'Error opening output rtmp://live.twitch.tv/app/***: I/O error');
+  assert.doesNotMatch(redactKey('rtmp://a.example/app/sk_abcdefghijklmnop failed', ''), /abcdefghijklmnop/);
+});

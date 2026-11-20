@@ -19,7 +19,7 @@ import { findFfmpeg, needsTranscode, remoteBrowserDecodable, browserPlayableVide
 import { Transcoder } from './transcode.js';
 import { Auth } from './auth.js';
 import { redactSettings, REDACTED } from './library-tools.js';
-import { SOURCE_TYPES } from './sources/index.js';
+import { SOURCE_TYPES, sourceConfigFromForm } from './sources/index.js';
 import { parseRekordboxXml, buildRekordboxXml } from './rekordbox.js';
 import { parseM3U, buildM3U } from './m3u.js';
 import { evaluateSmart, normSmart, SMART_FIELDS, SMART_OPS, SOURCE_VALUES, TRACK_COLORS } from './smart.js';
@@ -676,10 +676,13 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   route('GET', '/api/source-types', () => SOURCE_TYPES);
   route('GET', '/api/sources', () => library.data.sources.map((s) => library.publicSource(s)));
   route('POST', '/api/sources', async ({ body }) => {
-    const prev = body.id ? library.getSource(body.id) : null;
-    const cfg = { ...(prev || {}), ...body };
-    if (prev && !body.password) cfg.password = prev.password; // keep stored secret when editing
-    const result = await addSource(library, cfg);
+    const prev = typeof body.id === 'string' ? library.getSource(body.id) : null;
+    if (body.id !== undefined && !prev) throw new HttpError(404, 'No source');
+    // stored secrets are only reused for the same endpoint (see sourceConfigFromForm)
+    let result;
+    try { result = await addSource(library, sourceConfigFromForm(body, prev)); } catch (e) {
+      throw e.status ? e : new HttpError(502, `Could not connect: ${String(e.message).slice(0, 300)}`);
+    }
     runJob('sync:' + result.source.id, () => syncSource(library, result.source.id, { onProgress: (p) => emit('sync', p) }));
     return result;
   });
@@ -703,8 +706,9 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     delete patch.allowedRoots; // set in settings.json or OPENDJ_MUSIC_ROOTS, never from the web UI
     delete patch.recording; delete patch.broadcast; // only via their own validated endpoints
     for (const k of ['downloadDir', 'uploadDir']) if (k in patch && patch[k]) allowPath(String(patch[k]), 'This folder');
-    const hue = patch.lighting?.outputs?.hue;
-    if (hue?.username === REDACTED) hue.username = library.settings.lighting?.outputs?.hue?.username || '';
+    const hue = patch.lighting?.outputs?.hue, curHue = library.settings.lighting?.outputs?.hue;
+    // the redacted Hue key stands for the stored one, but only for the same bridge
+    if (hue?.username === REDACTED) hue.username = curHue?.username && String(hue.bridge || '') === String(curHue.bridge || '') ? curHue.username : '';
     return redactSettings(library.updateSettings(patch));
   }, { bodyLimit: BIG_JSON });
   route('GET', '/api/jobs', () => [...jobs.keys()]);

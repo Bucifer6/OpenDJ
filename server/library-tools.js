@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { AUDIO_EXT } from './scanner.js';
 import { DEFAULT_SETTINGS, newId } from './library.js';
+import { sourceEndpoint } from './sources/index.js';
 
 // ---------------------------------------------------------------- missing files
 
@@ -307,7 +308,7 @@ export function restoreBackup(library, history, backup, { pathAllowed = () => tr
     version: 1, tracks, playlists, folders,
     sources: (Array.isArray(lib.sources) ? lib.sources : []).filter((s) => isObj(s) && validId(s.id)).map((s) => {
       const old = oldSources.get(s.id);
-      if (!old) return s;
+      if (!old || sourceEndpoint(old) !== sourceEndpoint(s)) return s; // secrets stay bound to their endpoint
       const keep = Object.fromEntries(SECRET_KEYS.filter((k) => old[k]).map((k) => [k, old[k]]));
       return { ...s, ...keep };
     }),

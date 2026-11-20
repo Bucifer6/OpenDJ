@@ -27,7 +27,7 @@ export function clientFor(library, sourceId) {
 export async function addSource(library, cfg) {
   const client = createClient(cfg);
   const info = await client.connect();
-  const saved = library.saveSource({ ...cfg, ...client.persistable(), serverName: info?.serverName || cfg.name });
+  const saved = library.saveSource({ ...cfg, ...client.persistable(), serverName: info?.serverName || cfg.name }, { replace: true });
   // Plex/Jellyfin/Emby never sign in again once they have a token: don't keep the raw password around.
   // (Subsonic signs every request with it; MediaMax re-logs in when its session expires.)
   if (TOKEN_ONLY.has(saved.type) && saved.token) delete saved.password;
