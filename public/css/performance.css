@@ -170,7 +170,7 @@
 :root.w1300 .deck-toggles .btn, :root.w1300 .deck-mid .loop-row .btn { letter-spacing: -.02em; }
 
 /* ---- AI stem row: one line, the last knob is never cut off ---- */
-.deck-stems .stems-row:first-child { flex-wrap: nowrap; }
+.deck-stems .stems-row:first-child { flex-wrap: nowrap; padding-right: 5px; } /* room for the last knob ring */
 .deck-stems .stem-cell > .knob-wrap { flex: 0 0 auto; }
 .deck-stems .stem-btn { overflow: hidden; text-overflow: ellipsis; }
 
