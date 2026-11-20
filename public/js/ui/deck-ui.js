@@ -235,9 +235,10 @@ export function buildDeck(app, deck) {
   // ---------- updates ----------
   const updateMeta = () => {
     const t = deck.track;
-    title.textContent = t ? t.title || 'Untitled' : (deck.error ? `⚠ ${deck.error}` : 'Drop a track here');
-    title.title = t ? `${t.title || ''}${t.artist ? ' — ' + t.artist : ''}` : '';
-    artist.textContent = t ? t.artist || '' : '';
+    const f = !t && deck.error ? deck.failedTrack : null; // failed load: keep the track's name, show the error under it
+    title.textContent = t ? t.title || 'Untitled' : f ? `⚠ ${f.title || 'Untitled'}` : (deck.error ? `⚠ ${deck.error}` : 'Drop a track here');
+    title.title = t ? `${t.title || ''}${t.artist ? ' — ' + t.artist : ''}` : f ? `Could not load ${f.path || f.title}: ${deck.error}` : '';
+    artist.textContent = t ? t.artist || '' : f ? `Could not load: ${deck.error}` : '';
     cover.style.backgroundImage = t ? `url(${api.coverUrl(t.id)})` : '';
     const cam = toCamelot(t?.key);
     const playing = deck.playingCamelot || cam;

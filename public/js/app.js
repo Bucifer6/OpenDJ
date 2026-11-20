@@ -19,6 +19,8 @@ import { setupStems } from './stems/stems-ui.js';
 import { setupRecording } from './recording/index.js';
 import { setupLyrics } from './lyrics/lyrics.js';
 import { dvsButton } from './dvs/dvs-ui.js';
+import { BackgroundAnalyser } from './audio/background-analysis.js';
+import { isUndecodable } from './audio/analysis-queue.js';
 
 class App {
   constructor() { this.shift = false; this._shiftKey = false; }
@@ -32,6 +34,7 @@ class App {
     this.dvs = new DvsManager(this);
     this.dialogs = new Dialogs(this);
     this.library = new LibraryUI(this);
+    this.analyser = new BackgroundAnalyser(this);
     this.upload = setupUpload(this);
     if ('serviceWorker' in navigator && !/Electron/.test(navigator.userAgent)) navigator.serviceWorker.register('/sw.js').catch(() => {});
     this.automix = new AutoMix(this);
@@ -48,6 +51,8 @@ class App {
     this.lighting = new Lighting(this);
     try { await this.lighting.init(); } catch (e) { console.warn('lighting init failed', e); }
     await this.library.refresh();
+    this.analyser.autoQueue(); // tracks added earlier (or by another device) that were never analysed
+    api.capabilities().then((c) => { this.hosted = !!c.hosted; this.auth = !!c.auth; this.library.renderEmpty(); this.updateHostedUi?.(); }).catch(() => {});
     this.library.refreshDrives();
     setInterval(() => this.library.refreshDrives(), 15000); // notice USB sticks being plugged in
     this.setDeckCount(this.deckCount, false);
@@ -72,8 +77,17 @@ class App {
     const deck = this.engine.decks[deckIndex];
     if (!t) { this.toast('That track is no longer in the library'); throw new Error('Track not found in the library'); }
     if (deck.playing && !this.automix.enabled && !(await this.dialogs.confirm(`Deck ${deckIndex + 1} is playing. Load "${t.title}" anyway?`))) return;
-    try { await deck.load({ ...t }); this.library.renderRows(true); }
-    catch (e) { this.toast(`Could not load "${t.title}": ${e.message}`); throw e; }
+    try {
+      if (!(await deck.load({ ...t }))) return;
+      if (t.unreadable) api.updateTrack(t.id, { unreadable: false }).then((x) => this.library.updateTrack(x)).catch(() => {});
+      this.library.renderRows(true);
+    } catch (e) {
+      const file = String(t.path || t.localPath || '').split(/[\\/]/).pop();
+      const bad = isUndecodable(e);
+      this.toast(`⚠ Could not load "${t.title}"${file && file !== t.title ? ` (${file})` : ''}: ${bad ? 'the file could not be decoded (corrupt, empty or unsupported)' : e.message}`);
+      if (bad && !t.unreadable) api.updateTrack(t.id, { unreadable: true }).then((x) => this.library.updateTrack(x)).catch(() => {});
+      throw e;
+    }
   }
 
   toast(msg) {
@@ -276,16 +290,29 @@ class App {
 
   // ---------------- events / input ----------------
   wireEvents() {
-    let refreshT;
+    let refreshT, scanDone = false;
     api.events({
-      library: () => { clearTimeout(refreshT); refreshT = setTimeout(() => this.library.refresh(), 600); },
-      scan: (p) => this.library.setJobStatus(p.done ? '' : `Scanning… ${p.scanned} files`),
+      library: () => {
+        // While tracks are being analysed every one of them changes the library: refresh at most every 4 s then.
+        if (this.analyser.running && refreshT) return;
+        clearTimeout(refreshT);
+        refreshT = setTimeout(async () => { refreshT = null; await this.library.refresh(); this.analyser.autoQueue({ afterScan: scanDone }); scanDone = false; }, this.analyser.running ? 4000 : 600);
+      },
+      scan: (p) => { this.library.setJobStatus(p.done ? '' : `Scanning… ${p.scanned} files`); if (p.done) scanDone = true; },
       sync: (p) => this.library.setJobStatus(p.finished ? '' : `Syncing media server… ${p.done}${p.total ? '/' + p.total : ''}`),
       downloads: (d) => this.library.setDownloads(d),
       lyrics: (e) => this.lyrics?.invalidate(e.trackId),
       'job-error': (e) => { this.library.setJobStatus(''); this.toast(`⚠ ${e.message}`); },
     });
     this.engine.on('track-updated', (t) => this.library.updateTrack(t));
+    this.analyser.on('progress', (st) => this.library.setAnalysisStatus(st));
+    let unreadable = [];
+    this.analyser.on('unreadable', (t) => unreadable.push(t.title || t.path));
+    this.analyser.on('idle', () => {
+      if (unreadable.length) this.toast(`⚠ ${unreadable.length === 1 ? `"${unreadable[0]}" could not be decoded` : `${unreadable.length} files could not be decoded (${unreadable.slice(0, 3).map((x) => `"${x}"`).join(', ')}${unreadable.length > 3 ? '…' : ''})`}: marked ⚠ in the library`);
+      unreadable = [];
+      this.library.applyView(); // views that depend on analysis (bpm:, smart playlists) are complete now
+    });
     this.engine.on('warning', (m) => this.toast(`⚠ ${m}`));
     this.engine.on('recording', (on) => this.recBtn.classList.toggle('active', on));
     this.engine.on('master-deck', () => this.library.renderRows(true));

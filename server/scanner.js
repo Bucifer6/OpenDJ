@@ -100,7 +100,8 @@ export async function addFile(library, file, sourceId = 'files') {
   if (!st || !st.isFile()) return null;
   if (prev && prev.mtime === st.mtimeMs && 'needsTranscode' in prev) return prev; // unchanged (and has format info)
   const tags = await readTags(file, { ffmpeg: library.media?.ffmpeg()?.path });
-  return library.upsertTrack({ id: tid, sourceType: 'local', sourceId, path: path.resolve(file), ...tags });
+  // 0-byte files can never play: flag them right away (the browser flags other undecodable files when it tries)
+  return library.upsertTrack({ id: tid, sourceType: 'local', sourceId, path: path.resolve(file), ...tags, ...(st.size === 0 ? { unreadable: true } : {}) });
 }
 
 /** Scan a library folder. Removes tracks whose files disappeared (unless the drive itself is gone). */

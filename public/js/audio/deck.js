@@ -29,7 +29,7 @@ export class Deck extends Emitter {
     this.track = null; this.duration = 0; this.sr = this.ctx.sampleRate;
     this._pos = 0; this._t = 0; this._rate = 0; this._seekGuard = 0; this.playing = false;
     this.cuePoint = 0; this.loop = null; this.loopIn = null; this.waveform = null;
-    this.bpm = 0; this.gridOffset = 0; this.loading = false; this.error = null;
+    this.bpm = 0; this.gridOffset = 0; this.loading = false; this.error = null; this.failedTrack = null;
     this._countedPlay = false;
     this.frames = 0; this._stemSeq = (this._stemSeq || 0) + 1;
     if (this.stemsReady || this.stemsLoading) { this.stemsReady = false; this.engine.channels?.[this.index]?.setAiStems?.(false); }
@@ -138,7 +138,7 @@ export class Deck extends Emitter {
       return true;
     } catch (e) {
       if (stale()) return false;
-      this.loading = false; this.error = e.message; this.track = null;
+      this.loading = false; this.error = e.message; this.track = null; this.failedTrack = track; // keep the name for the deck title
       this.emit('error', e); this.emit('state');
       throw e;
     }
