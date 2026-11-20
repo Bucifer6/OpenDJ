@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { readJsonSafe, writeJsonAtomic } from './jsonstore.js';
+import { sanitizeSetting, sanitizeSettings } from './settings-schema.js';
 
 export const DEFAULT_SETTINGS = {
   deckCount: 2,
@@ -96,7 +97,7 @@ export class Library {
     const st = readJsonSafe(this.settingsFile);
     if (st.error) this.loadErrors.push(st.error);
     const s = st.data && typeof st.data === 'object' ? st.data : {};
-    const clean = Object.fromEntries(Object.entries(s).filter(([k]) => Object.hasOwn(DEFAULT_SETTINGS, k)));
+    const clean = sanitizeSettings(s, DEFAULT_SETTINGS); // known keys only, invalid values -> default (a bad value must not brick the UI)
     this.settings = { ...this.settings, ...clean, automix: { ...this.settings.automix, ...(clean.automix || {}) } };
     for (const e of this.loadErrors) console.error('[opendj]', e);
   }
@@ -279,8 +280,10 @@ export class Library {
   updateSettings(patch) {
     for (const [k, v] of Object.entries(patch || {})) {
       if (!Object.hasOwn(DEFAULT_SETTINGS, k)) continue;
-      this.settings[k] = (v && typeof v === 'object' && !Array.isArray(v) && !REPLACE_SETTINGS.has(k))
-        ? { ...this.settings[k], ...v } : v;
+      const r = sanitizeSetting(k, v); // invalid values (and invalid sub-values of objects) are ignored: settings-schema.js
+      if (!r.ok) continue;
+      this.settings[k] = (r.value && typeof r.value === 'object' && !Array.isArray(r.value) && !REPLACE_SETTINGS.has(k))
+        ? { ...this.settings[k], ...r.value } : r.value;
     }
     this.save();
     return this.settings;

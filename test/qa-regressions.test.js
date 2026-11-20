@@ -94,3 +94,36 @@ test('M7: rekordbox import marks the imported grid as authoritative (gridLocked)
     assert.equal(t.gridOffset, 0.3); assert.equal(t.bpm, 126); assert.equal(t.gridLocked, true);
   } finally { app.shutdown(); app.server.close(); }
 });
+
+test('m6/M9: settings are validated on update and when settings.json is loaded', async () => {
+  const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
+  const { Library, DEFAULT_SETTINGS } = await import('../server/library.js');
+  const { sanitizeSetting } = await import('../server/settings-schema.js');
+  assert.deepEqual(sanitizeSetting('deckCount', '4'), { ok: true, value: 4 });
+  assert.equal(sanitizeSetting('deckCount', 3).ok, false);
+  assert.equal(sanitizeSetting('latencyHint', 'bogus').ok, false);
+  assert.deepEqual(sanitizeSetting('latencyHint', '20'), { ok: true, value: '20' });
+  assert.equal(sanitizeSetting('tempoRange', -5).ok, false);
+  assert.equal(sanitizeSetting('theme', 42).ok, false);
+  assert.equal(sanitizeSetting('automix', 'x').ok, false);
+  assert.equal(sanitizeSetting('unknownFutureKey', { a: 1 }).ok, true);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'opendj-qa-set-'));
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ latencyHint: 'bogus', deckCount: '4', theme: 'neon', tempoRange: -5, automix: { style: 'nope', transitionBeats: 16 }, uiScale: 'huge' }));
+  const lib = new Library(dir);
+  assert.equal(lib.settings.latencyHint, DEFAULT_SETTINGS.latencyHint);
+  assert.equal(lib.settings.deckCount, 4);
+  assert.equal(lib.settings.theme, 'neon');
+  assert.equal(lib.settings.tempoRange, DEFAULT_SETTINGS.tempoRange);
+  assert.equal(lib.settings.uiScale, DEFAULT_SETTINGS.uiScale);
+  assert.equal(lib.settings.automix.style, DEFAULT_SETTINGS.automix.style);
+  assert.equal(lib.settings.automix.transitionBeats, 16);
+
+  lib.updateSettings({ deckCount: 3, automix: { style: 'echo', order: 'sideways' }, latencyHint: 'nope', crossfaderCurve: 'sharp' });
+  assert.equal(lib.settings.deckCount, 4, 'invalid deckCount ignored');
+  assert.equal(lib.settings.automix.style, 'echo');
+  assert.equal(lib.settings.automix.order, DEFAULT_SETTINGS.automix.order, 'invalid sub-value ignored, the rest merged');
+  assert.equal(lib.settings.latencyHint, DEFAULT_SETTINGS.latencyHint);
+  assert.equal(lib.settings.crossfaderCurve, 'sharp');
+  clearTimeout(lib._t);
+});

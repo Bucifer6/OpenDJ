@@ -139,7 +139,8 @@ export class Engine extends Emitter {
 
   async init() {
     const lh = this.settings.latencyHint || 'interactive';
-    this.ctx = new AudioContext({ latencyHint: /^\d/.test(lh) ? Number(lh) / 1000 : lh });
+    try { this.ctx = new AudioContext({ latencyHint: /^\d/.test(lh) ? Number(lh) / 1000 : lh }); }
+    catch (e) { console.warn(`Invalid audio latency setting (${lh}); using the default`, e); this.ctx = new AudioContext(); } // never brick startup
     await this.ctx.audioWorklet.addModule(new URL('./worklets.js', import.meta.url));
     const ctx = this.ctx;
     this.masterBus = ctx.createGain();
