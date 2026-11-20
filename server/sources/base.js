@@ -18,6 +18,9 @@
 //
 // Normalised playlist shape returned by listPlaylists():
 // { remoteId: string, name: string, trackRemoteIds: string[] }
+// listPlaylists({ tracks: false }) returns summaries without fetching each playlist's items:
+// { remoteId: string, name: string, trackCount: number|null, duration: seconds|null, smart?: boolean }
+// playlistTracks(remoteId) returns one playlist's tracks, in order, in the listTracks() track shape.
 
 export class SourceClient {
   constructor(config, { fetchImpl = globalThis.fetch } = {}) {
@@ -30,7 +33,8 @@ export class SourceClient {
   persistable() { return {}; }
   async listLibraries() { return []; } // [{ id, name }]
   async listTracks(_opts = {}) { throw new Error('not implemented'); } // opts.onProgress(done,total)
-  async listPlaylists() { return []; }
+  async listPlaylists(_opts = {}) { return []; }
+  async playlistTracks(_remoteId) { return []; }
   /** { url, headers } to stream the original/transcoded audio (must support HTTP Range when server does). */
   streamRequest(_remoteId, _track) { throw new Error('not implemented'); }
   /** { url, headers, ext } to download the original file. */

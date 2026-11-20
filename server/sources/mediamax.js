@@ -309,10 +309,23 @@ export class MediaMaxClient extends SourceClient {
     return out;
   }
 
-  /** The user's own playlists (manual and smart — smart children are computed live by the server). */
-  async listPlaylists() {
+  /**
+   * The user's own playlists (manual and smart — smart children are computed live by the server).
+   * Default: { remoteId, name, trackRemoteIds, smart } (used by sync).
+   * opts.tracks === false: summaries only, { remoteId, name, trackCount, duration, smart } (no children calls).
+   */
+  async listPlaylists(opts = {}) {
     await this._ensure();
     const lists = asArray(await this._req('/playlists'));
+    if (opts.tracks === false) {
+      return lists
+        .filter((p) => !p.type || p.type === 'playlist')
+        .map((p) => ({
+          remoteId: String(p.id), name: p.title || p.name || 'Playlist',
+          trackCount: Number(p.childCount ?? p.itemCount ?? p.trackCount) || null,
+          duration: p.durationMs ? p.durationMs / 1000 : null, smart: !!p.smart,
+        }));
+    }
     const out = [];
     for (const p of lists) {
       if (p.type && p.type !== 'playlist') continue;
@@ -323,6 +336,26 @@ export class MediaMaxClient extends SourceClient {
       out.push({ remoteId: String(p.id), name: p.title || p.name || 'Playlist', trackRemoteIds, smart: !!p.smart });
     }
     return out;
+  }
+
+  /**
+   * Tracks of one playlist, in playlist order, as normalised tracks (same shape as listTracks()), with file details
+   * (mediaId, format, size) and DJ analysis (BPM, key, energy) fetched per track like listTracks() does.
+   * opts.details === false skips the per-track calls.
+   */
+  async playlistTracks(id, opts = {}) {
+    await this._ensure();
+    const tracks = (await this._children(id)).filter((i) => !i.type || i.type === 'track').map((i) => this._normTrack(i));
+    if (opts.details === false || this.config.fetchDetails === false) return tracks;
+    const analysis = this.config.fetchAnalysis !== false;
+    await pool(tracks, DETAIL_CONCURRENCY, async (t) => {
+      const tid = encodeURIComponent(t.remoteId);
+      try { this._applyMedia(t, await this._req(`/items/${tid}`)); } catch (e) { if (e.status === 401) throw e; }
+      if (analysis) {
+        try { this._applyAnalysis(t, await this._req(`/items/${tid}/analysis`)); } catch (e) { if (e.status === 401) throw e; }
+      }
+    });
+    return tracks;
   }
 
   /** Direct play of the original file (Range supported). Falls back to the original-file download route. */

@@ -164,8 +164,18 @@ export class SubsonicClient extends SourceClient {
     return out;
   }
 
-  async listPlaylists() {
+  /**
+   * The user's playlists. Default: { remoteId, name, trackRemoteIds } (one getPlaylist call each, used by sync).
+   * opts.tracks === false: summaries only, { remoteId, name, trackCount, duration, owner }, one request.
+   */
+  async listPlaylists(opts = {}) {
     const r = await this._call('getPlaylists');
+    if (opts.tracks === false) {
+      return asArray(r.playlists?.playlist).map((p) => ({
+        remoteId: String(p.id), name: p.name || String(p.id), trackCount: Number(p.songCount) || 0,
+        duration: Number(p.duration) || null, owner: p.owner || null,
+      }));
+    }
     const out = [];
     for (const p of asArray(r.playlists?.playlist)) {
       const d = await this._call('getPlaylist', { id: p.id });
@@ -176,6 +186,12 @@ export class SubsonicClient extends SourceClient {
       });
     }
     return out;
+  }
+
+  /** Tracks of one playlist, in playlist order, as normalised tracks (same shape as listTracks()). */
+  async playlistTracks(id) {
+    const d = await this._call('getPlaylist', { id: String(id) });
+    return asArray(d.playlist?.entry).filter((e) => !e.isVideo && !e.isDir).map((e) => this._normTrack(e));
   }
 
   streamRequest(remoteId) {
