@@ -77,10 +77,11 @@ export async function scanFolder(library, folder, { onProgress, signal } = {}) {
   }
   const root = folder.path.endsWith(path.sep) ? folder.path : folder.path + path.sep;
   const missing = library.allTracks().filter((t) => t.sourceId === folder.id && !seen.has(t.id) && (!t.path || t.path.startsWith(root))).map((t) => t.id);
-  if (missing.length && !signal?.aborted) library.removeTracks(missing);
+  // Like rekordbox, keep vanished tracks (with their cues, grids and play history) and list them under
+  // "Missing files", where they can be relocated or removed. Nothing the user prepared is deleted by a rescan.
   folder.lastScan = Date.now();
   folder.trackCount = seen.size;
   library.changed('tracks');
   onProgress?.({ folder: folder.id, scanned: n, done: true });
-  return { scanned: n, added: seen.size, removed: missing.length };
+  return { scanned: n, added: seen.size, missing: missing.length };
 }

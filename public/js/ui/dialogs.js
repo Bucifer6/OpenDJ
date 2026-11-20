@@ -233,6 +233,7 @@ export class Dialogs {
     const library = el('div', { class: 'form' },
       field('Download folder (for tracks from media servers)', el('div', { class: 'row' }, dlIn, el('button', { class: 'btn', onclick: async () => { const p = await this.pickFolder('Download folder'); if (p) { dlIn.value = p; set('downloadDir', p); } } }, 'Browse…'))),
       el('h3', {}, 'Import'),
+      el('div', { class: 'row' }, ...[['rekordbox', 'rekordbox XML'], ['traktor', 'Traktor NML'], ['serato', 'Serato crates'], ['virtualdj', 'VirtualDJ database']].map(([k, l]) => el('button', { class: 'btn sm', onclick: () => app.library.dlg.importFrom(k) }, `Import ${l}…`))),
       el('div', { class: 'row' }, rbIn, el('button', { class: 'btn', onclick: async () => {
         try { const r = await api.importRekordbox({ path: rbIn.value.trim() }); this.app.toast(`Imported ${r.imported} tracks, ${r.playlists} playlists from rekordbox${r.missing ? ` (${r.missing} files not found)` : ''}`); app.library.refresh(); } catch (e) { this.app.toast(e.message); }
       } }, 'Import rekordbox XML')),
