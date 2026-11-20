@@ -172,3 +172,38 @@ test('UAT M4/N4/N5: rekordbox import keeps cues & rating when the XML has none, 
     void t0;
   } finally { app.shutdown(); app.server.close(); }
 });
+
+test('m3: a new recording never shares its name stem (and so its .cue/.txt) with another format', async () => {
+  const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
+  const { uniqueRecordingName } = await import('../server/recorder.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'opendj-qa-rec-'));
+  for (const f of ['mix.wav', 'mix.cue', 'mix.txt']) fs.writeFileSync(path.join(dir, f), '');
+  assert.equal(path.basename(await uniqueRecordingName(dir, 'mix', 'mp3')), 'mix (2).mp3');
+  assert.equal(path.basename(await uniqueRecordingName(dir, 'other', 'mp3')), 'other.mp3');
+});
+
+test('m7/m10: media server errors are readable; a failed stream marks the file missing at once', async () => {
+  const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
+  const { start } = await import('../server/index.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'opendj-qa-ms-'));
+  const music = path.join(dir, 'm'); fs.mkdirSync(music);
+  const b = Buffer.alloc(44 + 400); b.write('RIFF', 0); b.writeUInt32LE(36 + 400, 4); b.write('WAVEfmt ', 8);
+  b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(8000, 24); b.writeUInt32LE(16000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(400, 40);
+  fs.writeFileSync(path.join(music, 'a.wav'), b);
+  const app = await start({ port: 0, dataDir: path.join(dir, 'data') });
+  const req = async (m, u, body) => { const r = await fetch(app.url + u, { method: m, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) }); return { s: r.status, j: await r.json().catch(() => null) }; };
+  try {
+    const bad = await req('POST', 'api/sources', { type: 'subsonic', name: 'x', url: 'not a url', username: 'a', password: 'b' });
+    assert.equal(bad.s, 400); assert.match(bad.j.error, /full URL/);
+    const off = await req('POST', 'api/sources', { type: 'jellyfin', name: 'x', url: 'http://127.0.0.1:9', username: 'a', password: 'b' });
+    assert.equal(off.s, 502); assert.match(off.j.error, /Could not reach 127\.0\.0\.1:9/);
+    await req('POST', 'api/folders', { path: music });
+    for (let i = 0; i < 50 && !app.library.allTracks().length; i++) await new Promise((r) => setTimeout(r, 100));
+    const t = app.library.allTracks()[0];
+    assert.ok((await req('GET', 'api/tracks')).j.find((x) => x.id === t.id).missing !== true);
+    fs.unlinkSync(path.join(music, 'a.wav'));
+    assert.equal((await fetch(app.url + `api/tracks/${t.id}/stream`)).status, 404);
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal((await req('GET', 'api/tracks')).j.find((x) => x.id === t.id).missing, true, 'flagged without waiting for the cache TTL');
+  } finally { app.shutdown(); app.server.close(); }
+});

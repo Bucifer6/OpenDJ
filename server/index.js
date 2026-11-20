@@ -306,7 +306,10 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     if (!readable(file)) throw new HttpError(403, 'File is outside the allowed music folders');
     const st = await statOk(file);
     if (st === undefined) throw new HttpError(504, 'The drive holding this file does not respond');
-    if (!st) throw new HttpError(404, 'File missing (drive disconnected?)');
+    if (!st) { // tell the library right away (the Missing files view, the ⚠ in the row), not 15 s and a refresh later
+      missing.invalidate([t.id]); missing.missingIdsAsync([t]).then((m) => { if (m.has(t.id)) emit('library', { what: 'missing' }); }).catch(() => {});
+      throw new HttpError(404, 'File missing (drive disconnected?)');
+    }
     if (!st.isFile()) throw new HttpError(404, 'Not a file');
     return { file, st };
   };
