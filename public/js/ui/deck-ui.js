@@ -6,7 +6,7 @@ import { api } from '../api.js';
 import { cssVar } from './themes.js';
 import { dvsModeIndicator } from '../dvs/dvs-ui.js';
 import { buildStemControls } from '../stems/stems-ui.js';
-import { HOTCUE_COLORS } from '../audio/deck.js';
+import { HOTCUE_COLORS, TEMPO_RANGES } from '../audio/deck.js';
 import { camelotCompatible, toCamelot } from '../audio/analysis-core.js';
 
 export const DECK_COLORS = ['var(--deck1)', 'var(--deck2)', 'var(--deck3)', 'var(--deck4)'];
@@ -67,7 +67,7 @@ export function buildDeck(app, deck) {
   jog.style.setProperty('--deck-color', DECK_COLORS[i]);
 
   // ---------- tempo ----------
-  const rangeSel = el('select', { class: 'sel tiny', title: 'Tempo range' }, ...[6, 8, 10, 16, 25, 50, 100].map((r) => el('option', { value: r }, `±${r}%`)));
+  const rangeSel = el('select', { class: 'sel tiny', title: 'Tempo range' }, ...TEMPO_RANGES.map((r) => el('option', { value: r }, `±${r}%`)));
   rangeSel.value = String(deck.tempoRange);
   rangeSel.addEventListener('change', () => { deck.setTempoRange(Number(rangeSel.value)); tempoFader.render(); });
   const tempoFader = R(fader({ min: -1, max: 1, def: 0, get: () => deck.tempo / deck.tempoRange, set: (v) => deck.setTempoFader(v), invert: true, cls: 'tempo-fader', title: 'Tempo (double-click to reset)' }));
@@ -252,6 +252,7 @@ export function buildDeck(app, deck) {
   const renderState = () => { for (const r of renderers) r.render(); masterBadge.style.display = deck.isMaster ? '' : 'none'; };
   deck.on('state', renderState); deck.on('loop', () => { loopSize.textContent = deck.loop?.active ? fmtBeats(deck.loopBeats) : fmtBeats(autoLoopBeats); });
   deck.on('tempo', () => tempoFader.render());
+  deck.on('tempo-range', () => { rangeSel.value = String(deck.tempoRange); tempoFader.render(); });
 
   let lastFrame = 0;
   root.frame = (now) => {

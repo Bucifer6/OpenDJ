@@ -5,11 +5,11 @@ import { cssVar } from './themes.js';
 /** Rotary knob. Drag vertically, wheel to fine-tune, double-click to reset. */
 export function knob({ label, min = -1, max = 1, def = 0, get, set, size = 'md', bipolar = min < 0, title, format }) {
   const ind = el('div', { class: 'knob-ind' });
-  const cap = el('div', { class: `knob knob-${size}`, title: title || label, tabindex: 0 }, ind);
+  const cap = el('div', { class: `knob knob-${size}`, title: title || label, tabindex: 0, role: 'slider', 'aria-label': title || label || 'Knob', 'aria-valuemin': min, 'aria-valuemax': max }, ind);
   const val = el('div', { class: 'knob-val' });
   const root = el('div', { class: 'knob-wrap' }, cap, label ? el('div', { class: 'knob-label' }, label) : null, format ? val : null);
   const render = () => {
-    const v = get();
+    const v = clamp(get(), min, max);
     const k = (v - min) / (max - min);
     ind.style.transform = `rotate(${-135 + k * 270}deg)`;
     const from = bipolar ? 0.5 : 0;
@@ -17,6 +17,7 @@ export function knob({ label, min = -1, max = 1, def = 0, get, set, size = 'md',
     cap.style.setProperty('--arc-a', `${-135 + a * 270}deg`);
     cap.style.setProperty('--arc-b', `${(b - a) * 270}deg`);
     cap.classList.toggle('off-center', Math.abs(v - def) > 1e-3);
+    cap.setAttribute('aria-valuenow', String(+v.toFixed(4)));
     if (format) val.textContent = format(v);
   };
   let startY, startV;
@@ -47,21 +48,31 @@ export function knob({ label, min = -1, max = 1, def = 0, get, set, size = 'md',
 export function fader({ label, min = 0, max = 1, def = min, get, set, horizontal = false, invert = false, cls = '', title }) {
   const thumb = el('div', { class: 'fader-thumb' });
   const track = el('div', { class: 'fader-track' }, el('div', { class: 'fader-slot' }), thumb);
-  const root = el('div', { class: `fader ${horizontal ? 'fader-h' : 'fader-v'} ${cls}`, title: title || label, tabindex: 0 }, track, label ? el('div', { class: 'fader-label' }, label) : null);
+  const root = el('div', { class: `fader ${horizontal ? 'fader-h' : 'fader-v'} ${cls}`, title: title || label, tabindex: 0, role: 'slider', 'aria-label': title || label || 'Fader', 'aria-valuemin': min, 'aria-valuemax': max, 'aria-orientation': horizontal ? 'horizontal' : 'vertical' }, track, label ? el('div', { class: 'fader-label' }, label) : null);
   const toK = (v) => { const k = (v - min) / (max - min); return invert ? 1 - k : k; };
   const fromK = (k) => { k = clamp(k, 0, 1); if (invert) k = 1 - k; return min + k * (max - min); };
+  // The cap travels inside its track: --k (0..1) places it via CSS between "flush with one end" and "flush with the
+  // other" (see .fader-thumb in app.css), so it can never be drawn past the slot, whatever the value or layout.
+  let lastK = null;
   const render = () => {
-    const k = toK(get());
-    if (horizontal) thumb.style.left = `${k * 100}%`; else thumb.style.top = `${(1 - k) * 100}%`;
+    const k = clamp(toK(get()), 0, 1);
+    if (!Number.isFinite(k) || k === lastK) return;
+    lastK = k;
+    root.style.setProperty('--k', k.toFixed(4));
+    root.setAttribute('aria-valuenow', String(+get().toFixed(4)));
   };
+  // pointer -> 0..1 with the same geometry (rects are in window pixels on both sides, so UI zoom cancels out)
   const posToK = (e) => {
-    const r = track.getBoundingClientRect();
-    return horizontal ? (e.clientX - r.left) / r.width : 1 - (e.clientY - r.top) / r.height;
+    const r = track.getBoundingClientRect(), c = thumb.getBoundingClientRect();
+    const cap = horizontal ? c.width : c.height, len = (horizontal ? r.width : r.height) - cap;
+    if (len <= 0) return 0.5;
+    const p = horizontal ? e.clientX - r.left - cap / 2 : e.clientY - r.top - cap / 2;
+    return horizontal ? p / len : 1 - p / len;
   };
   let drag = null;
   track.addEventListener('pointerdown', (e) => {
     track.setPointerCapture(e.pointerId);
-    const k0 = toK(get()), kp = posToK(e);
+    const k0 = clamp(toK(get()), 0, 1), kp = posToK(e);
     const onThumb = e.target === thumb || Math.abs(kp - k0) < 0.06;
     drag = { off: onThumb ? kp - k0 : 0 };
     if (!onThumb) { set(fromK(kp)); render(); }

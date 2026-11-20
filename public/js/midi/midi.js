@@ -38,8 +38,8 @@ export function buildTargets(app) {
     add(`${P}.eject`, `Deck ${n} Eject`, 'button', (down) => down && deck.eject());
     add(`${P}.tempo`, `Deck ${n} Tempo fader`, 'abs', (v) => deck.setTempoFader(v * 2 - 1), null, () => (deck.tempo / deck.tempoRange + 1) / 2);
     add(`${P}.tempoReset`, `Deck ${n} Tempo reset`, 'button', (down) => down && deck.resetTempo());
-    add(`${P}.tempoUp`, `Deck ${n} Tempo +0.5 %`, 'button', (down) => down && deck.setTempo(deck.tempo + 0.5));
-    add(`${P}.tempoDown`, `Deck ${n} Tempo −0.5 %`, 'button', (down) => down && deck.setTempo(deck.tempo - 0.5));
+    add(`${P}.tempoUp`, `Deck ${n} Tempo +0.5 %`, 'button', (down) => down && deck.stepTempo(0.5));
+    add(`${P}.tempoDown`, `Deck ${n} Tempo −0.5 %`, 'button', (down) => down && deck.stepTempo(-0.5));
     add(`${P}.bendUp`, `Deck ${n} Pitch bend +`, 'button', (down) => deck.setBend(down ? 0.04 : 0));
     add(`${P}.bendDown`, `Deck ${n} Pitch bend −`, 'button', (down) => deck.setBend(down ? -0.04 : 0));
     add(`${P}.jogTouch`, `Deck ${n} Jog touch`, 'button', (down) => { deck._jogTouched = down; if (!down) deck.jogRelease(); });

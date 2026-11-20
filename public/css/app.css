@@ -157,19 +157,22 @@ body:not(.four-decks) .deck-col > .deck:nth-child(2) { display: none; }
 .knob-ind::after { content: ''; position: absolute; inset: 0; background: #e6eaef; border-radius: 1px; }
 .knob-label { font-size: 9px; font-weight: 700; color: var(--text-3); letter-spacing: .04em; }
 .knob-val { font: 500 9px var(--mono); color: var(--text-3); }
-.fader { display: flex; flex-direction: column; align-items: center; gap: 4px; touch-action: none; }
+.fader { --k: 0.5; display: flex; flex-direction: column; align-items: center; gap: 4px; touch-action: none; }
 .fader-track { position: relative; cursor: pointer; }
+.fader-v { --cap: 14px; }
+.fader-h { --cap: 16px; }
 .fader-v .fader-track { width: 28px; flex: 1; min-height: 60px; }
 .fader-h .fader-track { height: 28px; width: 100%; }
+/* the slot spans exactly the travel of the cap's centre line: the cap stays inside the track at both ends */
 .fader-slot { position: absolute; background: var(--slot); border-radius: 3px; box-shadow: inset 0 1px 2px #000; }
-.fader-v .fader-slot { left: 50%; width: 5px; margin-left: -2.5px; top: 6px; bottom: 6px; }
-.fader-h .fader-slot { top: 50%; height: 5px; margin-top: -2.5px; left: 8px; right: 8px; }
+.fader-v .fader-slot { left: 50%; width: 5px; margin-left: -2.5px; top: calc(var(--cap) / 2); bottom: calc(var(--cap) / 2); }
+.fader-h .fader-slot { top: 50%; height: 5px; margin-top: -2.5px; left: calc(var(--cap) / 2); right: calc(var(--cap) / 2); }
 .fader-thumb { position: absolute; background: linear-gradient(var(--fader-cap-1), var(--fader-cap-2) 45%, var(--fader-cap-2) 55%, var(--fader-cap-1)); border-radius: 3px; box-shadow: 0 2px 6px rgba(0,0,0,.7); }
 .fader-thumb::after { content: ''; position: absolute; background: #e6eaef; }
-.fader-v .fader-thumb { left: 2px; right: 2px; height: 14px; margin-top: -7px; }
-.fader-v .fader-thumb::after { left: 3px; right: 3px; top: 6px; height: 2px; }
-.fader-h .fader-thumb { top: 2px; bottom: 2px; width: 16px; margin-left: -8px; }
-.fader-h .fader-thumb::after { top: 3px; bottom: 3px; left: 7px; width: 2px; }
+.fader-v .fader-thumb { left: 2px; right: 2px; height: var(--cap); top: calc((1 - var(--k)) * (100% - var(--cap))); }
+.fader-v .fader-thumb::after { left: 3px; right: 3px; top: calc(50% - 1px); height: 2px; }
+.fader-h .fader-thumb { top: 2px; bottom: 2px; width: var(--cap); left: calc(var(--k) * (100% - var(--cap))); }
+.fader-h .fader-thumb::after { top: 3px; bottom: 3px; left: calc(50% - 1px); width: 2px; }
 .tempo-fader .fader-track { min-height: 100px; }
 .tempo-fader .fader-slot::after { content: ''; position: absolute; left: -7px; right: -7px; top: 50%; height: 1px; background: var(--green); }
 

@@ -6,6 +6,9 @@ import { Sampler } from './sampler.js';
 
 const knobToDb = (v) => (v >= 0 ? v * 6 : v <= -0.98 ? -60 : v * 26); // EQ knob -1..1: kill .. 0 .. +6 dB
 
+/** Value range of each continuous channel control (knobs, faders, MIDI, automation are clamped to it). */
+const CHANNEL_LIMITS = { trim: [-1, 1], eqHigh: [-1, 1], eqMid: [-1, 1], eqLow: [-1, 1], filter: [-1, 1], volume: [0, 1], fxMix: [0, 1], fxParam: [0, 1], vocal: [0, 1], inst: [0, 1] };
+
 class Channel extends Emitter {
   constructor(engine, index) {
     super();
@@ -58,6 +61,8 @@ class Channel extends Emitter {
     this.apply();
   }
   set(key, value) {
+    const lim = CHANNEL_LIMITS[key];
+    if (lim) { value = Number(value); if (!Number.isFinite(value)) return; value = clamp(value, lim[0], lim[1]); } // knobs/MIDI/automation can't overshoot
     if (this.state[key] === value) return;
     this.state[key] = value;
     switch (key) {
@@ -208,7 +213,7 @@ export class Engine extends Emitter {
     this.micSrc.connect(this.micGain);
     this.micOn = true; this.emit('mic');
   }
-  setMicVolume(v) { this.micVolume = v; if (this.micGain) this.micGain.gain.setTargetAtTime(v * v * 1.5, this.ctx.currentTime, 0.02); this.emit('master', 'micVolume', v); }
+  setMicVolume(v) { v = clamp(Number(v) || 0, 0, 1); this.micVolume = v; if (this.micGain) this.micGain.gain.setTargetAtTime(v * v * 1.5, this.ctx.currentTime, 0.02); this.emit('master', 'micVolume', v); }
   setMicEq(band, v) { const n = band === 'high' ? this.micHigh : this.micLow; if (n) n.gain.setTargetAtTime(v * 12, this.ctx.currentTime, 0.02); }
   setTalkover(on) {
     this.talkover = on;
@@ -234,9 +239,9 @@ export class Engine extends Emitter {
     if (on) { this.masterGain.connect(this.limiter); this.limiter.connect(this.masterOut); }
     else { try { this.limiter.disconnect(); } catch { /* */ } this.masterGain.connect(this.masterOut); }
   }
-  setMasterVolume(v) { this.masterVolume = v; this.masterGain.gain.setTargetAtTime(v * v * 1.25, this.ctx.currentTime, 0.01); this.emit('master', 'volume', v); }
-  setCueMix(v) { this.cueMix = v; this.hpCue.gain.value = Math.cos(v * Math.PI / 2); this.hpMaster.gain.value = Math.sin(v * Math.PI / 2); this.emit('master', 'cueMix', v); }
-  setHeadphoneVolume(v) { this.hpVolume = v; this.hpOut.gain.setTargetAtTime(v * v * 1.25, this.ctx.currentTime, 0.01); this.emit('master', 'hpVolume', v); }
+  setMasterVolume(v) { v = clamp(Number(v) || 0, 0, 1); this.masterVolume = v; this.masterGain.gain.setTargetAtTime(v * v * 1.25, this.ctx.currentTime, 0.01); this.emit('master', 'volume', v); }
+  setCueMix(v) { v = clamp(Number(v) || 0, 0, 1); this.cueMix = v; this.hpCue.gain.value = Math.cos(v * Math.PI / 2); this.hpMaster.gain.value = Math.sin(v * Math.PI / 2); this.emit('master', 'cueMix', v); }
+  setHeadphoneVolume(v) { v = clamp(Number(v) || 0, 0, 1); this.hpVolume = v; this.hpOut.gain.setTargetAtTime(v * v * 1.25, this.ctx.currentTime, 0.01); this.emit('master', 'hpVolume', v); }
 
   async listOutputs() {
     try {

@@ -6,6 +6,9 @@ import { effectiveGains, LOADED_STEMS } from '../stems/stem-mix.js';
 import { floatToInt16 } from '../stems/stem-dsp.js';
 import { StemEcho } from '../stems/stem-fx.js';
 
+/** Tempo fader ranges (±%), as offered in the deck and Settings. */
+export const TEMPO_RANGES = [6, 8, 10, 16, 25, 50, 100];
+
 export const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'];
 export const stemUrl = (id, stem) => `/api/stems/${encodeURIComponent(id)}/${stem}`;
 
@@ -289,12 +292,27 @@ export class Deck extends Emitter {
   }
 
   // ---------- tempo / sync ----------
+  /**
+   * Tempo in % (never outside the selected tempo range). A programmatic value beyond the range (sync to a far-away
+   * BPM, instant doubles, DVS, Link) widens the range to the next standard step instead of pushing the tempo fader
+   * cap off its track; user input (fader, MIDI, keys) is clamped to the range by its callers.
+   */
   setTempo(pct) {
-    this.tempo = clamp(pct, -100, 100); this.post('rate', { value: this.rate }); this.emit('tempo'); this.engine.onTempoChange(this);
+    pct = clamp(Number(pct) || 0, -100, 100);
+    if (Math.abs(pct) > this.tempoRange + 1e-9) { this.tempoRange = TEMPO_RANGES.find((r) => r >= Math.abs(pct) - 1e-9) || 100; this.emit('tempo-range', this.tempoRange); }
+    this.tempo = pct; this.post('rate', { value: this.rate }); this.emit('tempo'); this.engine.onTempoChange(this);
     if (this.stemFxOn && this.effectiveBpm) this.stemFx?.setBeat(60 / this.effectiveBpm);
   }
-  setTempoFader(v) { this.setTempo(v * this.tempoRange); if (this.syncOn && !this.isMaster) { this.syncOn = false; this.emit('state'); } } // -1..1
-  setTempoRange(r) { const f = this.tempo / this.tempoRange; this.tempoRange = r; this.emit('tempo'); return f; }
+  setTempoFader(v) { this.setTempo(clamp(Number(v) || 0, -1, 1) * this.tempoRange); if (this.syncOn && !this.isMaster) { this.syncOn = false; this.emit('state'); } } // -1..1
+  /** Pick the tempo range. The tempo keeps its value when it fits the new range, otherwise it is clamped to the range. */
+  setTempoRange(r) {
+    r = TEMPO_RANGES.includes(Number(r)) ? Number(r) : clamp(Number(r) || 8, 1, 100);
+    this.tempoRange = r; this.emit('tempo-range', r);
+    if (Math.abs(this.tempo) > r) { this.setTempo(Math.sign(this.tempo) * r); if (this.syncOn && !this.isMaster) { this.syncOn = false; this.emit('state'); } } else this.emit('tempo');
+    return this.tempo / r;
+  }
+  /** Step the tempo by `pct` (MIDI tempo +/- buttons), staying inside the tempo range. */
+  stepTempo(pct) { this.setTempo(clamp(this.tempo + pct, -this.tempoRange, this.tempoRange)); }
   resetTempo() { this.setTempo(0); }
   setBend(b) { this.bend = b; this.post('rate', { value: this.rate }); }
   setKeyLock(v) { this.keyLock = v; this.post('keylock', { value: v }); this.emit('state'); }
