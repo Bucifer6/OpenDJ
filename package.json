@@ -18,18 +18,18 @@
     "test:webapp": "node scripts/e2e-webapp.mjs"
   },
   "dependencies": {
-    "fast-xml-parser": "^4.5.0",
-    "music-metadata": "^10.6.0",
+    "fast-xml-parser": "^5.12.1",
+    "music-metadata": "^12.7.0",
     "onnxruntime-web": "1.23.2"
   },
   "devDependencies": {
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8"
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0"
   },
   "build": {
     "appId": "org.opendj.app",
     "productName": "OpenDJ",
-    "copyright": "Copyright \u00a9 OpenDJ contributors",
+    "copyright": "Copyright © OpenDJ contributors",
     "directories": {
       "buildResources": "build",
       "output": "dist"

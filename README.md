@@ -158,6 +158,8 @@ Get the latest version from **[GitHub Releases](https://github.com/Bucifer6/Open
 - **macOS:** right-click the app → *Open* (or *System Settings → Privacy & Security → Open Anyway*).
 - **Linux AppImage:** `chmod +x OpenDJ-*.AppImage`, then run it.
 
+Each release has a `SHA256SUMS.txt` so you can check a download wasn't tampered with (`sha256sum -c SHA256SUMS.txt --ignore-missing`). To report a security problem privately, see [SECURITY.md](SECURITY.md).
+
 Installers are built by GitHub Actions ([`build.yml`](.github/workflows/build.yml)) on Windows, macOS and Linux; pushing a tag like `v0.2.0` publishes a release, and every branch build has the installers under the run's *Artifacts*.
 
 ## Quick start
