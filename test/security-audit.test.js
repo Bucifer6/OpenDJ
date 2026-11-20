@@ -477,7 +477,7 @@ test('#14 electron/main.js applies the pop-up / navigation / webview policy to e
 // ---------------------------------------------------------------- #15 supply chain
 test('#15 Dockerfile base image pinned by digest; ffmpeg download location cannot be redirected and is hash-checked', async () => {
   const docker = fs.readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
-  assert.match(docker, /^FROM node:22-slim@sha256:[0-9a-f]{64}$/m);
+  assert.match(docker, /^FROM node:\d+-slim@sha256:[0-9a-f]{64}$/m); // any Node version, always pinned by digest
   const { createRequire } = await import('node:module');
   const bp = createRequire(import.meta.url)('../build/before-pack.cjs');
   process.env.FFMPEG_BINARIES_URL = 'https://evil.example'; process.env.FFMPEG_BINARY_RELEASE = 'x'; process.env.FFMPEG_BIN = '/tmp/x';
