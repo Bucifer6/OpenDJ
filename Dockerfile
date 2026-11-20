@@ -7,7 +7,7 @@
 # Or pass OPENDJ_PASSWORD (8+ characters; example values like "change-me" are refused at startup).
 # Pinned by digest (multi-arch index of node:22-slim, looked up 2026-11-20). To update:
 #   docker buildx imagetools inspect node:22-slim   (and replace the sha256 below)
-FROM node:22-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
+FROM node:26-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg tini \
