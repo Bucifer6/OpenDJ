@@ -243,6 +243,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
       progress(true);
       emit('stems-model', { ready: true });
     } catch (e) {
+      await fs.promises.rm(part, { force: true }).catch(() => {}); // gone before the error is reported (no .part left behind)
       lastError = ctrl.signal.aborted ? 'Download cancelled' : e.message;
       emit('stems-model', { error: lastError });
       throw e;
