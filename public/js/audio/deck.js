@@ -1,7 +1,7 @@
 // A playback deck: transport, cue logic (CDJ-style), hot cues, loops, beat jump, sync, key lock, scratch.
 import { Emitter, clamp } from '../util.js';
 import { api } from '../api.js';
-import { decodeWaveform, toCamelot, camelotCompatible, analyzeStructure } from './analysis-core.js';
+import { decodeWaveform, toCamelot, camelotCompatible, analyzeStructure, analysisPatch } from './analysis-core.js';
 import { effectiveGains, LOADED_STEMS } from '../stems/stem-mix.js';
 import { floatToInt16 } from '../stems/stem-dsp.js';
 import { StemEcho } from '../stems/stem-fx.js';
@@ -107,16 +107,7 @@ export class Deck extends Emitter {
         const r = await this.engine.analyze(mono, buf.sampleRate);
         if (stale()) return false;
         wave = decodeWaveform(r.wave.buffer);
-        const patch = {
-          bpm: track.bpm && track.bpmLocked ? track.bpm : r.result.bpm, gridOffset: r.result.gridOffset,
-          key: track.key || r.result.key, gain: r.result.gain, startTime: r.result.startTime, endTime: r.result.endTime,
-          energy: r.result.energy, duration: buf.duration, analyzed: true,
-        };
-        for (const k of ['phrases', 'mixIn', 'mixOut', 'downbeat']) if (r.result[k] !== undefined) patch[k] = r.result[k];
-        // automatic cue creation (like rekordbox auto cue / SMART CUE) for tracks without any cues yet
-        if (!(track.cues || []).length && Array.isArray(r.result.autoCues) && r.result.autoCues.length && this.engine.settings.autoCues !== false) {
-          patch.cues = r.result.autoCues;
-        }
+        const patch = analysisPatch(track, r.result, { duration: buf.duration, autoCues: this.engine.settings.autoCues });
         Object.assign(track, patch);
         api.saveWaveform(track.id, r.wave).catch(() => {});
         api.updateTrack(track.id, patch).then((t) => this.engine.emit('track-updated', t)).catch(() => {});

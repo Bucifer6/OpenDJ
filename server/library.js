@@ -32,6 +32,7 @@ export const DEFAULT_SETTINGS = {
   midiClockOutput: '',
   colorFx: 'filter',
   autoCues: true,
+  autoAnalyse: true,          // analyse new tracks (BPM, key, waveform, cues) in the background, in the browser
   sequencer: null,            // object; replaced wholesale on update (not merged)
   link: { enabled: false, quantum: 4, startStopSync: false },
   lyrics: { online: false, writeLrc: false },
@@ -62,7 +63,7 @@ const STR_FIELDS = { title: 500, artist: 500, album: 500, genre: 200, comment: 2
 export function sanitizeField(k, v) {
   if (NUM_FIELDS.has(k)) { if (v === null || v === undefined || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
   if (Object.hasOwn(STR_FIELDS, k)) return v === null || v === undefined ? (k === 'key' || k === 'color' ? null : '') : String(v).slice(0, STR_FIELDS[k]);
-  if (k === 'analyzed' || k === 'bpmLocked') return !!v;
+  if (k === 'analyzed' || k === 'bpmLocked' || k === 'unreadable') return !!v;
   if (['cues', 'loops', 'phrases', 'hotLoops'].includes(k)) return Array.isArray(v) ? v.slice(0, 1000) : [];
   return v;
 }
@@ -153,7 +154,7 @@ export class Library {
     if (!t) return null;
     const allowed = ['title', 'artist', 'album', 'genre', 'year', 'bpm', 'key', 'rating', 'comment', 'cues', 'loops',
       'gridOffset', 'analyzed', 'gain', 'color', 'playCount', 'lastPlayed', 'duration', 'endTime', 'startTime', 'energy', 'bpmLocked',
-      'phrases', 'tags', 'hotLoops', 'keyShift', 'mixIn', 'mixOut', 'downbeat'];
+      'phrases', 'tags', 'hotLoops', 'keyShift', 'mixIn', 'mixOut', 'downbeat', 'unreadable'];
     for (const k of allowed) if (k in patch) t[k] = sanitizeField(k, patch[k]);
     if ('tags' in patch) t.tags = normTags(patch.tags);
     // Tag edits made in OpenDJ survive a rescan of the file.
