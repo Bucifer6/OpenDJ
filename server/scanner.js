@@ -3,8 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseFile } from 'music-metadata';
 import { Library } from './library.js';
+import { MEDIA_EXT, VIDEO_EXT, needsTranscode, normCodec, mmVideoInfo, isVideoByName, probe } from './media.js';
 
-export const AUDIO_EXT = new Set(['.mp3', '.wav', '.aif', '.aiff', '.flac', '.m4a', '.aac', '.mp4', '.ogg', '.oga', '.opus', '.webm', '.alac']);
+// Every extension we can play: browser-native audio, FFmpeg-transcoded audio and video containers (see media.js).
+export const AUDIO_EXT = MEDIA_EXT;
+export { VIDEO_EXT };
 
 export async function* walk(dir, { signal } = {}) {
   let entries;
@@ -24,16 +27,33 @@ const parseTitleFromName = (file) => {
   return m ? { artist: m[1].trim(), title: m[2].trim() } : { artist: '', title: base };
 };
 
-export async function readTags(file) {
+/**
+ * Tags + format info. `ffmpeg` (optional, path): probe video containers and files music-metadata can't parse
+ * (AC3, DTS, TTA…) for streams, duration and sample rate.
+ */
+export async function readTags(file, { ffmpeg } = {}) {
   const st = await fs.promises.stat(file);
-  const ext = path.extname(file).slice(1).toLowerCase();
+  const dotExt = path.extname(file).toLowerCase();
+  const ext = dotExt.slice(1);
   const fallback = parseTitleFromName(file);
-  let common = {}, format = {};
+  let common = {}, format = {}, parsed = false;
   try {
     const mm = await parseFile(file, { skipCovers: true, duration: false });
-    common = mm.common; format = mm.format;
+    common = mm.common; format = mm.format; parsed = true;
   } catch { /* unreadable tags: use file name */ }
+  let { hasVideo, videoCodec } = mmVideoInfo(format);
+  let codec = normCodec(format.codec);
+  if (ffmpeg && (VIDEO_EXT.has(dotExt) || !parsed || !format.duration)) {
+    const p = await probe(ffmpeg, file).catch(() => null);
+    if (p) {
+      hasVideo = p.hasVideo; videoCodec = p.videoCodec || videoCodec;
+      codec = p.audioCodec || codec;
+      format = { ...format, duration: format.duration || p.duration, sampleRate: format.sampleRate || p.sampleRate, bitrate: format.bitrate || (p.bitrate ? p.bitrate * 1000 : undefined) };
+    }
+  } else if (!hasVideo && isVideoByName(dotExt)) hasVideo = true; // no ffmpeg: trust the extension
+  const media = { codec: codec || null, hasVideo, ...(hasVideo ? { videoCodec: videoCodec || null } : {}), needsTranscode: needsTranscode({ ext: dotExt, codec, hasVideo }) };
   return {
+    ...media,
     title: common.title || fallback.title,
     artist: common.artist || common.albumartist || fallback.artist,
     album: common.album || '',
@@ -58,8 +78,8 @@ export async function addFile(library, file, sourceId = 'files') {
   const prev = library.getTrack(tid);
   const st = await fs.promises.stat(file).catch(() => null);
   if (!st) return null;
-  if (prev && prev.mtime === st.mtimeMs) return prev; // unchanged
-  const tags = await readTags(file);
+  if (prev && prev.mtime === st.mtimeMs && 'needsTranscode' in prev) return prev; // unchanged (and has format info)
+  const tags = await readTags(file, { ffmpeg: library.media?.ffmpeg()?.path });
   return library.upsertTrack({ id: tid, sourceType: 'local', sourceId, path: path.resolve(file), ...tags });
 }
 
