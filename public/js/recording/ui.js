@@ -4,9 +4,9 @@ import { el } from '../util.js';
 import { MixRecorder } from './recorder.js';
 import { Broadcaster } from './broadcaster.js';
 import { recApi, castApi } from './http.js';
+import { hms, liveDetail } from './status.js';
 
 const mb = (n) => (n >= 1073741824 ? `${(n / 1073741824).toFixed(2)} GB` : `${(n / 1048576).toFixed(1)} MB`);
-const hms = (s) => { s = Math.max(0, Math.floor(s || 0)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return `${h ? h + ':' : ''}${String(m).padStart(h ? 2 : 1, '0')}:${String(x).padStart(2, '0')}`; };
 const fill = (node, ...kids) => node.replaceChildren(...kids.flat().filter((k) => k != null && k !== false));
 const field = (label, input, hint) => el('label', { class: 'field' }, el('span', {}, label), input, hint ? el('p', { class: 'hint' }, hint) : null);
 const sel = (value, options, onchange) => { const s = el('select', { class: 'sel', onchange: () => onchange(s.value) }, ...options.map(([v, l]) => el('option', { value: v }, l))); s.value = String(value ?? ''); return s; };
@@ -197,7 +197,7 @@ function openPanel(app, ctl, tab = 'record') {
         const outs = broadcaster.live ? broadcaster.status?.outputs || [] : [];
         fill(statusBox, ...outs.map((o) => el('div', { class: `bc-out bc-${o.state}` },
           el('b', {}, o.name), ` ${STATE_LABEL[o.state] || o.state}`,
-          o.state === 'live' ? ` · ${hms(o.uptime)} · ${o.kbps} kbps${o.listeners != null ? ` · ${o.listeners} listener${o.listeners === 1 ? '' : 's'}` : ''}` : '',
+          liveDetail(o),
           o.reconnects ? ` · ${o.reconnects} reconnect(s)` : '',
           o.song ? el('div', { class: 'hint' }, `Now playing: ${o.song}`) : null,
           o.error ? el('div', { class: 'rec-error' }, o.error) : null, o.metaError ? el('div', { class: 'hint' }, o.metaError) : null)));

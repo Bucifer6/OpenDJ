@@ -54,3 +54,12 @@ test('N10: lyrics written by ffmpeg into an MP3 are read back', async (t) => {
   assert.equal(l.synced[0].text, 'Sing along');
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('F11: broadcast status says "connecting…" instead of "0 kbps" until bytes flow', async () => {
+  const { liveDetail, hms } = await import('../public/js/recording/status.js');
+  assert.match(liveDetail({ state: 'live', uptime: 1, kbps: 0, bytes: 0 }), /connecting…/);
+  assert.doesNotMatch(liveDetail({ state: 'live', uptime: 2, kbps: 0, bytes: 4096 }), /0 kbps/);
+  assert.equal(liveDetail({ state: 'live', uptime: 75, kbps: 128, bytes: 9e5, listeners: 1 }), ' · 1:15 · 128 kbps · 1 listener');
+  assert.equal(liveDetail({ state: 'connecting' }), '');
+  assert.equal(hms(3725), '1:02:05');
+});
