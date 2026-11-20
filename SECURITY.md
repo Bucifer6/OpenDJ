@@ -24,9 +24,13 @@ and you are credited unless you ask not to be.
 - **Hosted mode** (the Docker image, or `npm run web` with `HOST=0.0.0.0`) is meant to sit behind
   HTTPS on a network you trust. Set a strong `OPENDJ_PASSWORD`, and limit `OPENDJ_MUSIC_ROOTS`
   to your music folders.
-- The desktop app's local server only listens on `127.0.0.1` and rejects cross-site requests.
+- The desktop app's local server only listens on `127.0.0.1`, rejects cross-site requests, and only answers
+  the app window that started it (a random per-launch token in an HttpOnly cookie). `npm run web` on
+  `127.0.0.1` has no token: anyone who can open connections on that computer can use it.
 - Media-server tokens, streaming keys and passwords are stored in the app's data folder on
-  your machine. Protect that folder like any other credentials file.
+  your machine (files readable by your user only, `0600`). Protect that folder like any other credentials file.
+- Media sources (Plex, Jellyfin, Subsonic…) and lighting outputs (Art-Net, WLED, Hue) connect to whatever
+  address you enter, LAN and local addresses included, because that is what they are for.
 
 ## Verifying downloads
 

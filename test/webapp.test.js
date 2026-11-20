@@ -90,14 +90,14 @@ test('login: required for API, SSE and app assets; cookie flags; logout; session
     const stored = fs.readFileSync(path.join(dir, 'd', 'auth.json'), 'utf8');
     assert.equal(stored.includes(c.cookie().split('=')[1]), false);
     // a new server on the same data dir accepts the session
-    const auth2 = new Auth({ dataDir: path.join(dir, 'd'), enabled: true, password: 'x', log: {} });
+    const auth2 = new Auth({ dataDir: path.join(dir, 'd'), enabled: true, password: 'correct horse', log: {} });
     assert.equal(auth2.check({ headers: { cookie: c.cookie() } }), true);
     const saved = c.cookie();
     await c('POST', '/api/auth/logout');
     c.setCookie(saved);
     assert.equal((await c('GET', '/api/tracks')).status, 401, 'logout revokes the session server-side');
     // behind a TLS reverse proxy (trusted), the cookie is Secure
-    const auth3 = new Auth({ dataDir: path.join(dir, 'd3'), enabled: true, password: 'x', trustProxy: true, log: {} });
+    const auth3 = new Auth({ dataDir: path.join(dir, 'd3'), enabled: true, password: 'correct horse', trustProxy: true, log: {} });
     assert.match(auth3.cookie({ socket: {}, headers: { 'x-forwarded-proto': 'https' } }, 'v', 10), /; Secure$/);
   } finally { app.server.close(); app.shutdown(); }
 });

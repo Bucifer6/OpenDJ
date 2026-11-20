@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { parseFile } from 'music-metadata';
+import { isMediaPath } from '../scanner.js';
 import { buildPdb } from './pdb-writer.js';
 import { readExportDb } from './pdb-reader.js';
 import { buildAnlz } from './anlz-writer.js';
@@ -87,6 +88,7 @@ export async function exportToCdj(ctx, req) {
     const src = t.localPath || (t.sourceType === 'local' || !t.sourceType ? t.path : null);
     const label = [t.artist, t.title].filter(Boolean).join(' - ') || path.basename(String(src || tid));
     if (!src) { skipped.push({ id: tid, title: label, reason: 'streaming track: download it for offline use first' }); continue; }
+    if (!isMediaPath(src)) { skipped.push({ id: tid, title: label, reason: 'not an audio or video file' }); continue; }
     if (!readable(src)) { skipped.push({ id: tid, title: label, reason: 'file is outside the allowed music folders' }); continue; }
     const sst = await statOk(src);
     if (!sst?.isFile()) { skipped.push({ id: tid, title: label, reason: 'file missing (drive disconnected?)' }); continue; }

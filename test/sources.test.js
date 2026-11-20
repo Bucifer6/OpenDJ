@@ -94,7 +94,7 @@ test('subsonic: token auth params, search3 paging, playlists, stream urls', asyn
   assert.equal(new URL(c.coverRequest('s1').url).pathname, '/rest/getCoverArt');
 });
 
-test('subsonic: falls back to p=enc:hex on error 41, and to album walk when search3 is empty', async () => {
+test('subsonic: legacy p=enc:hex only when chosen (error 41 never auto-downgrades), and album walk when search3 is empty', async () => {
   const srv = await mock((req, url) => {
     const q = url.searchParams;
     if (q.get('t')) return fail(41, 'Token authentication not supported for LDAP users.');
@@ -110,12 +110,15 @@ test('subsonic: falls back to p=enc:hex on error 41, and to album walk when sear
         return ok({ album: { id: q.get('id'), song: [{ id: q.get('id') + '-1', title: 'x', suffix: 'mp3' }] } });
     }
   });
-  const c = new SubsonicClient({ type: 'subsonic', url: srv.url, username: 'dj', password: 'pässword' });
-  await c.connect();
-  assert.equal(c.legacyAuth, true);
-  assert.deepEqual(c.persistable(), { legacyAuth: true });
-  // the first ping used a token, the retry used p=enc:
+  const auto = new SubsonicClient({ type: 'subsonic', url: srv.url, username: 'dj', password: 'pässword' });
+  await assert.rejects(auto.connect(), (e) => e.code === 41 && /Legacy password auth/.test(e.message));
+  assert.equal(auto.legacyAuth, false);
+  assert.equal(srv.log.length, 1, 'no retry with the password in the URL');
   assert.ok(srv.log[0].query.get('t'));
+  assert.equal(srv.log[0].query.get('p'), null);
+  const c = new SubsonicClient({ type: 'subsonic', url: srv.url, username: 'dj', password: 'pässword', legacyAuth: true });
+  await c.connect();
+  assert.deepEqual(c.persistable(), {});
   assert.ok(srv.log[1].query.get('p').startsWith('enc:'));
   const tracks = await c.listTracks();
   assert.deepEqual(tracks.map((t) => t.remoteId), ['al1-1', 'al2-1']);

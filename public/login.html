@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Q8IJrM6LqD8H7+uW1VBxOgrrlEKCT6tkWfhcF8TiXdY='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-K8KM56yhXk6vO01bhmxoCQUmRDK/ot2NSHIRTAEqdMw='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; form-action 'self'">
   <meta name="theme-color" content="#0b0d10">
   <title>OpenDJ – Sign in</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -82,9 +82,15 @@
 <script>
 (() => {
   const $ = (s) => document.querySelector(s);
+  // Only ever return to a page of this server: resolve against our origin, compare origins, and collapse leading
+  // slashes so "/.//host" cannot turn into a protocol-relative "//host".
   const next = () => {
     const n = new URLSearchParams(location.search).get('next') || '/';
-    return n.startsWith('/') && !n.startsWith('//') && !n.startsWith('/login.html') ? n : '/';
+    try {
+      const u = new URL(n, location.origin);
+      const p = '/' + u.pathname.replace(/^\/+/, '');
+      return u.origin === location.origin && !p.startsWith('/login.html') ? location.origin + p + u.search + u.hash : '/';
+    } catch (e) { return '/'; }
   };
   const post = async (url, body) => {
     const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body) });

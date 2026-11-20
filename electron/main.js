@@ -1,14 +1,33 @@
 // Electron shell: starts the local library/stream server and opens the UI.
 import { app, BrowserWindow, dialog, ipcMain, session, shell, Menu } from 'electron';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { start } from '../server/index.js';
+import { start, LAUNCH_COOKIE } from '../server/index.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 let server;
 let appOrigin = '';
 // IPC calls are only accepted from OpenDJ's own top-level page.
 const trusted = (e) => { try { return new URL(e.senderFrame.url).origin === appOrigin; } catch { return false; } };
+const own = (url) => { try { return !!appOrigin && new URL(url).origin === appOrigin; } catch { return false; } };
+
+// Every webContents (main window, the video-output pop-up, anything a page manages to open) gets the same policy:
+// same-origin pop-ups open inside the app, web links open in the browser, everything else is refused; navigation
+// away from the app is blocked (http(s) links go to the browser), and <webview> is never allowed.
+const popupOptions = { backgroundColor: '#000', autoHideMenuBar: true, webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } };
+const openExternal = (url) => { if (/^https?:\/\//i.test(url)) shell.openExternal(url); };
+app.on('web-contents-created', (_e, wc) => {
+  wc.setWindowOpenHandler(({ url }) => {
+    if (own(url)) return { action: 'allow', overrideBrowserWindowOptions: popupOptions };
+    openExternal(url);
+    return { action: 'deny' };
+  });
+  const guard = (e, url) => { if (!own(url)) { e.preventDefault(); openExternal(url); } };
+  wc.on('will-navigate', guard);
+  wc.on('will-redirect', guard);
+  wc.on('will-attach-webview', (e) => e.preventDefault());
+});
 
 // Let audio start without a click (DJ software needs it) and keep timers precise when the window is hidden.
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -16,11 +35,15 @@ app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 
 async function createWindow() {
-  server = await start({ port: 0, dataDir: path.join(app.getPath('userData'), 'library') });
+  // The desktop server has no password, so other local users / processes could otherwise drive it (browse the
+  // disk, read files) on 127.0.0.1. A random per-launch token, sent by this app only as an HttpOnly cookie, is
+  // required on every request (static files, API, SSE, media). `npm run web` / start() without a token is unchanged.
+  const launchToken = crypto.randomBytes(32).toString('base64url');
+  server = await start({ port: 0, dataDir: path.join(app.getPath('userData'), 'library'), launchToken });
   appOrigin = new URL(server.url).origin;
+  await session.defaultSession.cookies.set({ url: server.url, name: LAUNCH_COOKIE, value: launchToken, path: '/', httpOnly: true, sameSite: 'strict', secure: false });
   const allowed = new Set(['midi', 'midiSysex', 'media', 'speaker-selection', 'hid', 'clipboard-sanitized-write', 'fullscreen', 'serial', 'window-management']);
   // Only OpenDJ's own pages get device permissions, never embedded frames (e.g. the YouTube player).
-  const own = (url) => { try { return new URL(url).origin === appOrigin; } catch { return false; } };
   session.defaultSession.setPermissionRequestHandler((wc, perm, cb, details) => cb(allowed.has(perm) && own(details?.requestingUrl || wc.getURL())));
   session.defaultSession.setPermissionCheckHandler((_wc, perm, origin) => allowed.has(perm) && own(origin));
   session.defaultSession.setDevicePermissionHandler((details) => own(details.origin) && ['hid', 'serial'].includes(details.deviceType));
@@ -43,15 +66,7 @@ async function createWindow() {
     webPreferences: { preload: path.join(here, 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: false },
   });
   win.once('ready-to-show', () => win.show());
-  // Same-origin pop-ups (video output window) open inside the app; web links open in the browser; everything else is refused.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (own(url)) return { action: 'allow', overrideBrowserWindowOptions: { backgroundColor: '#000', autoHideMenuBar: true, webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false } } };
-    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
-    return { action: 'deny' };
-  });
-  const guard = (e, url) => { if (!own(url)) { e.preventDefault(); if (/^https?:\/\//i.test(url)) shell.openExternal(url); } };
-  win.webContents.on('will-navigate', guard);
-  win.webContents.on('will-redirect', guard);
+  // pop-up / navigation policy: see app.on('web-contents-created') above
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
     { role: 'fileMenu' }, { role: 'editMenu' },

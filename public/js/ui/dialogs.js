@@ -117,6 +117,11 @@ export class Dialogs {
     const renderFields = () => {
       const t = types.find((x) => x.type === typeSel.value);
       fieldsEl.replaceChildren(...t.fields.map((f) => {
+        if (f.type === 'checkbox') {
+          const cb = el('input', { type: 'checkbox', checked: !!existing?.[f.name] });
+          inputs[f.name] = cb;
+          return el('label', { class: 'check' }, cb, ` ${f.label}`, f.help ? el('small', { class: 'hint' }, ` ${f.help}`) : null);
+        }
         const inp = el('input', { class: 'inp', type: f.type === 'password' ? 'password' : 'text', placeholder: f.placeholder || (existing && f.type === 'password' ? '(unchanged)' : ''), value: existing && f.type !== 'password' ? existing[f.name] || '' : '' });
         inputs[f.name] = inp;
         return el('label', { class: 'field' }, el('span', {}, f.label + (f.required ? ' *' : '')), inp, f.help ? el('small', { class: 'hint' }, f.help) : null);
@@ -131,7 +136,10 @@ export class Dialogs {
       label: 'Connect', primary: true, action: async () => {
         const cfg = { type: typeSel.value, name: nameIn.value.trim() || typeSel.selectedOptions[0].textContent };
         if (existing) cfg.id = existing.id;
-        for (const [k, inp] of Object.entries(inputs)) if (inp.value.trim()) cfg[k] = inp.value.trim();
+        for (const [k, inp] of Object.entries(inputs)) {
+          if (inp.type === 'checkbox') cfg[k] = inp.checked;
+          else if (inp.value.trim()) cfg[k] = inp.value.trim();
+        }
         status.textContent = 'Connecting…';
         try { const res = await api.addSource(cfg); return res; } catch (e) { status.textContent = `✕ ${e.message}`; return false; }
       },

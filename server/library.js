@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { readJsonSafe, writeJsonAtomic } from './jsonstore.js';
+import { readJsonSafe, writeJsonAtomic, chmodQuiet } from './jsonstore.js';
 
 export const DEFAULT_SETTINGS = {
   deckCount: 2,
@@ -43,6 +43,7 @@ export const DEFAULT_SETTINGS = {
   transcodeCacheGB: 4,        // FFmpeg transcode cache cap (data dir/transcode-cache), LRU
   uploadDir: '',              // browser uploads land here ('' = <data dir>/Uploads, or OPENDJ_UPLOAD_DIR)
   uploadMaxMB: 2048,          // per-file upload limit
+  downloadMaxMB: 4096,        // per-file limit for offline copies downloaded from media servers
   allowedRoots: null,
   youtubeApiKey: '',          // YouTube Data API key for search (never written to backups)         // hosted mode: folders the web UI may browse/add/export to (OPENDJ_MUSIC_ROOTS wins)
 };
@@ -67,14 +68,21 @@ export function sanitizeField(k, v) {
   return v;
 }
 export const newId = () => crypto.randomBytes(8).toString('hex');
+// Ids index plain objects (data.tracks) or come from URLs: never let one name an Object.prototype property.
+const BAD_IDS = new Set(['__proto__', 'constructor', 'prototype']);
+export const okId = (id) => typeof id === 'string' && id.length > 0 && !BAD_IDS.has(id);
 
 export class Library {
   constructor(dataDir) {
     this.dataDir = dataDir;
-    fs.mkdirSync(dataDir, { recursive: true });
+    fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 }); // new data dirs are private to the user
     fs.mkdirSync(path.join(dataDir, 'waveforms'), { recursive: true });
     this.file = path.join(dataDir, 'library.json');
     this.settingsFile = path.join(dataDir, 'settings.json');
+    // files written by older versions were 0644: they hold source passwords / tokens and API keys
+    for (const f of [this.file, this.settingsFile, path.join(dataDir, 'auth.json'), path.join(dataDir, 'secrets.json')]) {
+      for (const x of [f, f + '.bak', f + '.tmp']) chmodQuiet(x, 0o600);
+    }
     this.listeners = new Set();
     this.data = { version: 1, tracks: {}, playlists: [], folders: [], sources: [] };
     this.settings = structuredClone(DEFAULT_SETTINGS);
@@ -129,10 +137,11 @@ export class Library {
   static remoteId(sourceId, remoteId) { return id(`remote:${sourceId}:${remoteId}`); }
 
   allTracks() { return Object.values(this.data.tracks); }
-  getTrack(tid) { return this.data.tracks[tid]; }
+  getTrack(tid) { return okId(tid) && Object.hasOwn(this.data.tracks, tid) ? this.data.tracks[tid] : undefined; }
 
   upsertTrack(t) {
-    const prev = this.data.tracks[t.id];
+    if (!okId(t?.id)) throw new Error('Bad track id');
+    const prev = this.getTrack(t.id);
     // Never overwrite the user's analysis / cue work with re-scanned tag data.
     const keep = prev ? {
       cues: prev.cues, loops: prev.loops, gridOffset: prev.gridOffset, analyzed: prev.analyzed,
@@ -149,7 +158,7 @@ export class Library {
   }
 
   updateTrack(tid, patch) {
-    const t = this.data.tracks[tid];
+    const t = this.getTrack(tid);
     if (!t) return null;
     const allowed = ['title', 'artist', 'album', 'genre', 'year', 'bpm', 'key', 'rating', 'comment', 'cues', 'loops',
       'gridOffset', 'analyzed', 'gain', 'color', 'playCount', 'lastPlayed', 'duration', 'endTime', 'startTime', 'energy', 'bpmLocked',
@@ -165,13 +174,13 @@ export class Library {
   /** Track id for a local path: honours relocated tracks (whose id was derived from their old path). */
   trackIdForPath(p) {
     const abs = path.resolve(p);
-    const alias = this.data.pathAlias?.[abs];
-    if (alias && this.data.tracks[alias]) return alias;
+    const alias = this.data.pathAlias && Object.hasOwn(this.data.pathAlias, abs) ? this.data.pathAlias[abs] : undefined;
+    if (alias && this.getTrack(alias)) return alias;
     return Library.localId(abs);
   }
   /** Point an existing track at a new file, keeping its id (and so its cues, analysis and playlist entries). */
   relocateTrack(tid, newPath, sourceId) {
-    const t = this.data.tracks[tid];
+    const t = this.getTrack(tid);
     if (!t) return null;
     const abs = path.resolve(newPath);
     this.data.pathAlias ||= {};
@@ -192,6 +201,7 @@ export class Library {
   removeTracks(ids) {
     const set = new Set(ids);
     for (const tid of ids) {
+      if (!okId(tid)) continue;
       delete this.data.tracks[tid];
       try { fs.unlinkSync(this.waveformPath(tid)); } catch { /* none */ }
     }
@@ -209,12 +219,12 @@ export class Library {
     this.changed('playlists');
     return p;
   }
-  getPlaylist(pid) { return this.data.playlists.find((p) => p.id === pid); }
+  getPlaylist(pid) { return okId(pid) ? this.data.playlists.find((p) => p.id === pid) : undefined; }
   updatePlaylist(pid, patch) {
     const p = this.getPlaylist(pid);
     if (!p) return null;
     if (typeof patch.name === 'string') p.name = patch.name.slice(0, 200) || p.name;
-    if (Array.isArray(patch.trackIds) && !p.smart) p.trackIds = patch.trackIds.filter((t) => this.data.tracks[t]);
+    if (Array.isArray(patch.trackIds) && !p.smart) p.trackIds = patch.trackIds.filter((t) => this.getTrack(t));
     if ('folder' in patch) p.folder = patch.folder;
     if (patch.smart && p.smart) p.smart = patch.smart;
     this.changed('playlists');
@@ -223,7 +233,7 @@ export class Library {
   addToPlaylist(pid, trackIds) {
     const p = this.getPlaylist(pid);
     if (!p || p.smart) return null;
-    for (const t of trackIds) if (this.data.tracks[t]) p.trackIds.push(t);
+    for (const t of trackIds) if (this.getTrack(t)) p.trackIds.push(t);
     this.changed('playlists');
     return p;
   }
@@ -243,6 +253,7 @@ export class Library {
     }
     return f;
   }
+  getFolder(fid) { return okId(fid) ? this.data.folders.find((x) => x.id === fid) : undefined; }
   removeFolder(fid, { removeTracks = true } = {}) {
     const f = this.data.folders.find((x) => x.id === fid);
     this.data.folders = this.data.folders.filter((x) => x.id !== fid);
@@ -257,9 +268,11 @@ export class Library {
     const { password, token, ...rest } = s; // never send secrets to the UI
     return { ...rest, hasPassword: !!password, hasToken: !!token };
   }
-  getSource(sid) { return this.data.sources.find((s) => s.id === sid); }
-  saveSource(cfg) {
+  getSource(sid) { return okId(sid) ? this.data.sources.find((s) => s.id === sid) : undefined; }
+  /** Add or update a source. `replace`: the stored entry becomes exactly `cfg` (dropped secrets stay dropped). */
+  saveSource(cfg, { replace = false } = {}) {
     const existing = cfg.id && this.getSource(cfg.id);
+    if (existing && replace) for (const k of Object.keys(existing)) if (k !== 'id' && k !== 'addedAt' && !(k in cfg)) delete existing[k];
     if (existing) Object.assign(existing, cfg);
     else this.data.sources.push({ ...cfg, id: cfg.id || newId(), addedAt: Date.now() });
     this.changed('sources');

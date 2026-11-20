@@ -13,7 +13,13 @@ const positional = args.filter((a, i) => !a.startsWith('--') && !(i > 0 && args[
 
 const port = Number(flag('port') || process.env.PORT || positional[0] || 7380);
 const host = flag('host') || process.env.HOST || '127.0.0.1';
-const app = await start({ port, host, dataDir: process.env.OPENDJ_DATA, auth: args.includes('--auth') || undefined });
+let app;
+try {
+  app = await start({ port, host, dataDir: process.env.OPENDJ_DATA, auth: args.includes('--auth') || undefined });
+} catch (e) {
+  console.error(`[opendj] Not started: ${e.message}`); // e.g. a weak OPENDJ_PASSWORD, port in use
+  process.exit(1);
+}
 console.log(`OpenDJ running at ${app.url}`);
 console.log(`Library data: ${app.library.dataDir}`);
 if (!isLoopback(host)) console.log('Hosted mode: password login is required; file access is limited to the allowed music folders.');

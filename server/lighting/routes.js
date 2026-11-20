@@ -24,13 +24,15 @@ export function registerLightingRoutes({ route, library, emit = () => {}, fetch:
   route('PUT', '/api/lighting/config', async ({ body }) => {
     if (!body || typeof body !== 'object') throw bad('Expected a lighting config');
     const hue = body.outputs?.hue, cur = engine.config.outputs?.hue;
-    if (hue && (hue.username === HUE_REDACTED || (!hue.username && cur?.username && hue.bridge === cur.bridge && !('username' in hue)))) {
-      body = { ...body, outputs: { ...body.outputs, hue: { ...hue, username: cur?.username || '' } } };
+    // keep the paired key only for the same bridge: a new bridge address must be paired again
+    const sameBridge = !!cur?.username && String(hue?.bridge || '') === String(cur.bridge || '');
+    if (hue && (hue.username === HUE_REDACTED || (!hue.username && !('username' in hue)))) {
+      body = { ...body, outputs: { ...body.outputs, hue: { ...hue, username: sameBridge ? cur.username : '' } } };
     }
     engine.setConfig(body);
     save();
     return redact(engine.config);
-  });
+ }, { bodyLimit: 8 * 2 ** 20 }); // rigs with many fixtures / cue lists
   // Renderer -> server music feed (10-20 Hz). Kept tiny.
   route('POST', '/api/lighting/state', async ({ body }) => { if (body && typeof body === 'object') engine.setState(body); return { ok: 1 }; });
   route('POST', '/api/lighting/live', async ({ body }) => {

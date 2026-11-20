@@ -186,8 +186,8 @@ npm run web        # then open http://localhost:7380 in Chrome or Edge
 ```bash
 docker build -t opendj .
 docker run -d --name opendj -p 7380:7380 \
-  -v opendj-data:/data -v /path/to/music:/music:ro \
-  -e OPENDJ_PASSWORD='choose-a-password' opendj
+  -v opendj-data:/data -v /path/to/music:/music:ro opendj
+docker logs opendj   # prints the one-time setup code for choosing the password on first visit
 ```
 
 Then open `http://<server-address>:7380`. Details in [Run as a web app](#run-as-a-web-app--on-a-nas).
@@ -217,34 +217,38 @@ OpenDJ can run on a NAS or home server and be opened from any computer's browser
 
 ```bash
 docker build -t opendj .
+read -rs OPENDJ_PASSWORD && export OPENDJ_PASSWORD   # type a password (8+ characters), or skip this and -e below
 docker run -d --name opendj -p 7380:7380 \
   -v opendj-data:/data -v /path/to/music:/music:ro \
-  -e OPENDJ_PASSWORD='choose-a-password' opendj
+  -e OPENDJ_PASSWORD opendj
 ```
 
 or edit and use [`docker-compose.yml`](docker-compose.yml) (`docker compose up -d`). Then open `http://<nas-address>:7380`.
 
 - `/music` is your music (read-only is fine); `/data` holds the library, analysis, transcode cache and uploads.
 - Without `OPENDJ_PASSWORD`, the first visit asks you to choose a password. It needs the one-time setup code printed in the log (`docker logs opendj`), so nobody else on the network can claim the server first.
+- `OPENDJ_PASSWORD` must be at least 8 characters; the server refuses to start with a shorter one or with an example value such as `change-me`.
 
 ### Without Docker
 
 ```bash
 npm install
-HOST=0.0.0.0 OPENDJ_PASSWORD='choose-a-password' OPENDJ_MUSIC_ROOTS=/srv/music npm run web
+read -rs OPENDJ_PASSWORD && export OPENDJ_PASSWORD   # 8+ characters; or leave it unset and use the setup code from the log
+HOST=0.0.0.0 OPENDJ_MUSIC_ROOTS=/srv/music npm run web
 # or: node server/cli.js --host 0.0.0.0 --port 7380
 ```
 
 | Variable | Meaning |
 |---|---|
-| `HOST` / `--host` | Address to listen on. Default `127.0.0.1` (this computer only, no password). Anything else turns on the login. |
+| `HOST` / `--host` | Address to listen on. Default `127.0.0.1` (this computer only). Anything else turns on the login. On `127.0.0.1` there is no password unless one of `OPENDJ_PASSWORD`, `OPENDJ_TRUST_PROXY`, `OPENDJ_ALLOWED_HOSTS` or `OPENDJ_AUTH=1` is set. |
+| `OPENDJ_AUTH=1` / `--auth` | Turn on the login (and limit file access to the music roots) even on `127.0.0.1` |
 | `PORT` / `--port` | Port, default 7380 |
-| `OPENDJ_PASSWORD` | Login password (otherwise chosen on first visit and stored hashed) |
+| `OPENDJ_PASSWORD` | Login password, 8+ characters (otherwise chosen on first visit with the setup code from the log, and stored hashed). Setting it always turns the login on, whatever `HOST` is |
 | `OPENDJ_MUSIC_ROOTS` | Folders the web UI may browse, add, import from and export to, separated by `:` (`;` on Windows). Default: `~/Music`, the uploads and downloads folders. Nothing outside them is ever shown. |
 | `OPENDJ_DATA` | Library data folder |
 | `OPENDJ_UPLOAD_DIR` | Where browser uploads go (default `<data>/Uploads`; it is added to the library as a folder) |
-| `OPENDJ_TRUST_PROXY=1` | Behind a reverse proxy: use `X-Forwarded-For` for login rate limiting and `X-Forwarded-Proto` for secure cookies |
-| `OPENDJ_ALLOWED_HOSTS` | Optional list of host names the server answers to (e.g. `dj.example.com`) |
+| `OPENDJ_TRUST_PROXY` | Behind a reverse proxy: `1` trusts the proxy that connects to OpenDJ and uses the right-most `X-Forwarded-For` hop for login rate limiting and `X-Forwarded-Proto` for secure cookies. Better: the proxy's address(es), comma-separated (e.g. `172.18.0.1`), so `X-Forwarded-*` is only read from requests that really come through it |
+| `OPENDJ_ALLOWED_HOSTS` | Host names the server answers to (e.g. `dj.example.com`, the name your reverse proxy forwards). Turns the login on; the server refuses to start if login is explicitly off |
 | `OPENDJ_FFMPEG` | FFmpeg binary, or `none` |
 
 ### Desktop app vs web app
@@ -276,7 +280,16 @@ https://opendj.lan {
 }
 ```
 
-Then start OpenDJ with `OPENDJ_TRUST_PROXY=1`. Sessions use an HttpOnly, SameSite=Strict cookie (marked Secure over HTTPS); failed logins are slowed down per address.
+Then start OpenDJ behind it. OpenDJ stays on `127.0.0.1` (only Caddy reaches it), so the login is turned on by the
+proxy settings, not by `HOST`:
+
+```bash
+read -rs OPENDJ_PASSWORD && export OPENDJ_PASSWORD   # 8+ characters; or leave it unset and use the setup code from the log
+OPENDJ_TRUST_PROXY=127.0.0.1 OPENDJ_ALLOWED_HOSTS=dj.example.com OPENDJ_MUSIC_ROOTS=/srv/music npm run web
+```
+
+`OPENDJ_TRUST_PROXY`, `OPENDJ_ALLOWED_HOSTS` and `OPENDJ_PASSWORD` each turn the login and the music-root limits on
+(as do `OPENDJ_AUTH=1` / `--auth`). Sessions use an HttpOnly, SameSite=Strict cookie (marked Secure over HTTPS); failed logins are slowed down per address.
 
 ## How OpenDJ compares
 
