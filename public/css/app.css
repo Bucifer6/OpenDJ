@@ -124,8 +124,15 @@ button, input, select { font: inherit; color: inherit; }
 .tempo-fader { flex: 1; min-height: 80px; }
 
 /* four-deck compact mode */
-.four-decks .jog { max-width: 110px; }
-.four-decks .deck-body { grid-template-columns: 110px minmax(0, 1fr) 54px; }
+.four-decks .jog { display: none; }
+.four-decks .deck-left { justify-content: center; }
+.four-decks .transport { grid-template-columns: 1fr; }
+.four-decks .deck-toggles { display: none; }
+.four-decks .overview-wrap { height: 28px; }
+.four-decks .deck { gap: 4px; padding: 6px; }
+.four-decks .deck-body { grid-template-columns: 52px minmax(0, 1fr) 54px; }
+.four-decks .tempo-fader .fader-track { min-height: 50px; }
+.four-decks .deck-tempo .bend, .four-decks .deck-tempo .btn { display: none; }
 .four-decks .btn.big { height: 34px; max-width: 42px; font-size: 10px; }
 .four-decks .deck-cover { display: none; }
 .four-decks .deck-header { grid-template-columns: 26px minmax(0, 1fr) auto auto; }

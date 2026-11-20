@@ -162,7 +162,8 @@ export class Engine extends Emitter {
     this.masterOut.connect(this.hpMaster); this.masterOut.connect(this.recNode);
     if (this.hpAudio) { this.hpAudio.pause(); this.hpAudio.srcObject = null; this.hpAudio = null; }
     try {
-      if (ctx.setSinkId) await ctx.setSinkId(s.masterDeviceId && s.masterDeviceId !== 'default' ? s.masterDeviceId : '');
+      const sink = s.masterDeviceId && s.masterDeviceId !== 'default' ? s.masterDeviceId : '';
+      if (ctx.setSinkId && (ctx.sinkId ?? '') !== sink) await ctx.setSinkId(sink);
     } catch (e) { this.emit('warning', `Could not open master output: ${e.message}`); }
 
     if (s.cueMode === 'split') {
