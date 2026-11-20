@@ -7,7 +7,8 @@ import { toCamelot, camelotCompatible } from '../audio/analysis-core.js';
 import { LibraryDialogs, TRACK_COLORS, colorName, flipSubmenus } from './library-dialogs.js';
 import { platform, unavailable } from '../platform.js';
 
-const ROW_H = 26;
+// rows are taller on touch screens (phones, tablets) so a finger can pick one
+const ROW_H = globalThis.matchMedia?.('(pointer: coarse)').matches ? 40 : 26;
 const COLS = [
   { id: '#', label: '#', w: 34, ordered: true }, // position in a playlist / set / history view (only shown there)
   { id: 'art', label: '', w: 30, sort: null },

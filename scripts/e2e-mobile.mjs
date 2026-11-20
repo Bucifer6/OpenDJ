@@ -230,13 +230,14 @@ async function runProfile({ name, device }) {
 
     // ---- mid-range phone: 4x CPU throttling with two decks playing and analysis in the background ----
     if (name === 'pixel7') {
+      const cdp = await ctx.newCDPSession(page);
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+      await page.evaluate(async ([a, b]) => { await window.opendj.loadTrack(0, a); await window.opendj.loadTrack(1, b); const [x, y] = window.opendj.engine.decks; x.play(); y.play(); }, [ids['Pocket Groove'], ids['Bus Ride']]);
+      // a new import starts the background analysis while both decks play
       const chooser2 = page.waitForEvent('filechooser');
       await page.locator('.lib-tools .import-btn').click();
       await (await chooser2).setFiles([FILES.flac]);
-      await page.waitForFunction(() => window.opendj.library.tracks.size === 4, null, { timeout: 30000 });
-      const cdp = await ctx.newCDPSession(page);
-      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
-      await page.evaluate(() => { const [a, b] = window.opendj.engine.decks; a.play(); b.play(); });
+      await page.waitForFunction(() => window.opendj.library.tracks.size === 4 && window.opendj.analyser.running, null, { timeout: 60000 });
       const perf = await page.evaluate(() => new Promise((resolve) => {
         let frames = 0, longest = 0, last = performance.now(); const t0 = last;
         const tick = (now) => { frames++; longest = Math.max(longest, now - last); last = now; if (now - t0 < 6000) requestAnimationFrame(tick); else resolve({ fps: frames / ((now - t0) / 1000), longest, analysing: window.opendj.analyser.running, playing: window.opendj.engine.decks.filter((d) => d.playing).length, ctx: window.opendj.engine.ctx.state }); };

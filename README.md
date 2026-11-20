@@ -194,6 +194,17 @@ docker logs opendj   # prints the one-time setup code for choosing the password 
 
 Then open `http://<server-address>:7380`. Details in [Run as a web app](#run-as-a-web-app--on-a-nas).
 
+## Mobile apps
+
+OpenDJ also runs as a **standalone iOS and Android app** (phase 1, built with Capacitor from the same UI): no computer
+or server needed. Import music from the Files app / Android storage (it is copied into the app, so it plays offline),
+let it analyse in the background, mix on two decks (phones) or two/four decks (tablets), make playlists, record your
+mix, stream or download from Plex / Jellyfin / Emby / Subsonic, bring cues and playlists over with rekordbox XML, and
+export through the share sheet. Playback continues with the screen locked. Lighting, Ableton Link, DVS, MIDI
+controllers, CDJ USB export and broadcasting stay desktop-only for now. CI builds the Android APK/AAB and an iOS build
+(`.github/workflows/mobile.yml`); try the mobile mode in a browser with `npm run web` and `http://localhost:7380/?local=1`.
+Details, build steps and the CI secrets: [docs/MOBILE.md](docs/MOBILE.md).
+
 ## Supported formats
 
 | | Formats | Needs |
@@ -359,13 +370,16 @@ server/             Node backend (127.0.0.1 by default; password login when host
   stems.js recorder.js broadcast.js lyrics.js transcode.js
   cdj/ lighting/ link/   CDJ device-library export, lighting outputs, Ableton Link
   rekordbox.js m3u.js aiff.js
-public/             UI (vanilla ES modules, no build step)
+public/             UI (vanilla ES modules, no build step) - the same UI runs in the desktop app, the web app and the mobile app
+  js/local/           on-device backend for the mobile app (the API inside the page: IndexedDB + app file storage)
+  js/shared/          logic shared by server/ and js/local/ (library model, smart playlists, media-server clients…)
   js/audio/           engine (mixer graph, routing), deck, AudioWorklets, effects, sampler, sequencer, analysis
   js/ui/              deck, mixer, waveform, library, dialogs, controls, controllers panel
   js/midi/            MIDI learn/mapping engine, presets, Mixxx import, wizard
   js/stems/ js/dvs/ js/video/ js/lighting/ js/recording/ js/cdj/ js/link/ js/lyrics/
   js/automix.js
-scripts/            end-to-end tests (e2e-*.mjs) and README demo tooling (demo/)
+mobile/             Capacitor iOS / Android projects (see docs/MOBILE.md)
+scripts/            end-to-end tests (e2e-*.mjs), README demo tooling (demo/), mobile build helpers
 ```
 
 Library data lives in your OS app-data folder, or in `OPENDJ_DATA` if set (desktop app and web server alike). Web server (`npm run web`): `%APPDATA%\OpenDJ`, `~/Library/Application Support/OpenDJ`, `~/.config/opendj`. Desktop app: the `library` folder inside Electron's app-data folder (`%APPDATA%\OpenDJ\library`, `~/Library/Application Support/OpenDJ/library`, `~/.config/OpenDJ/library`).
