@@ -35,6 +35,7 @@ export const DEFAULT_SETTINGS = {
   autoCues: true,
   autoAnalyse: true,          // analyse new tracks (BPM, key, waveform, cues) in the background, in the browser
   sequencer: null,            // object; replaced wholesale on update (not merged)
+  sampler: null,              // { pads: [{ sound, volume, sync }] } built-in sound / volume / sync-to-beat per pad; replaced wholesale
   link: { enabled: false, quantum: 4, startStopSync: false },
   lyrics: { online: false, writeLrc: false },
   stemsModelUrl: '', stemsModelSha256: '', stemsBackend: 'auto', stemsAutoLoad: true, stemsOverlap: 0.25,
@@ -50,7 +51,7 @@ export const DEFAULT_SETTINGS = {
   youtubeApiKey: '',          // YouTube Data API key for search (never written to backups)         // hosted mode: folders the web UI may browse/add/export to (OPENDJ_MUSIC_ROOTS wins)
 };
 // Object-valued settings that are replaced on update instead of shallow-merged.
-const REPLACE_SETTINGS = new Set(['midiMappings', 'sequencer', 'lighting']);
+const REPLACE_SETTINGS = new Set(['midiMappings', 'sequencer', 'lighting', 'sampler']);
 
 const id = (s) => crypto.createHash('sha1').update(String(s)).digest('hex').slice(0, 16);
 export const normTags = (v) => {

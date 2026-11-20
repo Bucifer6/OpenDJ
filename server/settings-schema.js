@@ -51,6 +51,15 @@ const SCHEMA = {
   talkoverDb: num(-60, 0),
   colorFx: oneOf('filter', 'space', 'dubecho', 'noise', 'crush', 'pitch'),
   sequencer: objOrNull(),
+  sampler: (v) => {
+    if (v === null) return null;
+    if (!v || typeof v !== 'object' || !Array.isArray(v.pads)) return undefined;
+    return { pads: v.pads.slice(0, 8).map((p) => ({
+      sound: typeof p?.sound === 'string' && /^[a-z0-9]{1,32}$/.test(p.sound) ? p.sound : null,
+      volume: num(0, 1.5)(p?.volume) ?? 1,
+      sync: p?.sync === true,
+    })) };
+  },
   link: shape({ enabled: bool(), quantum: num(1, 16), startStopSync: bool() }),
   lyrics: shape({ online: bool(), writeLrc: bool() }),
   stemsModelUrl: str(), stemsModelSha256: str(128), stemsBackend: oneOf('auto', 'wasm'), stemsOverlap: num(0, 0.75),

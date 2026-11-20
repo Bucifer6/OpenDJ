@@ -189,18 +189,43 @@ class App {
     const bar = el('div', { class: 'sampler-bar' }, el('span', { class: 'sb-title' }, 'SAMPLER'));
     const fileIn = el('input', { type: 'file', accept: 'audio/*', style: { display: 'none' } });
     let target = 0;
-    fileIn.addEventListener('change', async () => { try { await s.loadFile(target, fileIn.files[0]); render(); } catch (e) { this.toast(`Could not load sample: ${e.message}`); } fileIn.value = ''; });
+    const save = () => this.setSetting('sampler', s.config());
+    fileIn.addEventListener('change', async () => { try { await s.loadFile(target, fileIn.files[0]); save(); } catch (e) { this.toast(`Could not load sample: ${e.message}`); } fileIn.value = ''; });
     const pads = s.slots.map((_, i) => {
-      const b = el('button', { class: 'spad', title: 'Click: play · Shift-click: stop · Right-click: load your own sample' });
-      b.addEventListener('pointerdown', () => { this.engine.resume(); this.shift ? s.stop(i) : s.trigger(i); });
-      b.addEventListener('contextmenu', (e) => { e.preventDefault(); target = i; fileIn.click(); });
+      const b = el('button', { class: 'spad', 'data-pad': i, title: 'Click: play · Shift-click: stop · Right-click: choose sound, load your own sample, volume, sync to beat' });
+      b.addEventListener('pointerdown', (e) => { if (e.button !== 0) return; this.engine.resume(); this.shift ? s.stop(i) : s.trigger(i); });
+      b.addEventListener('contextmenu', (e) => { e.preventDefault(); this.samplerPadMenu(i, e.clientX, e.clientY, () => { target = i; fileIn.click(); }, save); });
       return b;
     });
-    const render = () => { pads.forEach((b, i) => { b.textContent = s.slots[i]?.name || '—'; }); this.seqPanel?.renderNames?.(); };
+    const render = () => {
+      pads.forEach((b, i) => {
+        const slot = s.slots[i];
+        b.textContent = slot?.name || '—';
+        b.classList.toggle('synced', !!slot?.sync);
+        b.classList.toggle('user', slot && !slot.builtin);
+      });
+      this.seqPanel?.renderNames?.();
+    };
+    s.onChange = render;
     render();
     const seqBtn = el('button', { class: 'btn sm seq-btn', title: 'Step sequencer (synced to the master deck)', onclick: () => this.toggleSequencer() }, 'SEQ');
     bar.append(...pads, seqBtn, fileIn);
     return bar;
+  }
+
+  /** Sampler pad options: built-in sound bank, own sample, pad volume, start on the next beat. */
+  samplerPadMenu(i, x, y, pickFile, save) {
+    const s = this.engine.sampler, slot = s.slots[i];
+    const mark = (on) => (on ? '✓ ' : '\u2003');
+    const vol = Math.round((slot.volume ?? 1) * 100);
+    this.dialogs.menu(x, y, [
+      { label: 'Built-in sound', sub: s.constructor.bank.map((b) => ({ label: mark(slot.builtin && slot.sound === b.id) + b.name, action: async () => { await s.setSound(i, b.id); save(); this.engine.resume(); s.trigger(i); } })) },
+      { label: 'Load your own sample…', action: pickFile },
+      { label: `Pad volume (${vol} %)`, sub: [25, 50, 75, 100, 125, 150].map((v) => ({ label: mark(vol === v) + `${v} %`, action: () => { s.setPadVolume(i, v / 100); save(); } })) },
+      { label: `${mark(slot.sync)}Sync to beat (start on the next beat of the master deck)`, action: () => { s.setPadSync(i, !slot.sync); save(); } },
+      '-',
+      { label: 'Preview', action: () => { this.engine.resume(); s.trigger(i); } },
+    ]);
   }
 
   toggleSequencer() {

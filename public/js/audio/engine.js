@@ -165,7 +165,15 @@ export class Engine extends Emitter {
     this.hpCue.connect(this.hpOut); this.hpMaster.connect(this.hpOut);
     this.setCueMix(0); this.hpOut.gain.value = 0.8;
     // sampler -> master
-    this.sampler = new Sampler(ctx, this.masterBus);
+    this.sampler = new Sampler(ctx, this.masterBus, this.settings.sampler || {});
+    // pads set to "sync to beat" start on the master deck's next beat
+    this.sampler.nextBeat = () => {
+      const m = this.masterDeck();
+      if (!m?.playing || !m.bpm || !m.rate) return null;
+      const ph = m.beatPhase();
+      if (ph < 0.04) return null; // just on the beat: play now
+      return this.ctx.currentTime + ((1 - ph) * m.beatLen) / m.rate;
+    };
 
     for (let i = 0; i < 4; i++) {
       const ch = new Channel(this, i); this.channels.push(ch);
