@@ -1,0 +1,46 @@
+/* DVS (timecode vinyl / CD control) */
+.dvs-btn.active { background: var(--green); border-color: var(--green); color: #032; }
+.dvs-btn.error { border-color: var(--red); color: var(--red); }
+
+.dvs-mode { font: 800 9.5px var(--mono, monospace); letter-spacing: .06em; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line-2); background: var(--panel-3); color: var(--text-2); cursor: pointer; line-height: 14px; }
+.dvs-mode[data-mode="abs"] { color: #032; background: var(--green); border-color: var(--green); }
+.dvs-mode[data-mode="rel"] { color: #1a1203; background: var(--amber); border-color: var(--amber); }
+.dvs-mode[data-mode="int"] { color: var(--text); }
+.dvs-mode.nosig { opacity: .45; }
+.dvs-mode.warn { box-shadow: 0 0 0 2px var(--red); animation: dvs-blink 1s steps(2) infinite; }
+@keyframes dvs-blink { 50% { box-shadow: 0 0 0 2px transparent; } }
+
+.modal.wide:has(.dvs-panel) { width: min(1140px, calc(100vw - 32px)); }
+.dvs-panel { display: flex; flex-direction: column; gap: 12px; }
+.dvs-top { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.dvs-top .field { min-width: 180px; }
+.dvs-enable { min-width: 120px; }
+.dvs-enable.active { background: var(--green); border-color: var(--green); color: #032; }
+.dvs-status { font: 600 11px var(--mono, monospace); color: var(--text-2); align-self: center; flex: 1 1 160px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dvs-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 500px), 1fr)); gap: 10px; }
+.dvs-card { border: 1px solid var(--line); border-top: 3px solid var(--deck-color); border-radius: 8px; background: var(--panel-2); padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+.dvs-card-head { display: flex; align-items: center; gap: 10px; }
+.dvs-card-head b { color: var(--deck-color); letter-spacing: .08em; }
+.dvs-modes .seg-btn { min-width: 42px; }
+.dvs-state { margin-left: auto; font: 700 10.5px var(--mono, monospace); text-transform: uppercase; }
+.dvs-state.ok { color: var(--green); }
+.dvs-state.off { color: var(--text-3); }
+.dvs-state.warn { color: var(--red); }
+.dvs-card-body { display: grid; grid-template-columns: 150px minmax(0, 1fr) 140px; gap: 10px; align-items: start; }
+.dvs-scope { width: 150px; height: 150px; border-radius: 6px; border: 1px solid var(--line-2); }
+.dvs-cfg { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dvs-cfg .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dvs-cfg .field { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
+.dvs-cfg .sel { max-width: 100%; }
+.dvs-stats { display: flex; flex-direction: column; gap: 5px; font-size: 11px; }
+.dvs-meter { display: grid; grid-template-columns: 44px 1fr 50px; align-items: center; gap: 4px; }
+.dvs-meter span, .dvs-num span { color: var(--text-3); }
+.dvs-meter em { font-style: normal; font-family: var(--mono, monospace); text-align: right; color: var(--text-2); }
+.dvs-bar { height: 8px; border-radius: 3px; background: var(--inset); overflow: hidden; }
+.dvs-bar i { display: block; height: 100%; width: 0; background: var(--green); transition: width .08s linear; }
+.dvs-bar i.clip { background: var(--red); }
+.dvs-num { display: flex; justify-content: space-between; gap: 6px; }
+.dvs-num b { font-family: var(--mono, monospace); font-weight: 600; }
+.dvs-cal { display: block; }
+.dvs-help { margin: 0; }
+@media (max-width: 720px) { .dvs-card-body { grid-template-columns: 1fr; } .dvs-cards { grid-template-columns: 1fr; } }

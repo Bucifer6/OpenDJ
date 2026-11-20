@@ -13,6 +13,8 @@ import { applyTheme } from './ui/themes.js';
 import { Lighting } from './lighting/lighting.js';
 import { setupVideo } from './video/video-ui.js';
 import { setupUpload } from './ui/upload.js';
+import { DvsManager } from './dvs/dvs.js';
+import { dvsButton } from './dvs/dvs-ui.js';
 
 class App {
   constructor() { this.shift = false; this._shiftKey = false; }
@@ -23,6 +25,7 @@ class App {
     this.deckCount = this.settings.deckCount || 2;
     this.engine = new Engine(this.settings);
     await this.engine.init();
+    this.dvs = new DvsManager(this);
     this.dialogs = new Dialogs(this);
     this.library = new LibraryUI(this);
     this.upload = setupUpload(this);
@@ -40,6 +43,7 @@ class App {
     this.library.refreshDrives();
     setInterval(() => this.library.refreshDrives(), 15000); // notice USB sticks being plugged in
     this.setDeckCount(this.deckCount, false);
+    this.dvs.init().catch((e) => console.warn('DVS init failed', e));
     this.engine.setMasterVolume(0.8); this.engine.setHeadphoneVolume(0.8);
     if (this.engine.ctx.state !== 'running') this.showStartOverlay();
     const frame = (now) => { this.frame(now); requestAnimationFrame(frame); };
@@ -96,6 +100,7 @@ class App {
       el('div', { class: 'tb-spacer' }),
       el('div', { class: 'tb-group' }, this.recBtn, this.recTime),
       this.midiDot, this.cpu, this.clock,
+      dvsButton(this),
       el('button', { class: 'btn sm video-btn', title: 'Video mixer, visuals, YouTube & projector output', onclick: () => (this.videoUi ||= setupVideo(this)).toggleMixer() }, '🎬 VIDEO'),
       el('button', { class: 'btn sm light-btn', title: 'Lighting (DMX, Art-Net, sACN, WLED, Hue, OSC)', onclick: () => this.lighting?.openPanel() }, '💡 LIGHTS'),
       el('button', { class: 'btn icon', title: 'Settings', onclick: () => this.dialogs.settings() }, '⚙'),

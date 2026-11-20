@@ -295,7 +295,8 @@ export class Dialogs {
       field('Interface size', sel(s.uiScale || 100, [80, 90, 100, 110, 125, 150].map((v) => [v, `${v}%`]), async (v) => { await set('uiScale', Number(v)); applyTheme(app.settings); }), 'Shrink for small laptop screens, enlarge for touchscreens and big displays.'),
       field('Waveform colours', sel(s.waveformColors, [['rgb', '3-band RGB'], ['blue', 'Blue'], ['mono', 'Monochrome']], (v) => set('waveformColors', v))),
     );
-    const tabs = { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], keys: ['Shortcuts', shortcuts] };
+    const dvsTab = el('div', { class: 'form' }, el('p', { class: 'hint' }, 'Control decks with Serato or Traktor timecode vinyl / CDs through your audio interface inputs.'), el('button', { class: 'btn', onclick: () => import('../dvs/dvs-ui.js').then((m) => m.openDvsPanel(app)) }, 'Open DVS setup…'));
+    const tabs = { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], dvs: ['DVS', dvsTab], keys: ['Shortcuts', shortcuts] };
     const tabBar = el('div', { class: 'tabs' });
     const pane = el('div', { class: 'tab-pane' });
     const show = (k) => { pane.replaceChildren(tabs[k][1]); for (const b of tabBar.children) b.classList.toggle('active', b.dataset.k === k); };

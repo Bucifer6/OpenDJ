@@ -4,6 +4,7 @@ import { OverviewWaveform } from './waveform.js';
 import { EFFECTS, BEAT_DIVISIONS } from '../audio/effects.js';
 import { api } from '../api.js';
 import { cssVar } from './themes.js';
+import { dvsModeIndicator } from '../dvs/dvs-ui.js';
 import { HOTCUE_COLORS } from '../audio/deck.js';
 import { camelotCompatible, toCamelot } from '../audio/analysis-core.js';
 
@@ -30,7 +31,7 @@ export function buildDeck(app, deck) {
   const header = el('div', { class: 'deck-header' },
     el('div', { class: 'deck-num' }, String(i + 1)),
     cover,
-    el('div', { class: 'deck-meta' }, title, el('div', { class: 'deck-sub' }, artist, keyBadge, masterBadge)),
+    el('div', { class: 'deck-meta' }, title, el('div', { class: 'deck-sub' }, artist, keyBadge, masterBadge, dvsModeIndicator(app, i))),
     el('div', { class: 'deck-times' }, elapsed, remain),
     el('div', { class: 'deck-bpmbox' }, bpmBig, bpmSub),
   );
