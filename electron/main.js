@@ -16,7 +16,7 @@ app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 
 async function createWindow() {
-  server = await start({ port: 0, dataDir: path.join(app.getPath('userData'), 'library') });
+  server = await start({ port: 0, dataDir: process.env.OPENDJ_DATA || path.join(app.getPath('userData'), 'library') });
   appOrigin = new URL(server.url).origin;
   const allowed = new Set(['midi', 'midiSysex', 'media', 'speaker-selection', 'hid', 'clipboard-sanitized-write', 'fullscreen', 'serial', 'window-management']);
   // Only OpenDJ's own pages get device permissions, never embedded frames (e.g. the YouTube player).
