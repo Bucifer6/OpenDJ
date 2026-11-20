@@ -492,3 +492,35 @@ test('#15 Dockerfile base image pinned by digest; ffmpeg download location canno
   assert.throws(() => bp.verifyFfmpeg(dir, 'linux-x64'), /does not match/);
   assert.equal(fs.existsSync(path.join(dir, 'ffmpeg')), false, 'rejected binary removed');
 });
+
+// ---------------------------------------------------------------- suspected items
+test('(suspected) media-server downloads are capped (declared and actual size); hosted stems uploads default to 30 minutes', async () => {
+  const { Library } = await import('../server/library.js');
+  const { DownloadManager } = await import('../server/remote.js');
+  const dir = tmpdir();
+  const big = Buffer.alloc(1.5 * 2 ** 20);
+  const srv = http.createServer((req, res) => {
+    if (req.url.includes('id=declared')) { res.writeHead(200, { 'Content-Length': String(5 * 2 ** 30) }); return res.end(); }
+    res.writeHead(200); res.write(big); res.end(big); // chunked, no length
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  try {
+    const lib = new Library(path.join(dir, 'data'));
+    lib.settings.downloadMaxMB = 1;
+    lib.saveSource({ id: 's', type: 'subsonic', name: 'S', url: `http://127.0.0.1:${srv.address().port}`, username: 'u', password: 'p' });
+    for (const id of ['declared', 'lying']) lib.upsertTrack({ id, sourceType: 'remote', sourceId: 's', remoteId: id, title: id, artist: 'A', format: 'mp3' });
+    const m = new DownloadManager(lib, () => {});
+    m.enqueue(['declared', 'lying']);
+    for (let i = 0; i < 200 && m.done.length < 2; i++) await sleep(20);
+    assert.deepEqual(m.done.map((d) => d.ok), [false, false]);
+    for (const d of m.done) assert.match(d.error, /limit/);
+    const left = fs.readdirSync(lib.settings.downloadDir, { recursive: true }).filter((f) => /\.(mp3|part)$/.test(f));
+    assert.deepEqual(left, [], 'nothing kept');
+    lib.flush();
+  } finally { srv.close(); }
+  await hosted(async ({ app, c }) => {
+    app.library.upsertTrack({ id: 'trk', sourceType: 'local', path: '/x.wav', title: 'x' });
+    assert.equal((await c('POST', '/api/stems/trk/begin', { frames: 44100 * 60 * 31, sampleRate: 44100 })).status, 400);
+    assert.equal((await c('POST', '/api/stems/trk/begin', { frames: 44100 * 60 * 29, sampleRate: 44100 })).status, 200);
+  });
+});

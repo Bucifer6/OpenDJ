@@ -98,6 +98,8 @@ export const safe = (s) => {
 /** A file extension from a (server-controlled) string: 1-5 alphanumerics, else the fallback. */
 export const safeExt = (e, fallback = 'mp3') => { const v = String(e || '').replace(/^\./, '').toLowerCase(); return /^[a-z0-9]{1,5}$/.test(v) ? v : fallback; };
 const DONE_CAP = 200;
+/** Largest file a media server may send for an offline copy (settings.downloadMaxMB, default 4 GiB). */
+const downloadLimit = (library) => Math.max(1, Number(library.settings?.downloadMaxMB) || 4096) * 1024 * 1024;
 
 export class DownloadManager {
   constructor(library, emit) {
@@ -150,6 +152,9 @@ export class DownloadManager {
     const res = await fetch(req.url, { headers: req.headers || {}, signal: job.ctrl.signal });
     if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
     job.total = Number(res.headers.get('content-length')) || t.size || 0;
+    const limit = downloadLimit(this.library);
+    const tooBig = () => new Error(`Download is larger than the ${Math.round(limit / 1048576)} MB limit (downloadMaxMB)`);
+    if (Number(res.headers.get('content-length')) > limit) { job.ctrl.abort(); throw tooBig(); }
     const ext = safeExt(req.ext, safeExt(t.format));
     const root = path.resolve(this.library.settings.downloadDir);
     const dir = path.join(root, safe(t.albumArtist || t.artist), safe(t.album || 'Singles'));
@@ -163,6 +168,7 @@ export class DownloadManager {
     const body = Readable.fromWeb(res.body);
     body.on('data', (chunk) => {
       job.received += chunk.length;
+      if (job.received > limit) { job.ctrl.abort(); body.destroy(tooBig()); } // a server that lies about (or omits) the length
       if (Date.now() - last > 250) { last = Date.now(); this.emit('downloads', this.list()); }
     });
     let file;

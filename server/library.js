@@ -43,6 +43,7 @@ export const DEFAULT_SETTINGS = {
   transcodeCacheGB: 4,        // FFmpeg transcode cache cap (data dir/transcode-cache), LRU
   uploadDir: '',              // browser uploads land here ('' = <data dir>/Uploads, or OPENDJ_UPLOAD_DIR)
   uploadMaxMB: 2048,          // per-file upload limit
+  downloadMaxMB: 4096,        // per-file limit for offline copies downloaded from media servers
   allowedRoots: null,
   youtubeApiKey: '',          // YouTube Data API key for search (never written to backups)         // hosted mode: folders the web UI may browse/add/export to (OPENDJ_MUSIC_ROOTS wins)
 };

@@ -178,6 +178,9 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
   const modelsDir = path.join(root, 'models');
   fs.mkdirSync(modelsDir, { recursive: true });
   const ORT = ortDir === undefined ? findOrtDir() : ortDir;
+  // longest track that gets stems (4 stems x 16-bit stereo: ~42 MB of raw PCM per minute while uploading); hosted
+  // servers default to 30 minutes so one user cannot fill the disk with a single upload
+  const maxMinutes = Math.max(1, Number(process.env.OPENDJ_STEMS_MAX_MINUTES) || (restricted ? 30 : 90));
   const ffmpeg = () => library.media?.ffmpeg?.() || null;
   const settings = () => library.settings || {};
   const trackDir = (id) => path.join(root, id);
@@ -318,7 +321,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     const t = track(params.id);
     const frames = Math.floor(Number(body.frames));
     const sampleRate = Math.floor(Number(body.sampleRate)) || STEM_RATE;
-    if (!(frames > 0 && frames <= sampleRate * 60 * 90)) throw bad('Bad length (max. 90 minutes)');
+    if (!(frames > 0 && frames <= sampleRate * 60 * maxMinutes)) throw bad(`Bad length (max. ${maxMinutes} minutes)`);
     if (sampleRate !== STEM_RATE) throw bad(`Stems must be ${STEM_RATE} Hz`);
     await dropUpload(t.id);
     const token = crypto.randomBytes(12).toString('hex');
