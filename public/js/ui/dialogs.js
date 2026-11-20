@@ -9,7 +9,8 @@ export class Dialogs {
   modal(title, body, buttons = [], { wide = false } = {}) {
     return new Promise((resolve) => {
       const close = (v) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
-      const onKey = (e) => { if (e.key === 'Escape') close(null); };
+      // only the top-most dialog reacts to Escape
+      const onKey = (e) => { if (e.key === 'Escape' && [...document.querySelectorAll('.overlay')].at(-1) === overlay) { e.preventDefault(); e.stopImmediatePropagation(); close(null); } };
       const foot = el('div', { class: 'modal-foot' }, ...buttons.map((b) => el('button', { class: `btn ${b.primary ? 'primary' : ''} ${b.danger ? 'danger' : ''}`, onclick: async () => { if (b.action) { const r = await b.action(); if (r === false) return; close(r ?? b.value); } else close(b.value); } }, b.label)));
       const box = el('div', { class: `modal ${wide ? 'wide' : ''}`, role: 'dialog', 'aria-label': title },
         el('div', { class: 'modal-head' }, el('h2', {}, title), el('button', { class: 'modal-x', onclick: () => close(null), 'aria-label': 'Close' }, '✕')),
@@ -42,7 +43,7 @@ export class Dialogs {
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok.click(); });
     let ok;
     const p = this.modal(title, el('label', { class: 'field' }, el('span', {}, label), input), [{ label: 'Cancel', value: null }, { label: 'OK', primary: true, action: () => input.value.trim() }]);
-    ok = document.querySelector('.modal .btn.primary');
+    ok = [...document.querySelectorAll('.overlay')].at(-1)?.querySelector('.modal-foot .btn.primary');
     return p;
   }
   confirm(text) { return this.modal('Confirm', el('p', {}, text), [{ label: 'Cancel', value: false }, { label: 'OK', primary: true, value: true }]); }
@@ -274,6 +275,7 @@ export class Dialogs {
     show(tab);
     await this.modal('Settings', el('div', {}, tabBar, pane), [{ label: 'Close', primary: true, value: true }], { wide: true });
     app.midi.cancelLearn();
+    controllers.destroy?.();
   }
 
 

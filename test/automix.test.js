@@ -151,3 +151,11 @@ test('queue editing helpers', () => {
   am.remove(99); am.move(7, 1);
   assert.equal(states, 5);
 });
+
+test('planMixOut never starts after the end of the track', async () => {
+  const { planMixOut } = await import('../public/js/automix.js');
+  for (const duration of [20, 60, 120.5, 201.7, 333]) for (const transitionBeats of [4, 8, 16, 32]) {
+    const r = planMixOut({ bpm: 128, gridOffset: 0.1, duration, endTime: duration }, { transitionBeats });
+    if (!(r.start <= r.end && r.len >= 0)) throw new Error(`bad plan for ${duration}s/${transitionBeats}: ${JSON.stringify(r)}`);
+  }
+});

@@ -54,7 +54,7 @@ class App {
   async loadTrack(deckIndex, trackId) {
     const t = this.library.track(trackId);
     const deck = this.engine.decks[deckIndex];
-    if (!t) return;
+    if (!t) { this.toast('That track is no longer in the library'); throw new Error('Track not found in the library'); }
     if (deck.playing && !this.automix.enabled && !(await this.dialogs.confirm(`Deck ${deckIndex + 1} is playing. Load "${t.title}" anyway?`))) return;
     try { await deck.load({ ...t }); this.library.renderRows(true); }
     catch (e) { this.toast(`Could not load "${t.title}": ${e.message}`); throw e; }
@@ -121,7 +121,7 @@ class App {
     let startY, startH;
     handle.addEventListener('pointerdown', (e) => { handle.setPointerCapture(e.pointerId); startY = e.clientY; startH = this.library.root.getBoundingClientRect().height; });
     handle.addEventListener('pointermove', (e) => { if (startY == null) return; const h = Math.max(120, Math.min(innerHeight - 260, startH - (e.clientY - startY))); document.documentElement.style.setProperty('--browser-h', `${h}px`); });
-    handle.addEventListener('pointerup', () => { startY = null; });
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) handle.addEventListener(ev, () => { startY = null; });
     root.replaceChildren(topbar, this.waveArea, this.deckArea, this.samplerBar, handle, this.library.root, this.toasts);
   }
 
@@ -222,6 +222,7 @@ class App {
     const blob = await this.engine.stopRecording();
     const name = `OpenDJ mix ${new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '-')}.wav`;
     const a = el('a', { href: URL.createObjectURL(blob), download: name }); document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
     this.toast(`Saved recording "${name}" (${(blob.size / 1048576).toFixed(1)} MB)`);
   }
 
@@ -242,9 +243,9 @@ class App {
         setTimeout(() => ch.set('fxParam', 0.5), deck.beatLen * 8000);
         break;
       case 'filterSweep': {
-        clearInterval(this._sweep);
+        clearInterval(ch._sweep);
         const target = down ? 0.75 : 0; const from = ch.state.filter; const t0 = performance.now(); const dur = down ? deck.beatLen * 8000 : 150;
-        this._sweep = setInterval(() => { const k = Math.min(1, (performance.now() - t0) / dur); ch.set('filter', from + (target - from) * k); if (k >= 1) clearInterval(this._sweep); }, 16);
+        ch._sweep = setInterval(() => { const k = Math.min(1, (performance.now() - t0) / dur); ch.set('filter', from + (target - from) * k); if (k >= 1) clearInterval(ch._sweep); }, 16);
         break;
       }
     }
@@ -270,11 +271,13 @@ class App {
 
     const keyDeck = { z: [0, 'cue'], x: [0, 'play'], c: [0, 'sync'], m: [1, 'cue'], ',': [1, 'play'], '.': [1, 'sync'], q: [0, 'loop'], w: [0, 'exit'], o: [1, 'loop'], p: [1, 'exit'] };
     const hot = { 1: [0, 0], 2: [0, 1], 3: [0, 2], 4: [0, 3], 7: [1, 0], 8: [1, 1], 9: [1, 2], 0: [1, 3] };
-    const typing = (e) => /INPUT|SELECT|TEXTAREA/.test(e.target.tagName);
+    const typing = (e) => /INPUT|SELECT|TEXTAREA/.test(e.target.tagName) || e.target.isContentEditable;
+    // shortcuts are off while a dialog/menu is open or another control already handled the key
+    const blocked = (e) => typing(e) || e.defaultPrevented || !!document.querySelector('.overlay, .ctx-menu');
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Shift') { this._shiftKey = true; this.shift = true; }
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') { e.preventDefault(); this.library.search.focus(); return; }
-      if (typing(e) || e.repeat || e.ctrlKey || e.metaKey) return;
+      if (blocked(e) || e.repeat || e.ctrlKey || e.metaKey) return;
       const k = e.key.toLowerCase(), E = this.engine;
       E.resume();
       if (k === ' ') { e.preventDefault(); E.decks[0].togglePlay(); }
@@ -291,6 +294,11 @@ class App {
       } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); this.library.moveSelection(e.key === 'ArrowDown' ? 1 : -1); }
       else if (k === 'r') this.toggleRecord();
       else if (k === 'a') this.toggleAutomix();
+    });
+    // releasing keys while the window is in the background never reaches us: reset held state on blur
+    window.addEventListener('blur', () => {
+      this._shiftKey = false; this.shift = false;
+      for (const d of this.engine.decks) { d.cueUp(); for (let n = 0; n < 8; n++) if (d.hotPreview === n) d.hotCueUp(n); }
     });
     document.addEventListener('keyup', (e) => {
       if (e.key === 'Shift') { this._shiftKey = false; this.shift = false; }

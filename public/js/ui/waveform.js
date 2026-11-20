@@ -32,17 +32,18 @@ export class DetailWaveform {
     }, { passive: false });
     // drag to scratch / seek on the waveform
     let last = null;
-    this.canvas.addEventListener('pointerdown', (e) => { this.canvas.setPointerCapture(e.pointerId); last = { x: e.clientX, t: performance.now() }; });
+    this.canvas.addEventListener('pointerdown', (e) => { this.canvas.setPointerCapture(e.pointerId); last = { x: e.clientX, t: performance.now(), scratch: this.deck.playing }; });
     this.canvas.addEventListener('pointermove', (e) => {
       if (!last) return;
       const w = this.canvas.getBoundingClientRect().width;
       const secs = -(e.clientX - last.x) / w * this.zoom;
       const now = performance.now();
-      if (this.deck.playing) this.deck.jogScratch(secs / 1.8, (now - last.t) / 1000); else this.deck.seek(this.deck.position + secs);
-      last = { x: e.clientX, t: now };
+      if (last.scratch) this.deck.jogScratch(secs / 1.8, (now - last.t) / 1000); else this.deck.seek(this.deck.position + secs);
+      last = { ...last, x: e.clientX, t: now };
     });
-    const up = () => { if (last && this.deck.playing) this.deck.jogRelease(); last = null; };
-    this.canvas.addEventListener('pointerup', up); this.canvas.addEventListener('pointercancel', up);
+    // release based on how the drag started, not on whether the deck is still playing (it may have stopped mid-drag)
+    const up = () => { if (last?.scratch) this.deck.jogRelease(); last = null; };
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) this.canvas.addEventListener(ev, up);
   }
 
   resize() {
@@ -90,10 +91,10 @@ export class DetailWaveform {
       g.globalAlpha = 1;
     }
     // beat grid
-    if (deck.bpm) {
+    if (deck.bpm > 0 && span > 0) {
       const bl = deck.beatLen;
       let k = Math.ceil((t0 - deck.gridOffset) / bl);
-      for (let t = deck.gridOffset + k * bl; t < t0 + span; t += bl, k++) {
+      for (let t = deck.gridOffset + k * bl, n = 0; t < t0 + span && n < 2000; t += bl, k++, n++) {
         const x = (t - t0) * pxPerSec;
         const bar = ((k % 4) + 4) % 4 === 0;
         g.fillStyle = bar ? 'rgba(255,60,60,0.85)' : 'rgba(255,255,255,0.28)';
@@ -142,7 +143,7 @@ export class OverviewWaveform {
     let down = false;
     this.canvas.addEventListener('pointerdown', (e) => { down = true; this.canvas.setPointerCapture(e.pointerId); seek(e); });
     this.canvas.addEventListener('pointermove', (e) => { if (down) seek(e); });
-    this.canvas.addEventListener('pointerup', () => { down = false; });
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) this.canvas.addEventListener(ev, () => { down = false; });
   }
   renderCache(W, H) {
     const w = this.deck.waveform; const s = this.getSettings();
@@ -182,7 +183,7 @@ export class OverviewWaveform {
       if (c.loopEnd) { g.fillStyle = 'rgba(46,212,122,0.25)'; g.fillRect(c.position / deck.duration * W, H - 4 * dpr, Math.max(2, (c.loopEnd - c.position) / deck.duration * W), 4 * dpr); }
     }
     // bar ticks every 16 bars
-    if (deck.bpm) {
+    if (deck.bpm > 0) {
       g.fillStyle = 'rgba(255,255,255,0.12)';
       const p = deck.beatLen * 64;
       for (let t = deck.gridOffset; t < deck.duration; t += p) g.fillRect(t / deck.duration * W, H - 3 * dpr, dpr, 3 * dpr);

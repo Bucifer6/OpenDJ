@@ -317,7 +317,7 @@ export function controllersPanel(app) {
   on('message', (m) => { if (!wizard && m.device === selected) monitor.textContent = `${describeKey(m.key)} = ${m.value}${m.isOff ? ' (off)' : ''}`; onWizardMessage(m); });
   on('devices', () => { renderDevices(); if (!wizard) renderDetail(); fillClock(); });
   on('mappings', () => { if (wizard) return; renderDevices(); const d = current(); if (d) headSub.textContent = headText(d); });
-  if (midi.hid) midi.hid.on('report', (r) => { if (root.isConnected && !wizard && r.key === selected) monitor.textContent = `HID report ${r.reportId}: ${[...r.bytes.slice(0, 24)].map((b) => b.toString(16).padStart(2, '0')).join(' ')}${r.bytes.length > 24 ? ' …' : ''}`; });
+  if (midi.hid) offs.push(midi.hid.on('report', (r) => { if (root.isConnected && !wizard && r.key === selected) monitor.textContent = `HID report ${r.reportId}: ${[...r.bytes.slice(0, 24)].map((b) => b.toString(16).padStart(2, '0')).join(' ')}${r.bytes.length > 24 ? ' …' : ''}`; }));
 
   renderDevices();
   // opened from the "new controller" offer: jump straight to search or guided setup

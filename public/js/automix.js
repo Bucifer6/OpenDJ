@@ -109,7 +109,10 @@ export function planMixOut(t, { transitionBeats = 32, skipSilence = true } = {})
   const phrase = beat * 16;
   start = anchor + Math.floor((start - anchor) / phrase) * phrase;
   if (end - start > lenSec * 1.6) start += phrase;
-  return { start, len: end - start, end, phrase: false };
+  // never start after the music ends (short / unanalysed tracks, short transitions)
+  const minStart = end - Math.min(lenSec, dur * 0.4);
+  if (!(start <= minStart)) start = Math.max(0, minStart);
+  return { start, len: Math.max(0, end - start), end, phrase: false };
 }
 
 /** Position (track seconds) to start the incoming track: its mix-in point (first downbeat), else first beat. */
@@ -206,10 +209,15 @@ export class AutoMix extends Emitter {
     await this.engine.resume();
     const playing = [a, b].find((d) => d.playing);
     if (!playing) {
-      await this.app.loadTrack(0, this.queue[0].id);
+      // start with the first track that actually loads (missing files / server errors are skipped)
+      let loaded = false;
+      while (this.idx < this.queue.length && this.enabled) {
+        try { await this.app.loadTrack(0, this.queue[this.idx].id); loaded = true; this.idx++; break; }
+        catch (e) { this.app.toast?.(`Automix: skipping "${this.queue[this.idx].title}" (${e.message})`); this.idx++; }
+      }
+      if (!loaded) { this.enabled = false; this.emit('state'); throw new Error('None of the tracks in the queue could be loaded'); }
       this.prepare(a);
       a.play();
-      this.idx = 1;
     }
     this.current = playing || a;
     this.preloadNext();
@@ -370,7 +378,15 @@ export class AutoMix extends Emitter {
   finishTransition(aborted = false) {
     const { out, inn } = this.transition;
     this.transition = null;
-    if (aborted) return;
+    if (aborted) {
+      // stopping mid-transition: finish the move to the incoming deck so the mixer isn't left half-mixed
+      out.pause();
+      const chO = this.engine.channels[out.index], chI = this.engine.channels[inn.index];
+      for (const ch of [chO, chI]) { ch.set('eqLow', 0); ch.set('eqMid', 0); ch.set('eqHigh', 0); ch.set('filter', 0); ch.set('fxOn', false); }
+      chI.set('volume', 0.8); chO.set('volume', 0.8);
+      inn.syncOn = false; inn.setMaster?.(); this.current = inn;
+      return;
+    }
     out.pause();
     const chO = this.engine.channels[out.index], chI = this.engine.channels[inn.index];
     chO.set('fxOn', false); chO.set('filter', 0); chO.set('eqLow', 0);

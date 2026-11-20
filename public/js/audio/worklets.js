@@ -32,8 +32,9 @@ class DeckProcessor extends AudioWorkletProcessor {
         this.L = m.left; this.R = m.right || m.left; this.len = this.L.length;
         this.step = m.sampleRate / sampleRate;
         this.pos = this.shadow = 0; this.playing = false; this.curRate = 0; this.loop = null; this.brake = 0;
+        this.scratch = null; this.dir = 1; this.slip = false; this.endedSent = false;
         break;
-      case 'unload': this.L = this.R = null; this.len = 0; this.playing = false; break;
+      case 'unload': this.L = this.R = null; this.len = 0; this.playing = false; this.scratch = null; this.dir = 1; this.slip = false; break;
       case 'play': this.playing = m.value; if (m.value) this.brake = 0; break;
       case 'rate': this.rate = m.value; break;
       case 'seek': {
@@ -133,9 +134,9 @@ class DeckProcessor extends AudioWorkletProcessor {
       if (this.loop && speed > 0 && this.pos >= this.loop.end) { this.pos -= (this.loop.end - this.loop.start); this.resetGrains(); }
       if (this.pos < 0) { this.pos = 0; if (!this.scratch) this.curRate = 0; }
       if (this.pos >= this.len) {
-        this.pos = this.len - 1; this.playing = false; this.curRate = 0;
-        this.port.postMessage({ type: 'ended' });
-      }
+        this.pos = this.len - 1; this.curRate = 0;
+        if (!this.endedSent && !this.scratch) { this.endedSent = true; this.playing = false; this.port.postMessage({ type: 'ended' }); }
+      } else if (this.endedSent && this.pos < this.len - 2) this.endedSent = false;
     }
     if ((this.counter += frames) >= 512) {
       this.counter = 0;

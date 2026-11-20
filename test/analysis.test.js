@@ -85,3 +85,12 @@ test('kick + off-beat bass is not detected at 2/3 tempo', () => {
   const r = detectBpm(x, sr);
   assert.ok(Math.abs(r.bpm - bpm) < 0.05, `got ${r.bpm}`);
 });
+
+test('toCamelot: major keys are not mistaken for minor', () => {
+  assert.equal(toCamelot('Amaj'), '11B');
+  assert.equal(toCamelot('A major'), '11B');
+  assert.equal(toCamelot('C major'), '8B');
+  assert.equal(toCamelot('Gbmaj'), '2B');
+  assert.equal(toCamelot('A minor'), '8A');
+  assert.equal(toCamelot('Cmin'), '5A');
+});

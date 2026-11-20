@@ -215,7 +215,7 @@ export class Engine extends Emitter {
     this.duck.gain.setTargetAtTime(on ? Math.pow(10, db / 20) : 1, this.ctx.currentTime, on ? 0.05 : 0.25);
     this.emit('master', 'talkover', on);
   }
-  micLevel() { if (!this.micOn || !this.micMeter) return 0; const b = new Float32Array(512); this.micMeter.getFloatTimeDomainData(b); let p = 0; for (const v of b) p = Math.max(p, Math.abs(v)); return p; }
+  micLevel() { if (!this.micOn || !this.micMeter) return 0; const b = (this._micBuf ||= new Float32Array(512)); this.micMeter.getFloatTimeDomainData(b); let p = 0; for (const v of b) p = Math.max(p, Math.abs(v)); return p; }
 
   resume() { if (this.ctx.state !== 'running') return this.ctx.resume(); }
 
@@ -336,7 +336,7 @@ export class Engine extends Emitter {
   }
 
   masterLevels() {
-    const b = new Float32Array(512); const peak = (an) => { an.getFloatTimeDomainData(b); let p = 0; for (const v of b) p = Math.max(p, Math.abs(v)); return p; };
+    const b = (this._mBuf ||= new Float32Array(512)); const peak = (an) => { an.getFloatTimeDomainData(b); let p = 0; for (const v of b) p = Math.max(p, Math.abs(v)); return p; };
     return [peak(this.masterMeterL), peak(this.masterMeterR)];
   }
 

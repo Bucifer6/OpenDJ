@@ -133,7 +133,7 @@ export function buildDeck(app, deck) {
     const p = el('button', { class: 'pad' }, el('span', { class: 'pad-label' }));
     p.addEventListener('pointerdown', (e) => { e.preventDefault(); app.engine.resume(); padAction(n, true); p.classList.add('pressed'); });
     const up = () => { if (p.classList.contains('pressed')) { p.classList.remove('pressed'); padAction(n, false); } };
-    p.addEventListener('pointerup', up); p.addEventListener('pointerleave', up);
+    for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) p.addEventListener(ev, up);
     p.addEventListener('contextmenu', (e) => { e.preventDefault(); if (padMode === 'hotcue') deck.deleteHotCue(n); });
     pads.push(p); padGrid.append(p);
   }
@@ -219,10 +219,10 @@ export function buildDeck(app, deck) {
     const fromDeck = e.dataTransfer.getData('text/x-opendj-deck');
     if (fromDeck !== '' && Number(fromDeck) !== i) return deck.cloneFrom(app.engine.decks[Number(fromDeck)]).catch((err) => app.toast(err.message));
     const tid = e.dataTransfer.getData('text/x-opendj-track');
-    if (tid) return app.loadTrack(i, tid);
+    if (tid) return app.loadTrack(i, tid).catch(() => {}); // errors are shown as toasts
     const files = [...e.dataTransfer.files];
     const paths = files.map((f) => window.opendjNative?.pathForFile(f)).filter(Boolean);
-    if (paths.length) { const r = await api.addFiles(paths); await app.library.refresh(); if (r.added[0]) app.loadTrack(i, r.added[0]); }
+    if (paths.length) { const r = await api.addFiles(paths); await app.library.refresh(); if (r.added[0]) app.loadTrack(i, r.added[0]).catch(() => {}); }
     else if (files.length) app.toast('Drag files from your library, or add their folder in the Library (browser mode cannot read file paths).');
   });
 

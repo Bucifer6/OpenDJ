@@ -30,11 +30,13 @@ export function buildMixer(app) {
   const eng = app.engine;
   const strips = [];
   const renderers = [];
-  const R = (c) => { renderers.push(c); return c; };
+  const byCh = []; let cur = null; // per-channel renderers so one change only re-renders its own strip
+  const R = (c) => { renderers.push(c); if (cur) cur.push(c); return c; };
   const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   const stripsWrap = el('div', { class: 'mixer-strips' });
 
   for (const i of order) {
+    cur = byCh[i] = [];
     const ch = eng.channels[i];
     const S = (k) => ({ get: () => ch.state[k], set: (v) => ch.set(k, v) });
     const vu = vuMeter();
@@ -58,6 +60,7 @@ export function buildMixer(app) {
     );
     strip.vu = vu; strip.ch = ch; strip.idx = i;
     strips.push(strip); stripsWrap.append(strip);
+    cur = null;
   }
 
   // master section
@@ -89,7 +92,7 @@ export function buildMixer(app) {
     el('div', { class: 'xfader-row' }, colorSel, el('span', { class: 'xf-l' }, 'A'), xfader, el('span', { class: 'xf-l' }, 'B'), curveSel),
   );
 
-  eng.on('mixer', () => { for (const r of renderers) r.render(); });
+  eng.on('mixer', (i) => { for (const r of byCh[i] || renderers) r.render(); });
   eng.on('master', () => { for (const r of renderers) r.render(); });
   eng.on('mic', () => { for (const r of renderers) r.render(); });
   root.setDeckCount = (n) => { for (const s of strips) s.style.display = s.idx < n ? '' : 'none'; };

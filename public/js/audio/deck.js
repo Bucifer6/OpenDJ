@@ -12,7 +12,7 @@ export class Deck extends Emitter {
     this.reset();
     this.tempoRange = 8; this.tempo = 0; this.bend = 0; this.keyLock = true;
     this.quantize = true; this.slip = false; this.reverse = false; this.syncOn = false; this.isMaster = false;
-    this.vinylMode = true; this.keyShift = 0;
+    this.vinylMode = true; this.keyShift = 0; this._loadSeq = 0;
   }
 
   reset() {
@@ -20,6 +20,10 @@ export class Deck extends Emitter {
     this._pos = 0; this._t = 0; this._rate = 0; this._seekGuard = 0; this.playing = false;
     this.cuePoint = 0; this.loop = null; this.loopIn = null; this.waveform = null;
     this.bpm = 0; this.gridOffset = 0; this.loading = false; this.error = null;
+    this._countedPlay = false;
+    this.scratching = false; this._slicing = false; this.rolling = false; this.cuePreview = false; this.hotPreview = null;
+    clearTimeout(this._scratchIdle);
+    if (this.node) this.post('scratch', { value: null });
   }
 
   post(type, extra = {}) { this.node.port.postMessage({ type, ...extra }); }
@@ -60,23 +64,27 @@ export class Deck extends Emitter {
     if (this.playing && this.engine.settings.lockPlayingDecks) throw new Error('Deck is playing');
     this.post('play', { value: false }); this.post('loop', { value: null }); this.post('unload');
     this.reset(); this.track = track; this.loading = true;
+    const tok = ++this._loadSeq;
+    const stale = () => tok !== this._loadSeq;
     this.emit('load', track); this.emit('state');
     try {
       const res = await fetch(api.streamUrl(track.id));
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
       const ab = await res.arrayBuffer();
-      if (this.track !== track) return; // another load superseded this one
+      if (stale()) return false; // another load superseded this one
       const buf = await this.ctx.decodeAudioData(ab);
-      if (this.track !== track) return;
+      if (stale()) return false;
       this.sr = buf.sampleRate; this.duration = buf.duration;
       const left = new Float32Array(buf.getChannelData(0));
       const right = buf.numberOfChannels > 1 ? new Float32Array(buf.getChannelData(1)) : null;
       // waveform + analysis (cached on the server after the first time)
       let wave = track.analyzed ? decodeWaveform(await api.waveform(track.id) || new ArrayBuffer(0)) : null;
-      if (!wave || !track.bpm) {
+      if (stale()) return false;
+      if (!wave) { // analyse once; tracks whose BPM can't be detected aren't re-analysed on every load
         const mono = new Float32Array(left.length);
         if (right) for (let i = 0; i < mono.length; i++) mono[i] = (left[i] + right[i]) * 0.5; else mono.set(left);
         const r = await this.engine.analyze(mono, buf.sampleRate);
+        if (stale()) return false;
         wave = decodeWaveform(r.wave.buffer);
         const patch = {
           bpm: track.bpm && track.bpmLocked ? track.bpm : r.result.bpm, gridOffset: r.result.gridOffset,
@@ -107,8 +115,9 @@ export class Deck extends Emitter {
       this.loading = false;
       if (this.syncOn) this.matchTempo();
       this.emit('loaded', track); this.emit('state');
+      return true;
     } catch (e) {
-      if (this.track !== track) return;
+      if (stale()) return false;
       this.loading = false; this.error = e.message; this.track = null;
       this.emit('error', e); this.emit('state');
       throw e;
@@ -190,7 +199,7 @@ export class Deck extends Emitter {
     this.saveCues();
   }
   hotCueUp(i) {
-    if (this.hotPreview === i) { this.hotPreview = null; this.pause(); const c = this.hotCue(i); if (c?.loopEnd) this.exitLoop(); this.seek(c.position); }
+    if (this.hotPreview === i) { this.hotPreview = null; this.pause(); const c = this.hotCue(i); if (c?.loopEnd) this.exitLoop(); if (c) this.seek(c.position); }
   }
   deleteHotCue(i) { if (!this.track) return; this.track.cues = (this.track.cues || []).filter((c) => c.index !== i); this.saveCues(); }
   addMemoryCue() {
@@ -254,7 +263,7 @@ export class Deck extends Emitter {
 
   // ---------- tempo / sync ----------
   setTempo(pct) { this.tempo = clamp(pct, -100, 100); this.post('rate', { value: this.rate }); this.emit('tempo'); this.engine.onTempoChange(this); }
-  setTempoFader(v) { this.setTempo(v * this.tempoRange); if (this.syncOn && !this.isMaster) this.syncOn = false; } // -1..1
+  setTempoFader(v) { this.setTempo(v * this.tempoRange); if (this.syncOn && !this.isMaster) { this.syncOn = false; this.emit('state'); } } // -1..1
   setTempoRange(r) { const f = this.tempo / this.tempoRange; this.tempoRange = r; this.emit('tempo'); return f; }
   resetTempo() { this.setTempo(0); }
   setBend(b) { this.bend = b; this.post('rate', { value: this.rate }); }
@@ -333,7 +342,7 @@ export class Deck extends Emitter {
 
   // ---------- beat grid editing ----------
   setGrid(bpm, offset) {
-    if (!this.track) return;
+    if (!this.track || !(bpm >= 20 && bpm <= 400) || !Number.isFinite(offset)) return false;
     this.bpm = bpm; this.gridOffset = offset;
     Object.assign(this.track, { bpm, gridOffset: offset });
     api.updateTrack(this.track.id, { bpm, gridOffset: offset }).catch(() => {});
@@ -375,14 +384,15 @@ export class Deck extends Emitter {
     other = other || this.engine.masterDeck(this);
     const mine = this.camelot, target = other?.playingCamelot;
     if (!mine || !target) return false;
-    const base = this.keyLock ? 0 : 12 * Math.log2(this.rate || 1);
+    // key sync always works with key lock on, so the tempo no longer changes the pitch
+    if (!this.keyLock) this.setKeyLock(true);
+    const base = 0;
     let best = null;
     for (const s of [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6]) {
       const cam = shiftCamelot(mine, Math.round(base + s));
       if (camelotCompatible(cam, target)) { best = s; break; } // smallest shift that mixes harmonically
     }
     if (best === null) return false;
-    if (!this.keyLock) this.setKeyLock(true);
     this.setKeyShift(best);
     return true;
   }
@@ -405,7 +415,7 @@ export class Deck extends Emitter {
   // ---------- instant doubles ----------
   async cloneFrom(src) {
     if (!src?.track || src === this) return;
-    await this.load({ ...src.track });
+    if ((await this.load({ ...src.track })) === false) return;
     this.setTempo(src.tempo); this.setKeyLock(src.keyLock); this.setKeyShift(src.keyShift);
     if (src.loop?.active) this.setLoop(src.loop.start, src.loop.end);
     this.seek(src.position);

@@ -205,9 +205,9 @@ export class LibraryUI {
         draggable: 'true', 'data-i': i,
         html: `<div class="art" style="background-image:url(${api.coverUrl(t.id)})"></div>`
           + `<div class="c-title">${sw}${t.missing ? '<span class="lc-miss">⚠</span>' : ''}${escapeHtml(t.title)}</div><div>${escapeHtml(t.artist)}</div>`
-          + `<div class="num ${bpmClose ? 'match' : ''}">${t.bpm ? t.bpm.toFixed(t.bpm % 1 ? 1 : 0) : ''}</div>`
+          + `<div class="num ${bpmClose ? 'match' : ''}">${Number(t.bpm) > 0 ? Number(t.bpm).toFixed(Number(t.bpm) % 1 ? 1 : 0) : ''}</div>`
           + `<div class="key ${cam ? `cam-${cam.replace(/\D/g, '')}` : ''} ${comp ? 'match' : ''}">${escapeHtml(cam || t.key || '')}</div>`
-          + `<div class="num">${fmtDur(t.duration)}</div><div class="num">${t.energy || ''}</div>`
+          + `<div class="num">${fmtDur(t.duration)}</div><div class="num">${escapeHtml(t.energy ?? '')}</div>`
           + `<div>${escapeHtml(t.genre)}</div><div class="lc-tags">${(t.tags || []).map((x) => `<span class="tag-chip">${escapeHtml(x)}</span>`).join('')}</div><div>${escapeHtml(t.album)}</div>`
           + `<div class="stars" data-rate>${[1, 2, 3, 4, 5].map((s) => `<span data-s="${s}" class="${s <= (t.rating || 0) ? 'on' : ''}">★</span>`).join('')}</div>`
           + `<div class="src ${t.sourceType === 'remote' && !t.localPath ? 'stream' : ''}">${dl.has(t.id) ? '⬇ …' : escapeHtml(src)}</div>`
@@ -263,11 +263,11 @@ export class LibraryUI {
     else if (top + ROW_H > this.scroller.scrollTop + H) this.scroller.scrollTop = top + ROW_H - H;
     this.renderRows(true);
   }
-  loadSelected(deck) { const t = this.rows[this.cursor]; if (t) this.app.loadTrack(deck, t.id); }
+  loadSelected(deck) { const t = this.rows[this.cursor]; if (t) this.app.loadTrack(deck, t.id).catch(() => {}); }
   loadToFreeDeck(id) {
     const n = this.app.deckCount;
     const d = this.app.engine.decks.slice(0, n).find((x) => !x.playing && !x.track) || this.app.engine.decks.slice(0, n).find((x) => !x.playing);
-    if (d) this.app.loadTrack(d.index, id); else this.app.toast('All decks are playing');
+    if (d) this.app.loadTrack(d.index, id).catch(() => {}); else this.app.toast('All decks are playing');
   }
 
   async removeFromPlaylist() {
@@ -280,7 +280,7 @@ export class LibraryUI {
     const ids = [...this.selected]; const tracks = ids.map((i) => this.tracks.get(i));
     const remote = tracks.filter((t) => t.sourceType === 'remote' && !t.localPath);
     const items = [];
-    for (let d = 0; d < this.app.deckCount; d++) items.push({ label: `Load to deck ${d + 1}`, action: () => this.app.loadTrack(d, ids[0]) });
+    for (let d = 0; d < this.app.deckCount; d++) items.push({ label: `Load to deck ${d + 1}`, action: () => this.app.loadTrack(d, ids[0]).catch(() => {}) });
     items.push({ label: 'Preview in headphones', action: () => this.previewTrack(ids[0]) });
     items.push('-');
     items.push({ label: ids.length > 1 ? `Edit info of ${ids.length} tracks…` : 'Edit track info…', action: () => this.dlg.editTracks(tracks) });
