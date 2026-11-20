@@ -1,5 +1,6 @@
 // "Export to CDJ USB" dialog: writes a rekordbox device library (export.pdb + analysis files) to a USB stick
 // so Pioneer CDJ / XDJ players can browse the playlists and play with grids, cues, loops and waveforms.
+import { glyphIcon } from '../ui/icons.js';
 import { el } from '../util.js';
 import { api, toLogin } from '../api.js';
 
@@ -31,7 +32,7 @@ export async function openCdjExport(app, playlistIds = []) {
 
   const target = el('input', { class: 'inp cdj-target', placeholder: 'USB stick (root folder)' });
   const drives = await api.drives().catch(() => []);
-  const driveCards = drives.filter((d) => d.kind !== 'home').map((d) => el('button', { class: 'drive-card', type: 'button', onclick: () => { target.value = d.path; onTarget(); } }, el('div', { class: 'drive-icon' }, '⛁'), el('div', {}, d.name)));
+  const driveCards = drives.filter((d) => d.kind !== 'home').map((d) => el('button', { class: 'drive-card', type: 'button', onclick: () => { target.value = d.path; onTarget(); } }, el('div', { class: 'drive-icon' }, glyphIcon('⛁')), el('div', {}, d.name)));
   const existing = el('div', { class: 'cdj-existing hint' });
   const modeUpdate = el('input', { type: 'radio', name: 'cdj-mode', value: 'update', checked: true });
   const modeReplace = el('input', { type: 'radio', name: 'cdj-mode', value: 'replace' });

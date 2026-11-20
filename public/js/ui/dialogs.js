@@ -1,3 +1,4 @@
+import { icon, glyphIcon } from './icons.js';
 import { el, uiZoom } from '../util.js';
 import { api } from '../api.js';
 import { THEMES, applyTheme } from './themes.js';
@@ -22,7 +23,7 @@ export class Dialogs {
       };
       const foot = el('div', { class: 'modal-foot' }, ...buttons.map((b) => el('button', { class: `btn ${b.primary ? 'primary' : ''} ${b.danger ? 'danger' : ''}`, onclick: async () => { if (b.action) { const r = await b.action(); if (r === false) return; close(r ?? b.value); } else close(b.value); } }, b.label)));
       const box = el('div', { class: `modal ${wide ? 'wide' : ''}`, role: 'dialog', 'aria-label': title },
-        el('div', { class: 'modal-head' }, el('h2', {}, title), el('button', { class: 'modal-x', onclick: () => close(null), 'aria-label': 'Close' }, '✕')),
+        el('div', { class: 'modal-head' }, el('h2', {}, title), el('button', { class: 'modal-x', onclick: () => close(null), 'aria-label': 'Close', title: 'Close' }, icon('x'))),
         el('div', { class: 'modal-body' }, body), buttons.length ? foot : null);
       const overlay = el('div', { class: 'overlay', onmousedown: (e) => { if (e.target === overlay) close(null); } }, box);
       document.body.append(overlay);
@@ -82,7 +83,7 @@ export class Dialogs {
     const render = () => {
       pathEl.value = cur.path ?? '';
       list.replaceChildren(
-        cur.parent ? el('div', { class: 'browse-item', onclick: async () => { cur = await api.browse(cur.parent); render(); } }, '⬑ ..') : null,
+        cur.parent ? el('div', { class: 'browse-item', onclick: async () => { cur = await api.browse(cur.parent); render(); } }, '.. (up)') : null,
         ...cur.entries.map((e) => el('div', { class: 'browse-item', onclick: async () => { try { cur = await api.browse(e.path); render(); } catch (err) { this.app.toast(err.message); } } }, '🗀 ' + e.name)));
     };
     pathEl.addEventListener('change', async () => { try { cur = await api.browse(pathEl.value); render(); } catch (e) { this.app.toast(e.message); } });
@@ -97,7 +98,7 @@ export class Dialogs {
     const body = el('div', { class: 'form' },
       el('p', { class: 'hint' }, 'Add any folder: internal disk, USB stick, external drive or a NAS share. NAS shares must be mounted by your operating system (SMB/NFS/AFP) or reachable by a network path. The folder is scanned now and can be rescanned anytime.'),
       drives.length ? el('div', { class: 'drive-grid' }, ...drives.map((d) => el('button', { class: 'drive-card', onclick: () => { pathIn.value = d.path; nameIn.value = d.name; } },
-        el('div', { class: 'drive-icon' }, d.kind === 'network' ? '🖧' : d.kind === 'home' ? '⌂' : '⛁'), el('div', {}, d.name), el('small', {}, d.kind === 'network' ? `NAS · ${d.fs}` : d.kind === 'home' ? 'Home' : 'Drive')))) : null,
+        el('div', { class: 'drive-icon' }, glyphIcon(d.kind === 'network' ? '🖧' : d.kind === 'home' ? '⌂' : '⛁')), el('div', {}, d.name), el('small', {}, d.kind === 'network' ? `NAS · ${d.fs}` : d.kind === 'home' ? 'Home' : 'Drive')))) : null,
       el('div', { class: 'row' }, pathIn, el('button', { class: 'btn', onclick: async () => { const p = await this.pickFolder(); if (p) pathIn.value = p; } }, 'Browse…')),
       nameIn,
     );
@@ -157,7 +158,7 @@ export class Dialogs {
     const body = el('div', { class: 'form' },
       el('p', { class: 'hint' }, 'Copies the audio files plus an .m3u8 per playlist and a rekordbox.xml into an "OpenDJ" folder on the target. Streaming-only tracks must be downloaded first.'),
       el('div', { class: 'check-list' }, ...checks),
-      el('div', { class: 'drive-grid' }, ...drives.filter((d) => d.kind !== 'home').map((d) => el('button', { class: 'drive-card', onclick: () => { target.value = d.path; } }, el('div', { class: 'drive-icon' }, '⛁'), el('div', {}, d.name)))),
+      el('div', { class: 'drive-grid' }, ...drives.filter((d) => d.kind !== 'home').map((d) => el('button', { class: 'drive-card', onclick: () => { target.value = d.path; } }, el('div', { class: 'drive-icon' }, glyphIcon('⛁')), el('div', {}, d.name)))),
       el('div', { class: 'row' }, target, el('button', { class: 'btn', onclick: async () => { const p = await this.pickFolder('Export target'); if (p) target.value = p; } }, 'Browse…')));
     const r = await this.modal('Export to USB', body, [{ label: 'Cancel', value: null }, {
       label: 'Export', primary: true, action: async () => {

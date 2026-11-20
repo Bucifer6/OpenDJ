@@ -373,7 +373,7 @@ input[type="range"] { accent-color: var(--accent); }
 .drive-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; }
 .drive-card { background: var(--panel-3); border: 1px solid var(--line-2); border-radius: var(--r-lg); padding: 10px 8px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease); }
 .drive-card:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel-3)); }
-.drive-icon { font-size: 20px; }
+.drive-icon { font-size: 20px; color: var(--text-2); line-height: 1; }
 .drive-card small { color: var(--text-3); }
 .browse-list { margin-top: 6px; max-height: 300px; overflow: auto; background: var(--inset); border-radius: var(--radius); border: 1px solid var(--line); }
 .browse-item { padding: 5px 9px; cursor: pointer; }

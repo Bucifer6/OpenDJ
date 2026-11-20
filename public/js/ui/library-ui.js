@@ -69,7 +69,8 @@ export class LibraryUI {
   }
   async refreshDrives() { try { this.drives = await api.drives(); } catch { this.drives = []; } this.renderTree(); }
   track(id) { return this.tracks.get(id); }
-  updateTrack(t) { if (t?.id) { this.tracks.set(t.id, { ...this.tracks.get(t.id), ...t }); this.renderRows(true); } }
+  // background analysis updates tracks one after another, also during playback: coalesce the row redraws to one per frame
+  updateTrack(t) { if (t?.id) { this.tracks.set(t.id, { ...this.tracks.get(t.id), ...t }); this._rowsRaf ||= requestAnimationFrame(() => { this._rowsRaf = 0; this.renderRows(true); }); } }
 
   viewTracks() {
     const all = [...this.tracks.values()]; const v = this.view;
