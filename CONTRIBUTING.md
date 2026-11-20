@@ -4,7 +4,7 @@ Thanks for helping! Bug reports, controller mappings, translations of docs, test
 
 ## Set up
 
-Requires **Node.js 20+** (CI uses Node 22).
+Requires **Node.js 22+** (music-metadata 12 needs it; CI uses Node 22).
 
 ```bash
 git clone https://github.com/Bucifer6/OpenDJ.git
