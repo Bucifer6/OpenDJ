@@ -137,6 +137,64 @@ try {
   await page.evaluate(() => window.rec.broadcaster.stop());
   check((await page.evaluate(async () => (await fetch('/api/broadcast/status')).json())).active.length === 0, 'broadcast stopped');
 
+  // ---- private test stream: the MC voice / a dedication is in the broadcast audio, the music ducks, metadata follows ----
+  const tts = await page.evaluate(async () => (await fetch('/api/tts/voices')).json());
+  if (!tts.engine || !tts.languages.ro) console.log(`(skipped: no speech engine with a Romanian voice on this machine: ${JSON.stringify(tts)}; install espeak-ng)`);
+  else {
+    await ice.close();
+    ice = await mockIcecast({ password: 'e2e-pass', keepAll: true });
+    await page.evaluate(async (port) => fetch('/api/broadcast/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targets: [{ id: (await (await fetch('/api/broadcast/config')).json()).config.targets[0].id, type: 'icecast', name: 'Private test', host: '127.0.0.1', port, mount: '/private', password: 'e2e-pass', format: 'mp3', bitrate: 128, public: false }] }) }), ice.port);
+    await page.evaluate(async () => { const d = window.opendj.engine.decks[0]; d.seek(1); if (!d.playing) d.play(); window.rec.broadcaster.metadataDelayMs = 300; await window.rec.broadcaster.start(); });
+    const t1 = Date.now();
+    while (ice.state.bytes < 16000 * 4 && Date.now() - t1 < 15000) await page.waitForTimeout(200); // ~4 s of music first
+    const ded = await page.evaluate(async () => {
+      const a = window.opendj;
+      const d = a.queueDedication('Pentru Ana și Mihai, la mulți ani și multă fericire!', { lang: 'ro', when: 'now' });
+      const t0 = performance.now(); let duck = 1, voice = 0, banner = false;
+      while (performance.now() - t0 < 15000 && d.state !== 'done') { await new Promise((r) => setTimeout(r, 100)); duck = Math.min(duck, a.engine.duck.gain.value); voice = Math.max(voice, a.voice.level()); banner ||= !!document.querySelector('.dedication-banner'); }
+      return { state: d.state, mode: d.mode, duck, voice, banner };
+    });
+    check(ded.state === 'done' && ded.mode === 'mix', `dedication spoken through the master bus (${ded.mode})`);
+    check(ded.duck < 0.35 && ded.voice > 0.05 && ded.banner, `music ducked to ${ded.duck.toFixed(2)} under the voice (voice peak ${ded.voice.toFixed(2)}), banner shown`);
+    while (!ice.metadata.some((m) => /Ana și Mihai/.test(m.song || '')) && Date.now() - t1 < 30000) await page.waitForTimeout(200);
+    check(ice.metadata.some((m) => /^Dedicație - Pentru Ana și Mihai/.test(m.song || '')), `stream metadata shows the dedication (${ice.metadata.map((m) => m.song).join(' | ')})`);
+    await page.waitForTimeout(2500);
+    await page.evaluate(() => window.rec.broadcaster.stop());
+    // decode what the private stream carried and look at it in 100 ms windows: speech band (1.2-3.5 kHz, the music
+    // has almost nothing there) and the music's 220 Hz tone (ducked while the voice talks)
+    const mp3 = path.join(tmp, 'private-stream.mp3'); fs.writeFileSync(mp3, Buffer.concat(ice.state.chunks));
+    const pcm = await new Promise((r) => { const out = []; const p = spawn(ff.path, ['-hide_banner', '-nostdin', '-i', mp3, '-ac', '1', '-ar', '16000', '-f', 'f32le', '-']); p.stdout.on('data', (d) => out.push(d)); p.on('close', () => r(Buffer.concat(out))); });
+    const x = new Float32Array(pcm.buffer, pcm.byteOffset, pcm.length / 4), W = 1600;
+    const biquad = (type, f, q = 0.707) => { // RBJ cookbook high / low pass
+      const w = 2 * Math.PI * f / 16000, c = Math.cos(w), al = Math.sin(w) / (2 * q), a0 = 1 + al;
+      const bb = type === 'lp' ? [(1 - c) / 2, 1 - c, (1 - c) / 2] : [(1 + c) / 2, -(1 + c), (1 + c) / 2];
+      return { b: bb.map((v) => v / a0), a: [-2 * c / a0, (1 - al) / a0] };
+    };
+    const filt = (sig, { b: [b0, b1, b2], a: [a1, a2] }) => { const y = new Float32Array(sig.length); let x1 = 0, x2 = 0, y1 = 0, y2 = 0; for (let i = 0; i < sig.length; i++) { const v = b0 * sig[i] + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2; x2 = x1; x1 = sig[i]; y2 = y1; y1 = v; y[i] = v; } return y; };
+    const band = (lo, hi) => { // RMS per 100 ms window of a 4th-order band-pass
+      let y = x; for (let k = 0; k < 2; k++) { y = filt(y, biquad('hp', lo)); y = filt(y, biquad('lp', hi)); }
+      const e = []; for (let i = 0; i + W <= y.length; i += W) { let s = 0; for (let j = i; j < i + W; j++) s += y[j] * y[j]; e.push(Math.sqrt(s / W)); }
+      return e;
+    };
+    const speech = band(1200, 3500), tone = band(150, 300);
+    const base = [...speech].sort((a, b) => a - b)[Math.floor(speech.length * 0.2)];
+    const voiced = speech.map((v) => v > base * 4);
+    // the dedication = the longest run of voiced windows (gaps between words up to 0.5 s); a stray window such as the
+    // encoder's start-up transient is ignored
+    const runs = [];
+    voiced.forEach((v, i) => { if (!v) return; const r = runs.at(-1); if (r && i - r.at(-1) <= 5) r.push(i); else runs.push([i]); });
+    const vIdx = runs.reduce((a, b) => (b.length > a.length ? b : a), []);
+    const first = vIdx[0], last = vIdx.at(-1);
+    const db = (v) => 20 * Math.log10(Math.max(v, 1e-9));
+    const avg = (arr) => arr.reduce((a, b) => a + b, 0) / Math.max(1, arr.length);
+    const toneBefore = avg(tone.slice(Math.max(0, first - 20), first - 3)), toneDuring = avg(tone.slice(first + 3, last - 3));
+    console.log(`   stream: ${(x.length / 16000).toFixed(1)} s decoded, speech windows ${vIdx.length} (${(first / 10).toFixed(1)}-${(last / 10).toFixed(1)} s), speech band ${db(avg(vIdx.map((i) => speech[i]))).toFixed(1)} dB vs ${db(base).toFixed(1)} dB without voice, 220 Hz tone ${db(toneBefore).toFixed(1)} -> ${db(toneDuring).toFixed(1)} dB`);
+    check(vIdx.length >= 10 && last - first >= 15, `the dedication is audible in the decoded stream (${vIdx.length} voiced 100 ms windows over ${((last - first) / 10).toFixed(1)} s)`);
+    check(db(avg(vIdx.map((i) => speech[i]))) - db(base) > 15, 'speech band at least 15 dB above the music-only level');
+    check(db(toneBefore) - db(toneDuring) > 6, `music ducked in the stream by ${(db(toneBefore) - db(toneDuring)).toFixed(1)} dB while the voice talks`);
+    check(ice.sources.at(-1)?.headers['ice-public'] === '0', 'private stream (Ice-Public: 0)');
+  }
+
   const bad = errors.filter((e) => !/favicon|AudioContext was not allowed/.test(e));
   check(!bad.length, `no page errors${bad.length ? ': ' + bad.join(' | ') : ''}`);
   console.log('\nE2E recording: all checks passed');

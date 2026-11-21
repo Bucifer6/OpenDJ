@@ -39,8 +39,8 @@ function writeWav(file, seconds) {
 writeWav(path.join(music, 'Update Artist - Long Tone.wav'), 30);
 
 // ---------------------------------------------------------------- fake GitHub API
-// (an unreleased "New in 0.5" section in the repo's notes is replaced by the fake 0.5 release's own section)
-const NOTES = fs.readFileSync(path.join(root, 'docs', 'RELEASE_NOTES.md'), 'utf8').replace(/### New in 0\.5\n[\s\S]*?(?=### New in )/, '');
+// the test injects its own (hostile) "New in 0.5": drop the real one so there is exactly one
+const NOTES = fs.readFileSync(path.join(root, 'docs', 'RELEASE_NOTES.md'), 'utf8').replace(/### New in 0\.5\n[\s\S]*?(?=### New in 0\.4)/, '');
 const NEW_SECTION = `### New in 0.5
 **Update prompt**
 - OpenDJ tells you when a new version is out, with *what's new* and an **Update now** button.

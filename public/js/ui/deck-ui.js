@@ -84,7 +84,7 @@ export function buildDeck(app, deck) {
   const mixNowBtn = R(button('MIX NOW', {
     cls: 'sm deck-mix-now',
     title: 'Start the queued Automix transition from this deck',
-    click: () => app.automixNow(),
+    click: () => app.mixNow(),
     disabled: () => !app.automix?.enabled || !!app.automix?.transition || app.automix?.current?.index !== i || !app.automix?.nextTrack?.(),
   }));
   const syncBtn = R(button('SYNC', { cls: 'btn-sync', click: () => deck.sync(), active: () => deck.syncOn }));

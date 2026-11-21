@@ -302,6 +302,11 @@ export class Engine extends Emitter {
     this.duck.gain.setTargetAtTime(on ? Math.pow(10, db / 20) : 1, this.ctx.currentTime, on ? 0.05 : 0.25);
     this.emit('master', 'talkover', on);
   }
+  // ---------- MC voice / dedications hook (audio/voice.js) ----------
+  // Synthesised speech joins the master bus after the music duck, so it is recorded and broadcast and is never ducked
+  // by its own talkover. Deliberately tiny: a dedicated mic / voice bus (being added separately) can provide its input
+  // node as `this.voiceBus` and the voice follows it; VoiceBus does its own ducking through `this.duck`.
+  voiceInput() { return this.voiceBus || this.masterBus; }
   micLevel() { if (!this.micOn || !this.micMeter) return 0; const b = (this._micBuf ||= new Float32Array(512)); this.micMeter.getFloatTimeDomainData(b); let p = 0; for (const v of b) p = Math.max(p, Math.abs(v)); return p; }
 
   resume() { if (this.ctx.state !== 'running') return this.ctx.resume(); }

@@ -13,6 +13,9 @@ const BUILT_IN_THEMES = [
   { id: 'vinyl', name: 'Vinyl Booth', desc: 'Turntable-inspired platters and warm analogue tones', swatch: ['#10100f', '#282725', '#d9b56d', '#e66a4b'] },
   { id: 'performance', name: 'Pad Performance', desc: 'Colour-coded pads and a modern performance controller', swatch: ['#101018', '#23232e', '#b276ff', '#3de0c1'] },
   { id: 'studio', name: 'Studio Mixer', desc: 'Brushed-metal mixer with classic channel colours', swatch: ['#111418', '#252b31', '#70a9d8', '#e6a759'] },
+  // whole-layout controller skins (js/skins/skin-host.js draws the decks + mixer as the hardware)
+  { id: 'compact-controller', name: 'Compact Controller', desc: 'The decks and mixer drawn as a compact 2-channel controller', swatch: ['#0d0e10', '#1e1f23', '#ff7a1a', '#37d46e'] },
+  { id: 'all-in-one', name: 'All-in-One 4-Channel', desc: 'A standalone 4-channel DJ system with a centre screen', swatch: ['#08090b', '#16181c', '#2f8cff', '#ff9a2a'] },
   // deck skins: `deck` turns every deck (Deck look "Follow the theme") into a full turntable or media player
   { id: 'turntable', name: 'Direct-Drive Turntable', desc: 'Every deck as a direct-drive turntable: plinth, platter, strobe, tonearm and a long pitch slider', swatch: ['#0e0e0f', '#2a2b2e', '#c9ced4', '#ff6a3d'], deck: 'turntable' },
   { id: 'player', name: 'Pro Media Player', desc: 'Every deck as a club media player: colour screen, hot-cue pads, big lit jog, tempo slider (Classic 2 decks: club booth)', swatch: ['#07090b', '#1a1f24', '#2fd3ff', '#ffb02e'], deck: 'player' },
@@ -21,6 +24,7 @@ const BUILT_IN_THEMES = [
 export const DECK_LOOKS = ['standard', 'turntable', 'player'];
 
 const THEME_CACHE_KEY = 'opendj-skin-catalog-v1';
+const MAX_CATALOG_BYTES = 256 * 1024;
 const SKIN_CATALOG_URL = 'https://raw.githubusercontent.com/Bucifer6/OpenDJ/main/public/skins/catalog.json';
 const THEME_VARS = new Set([
   '--bg', '--panel', '--panel-2', '--panel-3', '--line', '--line-2', '--text', '--text-2', '--text-3',
@@ -34,13 +38,23 @@ export const THEMES = [...BUILT_IN_THEMES];
 const skinVars = new Map();
 const appliedSkinVars = new Set();
 
-function validateSkin(s) {
+const lum = (hex) => {
+  let h = hex.slice(1); if (h.length <= 4) h = [...h.slice(0, 3)].map((c) => c + c).join('');
+  const [r, g, b] = [0, 2, 4].map((i) => { const v = parseInt(h.slice(i, i + 2), 16) / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+/** WCAG contrast ratio of two #rgb / #rrggbb colours. */
+export function contrast(a, b) { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+
+export function validateSkin(s) {
   if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
   const id = String(s.id || '');
   if (!(BUILT_IN_IDS.has(id) || /^remote-[a-z0-9]+(?:-[a-z0-9]+){0,5}$/.test(id))) return null;
   const vars = Object.fromEntries(Object.entries(s.vars || {}).filter(([k, v]) =>
     THEME_VARS.has(k) && typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v)));
   if (!Object.keys(vars).length) return null;
+  // an unreadable skin (text the colour of the background) could lock a user out of Settings: refuse it
+  for (const bg of ['--bg', '--panel']) if (vars['--text'] && vars[bg] && contrast(vars['--text'], vars[bg]) < 3) return null;
   const swatch = Array.isArray(s.swatch) ? s.swatch.filter((v) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v)).slice(0, 4) : [];
   return {
     id, name: String(s.name || id).slice(0, 40), desc: String(s.desc || 'Downloadable OpenDJ skin').slice(0, 100),
@@ -72,9 +86,13 @@ try {
 export async function refreshSkinCatalog() {
   const ctl = new AbortController(), timeout = setTimeout(() => ctl.abort(), 12000);
   try {
-    const res = await fetch(SKIN_CATALOG_URL, { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal: ctl.signal });
+    const res = await fetch(SKIN_CATALOG_URL, { cache: 'no-store', credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer', signal: ctl.signal });
     if (!res.ok) throw new Error(`Skin catalogue returned HTTP ${res.status}`);
-    const catalog = await res.json();
+    // colours only (validated below), and a size cap: a catalogue is a few KB
+    if (Number(res.headers.get('content-length')) > MAX_CATALOG_BYTES) throw new Error('Skin catalogue is too large');
+    const raw = await res.text();
+    if (raw.length > MAX_CATALOG_BYTES) throw new Error('Skin catalogue is too large');
+    let catalog; try { catalog = JSON.parse(raw); } catch { throw new Error('Skin catalogue is not valid JSON'); }
     if (catalog?.schema !== 1 || !Array.isArray(catalog.skins)) throw new Error('Skin catalogue format is not supported');
     const skins = catalog.skins.map(validateSkin).filter(Boolean).slice(0, 50);
     if (!skins.length) throw new Error('No valid skins were found in the catalogue');

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": 2,
+  "version": 3,
   "skins": [
     {
       "id": "cdj",
@@ -164,6 +164,70 @@
         "--platter-2": "#13181d",
         "--platter-3": "#080b0e",
         "--platter-4": "#222a31"
+      }
+    },
+    {
+      "id": "compact-controller",
+      "name": "Compact Controller",
+      "desc": "The decks and mixer drawn as a compact 2-channel controller",
+      "swatch": [
+        "#0d0e10",
+        "#1e1f23",
+        "#ff7a1a",
+        "#37d46e"
+      ],
+      "vars": {
+        "--bg": "#0d0e10",
+        "--panel": "#17181b",
+        "--panel-2": "#1e1f23",
+        "--panel-3": "#27292d",
+        "--line": "#2c2e33",
+        "--line-2": "#3b3d43",
+        "--text": "#ecece9",
+        "--text-2": "#a8a9a5",
+        "--text-3": "#75766f",
+        "--accent": "#ff7a1a",
+        "--on-accent": "#1a0d02",
+        "--deck1": "#ff8a2a",
+        "--deck2": "#4fb6ff",
+        "--deck3": "#3fd47a",
+        "--deck4": "#c27bff",
+        "--wave-bg": "#08090a",
+        "--wf-low": "#ff5a3c",
+        "--wf-mid": "#ffae4a",
+        "--wf-high": "#6fc3ff"
+      }
+    },
+    {
+      "id": "all-in-one",
+      "name": "All-in-One 4-Channel",
+      "desc": "A standalone 4-channel DJ system with a centre screen",
+      "swatch": [
+        "#08090b",
+        "#16181c",
+        "#2f8cff",
+        "#ff9a2a"
+      ],
+      "vars": {
+        "--bg": "#08090b",
+        "--panel": "#121316",
+        "--panel-2": "#16181c",
+        "--panel-3": "#1f2126",
+        "--line": "#262930",
+        "--line-2": "#343841",
+        "--text": "#ecedf0",
+        "--text-2": "#a4a8b1",
+        "--text-3": "#6f747e",
+        "--accent": "#2f8cff",
+        "--on-accent": "#02101f",
+        "--deck1": "#2f8cff",
+        "--deck2": "#ff9a2a",
+        "--deck3": "#3fd47a",
+        "--deck4": "#e05cff",
+        "--wave-bg": "#04060a",
+        "--wf-low": "#1f5fff",
+        "--wf-mid": "#6fb8ff",
+        "--wf-high": "#e8f4ff"
       }
     }
   ]

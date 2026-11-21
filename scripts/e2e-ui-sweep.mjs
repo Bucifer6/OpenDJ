@@ -2,7 +2,7 @@
 // unhandled rejection, on interactive controls that overlap each other, stick out of their panel (outside a scroll
 // area), are covered by something else where you would click them, or on fader caps outside their tracks.
 // Then clicks every deck / mixer / panel control, switches every panel and mode, opens the dialogs and presses the
-// keyboard shortcuts in each layout.   Usage: node scripts/e2e-ui-sweep.mjs [--quick]
+// keyboard shortcuts in each layout.   Usage: node scripts/e2e-ui-sweep.mjs [--quick] [--skins]
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,6 +12,7 @@ import { start } from '../server/index.js';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const QUICK = process.argv.includes('--quick');
+const SKINS_ONLY = process.argv.includes('--skins'); // only the controller skins (section 7)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'opendj-sweep-'));
 const music = path.join(tmp, 'Music'); fs.mkdirSync(music);
 function wav(file, seconds, bpm, f0) {
@@ -29,7 +30,7 @@ wav(path.join(music, 'Sweep - Four.wav'), 45, 122, 262);
 
 const app = await start({ port: 0, dataDir: path.join(tmp, 'data') });
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+let page = await browser.newPage({ viewport: { width: 1920, height: 1080 } }); // reassigned for the DPI-scaled pass (section 6)
 const errors = [];
 page.on('pageerror', (e) => errors.push(`pageerror: ${e}`));
 page.on('console', (m) => { if (m.type() === 'error' && !/favicon|Failed to load resource.*(cover|404)/i.test(m.text())) errors.push(`console: ${m.text()}`); });
@@ -137,6 +138,7 @@ try {
   await page.waitForFunction(() => !window.opendj.analyser.running, null, { timeout: 60000 }).catch(() => {});
   await ev(() => window.opendj.engine.decks.forEach((d) => d.addMemoryCue?.()));
 
+  if (!SKINS_ONLY) { // --skins: only section 7
   // ---------- 1. geometry across the matrix ----------
   const layouts = ['classic', 'performance', 'waveform', 'four'];
   const themes = QUICK ? ['midnight'] : ['midnight', 'light', 'contrast'];
@@ -250,7 +252,7 @@ try {
 
   // ---------- 2. click sweep per layout ----------
   await page.setViewportSize({ width: 1920, height: 1080 });
-  const SKIP = /eject|stems-prep|rec\b|live-btn|dvs-btn|video-btn|light-btn|signout|fullscreen|automix-btn|lib-collapse|upl-btn|import-btn/;
+  const SKIP = /eject|stems-prep|mc-btn|rec\b|live-btn|dvs-btn|video-btn|light-btn|signout|fullscreen|automix-btn|lib-collapse|upl-btn|import-btn/;
   for (const layout of layouts) {
     await setUi({ layout, theme: 'midnight', zoom: 100 });
     await page.waitForTimeout(200);
@@ -331,6 +333,144 @@ try {
   const after = await audit();
   check(!summary(after), `after live resizes: controls in bounds${summary(after) ? ' — ' + summary(after) : ''}`);
   await ev(() => window.opendj.engine.decks.forEach((d) => d.pause()));
+
+  // ---------- 5. crossfader travel and EQ preset in the narrow mixer of wide windows (handover checks) ----------
+  // The mixer keeps ~340 px at any window width; the crossfader used to share its row with three selects (150 px of
+  // track, selects squashed to bare arrows). It now wraps onto its own line.
+  await ev(() => { const E = window.opendj.engine; E.decks[0].play(); E.decks[1].play(); });
+  for (const [w, h, n] of [[1920, 1080, 2], [2560, 1080, 2], [2560, 1080, 4], [3440, 1440, 4], [1366, 768, 4], [1100, 700, 2]]) {
+    await page.setViewportSize({ width: w, height: h });
+    await ev((k) => window.opendj.setDeckCount(k, false), n); await page.waitForTimeout(350);
+    const g = await ev(() => {
+      const t = document.querySelector('.crossfader .fader-track').getBoundingClientRect();
+      const sels = [...document.querySelectorAll('.xfader-options .sel')].map((x) => { const r = x.getBoundingClientRect(); return { w: Math.round(r.width), text: x.selectedOptions[0]?.textContent }; });
+      return { track: Math.round(t.width), sels, mixer: Math.round(document.querySelector('.mixer').getBoundingClientRect().width) };
+    });
+    check(g.track >= 250 && g.sels.every((x) => x.w >= 64), `${w}x${h} ${n} decks: crossfader track ${g.track} px in a ${g.mixer} px mixer, options ${g.sels.map((x) => `${x.text} ${x.w}px`).join(', ')}`);
+    // drag end to end with the mouse while two decks play: full travel and smooth frames
+    const box = await page.locator('.crossfader .fader-track').boundingBox(), thumb = await page.locator('.crossfader .fader-thumb').boundingBox(), y = box.y + box.height / 2;
+    await ev(() => { window.opendj.engine.setCrossfader(0); window.__fr = []; let last = 0; window.__frOn = true; const f = (t) => { if (last) window.__fr.push(t - last); last = t; if (window.__frOn) requestAnimationFrame(f); }; requestAnimationFrame(f); });
+    await page.mouse.move(thumb.x + thumb.width / 2, y); await page.mouse.down();
+    let lo = 1, hi = -1;
+    for (const dir of [1, -1]) {
+      for (let k = 0; k <= 40; k++) await page.mouse.move(box.x + box.width / 2 + dir * (box.width / 2 + 30) * (k / 40), y);
+      const v = await ev(() => window.opendj.engine.crossfader); lo = Math.min(lo, v); hi = Math.max(hi, v);
+      for (let k = 40; k >= 0; k--) await page.mouse.move(box.x + box.width / 2 + dir * (box.width / 2 + 30) * (k / 40), y);
+    }
+    await page.mouse.up();
+    const fr = await ev(() => { window.__frOn = false; const s = [...window.__fr].sort((a, b) => a - b); return { n: s.length, p95: s[Math.floor(s.length * 0.95)] || 0 }; });
+    check(lo <= -0.999 && hi >= 0.999 && fr.p95 < 50, `${w}x${h} ${n} decks: crossfader drag reaches ${lo.toFixed(2)} … ${hi.toFixed(2)}, 95th-percentile frame ${fr.p95.toFixed(1)} ms`);
+  }
+  await page.setViewportSize({ width: 1920, height: 1080 }); await ev(() => window.opendj.setDeckCount(2, false));
+  // EQ preset: only an EQ change makes it "Custom"; volume / filter moves and automix fades do not
+  const eqp = await ev(async () => {
+    const E = window.opendj.engine, sel = document.querySelector('.mixer-eq-preset');
+    for (const ch of E.channels) for (const k of ['eqLow', 'eqMid', 'eqHigh']) ch.set(k, 0);
+    const flat = sel.value;
+    E.channels[0].set('volume', 0.5); E.channels[1].set('filter', 0.3); E.channels[1].set('filter', 0); E.setCrossfader(0.4);
+    const afterVol = sel.value;
+    sel.value = 'warm'; sel.dispatchEvent(new Event('change'));
+    const warm = sel.value, low = E.channels[2].state.eqLow;
+    E.channels[0].set('eqHigh', 0.5);
+    const custom = sel.value;
+    for (const ch of E.channels) for (const k of ['eqLow', 'eqMid', 'eqHigh']) ch.set(k, 0);
+    return { flat, afterVol, warm, low, custom, back: sel.value };
+  });
+  check(eqp.flat === 'flat' && eqp.afterVol === 'flat' && eqp.warm === 'warm' && Math.abs(eqp.low - 0.12) < 1e-6 && eqp.custom === 'custom' && eqp.back === 'flat', `EQ preset follows EQ changes only (${JSON.stringify(eqp)})`);
+  await ev(() => window.opendj.engine.decks.forEach((d) => d.pause()));
+  // ---------- 6. Windows display scaling (125 % / 150 %) with the hardware skins ----------
+  // A 1920x1080 screen at 125 % is a 1536x864 CSS window at device pixel ratio 1.25; at 150 % 1280x720 at 1.5;
+  // 2560x1440 at 150 % is 1707x960. The controller / vinyl skins change borders and radii (the vinyl jog has a 7 px
+  // rim): check them there in both layouts. (Real Windows font rendering / ClearType still needs a Windows run.)
+  if (!QUICK) {
+    const mainPage = page;
+    for (const [w, h, dpr] of [[1536, 864, 1.25], [1280, 720, 1.5], [1707, 960, 1.5], [1366, 768, 1.25]]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: dpr });
+      page = await ctx.newPage();
+      page.on('pageerror', (e) => errors.push(`pageerror: ${e}`));
+      try {
+        await page.goto(app.url); await page.waitForFunction(() => window.opendj?.ready, null, { timeout: 30000 });
+        await page.locator('.overlay.start button').click({ timeout: 1000 }).catch(() => {});
+        for (let i = 0; i < 4; i++) await ev(([i, id]) => window.opendj.loadTrack(i, id), [i, ids[i]]);
+        for (const theme of ['cdj', 'vinyl', 'performance', 'studio']) for (const layout of ['classic', 'four']) {
+          await setUi({ layout, theme, zoom: 100 }); await page.waitForTimeout(200);
+          const a = await audit(), f = await fit(['cues', 'fx']);
+          check(a.count > 40 && !summary(a) && !f.length, `DPI ${Math.round(dpr * 100)}% ${w}x${h} ${theme} ${layout}: ${a.count} controls in bounds, panels fit${summary(a) ? ' — ' + summary(a) : ''}${f.length ? ' — ' + f.slice(0, 3).join('; ') : ''}`);
+        }
+      } finally { await ctx.close(); page = mainPage; }
+    }
+  }
+  } // !SKINS_ONLY
+
+  // ---------- 7. whole-layout controller skins (js/skins): geometry at every size, then click every control ----------
+  const skinAudit = () => ev(() => {
+    const root = document.querySelector('.sk-root'); if (!root) return { missing: true };
+    const rr = root.getBoundingClientRect();
+    const CONTROLS = '.sk-btn, .sk-knob, .sk-fader, .sk-jog, .sk-pad, .ai-xpad';
+    const vis = (e) => { const r = e.getBoundingClientRect(); return e.offsetParent && r.width > 1 && r.height > 1; };
+    const name = (e) => `${e.className.baseVal ?? e.className}`.split(' ').slice(0, 2).join('.') + (e.textContent?.trim() ? `"${e.textContent.trim().slice(0, 12)}"` : '') + (e.dataset.target ? `[${e.dataset.target}]` : '');
+    const els = [...root.querySelectorAll(CONTROLS)].filter(vis);
+    const out = { count: els.length, escape: [], overlap: [], covered: [], fader: [], small: [], clipped: [] };
+    const rects = els.map((e) => ({ e, r: e.getBoundingClientRect() }));
+    for (const { e, r } of rects) {
+      if (r.left < rr.left - 1 || r.right > rr.right + 1 || r.top < rr.top - 1 || r.bottom > rr.bottom + 1) out.escape.push(name(e));
+      const panel = e.closest('.cc-deck, .cc-mixer, .ai-strip, .ai-deck, .ai-mixer, .ai-browse, .ai-screen-wrap');
+      if (panel) { const p = panel.getBoundingClientRect(); if (r.left < p.left - 1 || r.right > p.right + 1 || r.top < p.top - 1 || r.bottom > p.bottom + 1) out.escape.push(`${name(e)} outside its panel`); }
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (hit && hit !== e && !e.contains(hit) && !hit.contains(e) && !hit.closest('.toast, .toasts')) out.covered.push(`${name(e)} under ${name(hit)}`);
+      if (Math.min(r.width, r.height) < 9) out.small.push(name(e));
+      const lbl = e.matches('.sk-btn') && e.querySelector('.sk-lbl'); if (lbl && lbl.scrollWidth > e.clientWidth + 2) out.clipped.push(name(e));
+    }
+    for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) {
+      const a = rects[i], b = rects[j]; if (a.e.contains(b.e) || b.e.contains(a.e)) continue;
+      const w = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left), h = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
+      if (w > 1.5 && h > 1.5) out.overlap.push(`${name(a.e)} x ${name(b.e)}`);
+    }
+    for (const f of root.querySelectorAll('.sk-fader')) {
+      if (!vis(f)) continue;
+      const t = f.getBoundingClientRect(), c = f.querySelector('.sk-fcap').getBoundingClientRect();
+      if (c.top < t.top - 1 || c.bottom > t.bottom + 1 || c.left < t.left - 1 || c.right > t.right + 1) out.fader.push(name(f));
+    }
+    return out;
+  });
+  const skinSummary = (a) => a.missing ? 'skin not shown' : ['escape', 'overlap', 'covered', 'fader', 'small', 'clipped'].filter((k) => a[k].length).map((k) => `${k} ${a[k].slice(0, 4).join('; ')}`).join(' | ');
+  for (const skin of ['compact-controller', 'all-in-one']) {
+    for (const [w, h] of [[1920, 1080], [1600, 960], [1440, 900], [1366, 768], [1280, 800], [2560, 1440], [1180, 820]]) {
+      await page.setViewportSize({ width: w, height: h });
+      await setUi({ layout: skin === 'all-in-one' ? 'four' : 'classic', theme: skin, zoom: 100 });
+      await page.waitForSelector('.sk-root', { timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(250);
+      // every fader to both ends and back: the caps stay in their tracks
+      await ev(() => { for (const f of document.querySelectorAll('.sk-root .sk-fader[data-target]')) { const t = f.dataset.target, m = window.opendj.midi; const v = m.byId.get(t)?.get?.() ?? 0.5; m.dispatch({ target: t }, 0); m.dispatch({ target: t }, 1); m.dispatch({ target: t }, v); } });
+      await page.waitForTimeout(60);
+      const a = await skinAudit();
+      check(a.count > (skin === 'all-in-one' ? 150 : 60) && !skinSummary(a), `${skin} ${w}x${h}: ${a.count} controls reachable, in bounds, none overlapping, covered or clipped${skinSummary(a) ? ' — ' + skinSummary(a) : ''}`);
+      const f = await fit([]);
+      check(!f.length, `${skin} ${w}x${h}: page fits the window${f.length ? ' — ' + f.slice(0, 3).join('; ') : ''}`);
+    }
+    // click every enabled button and pad (twice for toggles), drag every knob and fader a little
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await setUi({ layout: skin === 'all-in-one' ? 'four' : 'classic', theme: skin, zoom: 100 });
+    await page.waitForSelector('.sk-root'); await page.waitForTimeout(200);
+    const SKIN_SKIP = /MENU|MIXER|TAG LIST|USB STOP|INST\.|LOAD|⏮|⏭/;
+    const n = await ev(() => { const l = [...document.querySelectorAll('.sk-root .sk-btn:not(.sk-na), .sk-root .sk-pad')].filter((e) => e.offsetParent); l.forEach((e, i) => { e.dataset.sweep = `${i}`; }); return l.length; });
+    let clicked = 0;
+    for (let i = 0; i < n; i++) {
+      const loc = page.locator(`.sk-root [data-sweep="${i}"]`);
+      const txt = (await loc.textContent()) || '';
+      if (SKIN_SKIP.test(txt)) continue;
+      await loc.click({ timeout: 2000 }); await loc.click({ timeout: 2000 }); clicked++;
+      if (await page.locator('.overlay').count()) await page.keyboard.press('Escape');
+    }
+    for (const sel of ['.sk-root .sk-knob:not(.sk-na)', '.sk-root .sk-fader']) {
+      const m = await page.locator(sel).count();
+      for (let i = 0; i < m; i++) { const bb = await page.locator(sel).nth(i).boundingBox(); if (!bb) continue; await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2); await page.mouse.down(); await page.mouse.move(bb.x + bb.width / 2 + 3, bb.y + bb.height / 2 - 6, { steps: 2 }); await page.mouse.up(); }
+    }
+    await ev(() => { document.querySelectorAll('[data-sweep]').forEach((e) => delete e.dataset.sweep); const a = window.opendj; a.shift = false; a.engine.decks.forEach((d) => { d.pause(); d.exitLoop?.(); d.setKeyShift?.(0); }); });
+    check(clicked > (skin === 'all-in-one' ? 80 : 40) && errors.length === 0, `${skin}: clicked ${clicked} buttons and pads, dragged every knob and fader, no errors${errors.length ? ': ' + errors.slice(0, 3).join(' | ') : ''}`);
+  }
+  await setUi({ layout: 'classic', theme: 'midnight', zoom: 100 });
+  check(await ev(() => !document.querySelector('.sk-root') && document.querySelectorAll('.waves .wave-row').length === 4), 'back to a normal theme: standard layout and waveforms restored');
   check(errors.length === 0, `no page errors, console errors or unhandled rejections${errors.length ? ': ' + errors.slice(0, 5).join(' | ') : ''}`);
 } catch (e) { console.error(e); failed = true; }
 await browser.close(); app.server.close();

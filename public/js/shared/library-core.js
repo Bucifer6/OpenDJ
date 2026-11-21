@@ -31,6 +31,7 @@ export const DEFAULT_SETTINGS = {
   latencyHint: 'interactive',
   micDeviceId: '',
   talkoverDb: -12,
+  voiceDuckDb: -14, voiceVolume: 1, dedicationLang: 'en', // MC voice / dedications (audio/voice.js, dedications.js)
   midiClockOutput: '',
   colorFx: 'filter',
   fxPostFader: true,          // beat FX tails ring out after the channel fader / crossfader closes (false = pre-fader FX)

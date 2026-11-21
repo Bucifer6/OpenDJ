@@ -78,6 +78,7 @@ html.touch .lr .art { width: 28px; height: 28px; margin: 6px 1px; }
     padding: var(--sat) var(--sar) var(--sab) var(--sal); box-sizing: border-box; --wave-h: 46px; }
   .topbar { flex: none; gap: 6px; flex-wrap: wrap; }
   .topbar .btn { min-height: 44px; min-width: 44px; }
+  .deck .transport .deck-mix-now { min-height: 44px; } /* finger-sized like CUE / PLAY */
   .topbar .logo { margin-right: auto; }
   .topbar .shift-btn, .topbar .seg, .topbar .cpu, .topbar .clock { display: none; }
   .waves { flex: none; }
@@ -157,6 +158,7 @@ html.touch:not(.compact) .topbar { min-height: 50px; }
    usable channel fader and 36-44 px tap targets (QA M4: 37 px fader, 16-21 px buttons, clipped labels). */
 html.tablet { --wave-h: 44px; --browser-h: clamp(140px, 19vh, 220px); }
 html.tablet body:not(.four-decks) .deck .pads .pad { height: 44px; min-height: 44px; }
+html.tablet .deck .transport .deck-mix-now { min-height: 44px; }
 html.tablet body:not(.four-decks) .deck-mid { gap: 3px; }
 html.tablet .deck-toggles .btn.sm { min-height: 36px; font-size: 10px; letter-spacing: 0; padding-left: 1px; padding-right: 1px; text-overflow: clip; }
 html.tablet .panel-tab { min-height: 34px; font-size: 10.5px; }
