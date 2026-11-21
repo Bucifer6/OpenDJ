@@ -46,7 +46,7 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 - Scrolling 3-band colour waveforms with beat grid, cue, loop and **phrase** markers, plus a full-track overview; beat grid editor with tap tempo
 - Mixer: trim, 3-band isolator EQ with kill, one-knob filter / **Color FX** (Filter, Space, Dub Echo, Noise, Crush, Jet), headphone cue, VU meters, crossfader curves, master limiter, auto-gain
 - 10 beat-synced effects per channel (Echo, Ping Pong, Reverb, Flanger, Phaser, Auto Filter, Trans, Bit Crusher, Distortion, Noise Sweep) and pad FX (brake, tape stop, backspin, echo out, filter sweep, rolls)
-- 8-slot sampler with a **16-step sequencer** locked to the master deck, microphone / aux input with **talkover**, MIDI clock out
+- 8-slot sampler with a bank of synthesised DJ FX (air horn single blast and "ba-ba-baaah" triplet, dub siren, laser, rewind, vinyl stop, riser, downlifter, impact, noise sweep, clap, kick), rendered with Web Audio and loudness-matched; per pad: choose a sound, load your own sample, pad volume, **sync to beat**. Plus a **16-step sequencer** locked to the master deck, microphone / aux input with **talkover**, MIDI clock out
 - Headphone cueing on a second sound card, on channels 3-4 of a 4-channel controller interface, or as split cue on one stereo jack
 
 ### AI stems
@@ -63,7 +63,7 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 <img src="docs/images/library.jpg" alt="Library browser with smart playlists, play history, playlist folders, colours, tags and ratings" width="100%">
 
 - Folders on any drive; **USB sticks and NAS shares** (SMB/NFS/AFP/SSHFS mounts) are detected and added with one click
-- **Media servers**: Plex, Jellyfin, Emby, Subsonic-compatible (Navidrome, Airsonic, Gonic…) and MediaMax (including its DJ analysis). Remote playlists are imported; tracks stream through a local proxy with seeking, or **download** them for offline use.
+- **Media servers**: Plex, Jellyfin, Emby, Subsonic-compatible (Navidrome, Airsonic, Gonic…) and MediaMax (including its DJ analysis). Each server's **playlists** show up live under it in the sidebar: open one, automix / shuffle & mix / smart mix it, import it as a local playlist or download it all. Tracks stream through a local proxy with seeking, or **download** them for offline use.
 - Automatic analysis: BPM + beat grid, key (Camelot), energy, loudness, silence trimming, **phrases** and automatic cues. New tracks are analysed **in the background** after a scan or upload, one at a time and paused while a deck loads (progress and a stop button in the library toolbar; *⋯ Library → Analyse all tracks* or right-click → *Analyse* to start it by hand; *Settings → Library* turns it off). Tracks with a locked BPM or an imported beat grid keep it; streaming-only media-server tracks are analysed when loaded or when you ask. Files that can't be decoded are flagged ⚠ in the list.
 - Playlists with folders, **smart playlists** (rules for BPM, key compatibility, genre, tags, colour, rating, energy, dates…), track **colours**, **My Tags**, ratings, **play history sessions** with setlist export (TXT/CSV/M3U)
 - Track info editor (single and multi-track), duplicate finder, missing-file relocate, library backup / restore
@@ -75,8 +75,9 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 <img src="docs/images/automix.png" alt="Automix dialog with smart ordering, energy curve and transition options" width="60%">
 
 - Non-stop mixing of any playlist or library view on decks 1 and 2
-- Beat-matched, **phrase-aligned** transitions: bass swap, crossfade, filter fade or echo out; afterwards the new track eases back to its original tempo over 8 bars (can be turned off), so tempo drift doesn't build up over a set
-- **Smart ordering** by key, tempo and an energy curve (harmonic, build up, peak, waves), optional Key Sync to fix key clashes, skip to next, queue tracks from the browser
+- Beat-matched, **phrase-aligned** transitions in 10 **mixing styles** that drive the real EQ, filter and FX: smooth blend (bass swap on the phrase), quick bass swap, crossfade, filter sweep, echo out, cut on the downbeat, backspin, vinyl brake, loop out (rolling loop) and reverb wash, or **Auto**, which picks one per transition from the BPM jump, energy change, key and genre. Length 4–32 bars, "vary styles", and a per-transition override in the **queue panel**, which also shows the next transition's style and when it starts. Afterwards the new track eases back to its original tempo over 8 bars (can be turned off)
+- **Smart mix**: orders a playlist, crate, media-server playlist, search result or the whole library by how well tracks go together (Camelot compatibility, BPM incl. half/double time, energy flow toward a set shape such as warm-up → peak → cool-down, genre/tags, no repeated artists or recently played tracks, intro phrases), or picks each next track live while playing; each transition is explained ("8A → 9A, 124 → 126 BPM, energy +1, same genre"). Presets plus harmonic / energy / variety sliders. **Shuffle & mix** plays a random order, still beat-matched
+- Loading a track on a deck while automix runs works like a pro DJ app: on the next deck it becomes the next track, on the playing deck automix asks (play next / stop and load), during a transition it is queued; optional Key Sync fixes key clashes
 
 ### Controllers, DVS & Ableton Link
 
@@ -348,10 +349,10 @@ Tests:
 
 ```bash
 npm test            # unit tests: analysis, media-server clients against mock servers, rekordbox round trip, CDJ export, DVS, Link…
-npm run test:e2e    # end-to-end checks in headless Chromium (smoke, performance, controllers, lighting, video, web app, DVS, Link/lyrics, recording, stems)
+npm run test:e2e    # end-to-end checks in headless Chromium (smoke, performance, controllers, lighting, video, web app, DVS, Link/lyrics, recording, stems, analysis, sampler, automix)
 ```
 
-The smoke test covers scan → load → analyse → play → sync → FX → record → automix; `node scripts/e2e-performance.mjs` measures pitch for key shift and key lock and checks key sync, quantized cues, saved loops, slicer, instant doubles, stems, Color FX, mic/talkover and the sequencer.
+The smoke test covers scan → load → analyse → play → sync → FX → record → automix; `scripts/e2e-automix.mjs` checks every mixing style on the master output (dropouts, level, clipping, clicks), smart mix, loading tracks while automix runs and media-server playlists; `scripts/e2e-sampler.mjs [outDir]` renders the sampler bank, measures loudness / spectrum and writes WAVs plus spectrogram PNGs; `node scripts/e2e-performance.mjs` measures pitch for key shift and key lock and checks key sync, quantized cues, saved loops, slicer, instant doubles, stems, Color FX, mic/talkover and the sequencer.
 
 README screenshots are reproducible: `node scripts/demo/make-demo-library.mjs` synthesises the fictional demo library and `node scripts/demo/screenshots.mjs` captures everything in `docs/images/`.
 

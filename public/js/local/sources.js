@@ -15,6 +15,18 @@ const TOKEN_ONLY = new Set(['plex', 'jellyfin', 'emby']);
 const USER_DATA = (t) => t.analyzed || t.cues?.length || t.loops?.length || t.hotLoops?.length || t.rating || t.playCount || t.comment || t.tags?.length || t.color;
 /** Never show (or log) a URL's query string: it can carry tokens / Subsonic auth. */
 export const scrub = (msg) => String(msg ?? '').replace(/(https?:\/\/[^\s?'"]+)\?[^\s'"]*/gi, '$1?…').slice(0, 300);
+/**
+ * Media-server errors as { status, message } for the UI: a remote 401/403 (or Subsonic auth error) is never passed
+ * through as 401 (that means "OpenDJ login"): it becomes 400 with a reason; not found 404; anything else 502.
+ */
+export function remoteError(e) {
+  if (e?.expose) return e;
+  const bad = (status, msg) => Object.assign(new Error(scrub(msg)), { status, expose: true });
+  const code = e?.code;
+  if (e?.status === 401 || e?.status === 403 || code === 40 || code === 41 || code === 50) return bad(400, `The media server refused the request (check the connection's user name / password / token): ${e.message}`);
+  if (e?.status === 404 || code === 70) return bad(404, 'Not found on the media server');
+  return bad(502, e instanceof TypeError ? `Could not reach the media server: ${e.message}` : `Media server error: ${e?.message || e}`);
+}
 export const safeExt = (e, fallback = 'mp3') => { const v = String(e || '').replace(/^\./, '').toLowerCase(); return /^[a-z0-9]{1,5}$/.test(v) ? v : fallback; };
 
 /**
@@ -123,6 +135,54 @@ export class LocalSources {
     lib.changed('tracks');
     onProgress?.({ source: sourceId, done: tracks.length, total: tracks.length, finished: true });
     return { tracks: tracks.length, playlists: playlists.length, pruned, keptMissing: kept, skippedPrune: !!suspicious };
+  }
+
+  /** Connect a source's client and persist refreshed account state (tokens), like a sync does. */
+  async _connected(sourceId) {
+    const cfg = this.library.getSource(sourceId);
+    if (!cfg) throw Object.assign(new Error('No source'), { status: 404, expose: true });
+    const client = this.clientFor(sourceId);
+    await client.connect();
+    const persist = client.persistable();
+    if (Object.keys(persist).some((k) => cfg[k] !== persist[k])) { Object.assign(cfg, persist); this.library.save(); }
+    return { cfg, client };
+  }
+
+  /** Live playlist list of a media server (same shape as GET /api/sources/:id/playlists on the desktop server). */
+  async sourcePlaylists(sourceId) {
+    try {
+      const { client } = await this._connected(sourceId);
+      const lists = await client.listPlaylists({ tracks: false });
+      return lists.map((p) => ({
+        remoteId: String(p.remoteId), name: String(p.name || p.remoteId).slice(0, 200), trackCount: p.trackCount ?? null,
+        duration: p.duration ?? null, smart: !!p.smart,
+        playlistId: this.library.data.playlists.find((x) => x.sourceId === sourceId && x.remoteId === String(p.remoteId))?.id || null,
+      }));
+    } catch (e) { throw remoteError(e); }
+  }
+
+  /**
+   * Open a media-server playlist: store its tracks as remote library tracks (they stream, analyse and download like
+   * synced ones) and mirror the playlist under the server. Returns { playlist, tracks } (tracks in playlist order).
+   */
+  async openSourcePlaylist(sourceId, remoteId, { name } = {}) {
+    const lib = this.library;
+    let cfg, client, list;
+    try { ({ cfg, client } = await this._connected(sourceId)); list = await client.playlistTracks(remoteId); } catch (e) { throw remoteError(e); }
+    const ids = [];
+    for (const rt of list) {
+      const { coverUrl, ...rest } = rt;
+      const t = lib.upsertTrack({ ...rest, id: LibraryCore.remoteId(sourceId, rt.remoteId), sourceType: 'remote', sourceId, sourceKind: cfg.type, hasCover: !!coverUrl });
+      if (!ids.includes(t.id)) ids.push(t.id);
+    }
+    let pl = lib.data.playlists.find((p) => p.sourceId === sourceId && p.remoteId === remoteId);
+    if (!pl) {
+      if (!name) { try { name = (await client.listPlaylists({ tracks: false })).find((p) => String(p.remoteId) === remoteId)?.name; } catch { /* cosmetic */ } }
+      pl = { id: LibraryCore.remoteId(sourceId, 'pl:' + remoteId), name: String(name || 'Playlist').slice(0, 200), trackIds: ids, sourceId, remoteId, folder: cfg.name, createdAt: Date.now() };
+      lib.data.playlists.push(pl);
+    } else pl.trackIds = ids;
+    lib.changed('tracks');
+    return { playlist: pl, tracks: ids.map((t) => lib.getTrack(t)) };
   }
 
   /** Fetch a media-server URL into app storage (native: file-transfer; browser: fetch). Returns bytes written. */

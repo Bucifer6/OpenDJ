@@ -37,6 +37,7 @@ export class LibraryUI {
     this.view = { kind: 'all' }; this.sort = { col: 'addedAt', dir: -1 }; this.query = '';
     this.rows = []; this.selected = new Set(); this.cursor = -1; this.downloads = { queued: [], active: [], done: [] };
     this.sessions = []; this.sessionRows = []; this.dupGroups = []; this.dupIndex = new Map(); this.showAllSessions = false;
+    this.remoteLists = new Map(); // source id -> { lists, error, loading } (live media-server playlists)
     this.dlg = new LibraryDialogs(app, this);
     this.build();
   }
@@ -48,6 +49,42 @@ export class LibraryUI {
     this.playlists = playlists; this.folders = folders; this.sources = sources; this.sessions = sessions;
     await this.loadViewData();
     this.renderTree(); this.applyView();
+    for (const src of sources) if (!this.remoteLists.has(src.id)) this.loadRemoteLists(src.id);
+  }
+  /** Fetch a media server's playlists (live) for the sidebar. */
+  async loadRemoteLists(sourceId) {
+    const prev = this.remoteLists.get(sourceId);
+    this.remoteLists.set(sourceId, { ...(prev || { lists: [] }), loading: true, error: null });
+    try { this.remoteLists.set(sourceId, { lists: await api.sourcePlaylists(sourceId), loading: false, error: null }); }
+    catch (e) { this.remoteLists.set(sourceId, { lists: prev?.lists || [], loading: false, error: e.message }); }
+    this.renderTree();
+  }
+  /** Open a media-server playlist: its tracks become remote library tracks and the playlist is mirrored. Returns the tracks. */
+  async openRemotePlaylist(src, rp, { show = true } = {}) {
+    this.setJobStatus(`Loading "${rp.name}" from ${src.name || src.type}…`);
+    let r;
+    try { r = await api.sourcePlaylist(src.id, rp.remoteId, rp.name); }
+    catch (e) { this.setJobStatus(''); this.app.toast(`Could not open "${rp.name}": ${e.message}`); throw e; }
+    this.setJobStatus('');
+    rp.playlistId = r.playlist.id;
+    await this.refresh();
+    if (show) await this.setView({ kind: 'playlist', id: r.playlist.id }, rp.name);
+    return r.tracks.map((t) => this.tracks.get(t.id) || t);
+  }
+  remotePlaylistMenu(src, rp, e) {
+    const r = this.tree.getBoundingClientRect();
+    const x = e?.clientX ?? r.right - 20, y = e?.clientY ?? r.top + 100;
+    const withTracks = (fn) => async () => { let t; try { t = await this.openRemotePlaylist(src, rp, { show: false }); } catch { return; } if (!t.length) { this.app.toast(`"${rp.name}" is empty`); return; } fn(t); };
+    this.app.dialogs.menu(x, y, [
+      { label: 'Open', action: () => this.openRemotePlaylist(src, rp).catch(() => {}) },
+      { label: 'Automix this playlist', action: withTracks((t) => this.app.dialogs.automixQueue(t, { mode: 'order', title: rp.name })) },
+      { label: 'Shuffle & mix', action: withTracks((t) => this.app.dialogs.automixQueue(t, { mode: 'shuffle', title: rp.name })) },
+      { label: 'Smart mix', action: withTracks((t) => this.app.dialogs.automixQueue(t, { mode: 'smart', title: rp.name })) },
+      { label: 'Add to automix queue', action: withTracks((t) => this.app.queueAdd(t)) },
+      '-',
+      { label: 'Import as local playlist', action: withTracks(async (t) => { await api.createPlaylist(rp.name, t.map((x) => x.id), src.name || src.serverName || 'Imported'); await this.refresh(); this.app.toast(`Imported "${rp.name}" (${t.length} tracks, streamed from ${src.name || src.type} until downloaded)`); }) },
+      { label: 'Download all for offline use', action: withTracks((t) => { const ids = t.filter((x) => x.sourceType === 'remote' && !x.localPath).map((x) => x.id); if (ids.length) this.download(ids); else this.app.toast('All tracks are already downloaded'); }) },
+    ]);
   }
   /** Fetch server-side data needed by the current view (history session entries, duplicate groups). */
   async loadViewData() {
@@ -457,9 +494,9 @@ export class LibraryUI {
   }
 
   renderTree() {
-    const item = (label, v, { icon = '', actions = [], count, drop, cls = '' } = {}) => {
+    const item = (label, v, { icon = '', actions = [], count, drop, cls = '', click } = {}) => {
       const active = this.view.kind === v.kind && this.view.id === v.id;
-      const node = el('div', { class: `tree-item ${active ? 'active' : ''} ${cls}`, onclick: () => this.setView(v, label) },
+      const node = el('div', { class: `tree-item ${active ? 'active' : ''} ${cls}`, onclick: () => (click ? click() : this.setView(v, label)) },
         el('span', { class: 'ti-icon' }, glyphIcon(icon)), el('span', { class: 'ti-label' }, label),
         count != null ? el('span', { class: 'ti-count' }, String(count)) : null,
         ...actions.map((a) => el('button', { class: 'ti-act', title: a.title, 'aria-label': a.title, onclick: (e) => { e.stopPropagation(); a.fn(e); } }, glyphIcon(a.icon))));
@@ -526,13 +563,35 @@ export class LibraryUI {
         item(s.name || s.serverName || s.type, { kind: 'source', id: s.id }, {
           icon: '☁', count: s.trackCount,
           actions: [{ icon: '⬇', title: 'Download all tracks for offline use', fn: () => this.download([...this.tracks.values()].filter((t) => t.sourceId === s.id && !t.localPath).map((t) => t.id)) },
-            { icon: '⟳', title: 'Sync library', fn: () => api.syncSource(s.id).catch((e) => this.app.toast(e.message)) },
+            { icon: '⟳', title: 'Sync library and reload its playlists', fn: () => { api.syncSource(s.id).catch((e) => this.app.toast(e.message)); this.loadRemoteLists(s.id); } },
             { icon: '✎', title: 'Edit connection', fn: () => this.app.dialogs.addSource(s) },
             { icon: '✕', title: 'Remove server', fn: async () => { if (await this.app.dialogs.confirm(`Disconnect ${s.name}? Downloaded tracks are kept.`)) { await api.removeSource(s.id); this.refresh(); } } }],
         }),
-        ...remotePl.filter((p) => p.sourceId === s.id).map((p) => item(p.name, { kind: 'playlist', id: p.id }, { icon: '♫', count: p.trackIds.length, cls: 'nested', actions: [{ icon: '⋯', title: 'Playlist options', menu: true, fn: (e) => this.playlistMenu(p, e) }] })),
+        ...this.sourcePlaylistNodes(s, remotePl, item),
       ]),
     );
+  }
+
+  /** Sidebar entries under a media server: its live playlists (click to open), plus mirrored ones it no longer lists. */
+  sourcePlaylistNodes(s, remotePl, item) {
+    const st = this.remoteLists.get(s.id);
+    const live = st?.lists || [];
+    const nodes = live.map((rp) => {
+      const mirror = remotePl.find((p) => p.sourceId === s.id && p.remoteId === rp.remoteId);
+      const node = item(rp.name, { kind: 'playlist', id: mirror?.id || `remote:${s.id}:${rp.remoteId}` }, {
+        icon: rp.smart ? '⚙' : '♫', count: rp.trackCount ?? mirror?.trackIds.length, cls: 'nested remote-pl',
+        actions: [{ icon: '⋯', title: 'Playlist options: automix, shuffle & mix, smart mix, import, download', menu: true, fn: (e) => this.remotePlaylistMenu(s, rp, e) }],
+        click: () => this.openRemotePlaylist(s, rp).catch(() => {}),
+      });
+      node.dataset.remotePl = rp.remoteId;
+      return node;
+    });
+    for (const p of remotePl.filter((x) => x.sourceId === s.id && !live.some((rp) => rp.remoteId === x.remoteId))) {
+      nodes.push(item(p.name, { kind: 'playlist', id: p.id }, { icon: '♫', count: p.trackIds.length, cls: 'nested', actions: [{ icon: '⋯', title: 'Playlist options', menu: true, fn: (e) => this.playlistMenu(p, e) }] }));
+    }
+    if (st?.loading && !live.length) nodes.push(el('div', { class: 'tree-empty nested' }, 'Loading playlists…'));
+    else if (st?.error) nodes.push(el('div', { class: 'tree-empty nested', title: st.error }, 'Playlists unavailable ', el('button', { class: 'ti-act', title: 'Try again', onclick: () => this.loadRemoteLists(s.id) }, '⟳')));
+    return nodes;
   }
 
   playlistMenu(p, e) {
@@ -540,7 +599,9 @@ export class LibraryUI {
     const x = e?.clientX ?? r.right - 20, y = e?.clientY ?? r.top + 100;
     const items = [
       ...(p.smart ? [{ label: 'Edit rules…', action: () => this.dlg.smartPlaylist(p) }] : []),
-      { label: 'Automix this playlist', action: () => this.app.dialogs.automixQueue(p.trackIds.map((i) => this.tracks.get(i)).filter(Boolean)) },
+      { label: 'Automix this playlist', action: () => this.app.dialogs.automixQueue(p.trackIds.map((i) => this.tracks.get(i)).filter(Boolean), { mode: 'order', title: p.name }) },
+      { label: 'Shuffle & mix', action: () => this.app.dialogs.automixQueue(p.trackIds.map((i) => this.tracks.get(i)).filter(Boolean), { mode: 'shuffle', title: p.name }) },
+      { label: 'Smart mix', action: () => this.app.dialogs.automixQueue(p.trackIds.map((i) => this.tracks.get(i)).filter(Boolean), { mode: 'smart', title: p.name }) },
       { label: 'Download all for offline use', action: () => this.download(p.trackIds.filter((i) => { const t = this.tracks.get(i); return t?.sourceType === 'remote' && !t.localPath; })) },
       { label: 'Export as M3U8', action: () => { const a = el('a', { href: api.m3uUrl(p.id), download: '' }); document.body.append(a); a.click(); a.remove(); } }, // no navigation: beforeunload would ask while decks play
       ...(unavailable('usbExport') ? [] : [{ label: 'Export to USB / folder…', action: () => this.app.dialogs.exportUsb([p.id]) }]),

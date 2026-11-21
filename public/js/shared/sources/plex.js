@@ -145,8 +145,20 @@ export class PlexClient extends SourceClient {
     return tracks;
   }
 
-  async listPlaylists() {
+  /**
+   * Audio playlists. Default: { remoteId, name, trackRemoteIds } (pages through each playlist, used by sync).
+   * opts.tracks === false: summaries only, { remoteId, name, trackCount, duration, smart }.
+   */
+  async listPlaylists(opts = {}) {
     const body = await this._get('/playlists?playlistType=audio');
+    if (opts.tracks === false) {
+      return asArray(body?.MediaContainer?.Metadata)
+        .filter((p) => !p.playlistType || p.playlistType === 'audio')
+        .map((p) => ({
+          remoteId: String(p.ratingKey), name: p.title || String(p.ratingKey), trackCount: Number(p.leafCount) || 0,
+          duration: p.duration ? p.duration / 1000 : null, smart: !!p.smart,
+        }));
+    }
     const out = [];
     for (const p of asArray(body?.MediaContainer?.Metadata)) {
       if (p.smart && p.playlistType !== 'audio') continue;
@@ -156,6 +168,15 @@ export class PlexClient extends SourceClient {
       });
       out.push({ remoteId: String(p.ratingKey), name: p.title, trackRemoteIds: ids });
     }
+    return out;
+  }
+
+  /** Tracks of one playlist, in playlist order, as normalised tracks (same shape as listTracks(), with remotePath). */
+  async playlistTracks(id) {
+    const out = [];
+    await this._paged(`/playlists/${encodeURIComponent(id)}/items`, (items) => {
+      for (const m of items) if (!m.type || m.type === 'track') out.push(this._normTrack(m));
+    });
     return out;
   }
 
