@@ -125,7 +125,8 @@ export function buildTargets(app) {
   });
   add('automix.toggle', 'Automix on/off', 'button', (down) => down && app.toggleAutomix(), () => app.automix.enabled);
   add('record.toggle', 'Record mix on/off', 'button', (down) => down && app.toggleRecord(), () => app.engine.recording);
-  T.push(...linkMidiTargets(app), ...lyricsMidiTargets(app), ...controllerTargets(app));
+  T.push(...linkMidiTargets(app), ...lyricsMidiTargets(app));
+  T.push(...controllerTargets(app, new Set(T.map((t) => t.id)))); // (skips ids another module already defines)
   return T;
 }
 

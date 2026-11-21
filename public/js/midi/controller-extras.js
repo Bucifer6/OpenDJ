@@ -226,7 +226,8 @@ export function setMasterCue(app, on) {
   const st = ctlState(app), eng = app.engine;
   if (st.masterCue === !!on) return;
   st.masterCue = !!on;
-  if (on) { st._cueMix = eng.cueMix ?? 0; eng.setCueMix(1); } else eng.setCueMix(st._cueMix ?? 0);
+  if (typeof eng.setMasterCue === 'function') eng.setMasterCue(!!on); // mixer v2: a real CUE MST bus
+  else if (on) { st._cueMix = eng.cueMix ?? 0; eng.setCueMix(1); } else eng.setCueMix(st._cueMix ?? 0);
   app.emitCtl?.();
 }
 
@@ -240,12 +241,14 @@ function searchHold(deck, dir, down) {
 }
 
 /** MIDI targets for midi.js buildTargets(). Same shape: { id, label, kind, handler, led?, get? }. */
-export function controllerTargets(app) {
+export function controllerTargets(app, existing = new Set()) {
   const T = [], eng = app.engine, st = ctlState(app);
-  const add = (id, label, kind, handler, led, get) => T.push({ id, label, kind, handler, led, get });
+  const add = (id, label, kind, handler, led, get) => { if (!existing.has(id)) T.push({ id, label, kind, handler, led, get }); };
   for (let d = 0; d < 4; d++) {
     const deck = eng.decks[d], n = d + 1, P = `deck${n}`;
     for (const m of Object.keys(PAD_MODES)) add(`${P}.ctlPadMode.${m}`, `Deck ${n} Pad mode: ${PAD_MODES[m].label}`, 'button', (down) => down && setPadMode(app, d, m), () => st.padMode[n] === m);
+    const CYCLE = ['hotcue', 'padfx', 'loop', 'sampler'];
+    add(`${P}.ctlPadModeNext`, `Deck ${n} Pad mode: next (HOT CUE → PAD FX → LOOP → SAMPLER)`, 'button', (down) => down && setPadMode(app, d, CYCLE[(CYCLE.indexOf(st.padMode[n]) + 1) % CYCLE.length]));
     for (let p = 0; p < 8; p++) {
       add(`${P}.ctlPad${p + 1}`, `Deck ${n} Performance pad ${p + 1} (controller pad mode)`, 'button', (down) => padAction(app, d, p, down), () => padInfo(app, d, p).lit);
       add(`${P}.padFx${p + 1}`, `Deck ${n} Pad FX ${p + 1} (${PAD_FX_LABELS[p]})`, 'button', (down) => { if (down) st.held[n].add(p); else st.held[n].delete(p); app.padFx?.(deck, PAD_FX[p], down); }, () => st.held[n].has(p));

@@ -33,7 +33,7 @@ const DECK_CONTROLS = [
   ['note', 0x47, 'ctlStutter', {}, false], // SHIFT + PLAY/PAUSE: stutter from the cue
   ['note', 0x48, 'ctlToStart', {}, false], // SHIFT + CUE: back to the start of the track
   ['note', 0x58, 'sync', {}, false], // BEAT SYNC (SHIFT handled by the target: set as master)
-  ['note', 0x5c, 'master', {}, false], // SHIFT + BEAT SYNC
+  ['note', 0x5c, 'ctlPadModeNext', {}, false], // SHIFT + BEAT SYNC = PAD MODE (silkscreen under BEAT SYNC)
   ['note', 0x36, 'jogTouch', { noLed: true }, false], // jog top touch
   ['note', 0x67, 'jogTouch', { noLed: true }, false], // jog top touch with SHIFT held
   ['cc', 0x22, 'jog', { rel: 'offset' }, 'chart-cited'], // jog top, turned while touched (scratch / vinyl)
