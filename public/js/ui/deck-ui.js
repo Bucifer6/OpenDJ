@@ -25,6 +25,7 @@ export function buildDeck(app, deck) {
   const cover = el('div', { class: 'deck-cover' });
   const title = el('div', { class: 'deck-title' }, 'Drop a track here');
   const artist = el('div', { class: 'deck-artist' }, '');
+  const artistNote = el('span', { class: 'deck-load-note', 'aria-live': 'polite' }); // load progress: Loading 42 % / Decoding… / Analysing…
   const keyBadge = el('span', { class: 'key-badge' });
   const bpmBig = el('div', { class: 'deck-bpm' }, '--');
   const bpmSub = el('div', { class: 'deck-bpm-sub' }, '');
@@ -34,7 +35,7 @@ export function buildDeck(app, deck) {
   const header = el('div', { class: 'deck-header' },
     el('div', { class: 'deck-num' }, String(i + 1)),
     cover,
-    el('div', { class: 'deck-meta' }, title, el('div', { class: 'deck-sub' }, artist, keyBadge, masterBadge, dvsModeIndicator(app, i))),
+    el('div', { class: 'deck-meta' }, title, el('div', { class: 'deck-sub' }, artist, artistNote, keyBadge, masterBadge, dvsModeIndicator(app, i))),
     el('div', { class: 'deck-times' }, elapsed, remain),
     el('div', { class: 'deck-bpmbox' }, bpmBig, bpmSub),
   );
@@ -282,6 +283,8 @@ export function buildDeck(app, deck) {
     const t = deck.track;
     const f = !t && deck.error ? deck.failedTrack : null; // failed load: keep the track's name, show the error under it
     title.textContent = t ? t.title || 'Untitled' : f ? `⚠ ${f.title || 'Untitled'}` : (deck.error ? `⚠ ${deck.error}` : 'Drop a track here');
+    const lp = deck.loading && deck.loadPhase;
+    artistNote.textContent = lp ? `${lp.name}${lp.pct != null ? ` ${lp.pct} %` : '…'}` : '';
     title.title = t ? `${t.title || ''}${t.artist ? ' — ' + t.artist : ''}` : f ? `Could not load ${f.path || f.title}: ${deck.error}` : '';
     artist.textContent = t ? t.artist || '' : f ? `Could not load: ${deck.error}` : '';
     cover.style.backgroundImage = t ? `url(${api.coverUrl(t.id)})` : '';
@@ -296,6 +299,7 @@ export function buildDeck(app, deck) {
     renderPads();
   };
   deck.on('key', () => { keyVal.textContent = `${deck.keyShift > 0 ? '+' : ''}${deck.keyShift}`; updateMeta(); renderPads(); });
+  deck.on('load-progress', () => { const lp = deck.loadPhase; artistNote.textContent = lp ? `${lp.name}${lp.pct != null ? ` ${lp.pct} %` : '…'}` : ''; });
   deck.on('load', updateMeta); deck.on('loaded', updateMeta); deck.on('error', updateMeta); deck.on('cues', renderPads);
   const renderState = () => { for (const r of renderers) r.render(); if (masterBadge.hidden === !!deck.isMaster) masterBadge.hidden = !deck.isMaster; };
   deck.on('state', renderState); deck.on('loop', () => { loopSize._t = loopSize.textContent = deck.loop?.active ? fmtBeats(deck.loopBeats) : fmtBeats(autoLoopBeats); });

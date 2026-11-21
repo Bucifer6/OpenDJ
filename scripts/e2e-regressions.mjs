@@ -312,6 +312,16 @@ try {
   }, ids.Third);
   check(eo.during === 'echo' && eo.after.fxType === 'flanger' && eo.after.fxMix === 0.3 && eo.after.fxParam === 0.4 && eo.after.fxBeats === 1 && !eo.after.fxOn, `Echo Out pad restores the beat FX afterwards (${JSON.stringify(eo)})`);
 
+  // m4: a deck load reports its progress (Loading x % / Decoding / Analysing) under the title
+  const prog2 = await page.evaluate(async (id) => {
+    const app = window.opendj, d = app.engine.decks[1], seen = [], notes = new Set();
+    const off = d.on('load-progress', (p) => { seen.push(`${p.name}${p.pct != null ? ':' + p.pct : ''}`); notes.add(document.querySelector('.deck[data-deck="1"] .deck-load-note').textContent); });
+    const t = app.library.track(id); const r = await fetch(`/api/tracks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ analyzed: false }) }).then((x) => x.json()); app.library.updateTrack(r);
+    await app.loadTrack(1, id); off();
+    return { phases: [...new Set(seen.map((x) => x.split(':')[0]))], pcts: seen.filter((x) => x.startsWith('Loading:')).length, notes: [...notes].slice(0, 4), after: document.querySelector('.deck[data-deck="1"] .deck-load-note').textContent };
+  }, ids.Long);
+  check(['Loading', 'Decoding', 'Analysing'].every((p) => prog2.phases.includes(p)) && prog2.pcts >= 2 && prog2.after === '', `deck load shows its progress (${JSON.stringify(prog2)})`);
+
   check(errors.length === 0, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
 } catch (e) { console.error(e); failed = true; }
 await browser.close(); app.server.close();

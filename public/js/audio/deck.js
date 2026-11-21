@@ -12,6 +12,24 @@ export const TEMPO_RANGES = [6, 8, 10, 16, 25, 50, 100];
 export const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'];
 export const stemUrl = (id, stem) => `/api/stems/${encodeURIComponent(id)}/${stem}`;
 
+/** Tracks longer than this get a warning on load (decoding a one-hour file takes seconds and ~1 GB of memory). */
+const LONG_TRACK_SEC = 30 * 60;
+/** Read a fetch response body, reporting progress (0..100) when the size is known. */
+async function readWithProgress(res, onPct) {
+  const total = Number(res.headers.get('content-length')) || 0;
+  if (!total || !res.body?.getReader) return res.arrayBuffer();
+  const reader = res.body.getReader();
+  let buf = new Uint8Array(total), got = 0, last = -1;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (got + value.length > buf.length) { const b = new Uint8Array(Math.max(buf.length * 2, got + value.length)); b.set(buf.subarray(0, got)); buf = b; } // longer than announced
+    buf.set(value, got); got += value.length;
+    const pct = Math.min(100, Math.floor(got / total * 100)); if (pct !== last) { last = pct; onPct(pct); }
+  }
+  return got === buf.length ? buf.buffer : buf.slice(0, got).buffer;
+}
+
 export class Deck extends Emitter {
   constructor(engine, index) {
     super();
@@ -95,10 +113,15 @@ export class Deck extends Emitter {
     const stale = () => tok !== this._loadSeq;
     this.emit('load', track); this.emit('state');
     try {
+      // load progress for the deck (a one-hour file takes many seconds): reading x %, decoding, analysing
+      const phase = (name, pct = null) => { this.loadPhase = { name, pct }; this.emit('load-progress', this.loadPhase); };
+      phase('Loading', 0);
+      if ((Number(track.duration) || 0) > LONG_TRACK_SEC) this.engine.emit('warning', `"${track.title || 'This track'}" is ${Math.round(track.duration / 60)} minutes long: loading takes a while and needs a lot of memory`);
       const res = await fetch(api.streamUrl(track.id));
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
-      const ab = await res.arrayBuffer();
+      const ab = await readWithProgress(res, (p) => { if (!stale()) phase('Loading', p); });
       if (stale()) return false; // another load superseded this one
+      phase('Decoding');
       const buf = await this.ctx.decodeAudioData(ab);
       if (stale()) return false;
       this.sr = buf.sampleRate; this.duration = buf.duration;
@@ -110,6 +133,7 @@ export class Deck extends Emitter {
         const c0 = buf.getChannelData(0), c1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : null;
         const mono = new Float32Array(c0.length);
         if (c1) for (let i = 0; i < mono.length; i++) mono[i] = (c0[i] + c1[i]) * 0.5; else mono.set(c0);
+        phase('Analysing');
         const r = await this.engine.analyze(mono, buf.sampleRate);
         if (stale()) return false;
         wave = decodeWaveform(r.wave.buffer);
@@ -144,7 +168,7 @@ export class Deck extends Emitter {
       if (this.cuePoint < 0) this.cuePoint += this.beatLen;
       this.seek(this.cuePoint);
       this.engine.channels[this.index].setAutoGain(this.engine.settings.autoGain ? (track.gain || 0) : 0);
-      this.loading = false;
+      this.loading = false; this.loadPhase = null;
       if (this.syncOn) this.matchTempo();
       this.emit('loaded', track); this.emit('state');
       // AI stems prepared for this track: attach them in the background (the deck already plays the original)
@@ -152,7 +176,7 @@ export class Deck extends Emitter {
       return true;
     } catch (e) {
       if (stale()) return false;
-      this.loading = false; this.error = e.message; this.track = null; this.failedTrack = track; // keep the name for the deck title
+      this.loading = false; this.loadPhase = null; this.error = e.message; this.track = null; this.failedTrack = track; // keep the name for the deck title
       this.emit('error', e); this.emit('state');
       throw e;
     }
