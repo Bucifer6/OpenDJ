@@ -431,3 +431,9 @@ kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-bottom
 
 /* The EQ preset is deliberately compact so it fits beside the crossfader on smaller mixer panels. */
 .xfader-row .mixer-eq-preset { flex: 0 0 82px; width: 82px; padding-left: 4px; padding-right: 4px; }
+
+
+/* Manual Automix transition control sits below the turntable's cue/play keys. */
+.deck-mix-now { grid-column: 1 / -1; width: 100%; min-height: 30px; font-weight: 800; letter-spacing: .06em; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.deck-mix-now:not(:disabled):hover { box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 28%, transparent); }
+.deck-mix-now:disabled { opacity: .45; }
