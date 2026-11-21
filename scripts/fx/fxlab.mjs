@@ -45,6 +45,20 @@ export function rms(x, sr, t0 = 0, t1 = x.length / sr) { const a = idx(sr, t0), 
 export function peak(x, sr, t0 = 0, t1 = x.length / sr) { const a = idx(sr, t0), b = Math.min(x.length, idx(sr, t1)); let p = 0; for (let i = a; i < b; i++) p = Math.max(p, Math.abs(x[i])); return p; }
 /** Largest sample-to-sample jump in [t0, t1). */
 export function maxJump(x, sr, t0 = 0, t1 = x.length / sr) { const a = Math.max(1, idx(sr, t0)), b = Math.min(x.length, idx(sr, t1)); let m = 0; for (let i = a; i < b; i++) m = Math.max(m, Math.abs(x[i] - x[i - 1])); return m; }
+/**
+ * Click detector independent of level: max over 5 ms windows of (largest sample step / window peak). A clean sine of
+ * frequency f scores 2πf/sr whatever its amplitude (220 Hz: 0.029); a click or step scores many times that.
+ */
+export function stepRatio(x, sr, t0 = 0, t1 = x.length / sr, floor = 0.05) {
+  const w = Math.round(sr * 0.005), a = Math.max(1, idx(sr, t0)), b = Math.min(x.length, idx(sr, t1));
+  let worst = 0;
+  for (let s = a; s < b; s += w >> 1) {
+    let j = 0, p = 0;
+    for (let i = s; i < Math.min(b, s + w); i++) { const d = Math.abs(x[i] - x[i - 1]); if (d > j) j = d; const v = Math.abs(x[i]); if (v > p) p = v; }
+    worst = Math.max(worst, j / Math.max(p, floor));
+  }
+  return worst;
+}
 /** Largest second difference (curvature): a click / step stands out far above smooth audio. */
 export function maxCurv(x, sr, t0 = 0, t1 = x.length / sr) { const a = Math.max(2, idx(sr, t0)), b = Math.min(x.length, idx(sr, t1)); let m = 0; for (let i = a; i < b; i++) m = Math.max(m, Math.abs(x[i] - 2 * x[i - 1] + x[i - 2])); return m; }
 /** Times (s) of local maxima of |x| above `thresh`, at least `gap` s apart. */

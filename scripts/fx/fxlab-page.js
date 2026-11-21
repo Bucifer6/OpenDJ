@@ -95,6 +95,11 @@ async function build(ctx, spec, src) {
       src.connect(u.input); u.output.connect(ctx.destination);
       return { target: u };
     }
+    case 'effect': { // one bare effect instance (wet output only)
+      const e = effects.createEffect(ctx, spec.effect);
+      src.connect(e.input); e.output.connect(ctx.destination);
+      return { target: e };
+    }
     case 'color': // a whole mixer channel; EQ / filter / Color FX / FX unit
     case 'channel': {
       const fe = fakeEngine(ctx, spec.settings || {});
@@ -135,6 +140,7 @@ function resolve(target, path) { let o = target; for (const k of (path || '').sp
 async function doOp(target, op) {
   if (op.msg) { target.port.postMessage(op.msg); return; }
   const obj = resolve(target, op.on);
+  if (typeof obj?.[op.call] !== "function") { if (op.optional) return; throw new Error(`no method ${op.call}`); }
   return obj[op.call](...(op.args || []));
 }
 
