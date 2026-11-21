@@ -636,3 +636,6 @@ html.tablet .deck .panel-tab { font-size: 9.5px; letter-spacing: 0; padding-left
 /* text that changes every 50 ms: keep its layout to itself */
 .pmp-timebox, .pmp-box, .pmp-tempo-led, .pmp-titlebar { contain: layout paint style; }
 .pmp-info, .pmp-screen { contain: layout style; }
+/* tight layouts: ACTIVE / Q live on long-presses of RELOOP / QUANT there */
+body.layout-performance .loop-extra, body.layout-waveform .loop-extra, body.four-decks .loop-extra { display: none; }
+:root.h1250 .four-decks .btn.big { height: 34px; max-width: 42px; }

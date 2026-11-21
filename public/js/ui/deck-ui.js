@@ -91,7 +91,7 @@ export function buildDeck(app, deck) {
   const masterBtn = R(button('MASTER', { cls: 'btn-master', click: () => deck.setMaster(), active: () => deck.isMaster }));
   const toggles = el('div', { class: 'deck-toggles' },
     R(button(dual('KEY LOCK', 'KEY'), { cls: 'sm', click: () => deck.setKeyLock(!deck.keyLock), active: () => deck.keyLock, title: 'Master tempo: change tempo without changing pitch' })),
-    R(button(dual('QUANT', 'QNT'), { cls: 'sm', click: () => deck.setQuantize(!deck.quantize), active: () => deck.quantize, title: 'Snap cues, loops and jumps to the beat grid' })),
+    (() => { const q = R(button(dual('QUANT', 'QNT'), { cls: 'sm', click: () => deck.setQuantize(!deck.quantize), active: () => deck.quantize, title: 'Snap cues, loops and jumps to the beat grid (hold: quantize division)' })); longPress(q, () => popupMenu(q, [0.125, 0.25, 0.5, 1, 4].map((v) => [fmtDiv(v), () => deck.setQuantizeDiv(v), deck.quantizeDiv === v]), 'Quantize to')); return q; })(),
     R(button('SLIP', { cls: 'sm', click: () => deck.setSlip(!deck.slip), active: () => deck.slip, title: 'Slip mode: track continues silently under loops, scratches and reverse' })),
     R(button('REV', { cls: 'sm', click: () => (shift() || deck.slipReverse ? deck.toggleSlipReverse() : deck.setReverse(!deck.reverse)), active: () => deck.reverse, title: 'Reverse (Shift-click: latching slip reverse, the track carries on underneath)' })),
     R(button('VINYL', { cls: 'sm', click: () => { deck.vinylMode = !deck.vinylMode; deck.emit('state'); }, active: () => deck.vinylMode, title: 'Jog mode. On (vinyl): touching the platter top scratches, the outer ring bends. Off (CDJ): the whole platter bends' })),
@@ -156,7 +156,7 @@ export function buildDeck(app, deck) {
   const loopRow = el('div', { class: 'loop-row' },
     adjBtn('IN', 'in', () => deck.loopInPress()),
     adjBtn('OUT', 'out', () => deck.loopOutPress()),
-    R(button(dual('RELOOP', icon('repeat')), { cls: 'sm', click: () => deck.reloop(), active: () => deck.loop?.active, title: 'Reloop / exit loop' })),
+    (() => { const rl = R(button(dual('RELOOP', icon('repeat')), { cls: 'sm', click: () => deck.reloop(), active: () => deck.loop?.active, title: 'Reloop / exit loop (hold: flag the loop as an active loop)' })); longPress(rl, () => { deck.toggleActiveLoop(); app.toast(deck.loopIsActiveLoop ? 'Active loop: it engages whenever the track reaches it' : 'Active loop cleared'); }); return rl; })(),
     button('½', { cls: 'sm', click: () => { if (deck.loop?.active) deck.loopHalve(); else { autoLoopBeats = Math.max(1 / 8, autoLoopBeats / 2); } } }),
     R(button(loopSize, { cls: 'sm loop-btn', click: () => deck.autoLoop(autoLoopBeats), active: () => deck.loop?.active, title: 'Auto beat loop' })),
     button('×2', { cls: 'sm', click: () => { if (deck.loop?.active) deck.loopDouble(); else { autoLoopBeats = Math.min(64, autoLoopBeats * 2); } } }),
