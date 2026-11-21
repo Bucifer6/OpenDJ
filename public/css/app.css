@@ -282,7 +282,7 @@ body:not(.four-decks) .deck-col > .deck:nth-child(2) { display: none; }
 .xfader-control .crossfader { flex: 1 1 auto; width: 100%; min-width: 0; }
 .xfader-control .fader-track { width: 100%; }
 .crossfader .fader-slot { height: 5px; background: linear-gradient(90deg, var(--deck1), var(--slot) 50%, var(--deck2)); }
-.crossfader .fader-thumb { width: 28px; }
+.crossfader { --cap: 28px; } /* the thumb width IS --cap: a fixed 28 px thumb on a 26 px --cap ran 2 px past the track end */
 .xf-l { font: 800 11px var(--mono); color: var(--text-2); }
 @media (max-width: 560px) {
   .xfader-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }

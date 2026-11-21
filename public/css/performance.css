@@ -287,7 +287,7 @@ html.odj-local .panel-tab[data-panel="stems"] { display: none; }
 
 /* mixer: compact, prominent crossfader */
 .xfader-row { padding: 6px 6px 2px; border-top: 1px solid var(--line); }
-.crossfader { --cap: 26px; }
+.crossfader { --cap: 28px; }
 .crossfader .fader-track { height: 34px; }
 .crossfader .fader-slot { height: 6px; margin-top: -3px; }
 .crossfader .fader-thumb { top: 1px; bottom: 1px; }
