@@ -90,7 +90,10 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 
 - Any class-compliant **MIDI controller** (Web MIDI) with **MIDI Learn**: 14-bit faders, relative jogs and encoders, LED feedback and a shift layer
 - Import **Mixxx community mappings** (hundreds of controllers) with online search, a **guided mapping wizard**, generic **HID** devices and gamepads; mappings auto-load per device and export as JSON
-- Includes a best-effort Pioneer DDJ-400 / DDJ-FLX4 preset; if a control doesn't respond, fix it with Learn
+- Bundled mappings, loaded automatically when the controller is plugged in:
+  - **AlphaTheta DDJ-FLX2**: first-party mapping with LEDs, pad modes and shift layers, SMART FADER and SMART CFX, plus the matching *Compact Controller* skin (some messages still await confirmation on a real unit; see Settings → Controllers → Controller test)
+  - Pioneer DDJ-400 / DDJ-FLX4 (best-effort); if a control doesn't respond, fix it with Learn
+- **Controller skins** (Settings → Appearance): *Compact Controller* and *All-in-One 4-Channel* draw the decks and mixer as hardware and follow the real controller
 - **DVS**: control decks with Serato CV02 or Traktor MK1/MK2 timecode vinyl and CDs (relative, absolute and internal modes, auto-calibration). *Absolute mode has not been verified with real timecode media yet.*
 - **Ableton Link**: follow or lead the session tempo with bar-phase lock (own protocol implementation). *Not yet tested against Ableton Live itself.*
 

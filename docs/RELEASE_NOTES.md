@@ -23,6 +23,15 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.5
+
+#### Controllers
+- **AlphaTheta DDJ-FLX2: plug and play.** A first-party mapping (CC0) loads as soon as the controller is plugged in: jogs (scratch, outer-ring nudge, SHIFT + jog search), SEARCH, tempo faders, SHIFT, BEAT SYNC (SHIFT: PAD MODE), the HOT CUE / PAD FX / LOOP / SAMPLER pad modes with 8 pads per deck and their SHIFT layers, CUE and PLAY/PAUSE, HI / MID / LOW and CFX, channel faders, crossfader, master level, MASTER and headphone cues 1 / 2, with LED feedback. Some messages are not yet confirmed on a real unit: they are flagged in the new Controller test view.
+- **SMART FADER**: the crossfader alone blends two tracks (both decks follow a BPM that morphs between the tracks, the basslines swap in the middle); SHIFT + SMART FADER runs a beat-synced 16-beat transition by itself. **SMART CFX**: the CFX knobs play a Color FX preset (Space, Dub Echo, Crush, Noise, Jet), picked with FX SELECT.
+- **The controller's own sound card**: OpenDJ offers once to send the master to its outputs 1-2 and the headphone cue to 3-4 (or suggests split cue when the interface only has 2 channels).
+- **Controller test** (Settings → Controllers): every incoming message live, which function it hits, a checklist of mapped controls, an LED check, and a capture recorder that saves a JSON file to attach to a bug report.
+- **Controller skins**: *Compact Controller* draws the decks and mixer as a compact 2-channel controller and *All-in-One 4-Channel* as a standalone 4-channel system with the waveforms in a centre screen and DECK SELECT layers. Pick them in Settings → Appearance; when a DDJ-FLX2 is connected OpenDJ offers the matching skin once. Every on-screen control works with mouse or touch and moves when the hardware is used.
+
 ### New in 0.4.2
 - MIX NOW on the active deck and wider crossfader travel.
 - 111 downloadable samples and a bundled recorded air horn.
