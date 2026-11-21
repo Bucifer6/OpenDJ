@@ -152,6 +152,7 @@ for (const p of results.phases) {
   if (p.travel && (p.travel[0] > -0.99 || p.travel[1] < 0.99)) { bad++; console.log(`[pacing] ${p.name}: crossfader travel ${p.travel}`); }
 }
 console.log(bad ? `[pacing] ${bad} problem(s)` : '[pacing] all phases within limits');
+await ev(() => window.opendj.engine.decks.forEach((d) => d.pause())).catch(() => {}); // else the desktop app asks before closing
 if (ELECTRON) await electronApp.close();
 else { await browser.close(); app.shutdown?.(); app.server.close(); }
 process.exit(bad && argv.includes('--strict') ? 1 : 0);
