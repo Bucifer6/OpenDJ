@@ -490,7 +490,12 @@ export class Sampler {
   }
   async _fill(i, slot) {
     try {
-      const b = await renderSound(slot.sound, this.ctx.sampleRate);
+      let b;
+      if (slot.sound === 'airhorn') {
+        const response = await fetch(new URL('../../samples/air-horn.mp3', import.meta.url));
+        if (!response.ok) throw new Error('Could not load the air horn recording');
+        b = await this.ctx.decodeAudioData(await response.arrayBuffer());
+      } else b = await renderSound(slot.sound, this.ctx.sampleRate);
       if (this.slots[i] === slot) { slot.buffer = b; this.onChange?.(); }
     } catch (e) { console.warn('sampler: could not render', slot.sound, e); }
   }
