@@ -1,6 +1,7 @@
 import { el, fmtTime } from './util.js';
 import { api } from './api.js';
 import { Engine } from './audio/engine.js';
+import { SAMPLE_CATALOG } from './audio/sample-catalog.js';
 import { buildDeck, DECK_COLORS } from './ui/deck-ui.js';
 import { buildMixer } from './ui/mixer-ui.js';
 import { DetailWaveform } from './ui/waveform.js';
@@ -273,11 +274,52 @@ class App {
     this.dialogs.menu(x, y, [
       { label: 'Built-in sound', sub: s.constructor.bank.map((b) => ({ label: b.name, checked: !!(slot.builtin && slot.sound === b.id), action: async () => { await s.setSound(i, b.id); save(); this.engine.resume(); s.trigger(i); } })) },
       { label: 'Load your own sample…', action: pickFile },
+      { label: 'Browse 112 CC0 samples…', action: () => this.openSamplerCatalog(i, save) },
       { label: `Pad volume (${vol} %)`, sub: [25, 50, 75, 100, 125, 150].map((v) => ({ label: `${v} %`, checked: vol === v, action: () => { s.setPadVolume(i, v / 100); save(); } })) },
       { label: 'Sync to beat (start on the next beat of the master deck)', checked: !!slot.sync, action: () => { s.setPadSync(i, !slot.sync); save(); } },
       '-',
       { label: 'Preview', action: () => { this.engine.resume(); s.trigger(i); } },
     ]);
+  }
+
+  /** Browse and download licensed one-shots into the selected sampler pad. */
+  openSamplerCatalog(i, save) {
+    const sampler = this.engine.sampler;
+    const categories = ['All sounds', ...new Set(SAMPLE_CATALOG.map((s) => s.category))];
+    const category = el('select', { class: 'sel', 'aria-label': 'Sample category' }, ...categories.map((c) => el('option', { value: c }, c)));
+    const search = el('input', { class: 'inp', type: 'search', placeholder: 'Search sounds…', 'aria-label': 'Search sounds' });
+    const count = el('span', { class: 'hint' }, SAMPLE_CATALOG.length + ' sounds · CC0 1.0 · downloads only when selected');
+    const list = el('div', { class: 'sample-catalog-list', role: 'listbox', 'aria-label': 'Available sounds' });
+    let selected = null;
+    const render = () => {
+      const q = search.value.trim().toLowerCase();
+      const matches = SAMPLE_CATALOG.filter((s) => (category.value === 'All sounds' || s.category === category.value)
+        && (!q || (s.name + ' ' + s.creator + ' ' + s.category).toLowerCase().includes(q)));
+      list.replaceChildren(...matches.map((sound) => {
+        const row = el('button', { type: 'button', class: 'sample-catalog-item' + (selected?.id === sound.id ? ' selected' : ''), role: 'option', 'aria-selected': String(selected?.id === sound.id), title: sound.source },
+          el('span', { class: 'sample-catalog-name' }, sound.name),
+          el('span', { class: 'sample-catalog-credit' }, sound.category + ' · ' + sound.creator + ' · CC0'));
+        row.addEventListener('click', () => { selected = sound; render(); });
+        return row;
+      }));
+      if (!matches.length) list.append(el('div', { class: 'hint' }, 'No sounds match your search.'));
+      count.textContent = matches.length + ' of ' + SAMPLE_CATALOG.length + ' sounds · CC0 1.0';
+    };
+    category.addEventListener('change', render); search.addEventListener('input', render); render();
+    const body = el('div', { class: 'sample-catalog-body' },
+      el('p', { class: 'hint' }, 'Curated from Sonic Pi’s CC0 collection. Every file is downloaded from a pinned source only after you choose it; creator and source details are saved with the pad.'),
+      el('div', { class: 'sample-catalog-filters' }, category, search), count, list);
+    this.dialogs.modal('CC0 sound library', body, [
+      { label: 'Cancel', value: null },
+      { label: 'Download to pad ' + (i + 1), primary: true, action: async () => {
+        if (!selected) { this.toast('Choose a sound first'); return false; }
+        try {
+          this.toast('Downloading ' + selected.name + '…');
+          await sampler.loadCatalogSample(i, selected); save(); this.engine.resume(); sampler.trigger(i);
+          this.toast(selected.name + ' loaded to pad ' + (i + 1));
+        } catch (e) { this.toast('Could not download sample: ' + e.message); return false; }
+      } },
+    ], { wide: true, cls: 'sample-catalog-modal' });
   }
 
   toggleSequencer() {
