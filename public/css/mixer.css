@@ -64,7 +64,7 @@
 /* phones: the mixer is as tall as its content; give the fader row a definite height (the meter must not set it) */
 :root.compact body .mixer.mx2 .strip > .fader-row { flex: none; height: 220px; }
 /* touch screens: finger-sized buttons */
-:root.tablet .mixer.mx2 .mixer-bar .btn, :root.touch .mixer.mx2 .mixer-bar .btn { min-height: 32px; }
+:root.tablet body .mixer.mx2 .mixer-master .btn, :root.touch body .mixer.mx2 .mixer-master .btn, :root.tablet body .mixer.mx2 .mixer-bar .btn { min-height: 32px; }
 
 /* ---------- personality / config variants (Club: none, today's look) ---------- */
 .mixer .mxv.v-eq4, .mixer .mxv.v-sculpt, .mixer .mxv.v-dual, .mixer .mxv.v-comp, .mixer .mxv.v-rotary, .mixer .mxv.v-iso, .mixer .mxv.v-warm, .mixer .mxv.v-booth, .mixer .mxv.v-rev { display: none; }
@@ -175,3 +175,6 @@
 :root body.four-decks .mixer.mx2 .strip { padding-left: 2px; padding-right: 2px; }
 :root body.four-decks .mixer.mx2 .xf-assign .btn { padding: 1px 3px; }
 :root body.four-decks .mixer.mx2 .mixer-strips, :root body.four-decks .mixer.mx2 .mixer-top { gap: 4px; }
+/* 4 decks: no room for the VOC / INST pair in a column (they stay in the drawer's Channel tab) */
+:root body.four-decks .mixer.mx2 .strip > .stem-knobs { display: none; }
+:root body .mixer.mx2 .strip > .stem-knobs { min-width: 0; overflow: hidden; }

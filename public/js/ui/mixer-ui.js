@@ -249,7 +249,7 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     const tight = H < 360, tiny = H < 290, gap = tight ? 1 : 3, fixed = tiny ? 10 + 18 + 8 : tight ? 10 + 18 + 18 + 8 : 12 + 22 + 20 + 9;
     const n0 = rows + (tiny ? 0 : 1);
     const per = (n) => (H - fixed - 0.45 * H - (n + 4) * gap) / n;
-    const stems = per(n0 + 1) >= 24, r = stems ? per(n0 + 1) : per(n0);
+    const stems = !document.body.classList.contains('four-decks') && per(n0 + 1) >= 24, r = stems ? per(n0 + 1) : per(n0);
     const max = document.body.classList.contains('four-decks') ? 18 : 20; // the fader gets the rest
     root.style.setProperty('--kn', `${Math.max(11, Math.min(max, Math.floor(r - 2)))}px`);
     root.classList.toggle('mx-nostems', !stems); root.classList.toggle('mx-tight', tight); root.classList.toggle('mx-tiny2', tiny);
