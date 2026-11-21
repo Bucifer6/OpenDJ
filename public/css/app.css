@@ -471,3 +471,9 @@ kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-bottom
 .dedication-list .ded-playing .ded-text { color: var(--accent); font-weight: 600; }
 .dedication-voice { margin: 4px 0; }
 
+/* Settings > Remote control */
+.remote-settings .warn { color: var(--amber, #f0b429); font-weight: 600; }
+.remote-settings .remote-token .inp { flex: 1; font-family: var(--mono); font-size: 11px; }
+.remote-audit { margin: 4px 0 0; padding-left: 18px; max-height: 180px; overflow: auto; font-size: 11px; }
+.remote-audit li.bad { color: var(--red); }
+.remote-audit code { color: var(--text-2); }

@@ -3,6 +3,7 @@ import { el, uiZoom } from '../util.js';
 import { api } from '../api.js';
 import { THEMES, applyTheme, refreshSkinCatalog } from './themes.js';
 import { controllersPanel } from './controllers-panel.js';
+import { remoteSettingsPane } from './remote-settings.js';
 import { platform, MOBILE_UNAVAILABLE, APP_VERSION } from '../platform.js';
 import { STYLES, normStyle } from '../automix.js';
 import { SET_SHAPES, PRESETS } from '../smartmix.js';
@@ -476,7 +477,7 @@ export class Dialogs {
     const about = this.aboutPane(chk);
     const tabs = platform.local
       ? { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], mobile: ['Mobile', this.mobileInfo()], about: ['About', about] }
-      : { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], dvs: ['DVS', dvsTab], keys: ['Shortcuts', shortcuts], about: ['About', about] };
+      : { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], dvs: ['DVS', dvsTab], remote: ['Remote control', remoteSettingsPane(app)], keys: ['Shortcuts', shortcuts], about: ['About', about] };
     if (!tabs[tab]) tab = 'audio';
     const tabBar = el('div', { class: 'tabs' });
     const pane = el('div', { class: 'tab-pane' });

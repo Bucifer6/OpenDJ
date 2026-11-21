@@ -132,7 +132,7 @@ export class Dedications extends Emitter {
       list.replaceChildren(...this.queue.map((d) => el('li', { class: `ded-${d.state}` },
         el('span', { class: 'ded-text' }, d.text), el('small', {}, ` ${d.lang.toUpperCase()} · ${d.state === 'waiting' && d.startsIn ? `in ${Math.ceil(d.startsIn)} s` : d.state}`),
         d.state === 'queued' ? el('button', { class: 'btn xs', title: 'Remove', onclick: () => this.remove(d.id) }, '✕') : null)));
-      if (!this.queue.length) list.append(el('li', { class: 'hint' }, 'Nothing queued.'));
+      if (!this.queue.length) list.append(el('li', { class: 'hint', style: { listStyle: 'none', marginLeft: '-18px' } }, 'Nothing queued.'));
     };
     const off = this.on('change', renderList); renderList();
     const voiceNote = async () => {

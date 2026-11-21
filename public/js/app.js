@@ -4,6 +4,7 @@ import { Engine } from './audio/engine.js';
 import { SAMPLE_CATALOG } from './audio/sample-catalog.js';
 import { VoiceBus } from './audio/voice.js';
 import { Dedications } from './dedications.js';
+import { setupRemoteControl } from './remote-control.js';
 import { buildDeck, DECK_COLORS } from './ui/deck-ui.js';
 import { buildMixer } from './ui/mixer-ui.js';
 import { DetailWaveform } from './ui/waveform.js';
@@ -61,6 +62,7 @@ class App {
     this.buildLayout();
     setupStems(this);
     this.recording = setupRecording(this); this.engine.attachRecorder(this.recording.recorder);
+    setupRemoteControl(this, api).then((r) => { this.remote = r; }).catch(() => {}); // AI assistant (MCP) actions, when on
     this.wireEvents(); // subscribe to server events before loading the library so no change is missed
     if (!unavailable('link')) setupLink(this); // Ableton Link: UDP multicast through the server
     setupLyrics(this);
