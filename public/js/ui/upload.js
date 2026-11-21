@@ -6,6 +6,12 @@
 //   toolbar.append(uploadButton(app));        // optional button (hidden in desktop mode unless { always: true })
 import { api } from '../api.js';
 import { el } from '../util.js';
+import { platform } from '../platform.js';
+import { checkFormat } from '../local/media.js';
+
+// Mobile app / ?local=1: the same queue imports into the on-device library (copy-in) instead of uploading.
+const LOCAL = platform.local;
+const WORD = LOCAL ? { ing: 'Importing', ed: 'Imported', noun: 'Import', to: 'into OpenDJ on this device' } : { ing: 'Uploading', ed: 'Uploaded', noun: 'Uploads', to: 'to the library' };
 
 const CONCURRENCY = 2;
 let shared = null; // one uploader (queue + panel) per page
@@ -26,9 +32,9 @@ class Uploader {
     this.caps = null;
     this.capsP = api.capabilities().then((c) => (this.caps = c)).catch(() => null);
     this.list = el('div', { class: 'upl-list' });
-    this.title = el('span', { class: 'upl-title' }, 'Uploads');
+    this.title = el('span', { class: 'upl-title' }, WORD.noun);
     this.panel = el('section', { class: 'upl-panel', hidden: true, role: 'status', 'aria-live': 'polite' },
-      el('header', {}, this.title, el('button', { class: 'upl-close', title: 'Hide', 'aria-label': 'Hide uploads', onclick: () => { this.panel.hidden = true; } }, '×')),
+      el('header', {}, this.title, el('button', { class: 'upl-close', title: 'Hide', 'aria-label': `Hide ${WORD.noun.toLowerCase()}`, onclick: () => { this.panel.hidden = true; } }, '×')),
       this.list);
     document.body.append(this.panel);
   }
@@ -48,8 +54,8 @@ class Uploader {
     if (skipped.length) {
       // rejected files stay visible: a toast naming them and a failed row each in the uploads panel
       const names = skipped.slice(0, 5).map((f) => `"${f.name}"`).join(', ') + (skipped.length > 5 ? ` and ${skipped.length - 5} more` : '');
-      this.app.toast?.(`⚠ Not uploaded (not an audio or video file): ${names}`);
-      for (const file of skipped) { const job = { file, resolve() {}, ctrl: new AbortController() }; this.row(job); this.finish(job, null, 'Not an audio / video file'); }
+      this.app.toast?.(`⚠ Not ${WORD.ed.toLowerCase()} (not an audio file OpenDJ can play here): ${names}`);
+      for (const file of skipped) { const job = { file, resolve() {}, ctrl: new AbortController() }; this.row(job); this.finish(job, null, LOCAL ? checkFormat(file.name).reason || 'Not supported here' : 'Not an audio / video file'); }
       this.panel.hidden = false;
     }
     const maxMB = this.caps?.upload?.maxMB;
@@ -63,7 +69,7 @@ class Uploader {
     const ids = (await Promise.all(jobs)).filter(Boolean);
     const dup = this.duplicates || 0; this.duplicates = 0;
     const added = Math.max(0, ids.length - dup);
-    if (ids.length) this.app.toast?.(added ? `Uploaded ${added} file(s) to the library${dup ? ` (${dup} already there, not added again)` : ''}` : `${dup} file(s) already in the library: not added again`);
+    if (ids.length) this.app.toast?.(added ? `${WORD.ed} ${added} file(s) ${WORD.to}${dup ? ` (${dup} already there, not added again)` : ''}` : `${dup} file(s) already in the library: not added again`);
     return ids;
   }
 
@@ -88,7 +94,7 @@ class Uploader {
         onProgress: (loaded, total) => {
           const f = total ? loaded / total : 0;
           job.ui.bar.style.width = `${(f * 100).toFixed(1)}%`;
-          job.ui.info.textContent = f >= 1 ? 'Reading tags…' : `${fmtMB(loaded)} / ${fmtMB(total)}`;
+          job.ui.info.textContent = f >= 1 ? 'Reading tags…' : LOCAL ? 'Copying…' : `${fmtMB(loaded)} / ${fmtMB(total)}`;
         },
       }).then((r) => this.finish(job, r.id, r.duplicate ? 'Already in the library' : 'Done', r.duplicate), (e) => this.finish(job, null, e.name === 'AbortError' ? 'Cancelled' : e.message))
         .finally(() => { this.active--; this.pump(); });
@@ -109,12 +115,20 @@ class Uploader {
 
   updateTitle() {
     const n = this.active + this.queue.length;
-    this.title.textContent = n ? `Uploading ${n} file(s)…` : 'Uploads';
+    this.title.textContent = n ? `${WORD.ing} ${n} file(s)…` : WORD.noun;
+    // phones: the panel covers the controls; once everything is done it goes away by itself (failures were toasted)
+    clearTimeout(this._hide);
+    if (LOCAL && !n) this._hide = setTimeout(() => { if (!this.active && !this.queue.length) this.panel.hidden = true; }, 6000);
   }
 
-  /** Open the file picker. */
-  pick() {
-    const input = el('input', { type: 'file', multiple: true, accept: [...this.accept(), 'audio/*', 'video/*'].join(','), hidden: true });
+  /** Open the file picker (the native one in the mobile app). `folder`: pick a whole folder where the browser can. */
+  async pick({ folder = false } = {}) {
+    const native = api.local?.backend?.pickFiles;
+    if (native) {
+      try { const files = await native({ types: ['audio/*', 'video/mp4', 'video/quicktime', 'application/octet-stream'] }); if (files.length) this.add(files); } catch (e) { if (!/cancel/i.test(e?.message || '')) this.app.toast?.(`⚠ ${e.message}`); }
+      return;
+    }
+    const input = el('input', { type: 'file', multiple: true, accept: [...this.accept(), 'audio/*', 'video/*'].join(','), hidden: true, ...(folder ? { webkitdirectory: '' } : {}) });
     input.addEventListener('change', () => { if (input.files.length) this.add(input.files); input.remove(); });
     document.body.append(input);
     input.click();
@@ -136,7 +150,7 @@ function uploader(app) {
 export function setupUpload(app, { target } = {}) {
   const u = uploader(app);
   const zone = target || app?.library?.root || document.body;
-  const overlay = el('div', { class: 'upl-drop', hidden: true }, el('div', {}, 'Drop audio or video files to upload them to the library'));
+  const overlay = el('div', { class: 'upl-drop', hidden: true }, el('div', {}, LOCAL ? 'Drop audio files to import them into OpenDJ' : 'Drop audio or video files to upload them to the library'));
   zone.classList.add('upl-zone');
   zone.append(overlay);
   let depth = 0;
@@ -149,7 +163,7 @@ export function setupUpload(app, { target } = {}) {
     depth = 0; overlay.hidden = true;
     u.add(e.dataTransfer.files);
   });
-  return { upload: (files) => u.add(files), pick: () => u.pick(), button: (opts) => uploadButton(app, opts) };
+  return { upload: (files) => u.add(files), pick: (o) => u.pick(o), button: (opts) => uploadButton(app, opts) };
 }
 
 /**
@@ -157,6 +171,7 @@ export function setupUpload(app, { target } = {}) {
  * where "+ Folder" can't reach the user's own disk; pass { always: true } to show it everywhere.
  */
 export function uploadButton(app, { always = false, label = '⇪ Upload…' } = {}) {
+  if (LOCAL) return el('button', { class: 'btn sm upl-btn import-btn', title: 'Copy music files into OpenDJ on this device (from Files, Downloads, a USB stick or a cloud drive)', onclick: () => uploader(app).pick() }, '＋ Import');
   const b = el('button', { class: 'btn sm upl-btn', title: 'Upload audio or video files from this computer to the server library', onclick: () => uploader(app).pick() }, label);
   if (!always) {
     b.hidden = true;

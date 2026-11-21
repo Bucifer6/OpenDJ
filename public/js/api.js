@@ -1,6 +1,12 @@
 // Thin client for the local OpenDJ server.
 // Hosted mode (password login): a 401 means the session ended, so go to the login page and come back afterwards.
+// Mobile app / ?local=1: the same requests are answered in the page by the on-device backend (local/boot.js
+// installs a fetch shim before anything here runs), so this file barely changes.
+import { local } from './local/boot.js';
+import { PLACEHOLDER_URL } from './local/media.js';
+
 export function toLogin() {
+  if (local.enabled) return; // no server, no login
   if (location.pathname.endsWith('/login.html')) return;
   location.href = `/login.html?next=${encodeURIComponent(location.pathname + location.search)}`;
 }
@@ -26,7 +32,14 @@ export const api = {
   streamUrl: (id) => `/api/tracks/${enc(id)}/stream`,
   /** Video of a track (track.hasVideo): original file when the browser can play it, else an MP4 made by FFmpeg. */
   videoUrl: (id) => `/api/tracks/${enc(id)}/video`,
-  coverUrl: (id) => `/api/tracks/${enc(id)}/cover`,
+  coverUrl: (id) => {
+    const u = `/api/tracks/${enc(id)}/cover`;
+    if (!local.enabled) return u;
+    // <img>/CSS need a URL now: app file URL / cached blob URL, else the placeholder (remote covers load in the background)
+    const now = local.backend?.urlForSync(u);
+    if (!now && local.backend) local.backend.urlFor(u).catch(() => {});
+    return now || PLACEHOLDER_URL;
+  },
   async waveform(id) { try { const r = await req('GET', `/api/tracks/${enc(id)}/waveform`, undefined, true); return await r.arrayBuffer(); } catch { return null; } },
   saveWaveform: (id, bytes) => req('PUT', `/api/tracks/${enc(id)}/waveform`, bytes),
   addFiles: (paths) => req('POST', '/api/files', { paths }),
@@ -67,6 +80,7 @@ export const api = {
    * onProgress(loaded, total); pass an AbortSignal to cancel. Uses XHR because fetch has no upload progress.
    */
   upload(file, { onProgress, signal } = {}) {
+    if (local.enabled) return localImport(file, { onProgress, signal });
     return new Promise((resolve, reject) => {
       const x = new XMLHttpRequest();
       x.open('POST', '/api/upload');
@@ -114,9 +128,30 @@ export const api = {
   hueDiscover: () => req('GET', '/api/lighting/hue/discover'),
   huePair: (bridge) => req('POST', '/api/lighting/hue/pair', { bridge }),
   hueLights: () => req('GET', '/api/lighting/hue/lights'),
+  /** Mobile app / ?local=1 only: the on-device backend (null on the desktop and web app). */
+  get local() { return local.enabled ? local : null; },
   events(handlers) {
     const es = new EventSource('/api/events');
     for (const [ev, fn] of Object.entries(handlers)) es.addEventListener(ev, (e) => fn(JSON.parse(e.data || '{}')));
     return es;
   },
 };
+
+/**
+ * Import into the on-device library (mobile app / ?local=1): a File / Blob from a file input or drag & drop, or a file
+ * picked with the native picker ({ name, size, path, webPath }), which the plugin copies without passing it through JS.
+ */
+async function localImport(file, { onProgress, signal } = {}) {
+  const b = await local.ready;
+  if (signal?.aborted) throw Object.assign(new Error('Upload cancelled'), { name: 'AbortError' });
+  onProgress?.(0, file.size || 0);
+  let r;
+  if (file instanceof Blob) {
+    const res = await b.handle('POST', '/api/upload', { body: file, headers: { 'X-Filename': encodeURIComponent(file.name || 'upload') }, signal });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j.error || `Import failed (HTTP ${res.status})`);
+    r = j;
+  } else r = await b.importPicked(file, b.nativeImport || {});
+  onProgress?.(file.size || 1, file.size || 1);
+  return r;
+}
