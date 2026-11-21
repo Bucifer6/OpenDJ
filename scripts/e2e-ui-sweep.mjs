@@ -272,6 +272,51 @@ try {
   const after = await audit();
   check(!summary(after), `after live resizes: controls in bounds${summary(after) ? ' — ' + summary(after) : ''}`);
   await ev(() => window.opendj.engine.decks.forEach((d) => d.pause()));
+
+  // ---------- 5. crossfader travel and EQ preset in the narrow mixer of wide windows (handover checks) ----------
+  // The mixer keeps ~340 px at any window width; the crossfader used to share its row with three selects (150 px of
+  // track, selects squashed to bare arrows). It now wraps onto its own line.
+  await ev(() => { const E = window.opendj.engine; E.decks[0].play(); E.decks[1].play(); });
+  for (const [w, h, n] of [[1920, 1080, 2], [2560, 1080, 2], [2560, 1080, 4], [3440, 1440, 4], [1366, 768, 4], [1100, 700, 2]]) {
+    await page.setViewportSize({ width: w, height: h });
+    await ev((k) => window.opendj.setDeckCount(k, false), n); await page.waitForTimeout(350);
+    const g = await ev(() => {
+      const t = document.querySelector('.crossfader .fader-track').getBoundingClientRect();
+      const sels = [...document.querySelectorAll('.xfader-options .sel')].map((x) => { const r = x.getBoundingClientRect(); return { w: Math.round(r.width), text: x.selectedOptions[0]?.textContent }; });
+      return { track: Math.round(t.width), sels, mixer: Math.round(document.querySelector('.mixer').getBoundingClientRect().width) };
+    });
+    check(g.track >= 250 && g.sels.every((x) => x.w >= 64), `${w}x${h} ${n} decks: crossfader track ${g.track} px in a ${g.mixer} px mixer, options ${g.sels.map((x) => `${x.text} ${x.w}px`).join(', ')}`);
+    // drag end to end with the mouse while two decks play: full travel and smooth frames
+    const box = await page.locator('.crossfader .fader-track').boundingBox(), thumb = await page.locator('.crossfader .fader-thumb').boundingBox(), y = box.y + box.height / 2;
+    await ev(() => { window.opendj.engine.setCrossfader(0); window.__fr = []; let last = 0; window.__frOn = true; const f = (t) => { if (last) window.__fr.push(t - last); last = t; if (window.__frOn) requestAnimationFrame(f); }; requestAnimationFrame(f); });
+    await page.mouse.move(thumb.x + thumb.width / 2, y); await page.mouse.down();
+    let lo = 1, hi = -1;
+    for (const dir of [1, -1]) {
+      for (let k = 0; k <= 40; k++) await page.mouse.move(box.x + box.width / 2 + dir * (box.width / 2 + 30) * (k / 40), y);
+      const v = await ev(() => window.opendj.engine.crossfader); lo = Math.min(lo, v); hi = Math.max(hi, v);
+      for (let k = 40; k >= 0; k--) await page.mouse.move(box.x + box.width / 2 + dir * (box.width / 2 + 30) * (k / 40), y);
+    }
+    await page.mouse.up();
+    const fr = await ev(() => { window.__frOn = false; const s = [...window.__fr].sort((a, b) => a - b); return { n: s.length, p95: s[Math.floor(s.length * 0.95)] || 0 }; });
+    check(lo <= -0.999 && hi >= 0.999 && fr.p95 < 50, `${w}x${h} ${n} decks: crossfader drag reaches ${lo.toFixed(2)} … ${hi.toFixed(2)}, 95th-percentile frame ${fr.p95.toFixed(1)} ms`);
+  }
+  await page.setViewportSize({ width: 1920, height: 1080 }); await ev(() => window.opendj.setDeckCount(2, false));
+  // EQ preset: only an EQ change makes it "Custom"; volume / filter moves and automix fades do not
+  const eqp = await ev(async () => {
+    const E = window.opendj.engine, sel = document.querySelector('.mixer-eq-preset');
+    for (const ch of E.channels) for (const k of ['eqLow', 'eqMid', 'eqHigh']) ch.set(k, 0);
+    const flat = sel.value;
+    E.channels[0].set('volume', 0.5); E.channels[1].set('filter', 0.3); E.channels[1].set('filter', 0); E.setCrossfader(0.4);
+    const afterVol = sel.value;
+    sel.value = 'warm'; sel.dispatchEvent(new Event('change'));
+    const warm = sel.value, low = E.channels[2].state.eqLow;
+    E.channels[0].set('eqHigh', 0.5);
+    const custom = sel.value;
+    for (const ch of E.channels) for (const k of ['eqLow', 'eqMid', 'eqHigh']) ch.set(k, 0);
+    return { flat, afterVol, warm, low, custom, back: sel.value };
+  });
+  check(eqp.flat === 'flat' && eqp.afterVol === 'flat' && eqp.warm === 'warm' && Math.abs(eqp.low - 0.12) < 1e-6 && eqp.custom === 'custom' && eqp.back === 'flat', `EQ preset follows EQ changes only (${JSON.stringify(eqp)})`);
+  await ev(() => window.opendj.engine.decks.forEach((d) => d.pause()));
   check(errors.length === 0, `no page errors, console errors or unhandled rejections${errors.length ? ': ' + errors.slice(0, 5).join(' | ') : ''}`);
 } catch (e) { console.error(e); failed = true; }
 await browser.close(); app.server.close();

@@ -271,10 +271,15 @@ body:not(.four-decks) .deck-col > .deck:nth-child(2) { display: none; }
 .mixer-master > .strip-num { color: var(--text-2); }
 .master-vu { display: flex; gap: 3px; height: 110px; padding: 2px; border-radius: var(--r-xs); background: var(--wave-bg); }
 .master-vu .vu { height: 100%; }
-.xfader-row { display: grid; grid-template-columns: auto minmax(180px, 1fr); align-items: center; gap: 10px; padding: 0 4px; }
-.xfader-options { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.xfader-control { display: flex; align-items: center; gap: 8px; min-width: 180px; }
-.xfader-control .crossfader { flex: 1 1 auto; width: 100%; min-width: 140px; }
+/* The options and the crossfader share one line only when the crossfader still gets 260 px of track; in the usual
+   340 px mixer the crossfader wraps onto its own full-width line (a 150 px crossfader next to three squashed
+   selects was hard to ride, and the selects lost their labels). Flex wrap follows the mixer's width, not the
+   window's, so wide windows with a narrow mixer are handled too. */
+.xfader-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 0 4px; }
+.xfader-options { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
+.xfader-options .sel { flex: 1 1 0; min-width: 64px; }
+.xfader-control { display: flex; align-items: center; gap: 8px; flex: 999 1 300px; min-width: 0; }
+.xfader-control .crossfader { flex: 1 1 auto; width: 100%; min-width: 0; }
 .xfader-control .fader-track { width: 100%; }
 .crossfader .fader-slot { height: 5px; background: linear-gradient(90deg, var(--deck1), var(--slot) 50%, var(--deck2)); }
 .crossfader .fader-thumb { width: 28px; }
@@ -430,7 +435,7 @@ kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-bottom
 
 
 /* The EQ preset is deliberately compact so it fits beside the crossfader on smaller mixer panels. */
-.xfader-row .mixer-eq-preset { flex: 0 0 82px; width: 82px; padding-left: 4px; padding-right: 4px; }
+.xfader-row .mixer-eq-preset { flex: 1 1 0; min-width: 72px; padding-left: 4px; padding-right: 4px; }
 
 
 /* Manual Automix transition control sits below the turntable's cue/play keys. */

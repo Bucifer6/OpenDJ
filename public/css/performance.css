@@ -520,3 +520,6 @@ body:not(.four-decks) .mixer.mx-short .mixer-master > .strip-num, body:not(.four
 :root.h1250 body:not(.four-decks) .deck-body { grid-template-columns: minmax(190px, 0.9fr) minmax(0, 1.6fr) 62px; }
 :root.h1250 .jog { max-width: 300px; }
 :root.h1250 .btn.big { height: 60px; max-width: 72px; }
+/* short mixers: the crossfader options row (EQ preset, Color FX, curve) stays on its own line but slimmer */
+.mixer.mx-400 .xfader-options .sel { height: 20px; min-height: 20px; padding-top: 0; padding-bottom: 0; font-size: 10px; }
+.mixer.mx-400 .xfader-row { row-gap: 3px; }

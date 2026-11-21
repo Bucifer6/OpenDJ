@@ -54,14 +54,14 @@ export function buildMixer(app) {
   const byCh = []; let cur = null; // per-channel renderers so one change only re-renders its own strip
   const R = (c) => { renderers.push(c); if (cur) cur.push(c); return c; };
   const EQ_PRESETS = [
-  { id: 'flat', label: 'Flat EQ', values: [0, 0, 0] },
-  { id: 'warm', label: 'Warm', values: [0.12, -0.04, -0.08] },
-  { id: 'bright', label: 'Bright', values: [-0.08, 0.04, 0.16] },
-  { id: 'vocal', label: 'Vocal focus', values: [-0.12, 0.16, 0.08] },
-  { id: 'bass-light', label: 'Bass light', values: [-0.22, 0.05, 0.1] },
-  { id: 'custom', label: 'Custom', values: null },
-];
-const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
+    { id: 'flat', label: 'Flat EQ', values: [0, 0, 0] },
+    { id: 'warm', label: 'Warm', values: [0.12, -0.04, -0.08] },
+    { id: 'bright', label: 'Bright', values: [-0.08, 0.04, 0.16] },
+    { id: 'vocal', label: 'Vocal focus', values: [-0.12, 0.16, 0.08] },
+    { id: 'bass-light', label: 'Bass light', values: [-0.22, 0.05, 0.1] },
+    { id: 'custom', label: 'Custom', values: null },
+  ];
+  const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   const stripsWrap = el('div', { class: 'mixer-strips' });
 
   for (const i of order) {
@@ -110,7 +110,9 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   let applyingEqPreset = false;
   const eqPreset = el('select', { class: 'sel tiny mixer-eq-preset', title: 'Apply a channel EQ preset to all decks', 'aria-label': 'Mixer EQ preset' },
     ...EQ_PRESETS.map((p) => el('option', { value: p.id }, p.label)));
-  eqPreset.value = 'flat';
+  // the preset that matches every channel's EQ, else Custom
+  const eqPresetFor = () => (EQ_PRESETS.find((p) => p.values && eng.channels.every((ch) => ['eqLow', 'eqMid', 'eqHigh'].every((k, j) => Math.abs((ch.state[k] || 0) - p.values[j]) < 1e-6)))?.id || 'custom');
+  eqPreset.value = eqPresetFor();
   eqPreset.addEventListener('change', () => {
     const preset = EQ_PRESETS.find((p) => p.id === eqPreset.value);
     if (!preset?.values) return;
@@ -137,7 +139,9 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     ),
   );
 
-  eng.on('mixer', (i) => { for (const r of byCh[i] || renderers) r.render(); if (!applyingEqPreset) eqPreset.value = 'custom'; });
+  // only an EQ change makes the preset "Custom" (not a volume / filter / FX move, nor automix's per-frame fades)
+  const EQ_KEYS = new Set(['eqLow', 'eqMid', 'eqHigh']);
+  eng.on('mixer', (i, key) => { for (const r of byCh[i] || renderers) r.render(); if (!applyingEqPreset && EQ_KEYS.has(key)) eqPreset.value = eqPresetFor(); });
   eng.on('master', () => { for (const r of renderers) r.render(); });
   eng.on('mic', () => { for (const r of renderers) r.render(); });
   // compact strips when the layout leaves the mixer little height (.mx-short / .mx-400 / .mx-tiny in performance.css);
