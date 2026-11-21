@@ -134,5 +134,4 @@ export const FLX2_PRESET = {
   // (master 1-2, headphones 3-4) is not in the chart
   audio: { builtIn: true, master: [1, 2], cue: [3, 4], deviceLabel: FLX2_MATCH, unverifiedChannels: true },
   init: [], // the chart lists no SysEx, init or keep-alive
-  skin: 'compact-controller',
 };

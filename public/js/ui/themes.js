@@ -13,9 +13,6 @@ const BUILT_IN_THEMES = [
   { id: 'vinyl', name: 'Vinyl Booth', desc: 'Turntable-inspired platters and warm analogue tones', swatch: ['#10100f', '#282725', '#d9b56d', '#e66a4b'] },
   { id: 'performance', name: 'Pad Performance', desc: 'Colour-coded pads and a modern performance controller', swatch: ['#101018', '#23232e', '#b276ff', '#3de0c1'] },
   { id: 'studio', name: 'Studio Mixer', desc: 'Brushed-metal mixer with classic channel colours', swatch: ['#111418', '#252b31', '#70a9d8', '#e6a759'] },
-  // whole-layout controller skins (js/skins/skin-host.js draws the decks + mixer as the hardware)
-  { id: 'compact-controller', name: 'Compact Controller', desc: 'The decks and mixer drawn as a compact 2-channel controller', swatch: ['#0d0e10', '#1e1f23', '#ff7a1a', '#37d46e'] },
-  { id: 'all-in-one', name: 'All-in-One 4-Channel', desc: 'A standalone 4-channel DJ system with a centre screen', swatch: ['#08090b', '#16181c', '#2f8cff', '#ff9a2a'] },
 ];
 
 const THEME_CACHE_KEY = 'opendj-skin-catalog-v1';

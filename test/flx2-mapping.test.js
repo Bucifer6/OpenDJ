@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { MidiManager, buildTargets, buildStates } from '../public/js/midi/midi.js';
 import { PRESETS } from '../public/js/midi/presets.js';
 import { FLX2_PRESET, FLX2_MATCH, FLX2_PAD_BANKS, FLX2_PAD_CH } from '../public/js/midi/mappings/ddj-flx2.js';
-import { ctlState, setPadMode, padAction, setSmartCfx, setSmartFader, SMART_CFX } from '../public/js/midi/controller-extras.js';
+import { ctlState, setPadMode, setSmartCfx, setSmartFader, setDeckLayer, routeTarget, SMART_CFX } from '../public/js/midi/controller-extras.js';
 
 function fakeApp() {
   const calls = [];
@@ -143,7 +143,7 @@ test('FLX2: LEDs follow state for pads, transport, sync, pad modes and cue butto
 test('Smart CFX and Smart Fader', () => {
   const { app, channels, engine, decks } = fakeApp();
   setSmartCfx(app, true, 2);
-  assert.ok(channels.every((c) => c.state.colorFx === SMART_CFX[2].id));
+  assert.ok(channels.every((c) => c.state.colorFx === SMART_CFX[2]));
   setSmartCfx(app, false);
   assert.ok(channels.every((c) => c.state.colorFx === 'filter'));
   decks[0].playing = true;
@@ -155,7 +155,20 @@ test('Smart CFX and Smart Fader', () => {
   assert.ok(channels[1].state.eqLow < -0.99 && Math.abs(channels[0].state.eqLow) < 0.01);
   setSmartFader(app, false);
   assert.ok(Math.abs(channels[0].state.eqLow) < 1e-9 && Math.abs(channels[1].state.eqLow) < 1e-9, 'EQs restored');
-  // pad modes through padAction
-  setPadMode(app, 0, 'keyshift');
-  padAction(app, 0, 7, true);
+});
+
+test('DECK SELECT layers route a 2-deck controller to decks 3 / 4', () => {
+  const { m, calls, app } = manager();
+  app.setDeckCount = (n) => { app.deckCount = n; };
+  m.applyPreset(DEV.name, FLX2_PRESET.name);
+  assert.equal(routeTarget(app, 'deck1.play'), 'deck1.play');
+  setDeckLayer(app, 0, 2);
+  assert.equal(app.deckCount, 4, 'switches to 4 decks');
+  assert.equal(routeTarget(app, 'deck1.play'), 'deck3.play'); assert.equal(routeTarget(app, 'mixer1.volume'), 'mixer3.volume');
+  assert.equal(routeTarget(app, 'deck2.play'), 'deck2.play'); assert.equal(routeTarget(app, 'mixer.crossfader'), 'mixer.crossfader');
+  calls.length = 0;
+  m.onMessage(DEV, Uint8Array.from([0x90, 0x0b, 0x7f]));
+  assert.deepEqual(calls.filter((c) => /^deck\d\.togglePlay$/.test(c[0])).map((c) => c[0]), ['deck3.togglePlay'], 'deck 1 PLAY now plays deck 3');
+  m.dispatch({ target: 'deckSelect.left' }, 1); // toggle back to deck 1
+  assert.equal(ctlState(app).layer[0], 0);
 });

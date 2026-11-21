@@ -14,7 +14,8 @@ import { PRESETS } from './presets.js';
 import { BEATLOOPS, BEATJUMPS, ROLLS, convertMixxx, toStoredMapping } from './mixxx.js';
 import { HidManager, describeHidKey } from './hid.js';
 import { GamepadManager, describeGamepadKey } from './gamepad.js';
-import { controllerTargets } from './controller-extras.js';
+import { controllerTargets, routeTarget } from './controller-extras.js';
+import { offerControllerAudio } from './controller-audio.js';
 
 const fmtBeats = (b) => (b < 1 ? `1/${Math.round(1 / b)}` : String(b));
 
@@ -212,18 +213,19 @@ export class MidiManager extends Emitter {
       if (preset) { this.mappings[inp.name] = this.presetMapping(preset); this.save(); this.app.toast(`MIDI: loaded "${preset.name}" mapping for ${inp.name}`); }
       else if (inp.state !== 'disconnected') this.offerMapping(inp.name);
     }
-    // bundled first-party mappings: init messages and the "matching skin / audio" offers (see skins/skin-host.js)
+    // bundled first-party mappings: init messages, and for controllers with their own sound card an audio offer
     for (const inp of this.inputs()) {
       const preset = this.presetOf(inp.name);
       if (!preset || inp.state === 'disconnected' || this._presetSeen?.has(inp.id)) continue;
       (this._presetSeen ||= new Set()).add(inp.id);
       for (const out of this.outputs()) if (portBase(out.name) === portBase(inp.name)) for (const msg of preset.init || []) { try { out.send(msg); } catch { /* port closed */ } }
       this.emit('preset', { device: inp.name, preset });
+      if (preset.audio?.builtIn) offerControllerAudio(this.app, inp.name, preset);
     }
     this.emit('devices');
   }
   hasMapping(name) { return !!this.mappings[name]?.entries?.length; }
-  /** Stored form of a bundled preset: entries plus its id so the bundled extras (init, skin, audio) can be found. */
+  /** Stored form of a bundled preset: entries plus its id so the bundled extras (init, audio, LED outputs) can be found. */
   presetMapping(p) { return { name: p.name, entries: structuredClone(p.entries), ...(p.id ? { presetId: p.id, presetVersion: p.version || 0 } : {}) }; }
   /** The bundled preset a device's current mapping came from (null for learned / imported mappings). */
   presetOf(name) { const id = this.mappings[name]?.presetId; return id ? PRESETS.find((p) => p.id === id) || null : null; }
@@ -310,7 +312,7 @@ export class MidiManager extends Emitter {
         continue;
       }
       if (e.key !== key) continue;
-      const t = this.byId.get(e.target); if (!t) continue;
+      const t = this.byId.get(routeTarget(this.app, e.target)); if (!t) continue;
       if (t.kind === 'button') { this.dispatch(e, isOff || (type !== 'note' && value === 0) ? 0 : 1); continue; }
       const range = type === 'pitch' ? 16384 : 128;
       if (t.kind === 'rel' || e.rel) {
@@ -338,7 +340,7 @@ export class MidiManager extends Emitter {
   }
 
   dispatch(entry, v) {
-    const t = this.byId.get(entry.target); if (!t) return;
+    const t = this.byId.get(routeTarget(this.app, entry.target)); if (!t) return; // (DECK SELECT layers: deck1 → deck3…)
     try {
       if (t.kind === 'button') t.handler(v > 0);
       else if (t.kind === 'rel') t.handler(entry.invert ? -v : v);
@@ -380,7 +382,7 @@ export class MidiManager extends Emitter {
         continue;
       }
       for (const e of map.entries) {
-        const t = this.byId.get(e.target);
+        const t = this.byId.get(routeTarget(this.app, e.target));
         if (!t?.led || e.noLed || e.key.includes('hid') || e.key.startsWith('gp:')) continue;
         const lk = e.ledKey || e.key; // ledKey: the LED answers on another note than the button sends
         const [type, ch, num] = lk.split(':').map((x, i) => (i ? +x : x));

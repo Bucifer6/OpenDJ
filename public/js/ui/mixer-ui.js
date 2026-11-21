@@ -2,6 +2,7 @@ import { el, uiZoom } from '../util.js';
 import { knob, fader, button } from './controls.js';
 import { DECK_COLORS } from './deck-ui.js';
 import { cssVar } from './themes.js';
+import { setSmartFader, smartAutoTransition } from '../midi/controller-extras.js';
 
 /**
  * Segmented LED meter. Meter ballistics like hardware: instant attack, ~24 dB/s release, a peak-hold segment that
@@ -109,6 +110,9 @@ export function buildMixer(app) {
       (mcBtn = R(button('MC', { cls: 'xs mc-btn', click: () => app.dedications?.open(), active: () => !!app.dedications?.current, title: 'Dedication: a short message spoken over the mix at the next phrase (English or Romanian), with the music ducked' })))),
   );
   const xfader = R(fader({ min: -1, max: 1, def: 0, get: () => eng.crossfader, set: (v) => eng.setCrossfader(v), horizontal: true, cls: 'crossfader', title: 'Crossfader' }));
+  // Smart Fader (midi/controller-extras.js): the crossfader alone blends BPM, bass and levels; Shift-click: 16-beat auto transition
+  const smartXf = R(button('SMART', { cls: 'xs smart-xf', click: (e) => (e.shiftKey || app.shift ? smartAutoTransition(app) : setSmartFader(app, !app.ctl?.smartFader)), active: () => !!(app.ctl?.smartFader || app.ctl?.auto), title: 'Smart Fader: the crossfader alone blends the two decks (BPM morph and bass swap). Shift-click: automatic beat-synced 16-beat transition' }));
+  window.addEventListener('opendj-ctl', () => smartXf.render());
   let applyingEqPreset = false;
   const eqPreset = el('select', { class: 'sel tiny mixer-eq-preset', title: 'Apply a channel EQ preset to all decks', 'aria-label': 'Mixer EQ preset' },
     ...EQ_PRESETS.map((p) => el('option', { value: p.id }, p.label)));
@@ -137,7 +141,7 @@ export function buildMixer(app) {
     el('div', { class: 'mixer-top' }, stripsWrap, master),
     el('div', { class: 'xfader-row' },
       el('div', { class: 'xfader-options' }, eqPreset, colorSel, curveSel),
-      el('div', { class: 'xfader-control' }, el('span', { class: 'xf-l' }, 'A'), xfader, el('span', { class: 'xf-l' }, 'B')),
+      el('div', { class: 'xfader-control' }, el('span', { class: 'xf-l' }, 'A'), xfader, el('span', { class: 'xf-l' }, 'B'), smartXf),
     ),
   );
 
