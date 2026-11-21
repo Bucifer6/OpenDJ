@@ -200,7 +200,7 @@ export class Deck extends Emitter {
   get hotCues() { return (this.track?.cues || []).filter((c) => c.index >= 0); }
   hotCue(i) { return this.hotCues.find((c) => c.index === i); }
   hotCueDown(i) {
-    if (!this.track) return;
+    if (!this.track || this.loading) return; // (still loading: no grid, no position yet)
     const c = this.hotCue(i);
     if (!c && this.loop?.active) { this.saveLoopToHotCue(i); return; }
     if (!c) {
@@ -250,13 +250,16 @@ export class Deck extends Emitter {
     if (end <= start) return;
     this.loop = { start, end, active };
     this.post('loop', { value: active ? { start: start * this.sr, end: end * this.sr } : null });
-    if (active && this.position > end) this.seek(start);
+    if (active && this.position > end) this.seek(start + ((this.position - start) % (end - start))); // keep the phase in the loop
     this.emit('loop');
   }
   autoLoop(beats) {
-    if (!this.track) return;
+    if (!this.track || this.loading) return; // a loop set now would use the 0.5 s fallback beat at 0:00
     if (this.loop?.active && Math.abs((this.loop.end - this.loop.start) - beats * this.beatLen) < 1e-3) return this.exitLoop();
-    const start = this.loop?.active ? this.loop.start : (this.quantize ? this.floorBeat(this.position) : this.position);
+    // sub-beat loops start on their own grid (a 1/4-beat loop on the 1/4-beat grid, like rolls), so the play head is
+    // already inside the loop: no jump back when ½ / ¼ is pressed late in the beat
+    const g = Math.min(beats, 1) * this.beatLen;
+    const start = this.loop?.active ? this.loop.start : !this.quantize ? this.position : beats < 1 && this.bpm ? this.gridOffset + Math.floor((this.position - this.gridOffset) / g + 1e-6) * g : this.floorBeat(this.position);
     this.setLoop(start, start + beats * this.beatLen);
   }
   loopInPress() { this.loopIn = this.snap(this.position); if (this.loop?.active) this.exitLoop(); this.emit('loop'); }
@@ -272,7 +275,13 @@ export class Deck extends Emitter {
     if (this.loop.active) return this.exitLoop();
     this.setLoop(this.loop.start, this.loop.end); this.seek(this.loop.start);
   }
-  loopHalve() { if (this.loop) this.setLoop(this.loop.start, this.loop.start + (this.loop.end - this.loop.start) / 2, this.loop.active); }
+  /** Halve the loop, down to 1/8 beat (shorter loops are a buzz, not a loop). */
+  loopHalve() {
+    if (!this.loop) return;
+    const len = (this.loop.end - this.loop.start) / 2;
+    if (len < (this.bpm ? this.beatLen / 8 : 0.03) - 1e-6) return;
+    this.setLoop(this.loop.start, this.loop.start + len, this.loop.active);
+  }
   loopDouble() { if (this.loop) this.setLoop(this.loop.start, this.loop.start + (this.loop.end - this.loop.start) * 2, this.loop.active); }
   get loopBeats() { return this.loop ? Math.round(((this.loop.end - this.loop.start) / this.beatLen) * 1000) / 1000 : 0; } // rounded: no 3.999999999
 
@@ -280,6 +289,7 @@ export class Deck extends Emitter {
   rollOn(beats) {
     if (!this.track || !this.playing) return;
     this._rollPrevSlip = this.slip; this.setSlip(true);
+    this._rollSavedLoop = this.loop && !this.loop.active ? { ...this.loop } : null; // the user's saved (inactive) loop
     // quantised to the roll size's own grid (1/8 beat roll -> 1/8 beat grid), so the play head is already inside the
     // loop: no jump on press, the repeat starts on the grid, the worklet cross-fades each wrap
     const pos = this.position, g = Math.min(beats, 1) * this.beatLen;
@@ -289,7 +299,7 @@ export class Deck extends Emitter {
   }
   rollOff() {
     if (!this.rolling) return;
-    this.rolling = false; this.exitLoop(); this.loop = null; this.setSlip(this._rollPrevSlip); this.emit('loop');
+    this.rolling = false; this.exitLoop(); this.loop = this._rollSavedLoop || null; this._rollSavedLoop = null; this.setSlip(this._rollPrevSlip); this.emit('loop');
   }
 
   beatJump(beats) {
@@ -350,7 +360,7 @@ export class Deck extends Emitter {
     this.seek(t);
   }
   sync() {
-    if (!this.track) return;
+    if (!this.track || this.loading) return;
     if (this.syncOn) { this.syncOn = false; this.emit('state'); return; }
     this.syncOn = true;
     if (this.matchTempo() && this.playing) this.alignPhase();
@@ -539,6 +549,7 @@ export class Deck extends Emitter {
     if (!this.track || !this.bpm) return;
     const b = this.beatLen;
     if (this._sliceStart == null || this.position > this._sliceStart + 8 * b || this.position < this._sliceStart) this._sliceStart = this.floorBeat(this.position - ((this.beatIndex() % 8) + 8) % 8 * b);
+    if (!this._slicing) this._sliceSavedLoop = this.loop && !this.loop.active ? { ...this.loop } : null; // the user's saved (inactive) loop
     this._slicePrevSlip = this._slicing ? this._slicePrevSlip : this.slip;
     this._slicing = true; this.setSlip(true);
     const start = this._sliceStart + n * b;
@@ -546,7 +557,7 @@ export class Deck extends Emitter {
   }
   sliceUp() {
     if (!this._slicing) return;
-    this._slicing = false; this.exitLoop(); this.loop = null; this.setSlip(this._slicePrevSlip); this.emit('loop');
+    this._slicing = false; this.exitLoop(); this.loop = this._sliceSavedLoop || null; this._sliceSavedLoop = null; this.setSlip(this._slicePrevSlip); this.emit('loop');
   }
 
   // ---------- instant doubles ----------

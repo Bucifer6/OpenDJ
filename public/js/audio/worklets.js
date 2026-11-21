@@ -230,8 +230,10 @@ class DeckProcessor extends AudioWorkletProcessor {
 
       this.pos += speed;
       if (this.slip) this.shadow += this.playing ? this.rate * this.step : 0;
-      if (this.loop && speed > 0 && this.pos >= this.loop.end) { this.startGhost(speed); this.pos -= (this.loop.end - this.loop.start); this.resetGrains(); }
-      else if (this.loop && speed < 0 && this.pos < this.loop.start) { this.startGhost(speed); this.pos += (this.loop.end - this.loop.start); this.resetGrains(); } // reverse wraps too
+      // loop wrap: modulo the loop length, so a play head far past the end (loop engaged late, halved) lands inside the
+      // loop in one wrap with one ghost voice instead of wrapping (and restarting the ghost) every sample
+      if (this.loop && speed > 0 && this.pos >= this.loop.end) { const ln = this.loop.end - this.loop.start; this.startGhost(speed); this.pos = ln > 0 ? this.loop.start + ((this.pos - this.loop.start) % ln) : this.loop.start; this.resetGrains(); }
+      else if (this.loop && speed < 0 && this.pos < this.loop.start) { const ln = this.loop.end - this.loop.start; this.startGhost(speed); this.pos = ln > 0 ? this.loop.end - ((this.loop.end - this.pos) % ln || ln) : this.loop.start; this.resetGrains(); } // reverse wraps too
       if (this.pos < 0) { this.pos = 0; if (!this.scratch) this.curRate = 0; }
       if (this.pos >= this.len) {
         this.pos = this.len - 1; this.curRate = 0;

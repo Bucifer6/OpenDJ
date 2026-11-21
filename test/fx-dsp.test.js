@@ -163,3 +163,14 @@ test('deck: key lock on, nudge / bend / tempo to and from 0 % / key shift switch
   const clean = 2 * Math.PI * 220 * 0.28 / SR;
   assert.ok(maxStep(all) <= clean * 1.3, `largest step ${maxStep(all).toFixed(4)} (clean sine ${clean.toFixed(4)}; a click was 0.2–0.46)`);
 });
+
+test('deck: a loop engaged with the play head far past its end wraps once, without clicks (QA M2)', () => {
+  const { p, msg } = deck(sine(SR * 4));
+  msg({ type: 'rate', value: 1 }); msg({ type: 'seek', frame: 30000 }); msg({ type: 'play', value: true });
+  const a = run(p, 4096);
+  msg({ type: 'loop', value: { start: 20000, end: 20000 + 0.0313 * SR } }); // 1/16 beat at 120 BPM, ~11 lengths behind
+  const b = run(p, 12032);
+  const all = new Float32Array(a.length + b.length); all.set(a); all.set(b, a.length);
+  assert.ok(maxStep(all, 300) <= CLEAN * 1.3, `loop engage ${maxStep(all, 300)}`);
+  assert.ok(p.pos >= 20000 && p.pos <= 20000 + 0.0313 * SR + 1, `inside the loop (${p.pos})`);
+});

@@ -244,6 +244,44 @@ try {
     `sync to a far BPM widens the range instead of overshooting; shrinking the range clamps the tempo (${JSON.stringify(prog)})`);
   await page.evaluate(() => window.opendj.engine.decks.forEach((d) => { d.setTempoRange(8); d.resetTempo(); }));
 
+  // QA final round: loops and loading (M2, m1, m5, m6)
+  const loops = await page.evaluate(async ({ long, third }) => {
+    const app = window.opendj, d = app.engine.decks[0];
+    await app.loadTrack(0, third); d.setGrid(120, 0);
+    const out = {};
+    // M2: a ¼-beat loop pressed late in the beat starts on the ¼-beat grid that holds the play head (no jump back)
+    d.seek(10.43); await new Promise((r) => setTimeout(r, 50)); const pos = d.position;
+    d.autoLoop(0.25); out.quarter = { start: d.loop.start, end: d.loop.end, pos };
+    // halving stops at 1/8 beat
+    for (let k = 0; k < 6; k++) d.loopHalve(); out.minBeats = d.loopBeats;
+    d.exitLoop();
+    // m1: ½ / ×2 after the loop was exited change the auto-loop size, not the stored inactive loop
+    const btns = [...document.querySelectorAll('.deck[data-deck="0"] .loop-row:not(.jump-row) .btn')];
+    const half = btns.find((b) => b.textContent.trim() === '½'), size = document.querySelector('.deck[data-deck="0"] .loop-size');
+    const before = size.textContent; half.click(); await new Promise((r) => setTimeout(r, 50)); out.halfAfterExit = { before, after: size.textContent, stored: d.loopBeats };
+    // m6: a loop roll / slice keeps the user's stored inactive loop
+    d.setLoop(4, 6); d.exitLoop(); d.play();
+    d.rollOn(0.25); await new Promise((r) => setTimeout(r, 80)); d.rollOff();
+    out.afterRoll = d.loop && { start: d.loop.start, end: d.loop.end, active: d.loop.active };
+    d.sliceDown(2); await new Promise((r) => setTimeout(r, 80)); d.sliceUp();
+    out.afterSlice = d.loop && { start: d.loop.start, end: d.loop.end, active: d.loop.active };
+    d.pause(); d.loop = null;
+    // m5: loop / hot cue / sync are ignored while the deck is still loading
+    const p = app.loadTrack(0, long);
+    await new Promise((r) => setTimeout(r, 30));
+    out.loadingWas = d.loading; const cues0 = (d.track?.cues || []).length; d.autoLoop(4); d.hotCueDown(0); d.sync();
+    out.whileLoading = { loop: d.loop, sync: d.syncOn, cues: (d.track?.cues || []).length - cues0 };
+    await p; d.syncOn = false;
+    return out;
+  }, { long: ids.Long, third: ids.Third });
+  const q = loops.quarter;
+  check(Math.abs(q.end - q.start - 0.125) < 1e-6 && q.start <= q.pos + 1e-3 && q.pos < q.end + 0.02, `¼-beat loop pressed late in the beat contains the play head (${q.start.toFixed(3)}–${q.end.toFixed(3)} s, play head ${q.pos.toFixed(3)} s)`);
+  check(loops.minBeats === 0.125, `loop ½ stops at 1/8 beat (${loops.minBeats})`);
+  check(loops.halfAfterExit.after !== loops.halfAfterExit.before && loops.halfAfterExit.stored === loops.minBeats, `½ after exiting a loop changes the auto-loop size (${JSON.stringify(loops.halfAfterExit)})`);
+  check(loops.afterRoll?.start === 4 && loops.afterRoll?.end === 6 && !loops.afterRoll.active, `a loop roll keeps the stored loop (${JSON.stringify(loops.afterRoll)})`);
+  check(loops.afterSlice?.start === 4 && loops.afterSlice?.end === 6 && !loops.afterSlice.active, `the slicer keeps the stored loop (${JSON.stringify(loops.afterSlice)})`);
+  check(loops.loadingWas && !loops.whileLoading.loop && !loops.whileLoading.sync && loops.whileLoading.cues === 0, `loop / hot cue / sync ignored while the deck loads (${JSON.stringify(loops.whileLoading)})`);
+
   check(errors.length === 0, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
 } catch (e) { console.error(e); failed = true; }
 await browser.close(); app.server.close();

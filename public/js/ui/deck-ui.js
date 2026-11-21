@@ -88,9 +88,9 @@ export function buildDeck(app, deck) {
     R(button('IN', { cls: 'sm', click: () => deck.loopInPress(), active: () => deck.loopIn != null && !deck.loop?.active })),
     R(button('OUT', { cls: 'sm', click: () => deck.loopOutPress() })),
     R(button('RELOOP', { cls: 'sm', click: () => deck.reloop(), active: () => deck.loop?.active })),
-    button('½', { cls: 'sm', click: () => { if (deck.loop) deck.loopHalve(); else { autoLoopBeats = Math.max(1 / 8, autoLoopBeats / 2); } } }),
+    button('½', { cls: 'sm', click: () => { if (deck.loop?.active) deck.loopHalve(); else { autoLoopBeats = Math.max(1 / 8, autoLoopBeats / 2); } } }),
     R(button(loopSize, { cls: 'sm loop-btn', click: () => deck.autoLoop(autoLoopBeats), active: () => deck.loop?.active, title: 'Auto beat loop' })),
-    button('×2', { cls: 'sm', click: () => { if (deck.loop) deck.loopDouble(); else { autoLoopBeats = Math.min(64, autoLoopBeats * 2); } } }),
+    button('×2', { cls: 'sm', click: () => { if (deck.loop?.active) deck.loopDouble(); else { autoLoopBeats = Math.min(64, autoLoopBeats * 2); } } }),
   );
   let jumpBeats = 4;
   const jumpLabel = el('span', {}, '4');
