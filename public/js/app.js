@@ -367,7 +367,14 @@ class App {
 
   /** Start a smart automix immediately using the visible library rows and saved preferences. */
   async automixNow() {
-    if (this.automix.enabled) { this.toast('Automix is already running'); return; }
+    if (this.automix.enabled) {
+      const result = this.automix.skip();
+      if (result === 'started') this.toast('Transition started');
+      else if (result === 'preparing') this.toast('Preparing the next track; transition will start as soon as it is ready');
+      else if (this.automix.transition) this.toast('A transition is already in progress');
+      else this.toast(this.automix.nextTrack() ? 'Could not start the transition yet' : 'No upcoming track queued');
+      return;
+    }
     const tracks = this.library?.rows || [];
     if (!tracks.length) { this.toast('No tracks in this view'); return; }
     const opts = this.settings.automix || {};
@@ -385,7 +392,16 @@ class App {
     const a = this.automix;
     this.amBtn.classList.toggle('active', a.enabled);
     const next = a.nextTrack();
-    this.amSkip.disabled = !a.enabled || !!a.transition;
+    this.amSkip.disabled = !a.enabled || !!a.transition || !next;
+    this.amNowBtn.title = a.enabled ? (a.transition ? 'A transition is already in progress' : next ? 'Start the queued transition now' : 'No upcoming track queued') : 'Start automix on the current library view using saved preferences';
+    this.amNowBtn.setAttribute('aria-label', a.enabled ? 'Start transition now' : 'Automix now');
+    for (const [i, deck] of (this.deckEls || []).entries()) {
+      const mixButton = deck.querySelector('.deck-mix-now');
+      if (!mixButton) continue;
+      const available = a.enabled && a.current?.index === i && !a.transition && !!next;
+      mixButton.disabled = !available;
+      mixButton.title = available ? 'Start transition to ' + next.title + ' now' : a.transition ? 'A transition is already in progress' : !a.enabled ? 'Start Automix to enable manual transitions' : !next ? 'No upcoming track queued' : 'Available on the active Automix deck';
+    }
     let info = '';
     if (a.enabled) {
       if (a.transition) info = `Mixing: ${STYLE_LABEL[a.transition.style] || a.transition.style}`;

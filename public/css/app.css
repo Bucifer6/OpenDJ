@@ -271,9 +271,21 @@ body:not(.four-decks) .deck-col > .deck:nth-child(2) { display: none; }
 .mixer-master > .strip-num { color: var(--text-2); }
 .master-vu { display: flex; gap: 3px; height: 110px; padding: 2px; border-radius: var(--r-xs); background: var(--wave-bg); }
 .master-vu .vu { height: 100%; }
-.xfader-row { display: flex; align-items: center; gap: 8px; padding: 0 4px; }
-.xfader-row .crossfader { flex: 1; }
-.xf-l { font: 800 11px var(--mono); color: var(--text-3); }
+.xfader-row { display: grid; grid-template-columns: auto minmax(180px, 1fr); align-items: center; gap: 10px; padding: 0 4px; }
+.xfader-options { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.xfader-control { display: flex; align-items: center; gap: 8px; min-width: 180px; }
+.xfader-control .crossfader { flex: 1 1 auto; width: 100%; min-width: 140px; }
+.xfader-control .fader-track { width: 100%; }
+.crossfader .fader-slot { height: 5px; background: linear-gradient(90deg, var(--deck1), var(--slot) 50%, var(--deck2)); }
+.crossfader .fader-thumb { width: 28px; }
+.xf-l { font: 800 11px var(--mono); color: var(--text-2); }
+@media (max-width: 560px) {
+  .xfader-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .xfader-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+  .xfader-options .sel { min-width: 0; width: 100%; }
+  .xfader-control { min-width: 0; width: 100%; gap: 10px; }
+  .xfader-control .crossfader { min-width: 0; }
+}
 .four-decks .mixer .knob-md { width: 28px; height: 28px; }
 
 /* ---------- sampler bar ---------- */
@@ -419,3 +431,9 @@ kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-bottom
 
 /* The EQ preset is deliberately compact so it fits beside the crossfader on smaller mixer panels. */
 .xfader-row .mixer-eq-preset { flex: 0 0 82px; width: 82px; padding-left: 4px; padding-right: 4px; }
+
+
+/* Manual Automix transition control sits below the turntable's cue/play keys. */
+.deck-mix-now { grid-column: 1 / -1; width: 100%; min-height: 30px; font-weight: 800; letter-spacing: .06em; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.deck-mix-now:not(:disabled):hover { box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 28%, transparent); }
+.deck-mix-now:disabled { opacity: .45; }

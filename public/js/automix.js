@@ -326,7 +326,7 @@ export class AutoMix extends Emitter {
     this.enabled = false; this.queue = []; this.idx = 0; this.transition = null;
     /** Per-transition style overrides (queue track object → style) and smart-mix explanations (track → text). */
     this.overrides = new Map(); this.reasons = new Map();
-    this.mode = 'order'; this.live = null; this.upcoming = null;
+    this.mode = 'order'; this.live = null; this.upcoming = null; this.forceTransitionRequested = false;
     this.engine.on('tick', () => this.tick());
   }
   get opts() { return this.app.settings.automix; }
@@ -363,7 +363,7 @@ export class AutoMix extends Emitter {
       this.reasons.set(t0, first?.reason || r.steps[0].reason);
     }
     this.mode = mode;
-    this.queue = list; this.idx = 0; this.enabled = true; this.transition = null;
+    this.queue = list; this.idx = 0; this.enabled = true; this.transition = null; this.forceTransitionRequested = false;
     const [a, b] = this.engine.decks;
     await this.engine.resume();
     const playing = [a, b].find((d) => d.playing);
@@ -387,8 +387,19 @@ export class AutoMix extends Emitter {
     this.preloadNext();
     this.emit('state');
   }
-  stop() { this.enabled = false; if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
-  skip() { if (this.enabled && !this.transition) this.beginTransition(true); }
+  stop() { this.enabled = false; this.forceTransitionRequested = false; if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
+  /** Start the next transition immediately, waiting for its deck preload if necessary. */
+  skip() {
+    if (!this.enabled || this.transition || !this.current || !this.nextTrack()) return false;
+    const incoming = this.other(this.current), next = this.nextTrack();
+    if (incoming.track?.id === next.id && !incoming.loading && !this._loading) {
+      this.beginTransition(true); return 'started';
+    }
+    this.forceTransitionRequested = true;
+    this.preloadNext();
+    this.emit('state');
+    return 'preparing';
+  }
 
   // ---------- queue editing ----------
   /** Remove queue entry i (absolute index into this.queue). */
@@ -534,6 +545,15 @@ export class AutoMix extends Emitter {
     if (this.transition) return this.stepTransition();
     if (this.tempoRamp) this.stepTempoRamp();
     const next = this.nextTrack();
+    if (this.forceTransitionRequested) {
+      const incoming = this.other(cur);
+      if (!next) { this.forceTransitionRequested = false; this.emit('state'); return; }
+      if (incoming.track?.id === next.id && !incoming.loading && !this._loading) {
+        this.forceTransitionRequested = false; this.beginTransition(true); return;
+      }
+      if (!this._loading && !incoming.loading) this.preloadNext();
+      return;
+    }
     if (!cur.playing && !cur.loading && cur.track && cur.position >= cur.duration - 0.05) {
       // track ended without a transition (e.g. next track failed to load)
       if (next) this.beginTransition(true); else this.stop();
