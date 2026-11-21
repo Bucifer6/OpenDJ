@@ -79,7 +79,7 @@ This release follows a full security audit, an in-depth QA pass and end-to-end t
 - **Mixer:**
   - 3-band EQ with kill, filter
   - Color FX (Space, Dub Echo, Noise, Crush, Jet) and quick vocal/instrumental stems
-  - 10 beat FX
+  - 10 beat FX, with post-fader echo / reverb tails (echo-outs)
   - crossfader curves, master limiter
   - mic input with talkover
   - headphone cue via a second sound card, 4-channel interface or split mode

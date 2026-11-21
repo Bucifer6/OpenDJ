@@ -45,7 +45,7 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 - Jog wheels with vinyl scratch, nudge, motor brake and backspin
 - Scrolling 3-band colour waveforms with beat grid, cue, loop and **phrase** markers, plus a full-track overview; beat grid editor with tap tempo
 - Mixer: trim, 3-band isolator EQ with kill, one-knob filter / **Color FX** (Filter, Space, Dub Echo, Noise, Crush, Jet), headphone cue, VU meters, crossfader curves, master limiter, auto-gain
-- 10 beat-synced effects per channel (Echo, Ping Pong, Reverb, Flanger, Phaser, Auto Filter, Trans, Bit Crusher, Distortion, Noise Sweep) and pad FX (brake, tape stop, backspin, echo out, filter sweep, rolls)
+- 10 beat-synced effects per channel (Echo, Ping Pong, Reverb, Flanger, Phaser, Auto Filter, Trans, Bit Crusher, Distortion, Noise Sweep) with **post-fader tails** (echo and reverb keep ringing when you close the fader, for echo-outs; switchable to pre-fader in Settings → Audio) and pad FX (brake, tape stop, backspin, echo out, filter sweep, rolls)
 - 8-slot sampler with a bank of synthesised DJ FX (air horn single blast and "ba-ba-baaah" triplet, dub siren, laser, rewind, vinyl stop, riser, downlifter, impact, noise sweep, clap, kick), rendered with Web Audio and loudness-matched; per pad: choose a sound, load your own sample, pad volume, **sync to beat**. Plus a **16-step sequencer** locked to the master deck, microphone / aux input with **talkover**, MIDI clock out
 - Headphone cueing on a second sound card, on channels 3-4 of a 4-channel controller interface, or as split cue on one stereo jack
 
