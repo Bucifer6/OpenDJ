@@ -40,9 +40,12 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 - **Key shift** (±12 semitones) and **Key Sync** to the nearest harmonically compatible key of the master deck
 - **Sync** (tempo + phase, half/double-time aware) with a **phase meter**; phase-locked hot cue jumps; **instant doubles** (drag a deck header onto another deck)
 - CDJ-style cue, 8 colour-coded **hot cues**, memory cues and **saved loops**
-- Pad modes: Hot Cue, Roll, **Slicer**, Beat Jump, **Pitch Play**, Sampler, Pad FX
+- Pad modes: Hot Cue, Roll, **Slicer**, Beat Jump, **Pitch Play**, Scale, Scratch samples, Sampler, Pad FX
 - Auto loops (⅛ to 64 beats), loop roll, beat jump, quantize, **slip**, reverse, censor
 - Jog wheels with vinyl scratch, nudge, motor brake and backspin
+- **Turntable feel:** motor start / stop times, release spin-up, platter inertia, slip-mat, jog weight, 33 / 45 / 78 rpm scratch scale, quartz lock, user-set brake and spin-back, flick to spin back, slip brake; touch and mouse scratching follow the hand's position (multitouch: a second finger holds the record)
+- **Platter looks:** Minimal, Vinyl (cover-art label, strobe, a tonearm you drag to drop the needle) and Jog display; whole-deck looks **Direct-Drive Turntable** and **Pro Media Player**; a phone **scratch view** with a crossfader strip, CUT button, scratch samples and haptics
+- Tempo glide (to 0 % or the master over 1-64 beats), ramped pitch bend, needle lock / snap, **active loops**, quantize divisions, beat jump ½-64, loop in / out adjust with the jog, scale play, deck lock, latching slip reverse
 - Scrolling 3-band colour waveforms with beat grid, cue, loop and **phrase** markers, plus a full-track overview; beat grid editor with tap tempo
 - Mixer: trim, 3-band isolator EQ with kill, one-knob filter / **Color FX** (Filter, Space, Dub Echo, Noise, Crush, Jet), headphone cue, VU meters, crossfader curves, master limiter, auto-gain
 - 10 beat-synced effects per channel (Echo, Ping Pong, Reverb, Flanger, Phaser, Auto Filter, Trans, Bit Crusher, Distortion, Noise Sweep) with **post-fader tails** (echo and reverb keep ringing when you close the fader, for echo-outs; switchable to pre-fader in Settings → Audio) and pad FX (brake, tape stop, backspin, echo out, filter sweep, rolls)
@@ -134,7 +137,7 @@ Run OpenDJ on a NAS or home server and open it from any computer's browser: pass
 
 <img src="docs/images/themes.jpg" alt="Six of the nine themes: Midnight, Neon, Club Red, Daylight, Black & Gold and High Contrast" width="100%">
 
-Nine themes in *Settings → Appearance*: Midnight, Graphite, Club Red, Neon, Ocean, Black & Gold, Forest, **Daylight** (a light theme for outdoor gigs) and **High Contrast**. Pick a custom accent colour, a waveform colour scheme, and scale the interface from 80 % to 150 % for small laptops or touchscreens.
+Nine themes in *Settings → Appearance*: Midnight, Graphite, Club Red, Neon, Ocean, Black & Gold, Forest, **Daylight** (a light theme for outdoor gigs) and **High Contrast**. Deck skins: **Direct-Drive Turntable** and **Pro Media Player**. Pick a custom accent colour, a waveform style (3-band RGB, Blue, Monochrome, **Player Blue**, **Player RGB**), and scale the interface from 80 % to 150 % for small laptops or touchscreens.
 
 <p align="center"><img src="docs/images/settings-appearance.png" alt="Settings → Appearance" width="70%"></p>
 

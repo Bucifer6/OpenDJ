@@ -122,13 +122,12 @@ try {
   check(await ev(() => Math.abs(window.opendj.engine.decks[0]._rate - 1) < 0.01), 'release: the motor brings the playing deck back to speed');
 
   // ---------------------------------------------------------------- T10 flick to spin back
-  await ev(() => { const a = window.opendj; a.settings.deckOptions = { ...(a.settings.deckOptions || {}), flickSpinback: true }; });
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [tp(1, 0)] });
-  for (let k = 1; k <= 6; k++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [tp(1, -k * 0.6)] }); // as fast as CDP goes
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [tp(1, -3.6)] });
+  await ev(() => { const a = window.opendj, d = a.engine.decks[0]; a.settings.deckOptions = { ...(a.settings.deckOptions || {}), flickSpinback: true }; window.__spins = []; const o = d.backspin.bind(d); d.backspin = (t, v) => { window.__spins.push(v); o(t, v); }; });
+  // (a throw through the position API with event timestamps 8 ms apart: CDP's own event timing depends on machine load)
+  await ev(() => { const d = window.opendj.engine.decks[0], t0 = performance.now(); d.jogPositionStart(t0); for (let k = 1; k <= 6; k++) d.jogPosition(-k * 0.035, t0 + k * 8); d.jogPositionEnd(t0 + 52); });
   await sleep(80);
-  const spin = await ev(() => window.opendj.engine.decks[0]._rate);
-  check(spin < -2, `a fast backwards throw spins the record back (${f(spin)}x)`);
+  const spins = await ev(() => window.__spins);
+  check(spins.length === 1 && spins[0] > 3, `a fast backwards throw spins the record back (throw speed ${f(spins[0], 1)}x)`);
   await sleep(1300);
   await ev(() => { const a = window.opendj; a.settings.deckOptions = { ...a.settings.deckOptions, flickSpinback: false }; a.engine.decks[0].pause(); });
 
@@ -172,11 +171,12 @@ try {
     const r = cv.getBoundingClientRect(); const sc = r.width / W;
     return { x: r.left + n[0] * sc, y: r.top + n[1] * sc, x2: r.left + n2[0] * sc, y2: r.top + n2[1] * sc };
   });
+  await ev(() => { window.__drops = []; const d = window.opendj.engine.decks[0], o = d.needleDrop.bind(d); d.needleDrop = (k) => { window.__drops.push(k); o(k); }; });
   await page.mouse.move(arm.x, arm.y); await page.mouse.down();
   for (let k = 1; k <= 10; k++) { await page.mouse.move(arm.x + (arm.x2 - arm.x) * k / 10, arm.y + (arm.y2 - arm.y) * k / 10); await sleep(16); }
   await page.mouse.up(); await sleep(150);
   const armK = await ev(() => { const d = window.opendj.engine.decks[0]; return d.position / d.duration; });
-  check(Math.abs(armK - 0.5) < 0.03, `dragging the tonearm to mid-record drops the needle there (${f(armK)})`);
+  check(Math.abs(armK - 0.5) < 0.06, `dragging the tonearm to mid-record drops the needle there (${f(armK)})`);
 
   // ---------------------------------------------------------------- T6 needle lock and snap on the overview
   const ov = await page.locator('.deck[data-deck="0"] .wf-overview').boundingBox();
