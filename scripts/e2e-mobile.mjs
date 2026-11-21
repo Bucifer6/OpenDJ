@@ -59,7 +59,7 @@ const check = (cond, msg) => { if (!cond) throw new Error(msg); console.log('ok 
 const PROFILES = [
   { name: 'iphone13', device: devices['iPhone 13'] },
   { name: 'pixel7', device: devices['Pixel 7'] },
-  { name: 'tablet-landscape', device: { ...devices['iPad Pro 11 landscape'] } },
+  { name: 'tablet-landscape', device: { ...devices['iPad (gen 7) landscape'] } }, // 1080x810: the tightest iPad landscape (QA M4)
 ];
 
 async function runProfile({ name, device }) {
@@ -229,6 +229,22 @@ async function runProfile({ name, device }) {
     check(!layout.small.length, `main touch targets are at least 44 px (${layout.small.slice(0, 6).join(', ')})`);
     check(/user-scalable=no/.test(layout.viewport) && /viewport-fit=cover/.test(layout.viewport), 'pinch zoom off, safe-area aware viewport');
     const landscape = device.viewport.width > device.viewport.height;
+    if (landscape && name.startsWith('tablet')) {
+      // iPad landscape: desktop layout at 100 %, a usable channel fader, visible meters, 36 px tap targets,
+      // nothing clipped or cut off (QA M4: 37 px fader, invisible meters, 16-21 px buttons, "KEY LC")
+      const tab = await page.evaluate(() => {
+        const vis = (e) => e.offsetParent !== null && e.getBoundingClientRect().width > 0;
+        const ch = [...document.querySelectorAll('.mixer .strip')].filter(vis);
+        const fader = Math.min(...ch.map((s) => s.querySelector('.fader-v .fader-track').getBoundingClientRect().height));
+        const vu = Math.min(...ch.map((s) => s.querySelector('.vu')?.getBoundingClientRect().height || 0));
+        const small = [...document.querySelectorAll('.deck .btn, .deck .pad-mode, .deck .panel-tab, .mixer .btn')].filter(vis).filter((e) => e.getBoundingClientRect().height < 31.5).map((e) => `${e.textContent.trim()}:${Math.round(e.getBoundingClientRect().height)}`);
+        const clipped = [...document.querySelectorAll('.deck .btn, .deck .pad-mode, .deck .panel-tab')].filter(vis).filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.textContent.trim());
+        const cut = window.opendj.deckEls.filter(vis).map((d) => { const m = d.querySelector('.deck-mid'); return m.scrollHeight - m.clientHeight; }).filter((x) => x > 1);
+        return { tablet: document.documentElement.classList.contains('tablet'), fader: Math.round(fader), vu: Math.round(vu), small: small.slice(0, 6), clipped: clipped.slice(0, 6), cut };
+      });
+      check(tab.tablet && tab.fader >= 90 && tab.vu >= 60, `iPad landscape: channel fader ${tab.fader} px, meters ${tab.vu} px`);
+      check(!tab.small.length && !tab.clipped.length && !tab.cut.length, `iPad landscape: deck and mixer buttons >= 32 px, no clipped labels, nothing cut off (${JSON.stringify(tab)})`);
+    }
     check(landscape ? layout.decks >= 2 : layout.decks === 1, `${landscape ? 'landscape: two decks side by side' : 'portrait: one deck at a time'} (${layout.decks} visible)`);
 
     // ---- mid-range phone: 4x CPU throttling with two decks playing and analysis in the background ----

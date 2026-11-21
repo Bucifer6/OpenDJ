@@ -28,12 +28,17 @@ export function applyTheme(settings) {
   // layouts in css/mobile.css) are laid out at their real size instead of being shrunk to fit the desktop layout.
   const want = (settings.uiScale || 100) / 100;
   const compact = innerWidth < 900 || innerHeight < 560;
+  // touch tablets in landscape (iPad 1024-1366 px): the desktop layout, but never shrunk below 100 % and with
+  // finger-sized controls (css/mobile.css html.tablet)
+  const tablet = !compact && !!globalThis.matchMedia?.('(pointer: coarse)').matches && innerWidth <= 1366;
   // Shrinking (< 100 %) stops at a 1100x700 effective window; enlarging (> 100 %) stops at 1280x700, so a larger
   // interface size never squeezes the desktop layout into its narrowest form (1600x900 at 125 % stays 1280 wide).
   const z = compact ? Math.max(0.5, Math.min(want, 1.5))
+    : tablet ? Math.max(1, Math.min(want, innerWidth / 1024, innerHeight / 700))
     : want > 1 ? Math.max(1, Math.min(want, Math.max(1, Math.min(innerWidth / 1280, innerHeight / 700))))
     : Math.max(0.5, Math.min(want, innerWidth / 1100, innerHeight / 700));
   root.classList.toggle('compact', compact);
+  root.classList.toggle('tablet', tablet);
   root.classList.toggle('touch', !!globalThis.matchMedia?.('(pointer: coarse)').matches);
   root.style.zoom = String(z);
   root.style.setProperty('--ui-zoom', String(z)); // layout heights divide by this so the page still fits the window
