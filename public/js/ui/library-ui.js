@@ -292,7 +292,7 @@ export class LibraryUI {
     this.header.replaceChildren(...this.cols().map((c) => el('div', {
       class: `lh ${this.sort.col === c.id ? 'sorted' : ''}`,
       onclick: () => { if (c.sort === null) return; this.sort = { col: c.id, dir: this.sort.col === c.id ? -this.sort.dir : 1 }; this.renderHeader(); this.applyView(); },
-    }, label(c), this.sort.col === c.id ? (this.sort.dir > 0 ? ' ▲' : ' ▼') : '')));
+    }, label(c), this.sort.col === c.id ? uiIcon(this.sort.dir > 0 ? 'chevron-up' : 'chevron-down', { cls: 'lh-sort' }) : '')));
   }
 
   /**

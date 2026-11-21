@@ -128,7 +128,7 @@
 :root.h860 .mic-box { flex-direction: row; flex-wrap: wrap; justify-content: center; }
 :root.h800 .deck-left .jog { max-width: 130px; }
 :root.h800 .fx-unit { padding: 3px; gap: 4px; }
-:root.h800 .fx-unit .knob-label { display: none; }
+:root.h800 .fx-unit .knob-label { font-size: 7.5px; margin-top: 2px; letter-spacing: .02em; }
 :root.h800 .fx-unit .fx-col select:nth-child(2) { display: none; }
 
 /* 4 decks: give the title room; extra-compact on short screens */
@@ -191,7 +191,7 @@
 :root.h920 body:not(.four-decks) .pad-mode { padding: 2px 0; }
 :root.h920 body:not(.four-decks) .fx-unit { padding: 3px; gap: 4px; }
 :root.h920 body:not(.four-decks) .fx-unit .fx-col { flex-direction: row; }
-:root.h920 body:not(.four-decks) .fx-unit .knob-label { display: none; }
+:root.h920 body:not(.four-decks) .fx-unit .knob-label { font-size: 7.5px; margin-top: 2px; letter-spacing: .02em; } /* compact labels: MIX / PARAM / P2 stay readable (QA m2) */
 :root.h920 body:not(.four-decks) .deck-stems { padding: 1px 0; gap: 2px; }
 .deck-mid { scrollbar-width: thin; }
 :root.h800 .deck-mid > .pad-modes { order: 1; }
@@ -491,3 +491,14 @@ body:not(.four-decks) .mixer.mx-short .mixer-master > .strip-num, body:not(.four
 :root.w1200 .pad-mode { letter-spacing: 0; font-size: 7.5px; }
 /* waveform focus keeps its single row of 8 pads on narrow windows too (two rows overflowed the short deck) */
 @media (min-width: 700px) and (min-height: 561px) { :root.w1200.h920 body.layout-waveform:not(.four-decks) .pads { grid-template-columns: repeat(8, minmax(0, 1fr)); } }
+
+/* automix queue rows: title + style / reason on the left, the two action buttons on the right (QA m7) */
+.am-q-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.am-q-title { grid-column: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.am-q-meta { grid-column: 1; display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.am-q-acts { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 4px; }
+.btn.icon-only { padding-left: 6px; padding-right: 6px; }
+/* menus: a fixed slot for the check icon of toggle / radio items */
+.ctx-check { display: inline-flex; width: 16px; margin-right: 6px; vertical-align: -2px; }
+.ctx-check .ico { width: 13px; height: 13px; }
+.lyr-kara .ico, .lyr-edit .ico { width: 13px; height: 13px; }

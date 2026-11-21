@@ -88,3 +88,4 @@ button.tag-chip:hover { border-color: var(--accent); color: #fff; }
 .lib-empty ul { margin: 0; padding-left: 18px; display: grid; gap: 7px; }
 .lib-empty li .btn { margin-right: 6px; }
 .lr .ico { width: 12px; height: 12px; vertical-align: -2px; }
+.lh .lh-sort { width: 11px; height: 11px; margin-left: 3px; vertical-align: -1px; }

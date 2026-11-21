@@ -266,13 +266,12 @@ class App {
   /** Sampler pad options: built-in sound bank, own sample, pad volume, start on the next beat. */
   samplerPadMenu(i, x, y, pickFile, save) {
     const s = this.engine.sampler, slot = s.slots[i];
-    const mark = (on) => (on ? '✓ ' : '\u2003');
     const vol = Math.round((slot.volume ?? 1) * 100);
     this.dialogs.menu(x, y, [
-      { label: 'Built-in sound', sub: s.constructor.bank.map((b) => ({ label: mark(slot.builtin && slot.sound === b.id) + b.name, action: async () => { await s.setSound(i, b.id); save(); this.engine.resume(); s.trigger(i); } })) },
+      { label: 'Built-in sound', sub: s.constructor.bank.map((b) => ({ label: b.name, checked: !!(slot.builtin && slot.sound === b.id), action: async () => { await s.setSound(i, b.id); save(); this.engine.resume(); s.trigger(i); } })) },
       { label: 'Load your own sample…', action: pickFile },
-      { label: `Pad volume (${vol} %)`, sub: [25, 50, 75, 100, 125, 150].map((v) => ({ label: mark(vol === v) + `${v} %`, action: () => { s.setPadVolume(i, v / 100); save(); } })) },
-      { label: `${mark(slot.sync)}Sync to beat (start on the next beat of the master deck)`, action: () => { s.setPadSync(i, !slot.sync); save(); } },
+      { label: `Pad volume (${vol} %)`, sub: [25, 50, 75, 100, 125, 150].map((v) => ({ label: `${v} %`, checked: vol === v, action: () => { s.setPadVolume(i, v / 100); save(); } })) },
+      { label: 'Sync to beat (start on the next beat of the master deck)', checked: !!slot.sync, action: () => { s.setPadSync(i, !slot.sync); save(); } },
       '-',
       { label: 'Preview', action: () => { this.engine.resume(); s.trigger(i); } },
     ]);
@@ -437,10 +436,10 @@ class App {
         const t = a.queue[i], st = a.styleFor(i, i === a.idx ? (a.current?.track && this.library.track(a.current.track.id)) || a.current?.track : null);
         rows.push(el('li', { class: 'am-q-item', 'data-id': t.id },
           el('div', { class: 'am-q-title' }, `${t.artist ? t.artist + ' – ' : ''}${t.title}`),
-          el('div', { class: 'am-q-meta' }, styleSelect(i), el('span', { class: 'hint' }, ` ${STYLE_LABEL[st?.style] || ''}${a.reasons.get(t) ? ` · ${a.reasons.get(t)}` : ''}`)),
+          el('div', { class: 'am-q-meta' }, styleSelect(i), el('span', { class: 'hint' }, ` ${STYLE_LABEL[st?.style] || ''}${st?.why && /too far/.test(st.why) ? ` (${st.why.split('; ').pop()})` : ''}${a.reasons.get(t) ? ` · ${a.reasons.get(t)}` : ''}`)),
           el('div', { class: 'am-q-acts' },
-            i > a.idx ? el('button', { class: 'btn xs', title: 'Play next', onclick: () => a.move(i, a.idx) }, '⤒') : null,
-            el('button', { class: 'btn xs', title: 'Remove from the queue', onclick: () => a.remove(i) }, '✕'))));
+            i > a.idx ? el('button', { class: 'btn xs icon-only', title: 'Play next', 'aria-label': 'Play next', onclick: () => a.move(i, a.idx) }, icon('chevron-up')) : null,
+            el('button', { class: 'btn xs icon-only', title: 'Remove from the queue', 'aria-label': 'Remove from the queue', onclick: () => a.remove(i) }, icon('x')))));
       }
       list.replaceChildren(...rows);
       if (!rows.length) list.append(el('li', { class: 'hint' }, 'Nothing queued. Right-click tracks → Add to automix queue, or start automix on a playlist.'));
@@ -448,7 +447,7 @@ class App {
     const panel = el('div', { class: 'am-queue-panel seq-panel', role: 'dialog', 'aria-label': 'Automix queue' },
       el('div', { class: 'seq-head' }, el('b', {}, 'AUTOMIX QUEUE'),
         el('button', { class: 'btn sm', onclick: () => a.skip(), title: 'Mix to the next track now' }, 'Mix now'),
-        el('button', { class: 'btn sm', onclick: () => this.toggleQueuePanel() }, '✕')),
+        el('button', { class: 'btn sm icon-only', title: 'Close', 'aria-label': 'Close', onclick: () => this.toggleQueuePanel() }, icon('x'))),
       head, list);
     panel.render = render;
     render();
@@ -471,9 +470,21 @@ class App {
       case 'roll2': down ? deck.rollOn(1 / 8) : deck.rollOff(); break;
       case 'echoOut':
         if (!down) break;
+      {
+        // the user's beat FX settings come back once the echo tail has died away (unless they took the FX over)
+        const saved = this._echoOutSaved || { fxType: ch.state.fxType, fxBeats: ch.state.fxBeats, fxParam: ch.state.fxParam, fxMix: ch.state.fxMix, fxOn: ch.state.fxOn };
+        this._echoOutSaved = saved;
         ch.set('fxType', 'echo'); ch.set('fxBeats', 0.75); ch.set('fxParam', 0.8); ch.set('fxMix', 0.7); ch.set('fxOn', true);
-        setTimeout(() => { ch.set('fxOn', false); deck.pause(); }, deck.beatLen * 1000);
-        setTimeout(() => ch.set('fxParam', 0.5), deck.beatLen * 8000);
+        const ours = () => ch.state.fxType === 'echo' && ch.state.fxBeats === 0.75 && ch.state.fxMix === 0.7;
+        setTimeout(() => { if (ours()) ch.set('fxOn', false); deck.pause(); }, deck.beatLen * 1000);
+        clearTimeout(this._echoOutT);
+        this._echoOutT = setTimeout(() => {
+          this._echoOutSaved = null;
+          if (!ours() || ch.state.fxOn) return; // changed meanwhile: leave the user's new settings alone
+          for (const k of ['fxType', 'fxBeats', 'fxParam', 'fxMix']) ch.set(k, saved[k]);
+          if (saved.fxOn) ch.set('fxOn', true);
+        }, deck.beatLen * 8000);
+      }
         break;
       case 'filterSweep': {
         clearInterval(ch._sweep);

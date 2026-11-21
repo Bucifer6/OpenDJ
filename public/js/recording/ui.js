@@ -223,7 +223,7 @@ function openPanel(app, ctl, tab = 'record') {
       chk('', t.enabled !== false, set('enabled')),
       inp(t.name, set('name'), { style: { flex: 1 } }),
       el('span', { class: 'bc-type' }, t.type === 'rtmp' ? 'RTMP' : t.type === 'shoutcast' ? 'Shoutcast' : 'Icecast'),
-      el('button', { class: 'btn sm danger', onclick: remove, title: 'Remove' }, '✕'));
+      el('button', { class: 'btn sm danger', onclick: remove, title: 'Remove' }, icon('x')));
     let body;
     if (t.type === 'rtmp') {
       const urlIn = inp(t.rtmpUrl, set('rtmpUrl'), { placeholder: 'rtmp://…' });

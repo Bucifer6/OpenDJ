@@ -67,7 +67,9 @@ export class Dialogs {
     document.querySelector('.ctx-menu')?.remove();
     const build = (list) => el('div', { class: 'ctx-menu' }, ...list.map((it) => {
       if (it === '-') return el('div', { class: 'ctx-sep' });
-      const row = el('div', { class: `ctx-item ${it.danger ? 'danger' : ''} ${it.sub ? 'has-sub' : ''}` }, it.label);
+      // `checked` (true / false): a check icon slot in front of the label (radio / toggle items)
+      const row = el('div', { class: `ctx-item ${it.danger ? 'danger' : ''} ${it.sub ? 'has-sub' : ''}`, role: it.checked !== undefined ? 'menuitemcheckbox' : null, 'aria-checked': it.checked !== undefined ? String(!!it.checked) : null },
+        it.checked !== undefined ? el('span', { class: 'ctx-check' }, it.checked ? icon('check') : '') : null, it.label);
       if (it.sub) {
         const sub = build(it.sub); sub.classList.add('ctx-sub'); row.append(sub);
         // keep submenus inside the window (flip left / shift up when they would overflow)

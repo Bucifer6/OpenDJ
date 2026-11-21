@@ -300,6 +300,18 @@ try {
   });
   check(lib.same && lib.count < 80 && lib.transform && !lib.rowTpl && !!lib.varTpl, `library rows are recycled while scrolling (${JSON.stringify(lib)})`);
 
+  // m3: the Echo Out pad gives the user's beat FX settings back after the tail
+  const eo = await page.evaluate(async (id) => {
+    const app = window.opendj, d = app.engine.decks[0], ch = app.engine.channels[0];
+    await app.loadTrack(0, id); d.setGrid(240, 0); d.play();
+    ch.set('fxType', 'flanger'); ch.set('fxMix', 0.3); ch.set('fxParam', 0.4); ch.set('fxBeats', 1);
+    app.padFx(d, 'echoOut', true);
+    const during = ch.state.fxType;
+    await new Promise((r) => setTimeout(r, d.beatLen * 8000 + 400));
+    return { during, after: { fxType: ch.state.fxType, fxMix: ch.state.fxMix, fxParam: ch.state.fxParam, fxBeats: ch.state.fxBeats, fxOn: ch.state.fxOn } };
+  }, ids.Third);
+  check(eo.during === 'echo' && eo.after.fxType === 'flanger' && eo.after.fxMix === 0.3 && eo.after.fxParam === 0.4 && eo.after.fxBeats === 1 && !eo.after.fxOn, `Echo Out pad restores the beat FX afterwards (${JSON.stringify(eo)})`);
+
   check(errors.length === 0, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
 } catch (e) { console.error(e); failed = true; }
 await browser.close(); app.server.close();

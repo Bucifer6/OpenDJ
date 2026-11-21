@@ -1,5 +1,6 @@
 // Library & prep dialogs: track info editor, smart playlist builder, importers, relocate, duplicates, backup/restore.
 import { el } from '../util.js';
+import { icon } from './icons.js';
 import { openCdjExport } from '../cdj/export-dialog.js';
 import { api } from '../api.js';
 import { platform, unavailable } from '../platform.js';
@@ -190,7 +191,7 @@ export class LibraryDialogs {
         fieldSel.addEventListener('change', () => { const nf = F.get(fieldSel.value); r.field = nf.id; if (nf.type !== f.type) { r.value = ''; delete r.value2; } render(); preview(); });
         opSel.addEventListener('change', () => { r.op = opSel.value; render(); preview(); });
         return el('div', { class: 'sm-rule' }, fieldSel, opSel, valueCtrl(r),
-          el('button', { class: 'btn xs', title: 'Remove rule', type: 'button', onclick: () => { smart.rules.splice(i, 1); render(); preview(); } }, '✕'));
+          el('button', { class: 'btn xs', title: 'Remove rule', type: 'button', onclick: () => { smart.rules.splice(i, 1); render(); preview(); } }, icon('x')));
       }));
     };
     matchSel.addEventListener('change', preview); limitIn.addEventListener('input', preview);

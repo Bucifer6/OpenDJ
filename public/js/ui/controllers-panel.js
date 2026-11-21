@@ -1,6 +1,7 @@
 // Settings → Controllers: every connected controller (MIDI, HID, gamepad), its mapping, MIDI learn, Mixxx mapping
 // search/import, guided setup, MIDI clock output.
 import { el } from '../util.js';
+import { icon } from './icons.js';
 import { describeKey } from '../midi/midi.js';
 import { PRESETS } from '../midi/presets.js';
 import { listMixxxMappings, matchMappings, downloadMixxxMapping, mappingTitle } from '../midi/mixxx-online.js';
@@ -95,7 +96,7 @@ export function controllersPanel(app) {
         el('span', { class: 'mr-map', title: desc }, desc || '—'),
         el('button', { class: 'btn xs', disabled: !dev, onclick: () => { learning ? midi.cancelLearn() : midi.learn(dev, t.id); renderTable(); } }, learning ? 'Listening…' : 'Learn'),
         entries.length ? el('button', { class: 'btn xs', title: 'Invert', onclick: () => { for (const e of entries) e.invert = !e.invert; midi.save(); renderTable(); } }, '⇅') : el('span'),
-        entries.length ? el('button', { class: 'btn xs', title: 'Clear', onclick: () => { map.entries = map.entries.filter((e) => e.target !== t.id); midi.save(); renderTable(); renderDevices(); } }, '✕') : el('span'));
+        entries.length ? el('button', { class: 'btn xs', title: 'Clear', onclick: () => { map.entries = map.entries.filter((e) => e.target !== t.id); midi.save(); renderTable(); renderDevices(); } }, icon('x')) : el('span'));
     }));
   }
 
