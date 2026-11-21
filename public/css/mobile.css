@@ -189,3 +189,20 @@ html.touch.compact .xfader-row { flex-wrap: wrap; row-gap: 6px; }
 html.touch.compact .xfader-row .crossfader { order: -1; flex: 1 0 100%; }
 html.touch.compact .xfader-row .xf-l { display: none; }
 html.touch.compact .xfader-row .sel { flex: 1 1 0; min-width: 0; }
+
+/* touch tablets at short / narrow sizes (1024x576, 1280x720 landscape): the deck's left column holds the platter,
+   CUE / PLAY and MIX NOW without spilling into the controls next to it */
+html.tablet body:not(.four-decks) .deck-left { container-type: size; min-width: 0; }
+html.tablet body:not(.four-decks) .deck-left .jog { flex: none; width: min(100cqw, max(0px, 100cqh - 176px)); max-width: 220px; }
+html.tablet body:not(.four-decks) .deck-left .transport { min-width: 0; grid-template-columns: 1fr; justify-items: center; gap: 4px; }
+html.tablet body:not(.four-decks) .deck-left .btn.big { height: auto; width: min(100%, 52px); min-width: 44px; aspect-ratio: 1; }
+html.tablet .deck .transport .deck-mix-now { min-width: 0; overflow: hidden; font-size: 10px; letter-spacing: 0; padding: 0 2px; }
+html.tablet.h920 body:not(.four-decks) .deck .deck-panel[data-panel="cues"] .pads { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: 44px; max-height: none; }
+html.tablet.h920 body:not(.four-decks) .deck-toggles { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+/* narrow tablet decks: no room for the SCRATCH chip in the header; a double-tap on the deck header opens the scratch view */
+html.tablet.w1200 .deck .scratch-view-btn { display: none; }
+/* sequencer header on narrow screens: wrap the row instead of squeezing the hint to one word per line */
+.seq-head { flex-wrap: wrap; row-gap: 4px; }
+.seq-head .hint { min-width: 0; }
+.seq-head > .hint:first-of-type { flex: 1 1 14em; }
+html.compact .seq-head > .hint:first-of-type { flex-basis: 100%; order: 10; }

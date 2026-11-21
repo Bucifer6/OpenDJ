@@ -106,6 +106,8 @@ async function runProfile({ name, device }) {
     check(mp3 && mp3.artist === 'Mobile Artist' && mp3.album === 'Phone Sessions' && mp3.hasCover, `ID3 tags + cover art read in the browser (${JSON.stringify(mp3)})`);
     check(tags.find((t) => t.title === 'Tram Loop')?.artist === 'Third Artist', 'title / artist from the file name when there are no tags');
     check(tags.every((t) => /^music\/[0-9a-f]{16}\.(mp3|m4a|wav)$/.test(t.path)), 'files copied into app storage (music/<id>.<ext>)');
+    // (the row art is set lazily: wait for it instead of reading it once)
+    await page.waitForFunction(() => [...document.querySelectorAll('.lib-rows .art')].some((e) => /blob:/.test(getComputedStyle(e).backgroundImage)), null, { timeout: 5000 }).catch(() => {});
     const coverSrc = await page.evaluate(() => { const t = [...window.opendj.library.tracks.values()].find((x) => x.hasCover); return window.opendj.library.app && (document.querySelector('.lib-rows .art') ? getComputedStyle([...document.querySelectorAll('.lib-rows .lr')].find((r) => r.textContent.includes(t.title)).querySelector('.art')).backgroundImage : ''); });
     check(/blob:/.test(coverSrc), `cover shown from app storage (${coverSrc.slice(0, 40)}…)`);
 

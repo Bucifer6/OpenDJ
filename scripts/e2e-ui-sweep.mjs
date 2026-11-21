@@ -493,6 +493,42 @@ try {
   }
   await setUi({ layout: 'classic', theme: 'midnight', zoom: 100 });
   check(await ev(() => !document.querySelector('.sk-root') && document.querySelectorAll('.waves .wave-row').length === 4), 'back to a normal theme: standard layout and waveforms restored');
+  // ---------- touch tablets at short sizes and phone width (store-screenshot bugs): no overlapping deck controls,
+  // the platter / CUE / PLAY / MIX NOW stay in their column, the sequencer hint wraps as a line, not word by word ----------
+  {
+    const tctx = await browser.newContext({ viewport: { width: 1024, height: 576 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+    const tp = await tctx.newPage();
+    tp.on('pageerror', (e) => errors.push(`pageerror (touch): ${e}`));
+    await tp.goto(app.url); await tp.waitForFunction(() => window.opendj?.ready, null, { timeout: 30000 });
+    const deckOverlaps = () => tp.evaluate(() => {
+      const out = []; const vis = (e) => e.offsetParent && e.getBoundingClientRect().width > 1;
+      for (const d of document.querySelectorAll('.deck')) {
+        if (!vis(d)) continue;
+        const els = [...d.querySelectorAll('.btn, .knob, .pad, .panel-tab, .pad-mode, select, .jog, .fader-track')].filter(vis).filter((e) => !e.parentElement.closest('.btn, .knob, .pad'));
+        for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) {
+          if (els[i].contains(els[j]) || els[j].contains(els[i])) continue;
+          const A = els[i].getBoundingClientRect(), B = els[j].getBoundingClientRect(), w = Math.min(A.right, B.right) - Math.max(A.left, B.left), h = Math.min(A.bottom, B.bottom) - Math.max(A.top, B.top);
+          if (w > 1.5 && h > 1.5) out.push(`${els[i].className.split(' ').slice(0, 3).join('.')}"${els[i].textContent.trim().slice(0, 10)}" x ${els[j].className.split(' ').slice(0, 3).join('.')}"${els[j].textContent.trim().slice(0, 10)}"`);
+        }
+        const left = d.querySelector('.deck-left')?.getBoundingClientRect();
+        for (const e of d.querySelectorAll('.deck-left .btn')) if (vis(e) && left) { const r = e.getBoundingClientRect(); if (r.right > left.right + 1 || r.left < left.left - 1) out.push(`${e.className.split(' ').slice(0, 3).join('.')} leaves the platter column`); }
+      }
+      return [...new Set(out)];
+    });
+    for (const [w, h] of [[1024, 576], [1280, 720], [1080, 810]]) for (const layout of ['classic', 'performance']) for (const panel of ['cues', 'loops', 'fx', 'platter']) {
+      await tp.setViewportSize({ width: w, height: h });
+      await tp.evaluate(([layout, panel]) => { window.opendj.setLayout(layout, false); window.opendj.engine.decks.slice(0, 2).forEach((d) => d.showPanel(panel)); }, [layout, panel]);
+      await tp.waitForTimeout(250);
+      const o = await deckOverlaps();
+      check(!o.length, `touch tablet ${w}x${h} ${layout} ${panel} panel: deck controls don't overlap${o.length ? ' — ' + o.slice(0, 4).join('; ') : ''}`);
+    }
+    await tp.setViewportSize({ width: 390, height: 844 });
+    await tp.evaluate(() => window.opendj.toggleSequencer()); await tp.waitForTimeout(300);
+    const hint = await tp.evaluate(() => { const h = document.querySelector('.seq-head .hint'); if (!h) return null; const r = h.getBoundingClientRect(), lh = parseFloat(getComputedStyle(h).lineHeight) || 14; return { lines: Math.round(r.height / lh), w: Math.round(r.width) }; });
+    check(hint && hint.lines <= 3 && hint.w > 120, `phone width: the sequencer hint reads as a line, not one word per line (${JSON.stringify(hint)})`);
+    await tctx.close();
+  }
+
   check(errors.length === 0, `no page errors, console errors or unhandled rejections${errors.length ? ': ' + errors.slice(0, 5).join(' | ') : ''}`);
 } catch (e) { console.error(e); failed = true; }
 await browser.close(); app.server.close();
