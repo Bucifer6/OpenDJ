@@ -23,6 +23,12 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.4.3
+
+- Added Silverline and Walnut Hi-Fi and refreshed Club Decks, Vinyl Booth and Pad Performance.
+- Choose Brushed Metal, Digital Jog, Vinyl Turntable or OpenDJ Classic in Settings → Appearance. Each skin remembers its own jog wheel style.
+- Vinyl Turntable adds a grooved record, spindle, strobe dots and a tonearm that moves during playback.
+
 ### New in 0.4.2
 - MIX NOW on the active deck and wider crossfader travel.
 - 111 downloadable samples and a bundled recorded air horn.
