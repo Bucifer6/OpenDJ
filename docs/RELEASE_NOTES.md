@@ -23,6 +23,16 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.5
+
+#### Voice, dedications and remote control
+- **MC voice in the mix:** spoken announcements now play through the master output, so they are heard, recorded and broadcast, with the music ducked underneath. OpenDJ uses your system's speech engine (Windows speech, macOS voices, or espeak-ng on Linux); nothing is downloaded.
+- **Live dedications:** press **MC** in the mixer, write "For Ana and Mihai…", pick English or Română, and it is spoken over the mix at the next phrase. It can also appear on screen, on the video output and in your stream's "now playing". Without a Romanian voice, OpenDJ tells you how to add one and shows the text instead.
+- **Local AI planning (desktop):** clearer messages when Ollama isn't running, the model isn't installed, or it answers badly; installed models are suggested; the spoken introduction goes into the mix.
+- **Remote control for AI assistants (MCP):** off by default. Turn it on in **Settings → Remote control** to let an assistant such as Claude read OpenDJ's status, search your library, control decks, automix, crossfader, sampler and dedications, and start or stop your saved stream targets. It uses a token you copy once and permissions you choose, listens on this computer only unless you change it, and every action is logged. It never sees your files, folders or passwords.
+- **One-click AUTOMIX:** AUTOMIX starts a smart mix of your queue or the view you're looking at straight away; Shift-click or right-click it for the options. The separate AUTOMIX NOW button is gone; each deck keeps **MIX NOW**.
+- **Fixes:** sampler sounds, the sequencer pattern and other preferences now survive restarting the desktop app; a wider crossfader in the mixer; stopping automix while it loads no longer starts the track anyway.
+
 ### New in 0.4.2
 - MIX NOW on the active deck and wider crossfader travel.
 - 111 downloadable samples and a bundled recorded air horn.

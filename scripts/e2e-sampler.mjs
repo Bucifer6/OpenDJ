@@ -146,6 +146,68 @@ try {
   check(ui.padText[0] === 'Air Horn ×3', `pad label follows the chosen sound (${ui.padText[0]})`);
   check(ui.quant > 0.2 && ui.quant < 0.3 && ui.free === 0, `sync-to-beat pads start on the next beat (${ui.quant.toFixed(3)} s), others at once`);
   check(errors.length === 0, `no page errors ${errors.join(' | ')}`);
+
+  // ---- the recorded air horn, the CC0 library download, and both surviving a restart (server + browser) ----
+  // Same port and the same browser profile on both runs, as the desktop app: browser storage is per origin.
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'opendj-e2e-sampler-profile-'));
+  const dataDir = path.join(tmp, 'restart-data');
+  const PORT = 7902;
+  const fakeFlac = (() => { // the pinned catalogue URL is answered locally (no network in CI): a 0.4 s 60 Hz thump as WAV
+    const sr = 44100, n = Math.round(sr * 0.4), b = Buffer.alloc(44 + n * 2);
+    b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(sr, 24); b.writeUInt32LE(sr * 2, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(n * 2, 40);
+    for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(0.8 * Math.sin(2 * Math.PI * 60 * i / sr) * Math.exp(-i / sr * 8) * 32767), 44 + i * 2);
+    return b;
+  })();
+  const fetched = [];
+  const run = async (fn) => {
+    const srv = await start({ port: PORT, dataDir });
+    const ctx = await chromium.launchPersistentContext(profile, { headless: true });
+    await ctx.route('https://raw.githubusercontent.com/**', (r) => { fetched.push(r.request().url()); r.fulfill({ status: 200, contentType: 'audio/flac', body: fakeFlac }); });
+    await ctx.route('https://evil.example/**', (r) => { fetched.push(r.request().url()); r.fulfill({ status: 200, body: fakeFlac }); });
+    const pg = ctx.pages()[0] || await ctx.newPage();
+    pg.on('pageerror', (e) => errors.push(String(e)));
+    try {
+      await pg.goto(srv.url); await pg.waitForFunction(() => window.opendj?.ready, null, { timeout: 20000 });
+      return await fn(pg);
+    } finally { await ctx.close(); srv.shutdown(); srv.server.closeAllConnections?.(); await new Promise((r) => srv.server.close(r)); }
+  };
+  const first = await run((pg) => pg.evaluate(async () => {
+    const a = window.opendj, s = a.engine.sampler, { SAMPLE_CATALOG } = await import('/js/audio/sample-catalog.js');
+    await s.ready;
+    const horn = s.slots[0].buffer, d = horn.getChannelData(0); let pk = 0; for (const v of d) pk = Math.max(pk, Math.abs(v));
+    const entry = SAMPLE_CATALOG.find((x) => x.id === 'bd_808');
+    const r = await s.loadCatalogSample(1, { id: 'bd_808' });
+    let refused = '';
+    try { await s.loadCatalogSample(2, { id: 'evil', name: 'x', url: 'https://evil.example/x.flac' }); } catch (e) { refused = e.message; }
+    let refused2 = '';
+    try { await s.loadCatalogSample(2, { ...entry, id: 'not-in-catalogue', url: 'https://evil.example/y.flac' }); } catch (e) { refused2 = e.message; }
+    await a.setSetting('sampler', s.config());
+    // the browser dialog: 111 sounds, search filters
+    a.openSamplerCatalog(3, () => {});
+    await new Promise((res) => setTimeout(res, 200));
+    const all = document.querySelectorAll('.sample-catalog-item').length;
+    const inp = document.querySelector('.sample-catalog-modal input[type=search]'); inp.value = 'vinyl'; inp.dispatchEvent(new Event('input'));
+    const vinyl = document.querySelectorAll('.sample-catalog-item').length;
+    document.querySelector('.sample-catalog-modal .modal-x, .overlay .modal-x')?.click();
+    return { hornDur: horn.duration, hornPeakDb: 20 * Math.log10(pk), hornName: s.slots[0].name, saved: r.saved, name: s.slots[1].name, creator: s.slots[1].creator, refused, refused2, all, vinyl, title: document.querySelectorAll('.sampler-bar .spad')[1]?.title };
+  }));
+  check(first.hornName === 'Air Horn' && first.hornDur > 0.4 && first.hornDur < 1, `pad 1 plays the recorded air horn (${first.hornDur.toFixed(2)} s)`);
+  check(first.hornPeakDb <= -0.9, `recorded air horn mastered to the bank's -1 dBFS ceiling (peak ${first.hornPeakDb.toFixed(2)} dBFS; the file peaks at 0 dBFS)`);
+  check(first.saved && first.name === 'Bd 808' && first.creator, `CC0 sample downloaded to pad 2 and stored (${first.name} by ${first.creator})`);
+  check(/^Bd 808 — .+ · CC0 1\.0 · https:\/\/freesound\.org\//.test(first.title || ''), `pad tooltip credits the creator and source (${first.title})`);
+  check(/Invalid sample selection/.test(first.refused) && /Invalid sample selection/.test(first.refused2) && !fetched.some((u) => u.includes('evil.example')), 'only catalogue entries are downloaded, from their pinned URL (other URLs never fetched)');
+  check(fetched.length === 1 && fetched[0].includes('/ed4b23ccb77f0845cbad2b8d911cd36a455ec597/etc/samples/bd_808.flac'), 'download went to the pinned Sonic Pi commit');
+  check(first.all === 111 && first.vinyl >= 3 && first.vinyl < 111, `sound library lists ${first.all} sounds, search narrows to ${first.vinyl}`);
+  const second = await run((pg) => pg.evaluate(async () => {
+    const s = window.opendj.engine.sampler; await s.ready;
+    for (let k = 0; k < 50 && !s.slots[1].creator; k++) await new Promise((r) => setTimeout(r, 100));
+    return { hornDur: s.slots[0].buffer?.duration, horn: s.slots[0].builtin && s.slots[0].sound === 'airhorn', name: s.slots[1].name, creator: s.slots[1].creator, license: s.slots[1].license, buf: s.slots[1].buffer?.duration, builtin: s.slots[1].builtin };
+  }));
+  check(second.horn && second.hornDur > 0.4 && second.hornDur < 1, 'after a restart: pad 1 is still the recorded air horn');
+  check(second.name === 'Bd 808' && second.creator === first.creator && second.license === 'CC0 1.0' && second.buf > 0.3 && !second.builtin, `after a restart: the downloaded sample is still on pad 2 with its credits (${JSON.stringify(second)})`);
+  check(fetched.length === 1, 'after a restart: restored from browser storage, not downloaded again');
+  fs.rmSync(profile, { recursive: true, force: true });
+  check(errors.length === 0, `no page errors ${errors.join(' | ')}`);
   console.log(`\nWAVs${ffmpeg ? ' + spectrogram PNGs' : ''} in ${out}`);
 } catch (e) {
   failed++; console.error(e);

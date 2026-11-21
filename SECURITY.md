@@ -42,6 +42,27 @@ and you are credited unless you ask not to be.
   (a missing entry or mismatch is refused), re-checks the hash before starting an installer, and only after the
   user clicks *Restart to update*. The builds are not code-signed, so the checksum list on the release is the trust anchor.
 
+- **Remote control for AI assistants (MCP)** is **off by default** (Settings → Remote control). Turning it on
+  creates one random per-install token (256 bit, `odj_mcp_…`), shown once and stored only as a SHA-256 hash
+  (`mcp-token.json`, `0600`); a new token disconnects every client. Permissions: *read* (status, library search),
+  *playback* (decks, automix, crossfader, sampler, dedications), *broadcast* (start / stop configured targets by id).
+  The desktop app and `npm run web` serve it on a separate listener bound to `127.0.0.1` (default port 47800); binding
+  it to all networks is an explicit choice behind a warning, and then the token is the only protection. Hosted mode
+  has no separate listener: `POST /api/mcp/rpc` on the main server needs the login session **and** the token. The
+  endpoint refuses browser `Origin`s, checks `Host` on loopback (DNS rebinding), limits bodies to 64 KB, rate-limits
+  requests (120/min), control actions (30/min) and failed tokens (10/min), validates every tool input against a
+  closed schema, and keeps an audit log (Settings → Remote control, and `mcp-audit.log`; tokens are never logged).
+  Tools return metadata only: no file paths, source URLs, settings or credentials; broadcast targets are used by id
+  and their passwords / stream keys never leave the server. The settings, scopes and token can only be changed
+  through OpenDJ's own UI (the normal API checks: Origin, Host, launch token or login).
+- **Speech (MC voice, dedications)**: the server renders text with the operating system's speech engine (SAPI via
+  PowerShell, macOS `say`, `espeak-ng`). The text goes through stdin only, never a command line or shell; at most
+  500 characters, one at a time, 30 per minute, time and size limits.
+- **Local AI planning (desktop)** talks only to Ollama on `127.0.0.1:11434` (IPC accepted from the app window only).
+  The model's answer is treated as untrusted data: size-capped, reduced to a track order and a plain-text sentence.
+- The desktop app keeps its local server port between launches (`server-port.json`) so the page's browser storage
+  survives restarts; the per-launch token still guards every request.
+
 ## Verifying downloads
 
 Each release includes `SHA256SUMS.txt`. Check a download before running it:

@@ -271,13 +271,18 @@ body:not(.four-decks) .deck-col > .deck:nth-child(2) { display: none; }
 .mixer-master > .strip-num { color: var(--text-2); }
 .master-vu { display: flex; gap: 3px; height: 110px; padding: 2px; border-radius: var(--r-xs); background: var(--wave-bg); }
 .master-vu .vu { height: 100%; }
-.xfader-row { display: grid; grid-template-columns: auto minmax(180px, 1fr); align-items: center; gap: 10px; padding: 0 4px; }
-.xfader-options { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.xfader-control { display: flex; align-items: center; gap: 8px; min-width: 180px; }
-.xfader-control .crossfader { flex: 1 1 auto; width: 100%; min-width: 140px; }
+/* The options and the crossfader share one line only when the crossfader still gets 260 px of track; in the usual
+   340 px mixer the crossfader wraps onto its own full-width line (a 150 px crossfader next to three squashed
+   selects was hard to ride, and the selects lost their labels). Flex wrap follows the mixer's width, not the
+   window's, so wide windows with a narrow mixer are handled too. */
+.xfader-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 0 4px; }
+.xfader-options { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
+.xfader-options .sel { flex: 1 1 0; min-width: 64px; }
+.xfader-control { display: flex; align-items: center; gap: 8px; flex: 999 1 300px; min-width: 0; }
+.xfader-control .crossfader { flex: 1 1 auto; width: 100%; min-width: 0; }
 .xfader-control .fader-track { width: 100%; }
 .crossfader .fader-slot { height: 5px; background: linear-gradient(90deg, var(--deck1), var(--slot) 50%, var(--deck2)); }
-.crossfader .fader-thumb { width: 28px; }
+.crossfader { --cap: 28px; } /* the thumb width IS --cap: a fixed 28 px thumb on a 26 px --cap ran 2 px past the track end */
 .xf-l { font: 800 11px var(--mono); color: var(--text-2); }
 @media (max-width: 560px) {
   .xfader-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
@@ -430,13 +435,17 @@ kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-bottom
 
 
 /* The EQ preset is deliberately compact so it fits beside the crossfader on smaller mixer panels. */
-.xfader-row .mixer-eq-preset { flex: 0 0 82px; width: 82px; padding-left: 4px; padding-right: 4px; }
+.xfader-row .mixer-eq-preset { flex: 1 1 0; min-width: 72px; padding-left: 4px; padding-right: 4px; }
 
 
 /* Manual Automix transition control sits below the turntable's cue/play keys. */
 .deck-mix-now { grid-column: 1 / -1; width: 100%; min-height: 30px; font-weight: 800; letter-spacing: .06em; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .deck-mix-now:not(:disabled):hover { box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 28%, transparent); }
 .deck-mix-now:disabled { opacity: .45; }
+/* 4 decks: the transport column is 52 px; "MIX NOW" with its letter-spacing was wider and pushed CUE / PLAY into
+   the hot-cue pads (e2e-ui-sweep, 1920x1080 at 80 %). Two compact lines instead. */
+.four-decks .transport > * { min-width: 0; }
+.four-decks .deck-mix-now { font-size: 9px; letter-spacing: 0; padding: 2px 1px; white-space: normal; line-height: 1.05; min-height: 26px; }
 
 /* Licensed one-shot sample browser */
 .sample-catalog-body { display: flex; flex-direction: column; gap: 10px; }
@@ -448,3 +457,23 @@ kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-bottom
 .sample-catalog-name { font-weight: 750; }
 .sample-catalog-credit { color: var(--text-2); font-size: var(--fs-xs); }
 @media (max-width: 520px) { .sample-catalog-filters { grid-template-columns: 1fr; } .sample-catalog-list { grid-template-columns: 1fr; } }
+
+/* Live dedications: the MC button's queue count and the on-screen banner while one plays */
+.mc-btn[data-count]:not([data-count=""])::after { content: attr(data-count); margin-left: 3px; font-size: 9px; color: var(--accent); }
+.dedication-banner { position: fixed; left: 50%; bottom: 18%; transform: translateX(-50%); z-index: 60; max-width: min(760px, 86vw); display: flex; gap: 12px; align-items: baseline; padding: 12px 20px; border-radius: 12px; background: color-mix(in srgb, var(--panel) 92%, transparent); border: 1px solid var(--accent); box-shadow: 0 10px 34px rgba(0,0,0,.55); pointer-events: none; animation: ded-in .35s ease-out; }
+.dedication-tag { font: 800 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); white-space: nowrap; }
+.dedication-text { font-size: 18px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+@keyframes ded-in { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) { .dedication-banner { animation: none; } }
+.dedication-input { width: 100%; resize: vertical; min-height: 64px; }
+.dedication-list { margin: 0; padding-left: 18px; max-height: 160px; overflow: auto; }
+.dedication-list li { padding: 3px 0; }
+.dedication-list .ded-playing .ded-text { color: var(--accent); font-weight: 600; }
+.dedication-voice { margin: 4px 0; }
+
+/* Settings > Remote control */
+.remote-settings .warn { color: var(--amber, #f0b429); font-weight: 600; }
+.remote-settings .remote-token .inp { flex: 1; font-family: var(--mono); font-size: 11px; }
+.remote-audit { margin: 4px 0 0; padding-left: 18px; max-height: 180px; overflow: auto; font-size: 11px; }
+.remote-audit li.bad { color: var(--red); }
+.remote-audit code { color: var(--text-2); }

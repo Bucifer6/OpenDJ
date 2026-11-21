@@ -54,14 +54,15 @@ export function buildMixer(app) {
   const byCh = []; let cur = null; // per-channel renderers so one change only re-renders its own strip
   const R = (c) => { renderers.push(c); if (cur) cur.push(c); return c; };
   const EQ_PRESETS = [
-  { id: 'flat', label: 'Flat EQ', values: [0, 0, 0] },
-  { id: 'warm', label: 'Warm', values: [0.12, -0.04, -0.08] },
-  { id: 'bright', label: 'Bright', values: [-0.08, 0.04, 0.16] },
-  { id: 'vocal', label: 'Vocal focus', values: [-0.12, 0.16, 0.08] },
-  { id: 'bass-light', label: 'Bass light', values: [-0.22, 0.05, 0.1] },
-  { id: 'custom', label: 'Custom', values: null },
-];
-const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
+    { id: 'flat', label: 'Flat EQ', values: [0, 0, 0] },
+    { id: 'warm', label: 'Warm', values: [0.12, -0.04, -0.08] },
+    { id: 'bright', label: 'Bright', values: [-0.08, 0.04, 0.16] },
+    { id: 'vocal', label: 'Vocal focus', values: [-0.12, 0.16, 0.08] },
+    { id: 'bass-light', label: 'Bass light', values: [-0.22, 0.05, 0.1] },
+    { id: 'custom', label: 'Custom', values: null },
+  ];
+  const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
+  let mcBtn = null;
   const stripsWrap = el('div', { class: 'mixer-strips' });
 
   for (const i of order) {
@@ -104,13 +105,16 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     el('div', { class: 'mic-box' },
       R(button('MIC', { cls: 'xs mic-on', click: () => app.toggleMic(), active: () => eng.micOn, title: 'Microphone / aux input on/off' })),
       R(knob({ label: 'MIC', min: 0, max: 1, def: 0.7, bipolar: false, get: () => eng.micVolume ?? 0.7, set: (v) => eng.setMicVolume(v), size: 'sm' })),
-      R(button('TALK', { cls: 'xs talk', click: () => eng.setTalkover(!eng.talkover), active: () => eng.talkover, title: 'Talkover: duck the music while you speak' }))),
+      R(button('TALK', { cls: 'xs talk', click: () => eng.setTalkover(!eng.talkover), active: () => eng.talkover, title: 'Talkover: duck the music while you speak' })),
+      (mcBtn = R(button('MC', { cls: 'xs mc-btn', click: () => app.dedications?.open(), active: () => !!app.dedications?.current, title: 'Dedication: a short message spoken over the mix at the next phrase (English or Romanian), with the music ducked' })))),
   );
   const xfader = R(fader({ min: -1, max: 1, def: 0, get: () => eng.crossfader, set: (v) => eng.setCrossfader(v), horizontal: true, cls: 'crossfader', title: 'Crossfader' }));
   let applyingEqPreset = false;
   const eqPreset = el('select', { class: 'sel tiny mixer-eq-preset', title: 'Apply a channel EQ preset to all decks', 'aria-label': 'Mixer EQ preset' },
     ...EQ_PRESETS.map((p) => el('option', { value: p.id }, p.label)));
-  eqPreset.value = 'flat';
+  // the preset that matches every channel's EQ, else Custom
+  const eqPresetFor = () => (EQ_PRESETS.find((p) => p.values && eng.channels.every((ch) => ['eqLow', 'eqMid', 'eqHigh'].every((k, j) => Math.abs((ch.state[k] || 0) - p.values[j]) < 1e-6)))?.id || 'custom');
+  eqPreset.value = eqPresetFor();
   eqPreset.addEventListener('change', () => {
     const preset = EQ_PRESETS.find((p) => p.id === eqPreset.value);
     if (!preset?.values) return;
@@ -137,8 +141,11 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     ),
   );
 
-  eng.on('mixer', (i) => { for (const r of byCh[i] || renderers) r.render(); if (!applyingEqPreset) eqPreset.value = 'custom'; });
+  // only an EQ change makes the preset "Custom" (not a volume / filter / FX move, nor automix's per-frame fades)
+  const EQ_KEYS = new Set(['eqLow', 'eqMid', 'eqHigh']);
+  eng.on('mixer', (i, key) => { for (const r of byCh[i] || renderers) r.render(); if (!applyingEqPreset && EQ_KEYS.has(key)) eqPreset.value = eqPresetFor(); });
   eng.on('master', () => { for (const r of renderers) r.render(); });
+  app.dedications?.on('change', () => { mcBtn?.render?.(); mcBtn?.setAttribute('data-count', String(app.dedications.pending() || '')); });
   eng.on('mic', () => { for (const r of renderers) r.render(); });
   // compact strips when the layout leaves the mixer little height (.mx-short / .mx-400 / .mx-tiny in performance.css);
   // phones stack the mixer at its natural height, so only desktop / tablet grids use this
