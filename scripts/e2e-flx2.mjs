@@ -151,7 +151,7 @@ try {
   check(await ev(() => !window.opendj.ctl.smartFader && Math.abs(window.opendj.engine.channels[0].state.eqLow) < 0.01), 'SMART FADER off restores the EQ');
   await midi([0xb6, 0x1f, 0x40]); await midi([0xb6, 0x3f, 0x00]);
   await midi([0x96, 0x63, 0x7f]); await midi([0x96, 0x63, 0x00]);
-  check(await ev(() => window.opendj.ctl.masterCue), 'MASTER cue on');
+  check(await ev(() => !!(window.opendj.engine.masterCue ?? window.opendj.ctl.masterCue)), 'MASTER cue on (note 0x63 ch7)');
   await midi([0x96, 0x63, 0x7f]); await midi([0x96, 0x63, 0x00]);
 
   // ---------- LEDs ----------

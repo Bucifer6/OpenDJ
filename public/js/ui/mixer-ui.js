@@ -178,7 +178,7 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     ...EQ_MODEL_LIST.map((p) => el('option', { value: p.id }, `EQ: ${p.label}`)));
   eqModel.value = eng.mx.eqType;
   eqModel.addEventListener('change', () => updateMixer(app, { eqType: eqModel.value }));
-  const tools = el('div', { class: 'mixer-tools' }, el('div', { class: 'mixer-tools-pair' }, eqModel, smartXf, advBtn), el('div', { class: 'mixer-tools-pair' }, colorSel, curveSel, revBtn));
+  const tools = el('div', { class: 'mixer-tools' }, el('div', { class: 'mixer-tools-pair' }, eqModel, advBtn), el('div', { class: 'mixer-tools-pair' }, colorSel, curveSel, revBtn), el('div', { class: 'mixer-tools-pair' }, smartXf));
   master.append(tools);
   const toolsRow = el('div', { class: 'mixer-tools-row' });
   const root = el('section', { class: 'mixer' },
