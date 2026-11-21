@@ -8,6 +8,7 @@ import { sha1Hex, randomHex } from './hash.js';
 export const DEFAULT_SETTINGS = {
   deckCount: 2,
   theme: 'midnight',
+  jogStyles: {},
   accentColor: '',
   uiScale: 100,
   layoutMode: 'classic',      // 'classic' | 'performance' | 'waveform' (decks view; 4 decks is deckCount)

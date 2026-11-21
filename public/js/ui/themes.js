@@ -1,18 +1,30 @@
 // App themes. Each theme overrides CSS custom properties (see public/css/themes.css); canvases read them via cssVar().
+import { isThemeId, JOG_STYLE_IDS } from '../shared/settings-schema.js';
+
+export const JOG_STYLE_OPTIONS = [
+  ['theme', 'Skin default'],
+  ['brushed', 'Brushed Metal'],
+  ['digital', 'Digital Jog'],
+  ['vinyl', 'Vinyl Turntable'],
+  ['classic', 'OpenDJ Classic'],
+];
+
 const BUILT_IN_THEMES = [
   { id: 'midnight', name: 'Midnight', desc: 'Default dark blue-grey', swatch: ['#0b0d10', '#191d23', '#3ea6ff', '#ff8a3d'] },
   { id: 'graphite', name: 'Graphite', desc: 'Neutral studio grey', swatch: ['#121212', '#1e1e1e', '#e0e0e0', '#ffb347'] },
   { id: 'club', name: 'Club Red', desc: 'Dark with red accents (low light)', swatch: ['#0c0708', '#1b1113', '#ff2e4d', '#ffb020'] },
-  { id: 'neon', name: 'Neon', desc: 'Synthwave purple & cyan', swatch: ['#0b0614', '#1a1030', '#00e5ff', '#ff3df2'] },
+  { id: 'neon', name: 'Neon', desc: 'Synthwave purple & cyan', swatch: ['#0b0614', '#1a1030', '#00e5ff', '#ff3df2'], jogStyle: 'digital' },
   { id: 'ocean', name: 'Ocean', desc: 'Deep navy & teal', swatch: ['#06121a', '#0e2230', '#21d4c4', '#5aa9ff'] },
   { id: 'gold', name: 'Black & Gold', desc: 'Premium black with gold', swatch: ['#0a0a0a', '#181612', '#e8b84a', '#d0d0d0'] },
   { id: 'forest', name: 'Forest', desc: 'Dark green, easy on the eyes', swatch: ['#08100c', '#13211a', '#3ddc84', '#f2c94c'] },
   { id: 'light', name: 'Daylight', desc: 'Bright theme for outdoor & daytime gigs', swatch: ['#eef1f5', '#ffffff', '#0a6cff', '#e8590c'] },
-  { id: 'contrast', name: 'High Contrast', desc: 'Maximum legibility (sunlight, accessibility)', swatch: ['#000000', '#000000', '#ffff00', '#00ffff'] },
-  { id: 'cdj', name: 'Club Decks', desc: 'CDJ-style decks, bright displays and a central mixer', swatch: ['#090c10', '#20262d', '#32c7dd', '#ffb64d'] },
-  { id: 'vinyl', name: 'Vinyl Booth', desc: 'Turntable-inspired platters and warm analogue tones', swatch: ['#10100f', '#282725', '#d9b56d', '#e66a4b'] },
-  { id: 'performance', name: 'Pad Performance', desc: 'Colour-coded pads and a modern performance controller', swatch: ['#101018', '#23232e', '#b276ff', '#3de0c1'] },
+  { id: 'contrast', name: 'High Contrast', desc: 'Maximum legibility (sunlight, accessibility)', swatch: ['#000000', '#000000', '#ffff00', '#00ffff'], jogStyle: 'classic' },
+  { id: 'cdj', name: 'Club Decks', desc: 'Bevelled dark decks with digital jog displays', swatch: ['#090c10', '#20262d', '#32c7dd', '#ffb64d'], jogStyle: 'digital' },
+  { id: 'vinyl', name: 'Vinyl Booth', desc: 'Black turntable decks with warm analogue tones', swatch: ['#10100f', '#282725', '#d9b56d', '#e66a4b'], jogStyle: 'vinyl' },
+  { id: 'performance', name: 'Pad Performance', desc: 'Colour-coded pads and sculpted performance decks', swatch: ['#101018', '#23232e', '#b276ff', '#3de0c1'], jogStyle: 'digital' },
   { id: 'studio', name: 'Studio Mixer', desc: 'Brushed-metal mixer with classic channel colours', swatch: ['#111418', '#252b31', '#70a9d8', '#e6a759'] },
+  { id: 'remote-silverline', name: 'Silverline', desc: 'Satin aluminium faceplates and machined jogs', swatch: ['#141b21', '#b2bec7', '#176d9c', '#a1401c'], jogStyle: 'brushed' },
+  { id: 'remote-walnut', name: 'Walnut Hi-Fi', desc: 'Walnut-trimmed decks with record platters', swatch: ['#211814', '#463226', '#ebba73', '#ec8772'], jogStyle: 'vinyl' },
 ];
 
 const THEME_CACHE_KEY = 'opendj-skin-catalog-v1';
@@ -32,7 +44,7 @@ const appliedSkinVars = new Set();
 function validateSkin(s) {
   if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
   const id = String(s.id || '');
-  if (!(BUILT_IN_IDS.has(id) || /^remote-[a-z0-9]+(?:-[a-z0-9]+){0,5}$/.test(id))) return null;
+  if (!isThemeId(id)) return null;
   const vars = Object.fromEntries(Object.entries(s.vars || {}).filter(([k, v]) =>
     THEME_VARS.has(k) && typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v)));
   if (!Object.keys(vars).length) return null;
@@ -40,7 +52,7 @@ function validateSkin(s) {
   return {
     id, name: String(s.name || id).slice(0, 40), desc: String(s.desc || 'Downloadable OpenDJ skin').slice(0, 100),
     swatch: swatch.length ? swatch : [vars['--bg'] || '#101318', vars['--panel'] || '#20252c', vars['--accent'] || '#49aaff', vars['--deck2'] || '#f3a74f'],
-    vars,
+    vars, jogStyle: JOG_STYLE_IDS.includes(s.jogStyle) ? s.jogStyle : undefined,
   };
 }
 
@@ -52,8 +64,9 @@ function installSkinCatalog(list) {
     if (!skin) continue;
     skinVars.set(skin.id, skin.vars);
     const index = THEMES.findIndex((t) => t.id === skin.id);
-    if (index >= 0) THEMES[index] = { ...THEMES[index], name: skin.name, desc: skin.desc, swatch: skin.swatch };
-    else THEMES.push({ id: skin.id, name: skin.name, desc: skin.desc, swatch: skin.swatch });
+    const { vars, ...appearance } = skin;
+    if (index >= 0) THEMES[index] = { ...THEMES[index], ...appearance, jogStyle: appearance.jogStyle || THEMES[index].jogStyle };
+    else THEMES.push(appearance);
   }
 }
 
@@ -84,18 +97,25 @@ export function cssVar(name) {
   return cache.get(name);
 }
 
+export function selectedTheme(settings) {
+  return THEMES.find((t) => t.id === settings.theme) || BUILT_IN_THEMES[0];
+}
+
 export function applyTheme(settings) {
   const root = document.documentElement;
-  const theme = THEMES.some((t) => t.id === settings.theme) ? settings.theme : 'midnight';
+  const { id: theme, jogStyle } = selectedTheme(settings);
+  const override = settings.jogStyles?.[theme];
   root.classList.add('theme-switching');
   root.dataset.theme = BUILT_IN_IDS.has(theme) ? theme : 'midnight';
+  root.dataset.jogStyle = JOG_STYLE_IDS.includes(override) ? override : jogStyle || 'brushed';
   for (const name of appliedSkinVars) root.style.removeProperty(name);
   appliedSkinVars.clear();
   for (const [name, value] of Object.entries(skinVars.get(theme) || {})) {
     root.style.setProperty(name, value); appliedSkinVars.add(name);
   }
   // optional custom accent colour on top of any theme
-  if (settings.accentColor) root.style.setProperty('--accent', settings.accentColor); else root.style.removeProperty('--accent');
+  if (settings.accentColor) root.style.setProperty('--accent', settings.accentColor);
+  else if (!appliedSkinVars.has('--accent')) root.style.removeProperty('--accent');
   // never scale beyond what keeps a usable 1100x700 effective window. Phones and small tablets (the compact
   // layouts in css/mobile.css) are laid out at their real size instead of being shrunk to fit the desktop layout.
   const want = (settings.uiScale || 100) / 100;

@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "version": 1,
+  "version": 2,
   "skins": [
     {
       "id": "cdj",
       "name": "Club Decks",
-      "desc": "Updated CDJ booth colours",
+      "desc": "Bevelled dark decks with digital jog displays",
       "swatch": [
         "#090c10",
         "#20262d",
@@ -32,12 +32,13 @@
         "--wf-low": "#ff5964",
         "--wf-mid": "#55d98a",
         "--wf-high": "#4da8ff"
-      }
+      },
+      "jogStyle": "digital"
     },
     {
       "id": "vinyl",
       "name": "Vinyl Booth",
-      "desc": "Refreshed warm analogue palette",
+      "desc": "Black turntable decks with warm analogue tones",
       "swatch": [
         "#10100f",
         "#282725",
@@ -64,7 +65,8 @@
         "--wf-low": "#e66a4b",
         "--wf-mid": "#d9b56d",
         "--wf-high": "#7c9ec2"
-      }
+      },
+      "jogStyle": "vinyl"
     },
     {
       "id": "remote-sunset",
@@ -96,6 +98,79 @@
         "--wf-low": "#ff6b6b",
         "--wf-mid": "#ffd166",
         "--wf-high": "#6ec6ff"
+      }
+    },
+    {
+      "id": "remote-silverline",
+      "name": "Silverline",
+      "desc": "Satin aluminium faceplates and machined jogs",
+      "swatch": [
+        "#141b21",
+        "#b2bec7",
+        "#176d9c",
+        "#a1401c"
+      ],
+      "jogStyle": "brushed",
+      "vars": {
+        "--bg": "#141b21",
+        "--panel": "#25313a",
+        "--panel-2": "#384751",
+        "--panel-3": "#465660",
+        "--line": "#485962",
+        "--line-2": "#61717b",
+        "--text": "#f1f5f7",
+        "--text-2": "#d4e0e6",
+        "--text-3": "#adbec8",
+        "--accent": "#7fd6ff",
+        "--on-accent": "#0d2938",
+        "--deck1": "#7fd6ff",
+        "--deck2": "#ffc499",
+        "--deck3": "#a2e6c0",
+        "--deck4": "#d8bbf3",
+        "--inset": "#202b33",
+        "--deep": "#1b242b",
+        "--wave-bg": "#11171d",
+        "--topbar-1": "#35434d",
+        "--topbar-2": "#26323b",
+        "--fader-cap-1": "#e5edf0",
+        "--fader-cap-2": "#77868f"
+      }
+    },
+    {
+      "id": "remote-walnut",
+      "name": "Walnut Hi-Fi",
+      "desc": "Walnut-trimmed decks with record platters",
+      "swatch": [
+        "#211814",
+        "#463226",
+        "#ebba73",
+        "#ec8772"
+      ],
+      "jogStyle": "vinyl",
+      "vars": {
+        "--bg": "#211814",
+        "--panel": "#2e231d",
+        "--panel-2": "#3b2b23",
+        "--panel-3": "#463226",
+        "--line": "#503a2c",
+        "--line-2": "#71533c",
+        "--text": "#fcf0e2",
+        "--text-2": "#e2c9b3",
+        "--text-3": "#ba9e85",
+        "--accent": "#ebba73",
+        "--on-accent": "#2a1810",
+        "--deck1": "#ebba73",
+        "--deck2": "#ec8772",
+        "--deck3": "#abd3a2",
+        "--deck4": "#aec6e7",
+        "--inset": "#231a16",
+        "--deep": "#211a17",
+        "--wave-bg": "#15100e",
+        "--topbar-1": "#3c2c25",
+        "--topbar-2": "#231a16",
+        "--platter-rim-1": "#b58b65",
+        "--fader-cap-1": "#d6b391",
+        "--fader-cap-2": "#7f5e46"
       }
     }
   ]

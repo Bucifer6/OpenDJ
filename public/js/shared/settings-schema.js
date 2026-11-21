@@ -6,7 +6,9 @@
 //   sanitizeSetting(key, value) -> { ok: true, value } | { ok: false }
 //   sanitizeSettings(obj, defaults) -> a copy with every known key valid (invalid ones replaced by the default)
 
-export const THEME_IDS = ['midnight', 'graphite', 'club', 'neon', 'ocean', 'gold', 'forest', 'light', 'contrast', 'cdj', 'vinyl', 'performance', 'studio'];
+export const THEME_IDS = ['midnight', 'graphite', 'club', 'neon', 'ocean', 'gold', 'forest', 'light', 'contrast', 'cdj', 'vinyl', 'performance', 'studio', 'remote-silverline', 'remote-walnut'];
+export const JOG_STYLE_IDS = ['brushed', 'digital', 'vinyl', 'classic'];
+export const isThemeId = (v) => typeof v === 'string' && (THEME_IDS.includes(v) || /^remote-[a-z0-9]+(?:-[a-z0-9]+){0,5}$/.test(v));
 
 const bool = () => (v) => (typeof v === 'boolean' ? v : v === 'true' ? true : v === 'false' ? false : undefined);
 const str = (max = 4096) => (v) => (typeof v === 'string' ? v.slice(0, max) : v == null ? '' : undefined);
@@ -28,7 +30,12 @@ const shape = (fields) => (v) => {
 
 const SCHEMA = {
   deckCount: oneOf(2, 4),
-  theme: (v) => (typeof v === 'string' && (THEME_IDS.includes(v) || /^remote-[a-z0-9]+(?:-[a-z0-9]+){0,5}$/.test(v)) ? v : undefined),
+  theme: (v) => isThemeId(v) ? v : undefined,
+  jogStyles: (v) => {
+    if (!obj()(v)) return undefined;
+    return Object.fromEntries(Object.entries(v).filter(([id, style]) =>
+      isThemeId(id) && (style === 'theme' || JOG_STYLE_IDS.includes(style))));
+  },
   accentColor: (v) => (v === '' || v == null ? '' : typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : undefined),
   uiScale: num(50, 200),
   layoutMode: oneOf('classic', 'performance', 'waveform'),

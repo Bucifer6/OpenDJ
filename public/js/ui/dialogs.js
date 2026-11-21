@@ -1,7 +1,7 @@
 import { icon, glyphIcon } from './icons.js';
 import { el, uiZoom } from '../util.js';
 import { api } from '../api.js';
-import { THEMES, applyTheme, refreshSkinCatalog } from './themes.js';
+import { THEMES, JOG_STYLE_OPTIONS, applyTheme, refreshSkinCatalog, selectedTheme } from './themes.js';
 import { controllersPanel } from './controllers-panel.js';
 import { platform, MOBILE_UNAVAILABLE, APP_VERSION } from '../platform.js';
 import { STYLES, normStyle } from '../automix.js';
@@ -441,12 +441,30 @@ export class Dialogs {
     // ---- appearance ----
     let cards = [];
     const themeGrid = el('div', { class: 'theme-grid' });
+    const jogStyle = sel('theme', JOG_STYLE_OPTIONS, async (value) => {
+      const { id } = selectedTheme(app.settings);
+      await set('jogStyles', { ...app.settings.jogStyles, [id]: value });
+      applyTheme(app.settings);
+      syncJogStyle();
+    });
+    const syncJogStyle = () => {
+      const { id, jogStyle: suggested = 'brushed' } = selectedTheme(app.settings);
+      const label = JOG_STYLE_OPTIONS.find(([value]) => value === suggested)[1];
+      jogStyle.options[0].textContent = `Skin default (${label})`;
+      jogStyle.value = app.settings.jogStyles?.[id] || 'theme';
+    };
     const renderThemeCards = () => {
-      cards = THEMES.map((t) => el('button', { class: `theme-card ${(app.settings.theme || 'midnight') === t.id ? 'active' : ''}`, 'data-id': t.id, onclick: async () => {
+      const activeId = selectedTheme(app.settings).id;
+      cards = THEMES.map((t) => el('button', { class: `theme-card${activeId === t.id ? ' active' : ''}`, 'aria-pressed': String(activeId === t.id), 'data-id': t.id, onclick: async () => {
         await set('theme', t.id); applyTheme(app.settings);
-        for (const c of cards) c.classList.toggle('active', c.dataset.id === t.id);
+        for (const c of cards) {
+          c.classList.toggle('active', c.dataset.id === t.id);
+          c.setAttribute('aria-pressed', String(c.dataset.id === t.id));
+        }
+        syncJogStyle();
       } }, el('div', { class: 'theme-swatch' }, ...t.swatch.map((c) => el('span', { style: { background: c } }))), el('b', {}, t.name), el('small', {}, t.desc)));
       themeGrid.replaceChildren(...cards);
+      syncJogStyle();
     };
     renderThemeCards();
     const skinUpdateStatus = el('span', { class: 'hint' });
@@ -469,6 +487,7 @@ export class Dialogs {
     };
     scaleNote();
     const appearance = el('div', { class: 'form' },
+      field('Jog wheel style', jogStyle, 'Saved separately for each skin.'),
       themeGrid,
       el('div', { class: 'row' }, skinUpdateButton, skinUpdateStatus),
       el('p', { class: 'hint' }, 'Download new and updated skins without installing a new OpenDJ release.'),
