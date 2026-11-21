@@ -157,9 +157,9 @@ export function buildDeck(app, deck) {
     adjBtn('IN', 'in', () => deck.loopInPress()),
     adjBtn('OUT', 'out', () => deck.loopOutPress()),
     (() => { const rl = R(button(dual('RELOOP', icon('repeat')), { cls: 'sm', click: () => deck.reloop(), active: () => deck.loop?.active, title: 'Reloop / exit loop (hold: flag the loop as an active loop)' })); longPress(rl, () => { deck.toggleActiveLoop(); app.toast(deck.loopIsActiveLoop ? 'Active loop: it engages whenever the track reaches it' : 'Active loop cleared'); }); return rl; })(),
-    button('½', { cls: 'sm', click: () => { if (deck.loop?.active) deck.loopHalve(); else { autoLoopBeats = Math.max(1 / 8, autoLoopBeats / 2); } } }),
+    button('½', { cls: 'sm', click: () => { if (deck.loop?.active) deck.loopHalve(); else { autoLoopBeats = Math.max(1 / 8, autoLoopBeats / 2); loopSize._t = loopSize.textContent = fmtBeats(autoLoopBeats); } } }),
     R(button(loopSize, { cls: 'sm loop-btn', click: () => deck.autoLoop(autoLoopBeats), active: () => deck.loop?.active, title: 'Auto beat loop' })),
-    button('×2', { cls: 'sm', click: () => { if (deck.loop?.active) deck.loopDouble(); else { autoLoopBeats = Math.min(64, autoLoopBeats * 2); } } }),
+    button('×2', { cls: 'sm', click: () => { if (deck.loop?.active) deck.loopDouble(); else { autoLoopBeats = Math.min(64, autoLoopBeats * 2); loopSize._t = loopSize.textContent = fmtBeats(autoLoopBeats); } } }),
   );
   const jumpLabel = el('span', {}, '4');
   const jumpRow = el('div', { class: 'loop-row jump-row' },
