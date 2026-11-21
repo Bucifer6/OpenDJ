@@ -404,6 +404,8 @@ class App {
 
   // ---------------- automix / record ----------------
   toggleAutomix() {
+    // pressed again while a start is still analysing / loading the first track: cancel it
+    if (this._amStarting) { this._amStarting.cancelled = true; this.automix.stop(); this.toast('Automix cancelled'); return; }
     if (this.automix.enabled) { this.automix.stop(); this.toast('Automix stopped'); }
     else this.dialogs.automixQueue(this.automix.queue.length > this.automix.idx ? this.automix.queue.slice(this.automix.idx) : this.library.rows);
   }
@@ -422,7 +424,8 @@ class App {
     if (!tracks.length) { this.toast('No tracks in this view'); return; }
     const opts = this.settings.automix || {};
     const mode = opts.shuffle ? 'shuffle' : 'smart';
-    await this.startAutomix(tracks, { mode, shape: opts.shape, sliders: opts.sliders });
+    // same set length as the Automix dialog's default: a smart order over a whole big library would block the UI
+    await this.startAutomix(tracks, { mode, shape: opts.shape, sliders: opts.sliders, limit: tracks.length > 200 ? 40 : undefined });
   }
   queueAdd(tracks) {
     if (!this.automix.enabled) { this.automix.queue = [...this.automix.queue.slice(this.automix.idx), ...tracks]; this.automix.idx = 0; }
@@ -462,6 +465,12 @@ class App {
    * have no analysis yet (remote tracks included) for a short while, then score with whatever data there is.
    */
   async startAutomix(tracks, opts = {}) {
+    // one start at a time: repeated AUTOMIX NOW / MIX NOW presses during the analysis wait used to start several
+    if (this._amStarting) { this.toast('Automix is starting…'); return; }
+    const run = this._amStarting = { cancelled: false };
+    try { await this._startAutomix(tracks, opts, run); } finally { if (this._amStarting === run) this._amStarting = null; }
+  }
+  async _startAutomix(tracks, opts, run) {
     let list = tracks.filter(Boolean);
     if (opts.mode === 'smart' || opts.mode === 'live') {
       const todo = list.filter((t) => !t.analyzed && !t.unreadable);
@@ -470,13 +479,14 @@ class App {
         if (n) {
           this.toast(`Analysing ${n} track(s) before smart mix (BPM, key, energy)…`);
           const t0 = performance.now(), maxMs = Math.min(45000, 4000 + n * 3000);
-          while (performance.now() - t0 < maxMs && todo.some((t) => { const f = this.library.track(t.id); return f && !f.analyzed && !f.unreadable; }) && this.analyser.running) await new Promise((r) => setTimeout(r, 300));
+          while (!run.cancelled && performance.now() - t0 < maxMs && todo.some((t) => { const f = this.library.track(t.id); return f && !f.analyzed && !f.unreadable; }) && this.analyser.running) await new Promise((r) => setTimeout(r, 300));
           const left = todo.filter((t) => !this.library.track(t.id)?.analyzed).length;
           if (left) this.toast(`${left} track(s) not analysed yet: smart mix uses the data it has for them`);
         }
       }
       list = list.map((t) => this.library.track(t.id) || t); // analysed copies
     }
+    if (run.cancelled) return;
     try { await this.automix.start(list, opts); } catch (e) { this.toast(e.message); }
   }
 
