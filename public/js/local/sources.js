@@ -148,6 +148,31 @@ export class LocalSources {
     return { cfg, client };
   }
 
+  /** Plex Home users of a Plex connection (same as GET /api/sources/:id/users on the desktop server). */
+  async plexUsers(sourceId) {
+    if (this.library.getSource(sourceId)?.type !== 'plex') throw Object.assign(new Error('User switching is for Plex servers'), { status: 400, expose: true });
+    try { const { client } = await this._connected(sourceId); return { users: await client.homeUsers() }; } catch (e) { throw remoteError(e); }
+  }
+
+  /** Switch a Plex connection to another Plex Home user (pin never stored); like server/remote.js switchPlexUser. */
+  async switchPlexUser(sourceId, userId, pin) {
+    const cfg = this.library.getSource(sourceId);
+    if (cfg?.type !== 'plex') throw Object.assign(new Error('User switching is for Plex servers'), { status: 400, expose: true });
+    if (typeof userId !== 'string' || !userId || userId.length > 100) throw Object.assign(new Error('Choose a Plex user'), { status: 400, expose: true });
+    try {
+      const { client } = await this._connected(sourceId);
+      const user = await client.switchUser(userId, typeof pin === 'string' || typeof pin === 'number' ? String(pin) : undefined);
+      Object.assign(cfg, client.persistable());
+      if (!client.config.plexUser) delete cfg.plexUser;
+      this.library.changed('sources');
+      this.clients.delete(sourceId);
+      return { source: this.library.publicSource(cfg), user };
+    } catch (e) {
+      if (e.status === 400 || e.status === 404) throw Object.assign(new Error(scrub(e.message)), { status: e.status, expose: true, needsPin: !!e.needsPin });
+      throw remoteError(e);
+    }
+  }
+
   /** Live playlist list of a media server (same shape as GET /api/sources/:id/playlists on the desktop server). */
   async sourcePlaylists(sourceId) {
     try {

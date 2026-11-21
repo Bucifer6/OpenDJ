@@ -6,6 +6,7 @@ import { describeKey } from '../midi/midi.js';
 import { PRESETS } from '../midi/presets.js';
 import { listMixxxMappings, matchMappings, downloadMixxxMapping, mappingTitle } from '../midi/mixxx-online.js';
 import { wizardSteps, detectMidiControl, entryFor } from '../midi/wizard.js';
+import { ctlState, setDeckLayer } from '../midi/controller-extras.js';
 
 /** replaceChildren that skips null/false (optional sections). */
 const put = (node, ...kids) => node.replaceChildren(...kids.flat().filter((k) => k != null && k !== false));
@@ -71,6 +72,17 @@ export function controllersPanel(app) {
     root._wasConnected = true;
     const now = performance.now();
     for (const c of devList.querySelectorAll('.ctl-card[data-key]')) c.classList.toggle('busy', now - (midi.deviceActivity.get(c.dataset.key) || -1e9) < 140);
+  }
+
+  // DECK SELECT: which decks the two sides of a 2-deck controller drive in 4-deck mode (also MIDI-learnable:
+  // "Deck select: left / right")
+  function deckLayers() {
+    const st = ctlState(app);
+    const side = (i, label) => el('span', { class: 'seg ctl-layer' }, label, ...[i, i + 2].map((d) => el('button', {
+      class: `seg-btn ${st.layer[i] === d ? 'active' : ''}`, 'aria-pressed': String(st.layer[i] === d),
+      onclick: () => { setDeckLayer(app, i, d); renderDetail(); },
+    }, `Deck ${d + 1}`)));
+    return el('div', { class: 'row ctl-layers', title: 'A 2-deck controller drives decks 1 and 2; switch a side to deck 3 or 4 here or with a mapped "Deck select" button' }, side(0, 'Left side '), side(1, 'Right side '));
   }
 
   // ---------- selected device ----------
@@ -181,12 +193,14 @@ export function controllersPanel(app) {
       el('button', { class: 'btn', onclick: () => fileIn.click() }, isMidi ? 'Import mapping file…' : 'Import…'),
       el('button', { class: 'btn', disabled: !map?.entries?.length, onclick: () => { const blob = new Blob([midi.exportMapping(d.key)], { type: 'application/json' }); const a = el('a', { href: URL.createObjectURL(blob), download: `${d.name.replace(/[^\w.-]+/g, '_')}.opendj-midi.json` }); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); } }, 'Export'),
       isMidi ? presetSel : null,
+      isMidi ? el('button', { class: 'btn ctl-test-btn', onclick: () => import('./controller-test.js').then((m) => m.openControllerTest(app, d.key)), title: 'See every message the controller sends, which are mapped, and record a capture to send back' }, 'Controller test') : null,
       el('button', { class: 'btn danger', disabled: !map?.entries?.length, onclick: async () => { if (await (app.dialogs?.confirm?.(`Remove the mapping for ${d.name}?`) ?? true)) { midi.clearMapping(d.key); renderDevices(); renderDetail(); } } }, 'Clear'),
       d.kind === 'hid' ? el('button', { class: 'btn', onclick: async () => { await midi.hid.disconnect(d.key); selected = null; renderDevices(); renderDetail(); } }, 'Disconnect') : null,
     ];
     put(detail, 
       el('div', { class: 'ctl-head' }, el('h3', {}, d.name), headSub),
       actions.length ? el('div', { class: 'row ctl-actions' }, ...actions, fileIn) : null,
+      isMidi && app.deckCount === 4 ? deckLayers() : null,
       renderSearch(),
       importSummary(map),
       isMidi ? el('p', { class: 'hint' }, 'Something not working right? Open the Controller Mapper to test each control, fix it, apply the fix here and send it to the OpenDJ community collection so it works for everyone.') : null,

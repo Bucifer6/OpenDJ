@@ -17,7 +17,8 @@ import { installKind, updatePlan, installHint, downloadVerified, fetchReleaseFil
 import { start } from '../server/index.js';
 import { sanitizeSetting } from '../public/js/shared/settings-schema.js';
 
-const NOTES = fs.readFileSync(new URL('../docs/RELEASE_NOTES.md', import.meta.url), 'utf8');
+// the fixtures model the 0.4.x releases: drop the unreleased "New in 0.5" section being written for the next release
+const NOTES = fs.readFileSync(new URL('../docs/RELEASE_NOTES.md', import.meta.url), 'utf8').replace(/### New in 0\.5\n[\s\S]*?(?=### New in 0\.4)/, '');
 const DL = (v, n) => `https://github.com/Bucifer6/OpenDJ/releases/download/v${v}/${n}`;
 const ALL_ASSETS = (v) => [`OpenDJ-Setup-${v}-x64.exe`, `OpenDJ-Setup-${v}-arm64.exe`, `OpenDJ-Setup-${v}.exe`, `OpenDJ-Portable-${v}.exe`, `OpenDJ-${v}-mac-arm64.dmg`, `OpenDJ-${v}-mac-arm64.zip`,
   `OpenDJ-${v}-mac-x64.dmg`, `OpenDJ-${v}-mac-x64.zip`, `OpenDJ-${v}-linux-x86_64.AppImage`, `OpenDJ-${v}-linux-arm64.AppImage`, `OpenDJ-${v}-linux-amd64.deb`, `OpenDJ-${v}-linux-arm64.deb`,
@@ -271,7 +272,7 @@ test('checker: headers, ETag revalidation, caching, rate-limit back-off, offline
   assert.equal(calls[0].init.redirect, 'error');
   assert.equal(calls[0].init.credentials, 'omit');
   assert.deepEqual(Object.keys(calls[0].init.headers).sort(), ['Accept', 'User-Agent', 'X-GitHub-Api-Version'], 'nothing about the user');
-  assert.deepEqual(r1.latest.notes.map((section) => section.version), ['0.4.2', '0.4.1'], 'show the release notes newer than 0.4.0');
+  assert.deepEqual(r1.latest.notes.map((section) => section.version), ['0.4.2', '0.4.1'], 'show the release notes newer than 0.4.0 (the fixture drops the unreleased 0.5 section)');
   await c.check(); assert.equal(calls.length, 1, 'cached');
   t += 16 * 60e3;
   reply = () => res(304, null, { ETag: '"e1"' });

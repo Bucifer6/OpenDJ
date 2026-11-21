@@ -25,6 +25,7 @@ export class PlexClient extends SourceClient {
   constructor(config, opts) {
     super(config, opts);
     this.signInUrl = opts?.signInUrl || 'https://plex.tv/users/sign_in.json';
+    this.plexTvUrl = (opts?.plexTvUrl || 'https://plex.tv').replace(/\/+$/, '');
     this.clientId =
       config.clientId ||
       'opendj-' + sha1Hex(String(config.id || `${this.config.url}|${config.username || ''}`)).slice(0, 16);
@@ -69,6 +70,7 @@ export class PlexClient extends SourceClient {
     const token = body?.user?.authToken || body?.user?.authentication_token;
     if (!token) throw new Error('Plex sign-in returned no token');
     this.config.token = token;
+    this.config.accountToken = token;
   }
 
   async connect() {
@@ -77,13 +79,116 @@ export class PlexClient extends SourceClient {
       if (this.config.username && this.config.password) await this._signIn();
       else throw new Error('Plex token or username/password required');
     }
+    // The plex.tv account token (lists Plex Home users and switches between them). A connection made with a typed
+    // X-Plex-Token assumes it is the account token; a switched-to user's token never replaces it.
+    if (!this.config.accountToken) this.config.accountToken = this.config.token;
     const body = await this._get('/');
     const mc = body?.MediaContainer || {};
+    this.machineId = mc.machineIdentifier || null;
     return { ok: true, serverName: mc.friendlyName || 'Plex', version: mc.version || null };
   }
 
   persistable() {
-    return this.config.token ? { token: this.config.token } : {};
+    const out = {};
+    if (this.config.token) out.token = this.config.token;
+    if (this.config.accountToken) out.accountToken = this.config.accountToken;
+    if (this.config.plexUser) out.plexUser = this.config.plexUser;
+    return out;
+  }
+
+  /** A plex.tv request with the given token (JSON). */
+  async _plexTv(path, token, { method = 'GET' } = {}) {
+    const res = await this.fetch(this.plexTvUrl + path, {
+      method,
+      headers: {
+        Accept: 'application/json',
+        'X-Plex-Client-Identifier': this.clientId,
+        'X-Plex-Product': PRODUCT,
+        'X-Plex-Version': VERSION,
+        'X-Plex-Token': token,
+      },
+    });
+    if (!res.ok) {
+      const err = new Error(`plex.tv ${path.split('?')[0]} -> HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  }
+
+  /**
+   * Plex Home users of the signed-in account: [{ id (uuid), title, admin, protected (needs a PIN), restricted
+   * (managed user), guest, current }]. An account without Plex Home lists only itself (or nothing).
+   */
+  async homeUsers() {
+    const token = this.config.accountToken || this.config.token;
+    if (!token) throw new Error('Connect to Plex first');
+    const body = await this._plexTv('/api/v2/home/users', token);
+    const list = Array.isArray(body) ? body : asArray(body?.users);
+    const current = this.config.plexUser?.id || null;
+    return list
+      .filter((u) => u && (u.uuid || u.id != null))
+      .map((u) => {
+        const id = String(u.uuid || u.id);
+        const admin = !!u.admin;
+        return {
+          id,
+          title: String(u.title || u.friendlyName || u.username || 'Plex user').slice(0, 100),
+          admin,
+          protected: !!u.protected,
+          restricted: !!u.restricted,
+          guest: !!u.guest,
+          current: current ? current === id : admin,
+        };
+      });
+  }
+
+  /**
+   * Switch to a Plex Home user (`pin` for PIN-protected users; never stored). Afterwards the connection browses and
+   * streams as that user: their libraries, playlists and restrictions. Switching to the account owner goes back to
+   * the account token. Throws (and keeps the current user) when the PIN is wrong or the user can't use this server.
+   */
+  async switchUser(userId, pin) {
+    const users = await this.homeUsers();
+    const user = users.find((u) => u.id === String(userId));
+    if (!user) throw Object.assign(new Error('That Plex user is not in this Plex Home'), { status: 404 });
+    if (pin != null && pin !== '' && !/^\d{4}$/.test(String(pin))) throw Object.assign(new Error('The PIN is 4 digits'), { status: 400 });
+    if (user.protected && !pin && !user.admin) throw Object.assign(new Error(`${user.title} needs a PIN`), { status: 400, needsPin: true });
+    const account = this.config.accountToken || this.config.token;
+    let userToken;
+    if (user.admin && !pin) userToken = account;
+    else {
+      const q = pin ? `?pin=${encodeURIComponent(String(pin))}` : '';
+      let body;
+      try { body = await this._plexTv(`/api/v2/home/users/${encodeURIComponent(user.id)}/switch${q}`, account, { method: 'POST' }); } catch (e) {
+        if (e.status === 401 || e.status === 403 || e.status === 422) throw Object.assign(new Error(pin ? 'Wrong PIN' : `${user.title} needs a PIN`), { status: 400, needsPin: !pin });
+        throw e;
+      }
+      userToken = body?.authToken || body?.authenticationToken || body?.user?.authToken;
+      if (!userToken) throw new Error('plex.tv returned no token for that user');
+    }
+    const serverToken = await this._serverToken(userToken);
+    // check the user can actually reach this server before keeping anything
+    const res = await this.fetch(this.config.url + '/', { headers: { ...this._headers(), 'X-Plex-Token': serverToken } });
+    if (!res.ok) throw Object.assign(new Error(`${user.title} has no access to this Plex server`), { status: 400 });
+    this.config.token = serverToken;
+    if (user.admin) delete this.config.plexUser;
+    else this.config.plexUser = { id: user.id, title: user.title };
+    return user;
+  }
+
+  /** The token a plex.tv user token uses on this server (its resource access token), else the user token itself. */
+  async _serverToken(userToken) {
+    if (!this.machineId) {
+      try { this.machineId = (await this._get('/'))?.MediaContainer?.machineIdentifier || null; } catch { /* below */ }
+    }
+    if (!this.machineId) return userToken;
+    try {
+      const list = await this._plexTv('/api/v2/resources?includeHttps=1&includeRelay=1', userToken);
+      const r = asArray(list).find((x) => x?.clientIdentifier === this.machineId && x.accessToken);
+      if (r) return String(r.accessToken);
+    } catch { /* fall back to the user token */ }
+    return userToken;
   }
 
   async listLibraries() {

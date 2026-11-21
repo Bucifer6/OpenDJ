@@ -5,6 +5,7 @@ import { decodeWaveform, toCamelot, camelotCompatible, analyzeStructure, analysi
 import { effectiveGains, LOADED_STEMS } from '../stems/stem-mix.js';
 import { floatToInt16 } from '../stems/stem-dsp.js';
 import { StemEcho } from '../stems/stem-fx.js';
+import { VINYL_DEFAULTS, secPerRev, snapTo, nextQuantizeDiv, glideDuration, bendAt, needleTarget, jumpSizeStep, semitoneRate } from './vinyl.js';
 
 /** Tempo fader ranges (±%), as offered in the deck and Settings. */
 export const TEMPO_RANGES = [6, 8, 10, 16, 25, 50, 100];
@@ -41,6 +42,12 @@ export class Deck extends Emitter {
     this.tempoRange = 8; this.tempo = 0; this.bend = 0; this.keyLock = true;
     this.quantize = true; this.slip = false; this.reverse = false; this.syncOn = false; this.isMaster = false;
     this.vinylMode = true; this.keyShift = 0; this._loadSeq = 0;
+    this.vinyl = { ...VINYL_DEFAULTS }; // motor / platter model (T1-T4), see applyVinyl()
+    this.quantizeDiv = 1;   // quantize division in beats (1/8 .. 4 = 1 bar)
+    this.jumpSize = 4;      // beat jump size (½ .. 64)
+    this.rateMul = 1;       // scale play (pads change the platter speed)
+    this.hardLock = false;  // a playing deck refuses loads
+    this.slipReverse = false; this.loopAdjust = null; this._audioOff = null;
     this.stemMacro = [1, 1]; // channel VOC / INST knobs (they drive the AI stems once loaded)
     this.stemFxOn = false; this.stemFx = null;
     this.resetStemControls();
@@ -57,6 +64,8 @@ export class Deck extends Emitter {
     this.stemsReady = false; this.stemsLoading = false; this.stemsError = null;
     this.external = false;
     this.scratching = false; this._slicing = false; this.rolling = false; this.cuePreview = false; this.hotPreview = null;
+    this._shadow = 0; this._handPos = false; this.scratchSample = null; this._glide = null; this.loopAdjust = null;
+    if (this.slipReverse) { this.slipReverse = false; this.reverse = false; }
     clearTimeout(this._scratchIdle);
     if (this.node) this.post('scratch', { value: null });
   }
@@ -66,10 +75,17 @@ export class Deck extends Emitter {
   onWorklet(m) {
     if (m.type === 'pos') {
       if (m.time < this._seekGuard) return; // report produced before our last seek reached the audio thread
-      this._pos = m.frame / this.sr; this._t = Math.min(m.time, this.ctx.currentTime); this._rate = m.rate;
+      this._pos = m.frame / this.sr; this._t = Math.min(m.time, this.ctx.currentTime); this._rate = m.rate; this._shadow = m.shadow / this.sr;
+      if (this._glide && m.tempo > 0) { this.tempo = (m.tempo / ((1 + this.bend) * this.rateMul) - 1) * 100; this.emit('tempo'); }
       if (this.playing !== m.playing && !this._pendingPlay) { this.playing = m.playing; this.emit('state'); }
-    } else if (m.type === 'ended') { this.playing = false; this.emit('state'); this.emit('ended'); }
+    } else if (m.type === 'ended') { this.playing = false; this.emit('state'); if (!this.scratchSample) this.emit('ended'); }
     else if (m.type === 'stopped') { this.playing = false; this.emit('state'); }
+    else if (m.type === 'slipResumed') { if (this._slipStopPrev != null) { const p = this._slipStopPrev; this._slipStopPrev = null; this.setSlip(p); } }
+    else if (m.type === 'rampDone') { if (this._glide && m.id === this._glide.id) { const g = this._glide; this._glide = null; this.setTempo(g.target); } }
+    else if (m.type === 'loopEngaged') {
+      if (this.scratchSample) return;
+      this.loop = { start: m.start / this.sr, end: m.end / this.sr, active: true, auto: true }; this.emit('loop');
+    }
     else if (m.type === 'stems') {
       if (m.seq !== this._stemSeq) return; // answer to an older load/unload
       this.stemsReady = m.loaded; this.stemsLoading = false;
@@ -89,7 +105,7 @@ export class Deck extends Emitter {
     if (this.loop?.active && p < this.loop.start && this._rate < 0 && this._pos >= this.loop.start) { const L = this.loop.end - this.loop.start; return this.loop.end - ((this.loop.start - p) % L); }
     return clamp(p, 0, this.duration);
   }
-  get rate() { return (1 + this.tempo / 100) * (1 + this.bend); }
+  get rate() { return (1 + this.tempo / 100) * (1 + this.bend) * (this.rateMul || 1); }
   get effectiveBpm() { return this.bpm ? this.bpm * (1 + this.tempo / 100) : 0; }
   get beatLen() { return this.bpm ? 60 / this.bpm : 0.5; }
   get remaining() { return this.duration - this.position; }
@@ -97,8 +113,14 @@ export class Deck extends Emitter {
   beatIndex(pos = this.position) { return this.bpm ? Math.floor((pos - this.gridOffset) / this.beatLen + 1e-6) : 0; }
   snap(t) {
     if (!this.quantize || !this.bpm) return t;
-    const b = this.beatLen; return this.gridOffset + Math.round((t - this.gridOffset) / b) * b;
+    return snapTo(t, this.gridOffset, this.beatLen, this.quantizeDiv || 1);
   }
+  /** Quantize division (T11): 1/8, 1/4, 1/2, 1 beat or 1 bar; cues, loop in/out and needle drops snap to it. */
+  setQuantizeDiv(div) { this.quantizeDiv = [0.125, 0.25, 0.5, 1, 4].includes(div) ? div : 1; this.emit('state'); }
+  cycleQuantizeDiv() { this.setQuantizeDiv(nextQuantizeDiv(this.quantizeDiv)); }
+  /** Seconds of audio per platter turn (33⅓ rpm = 1.8 s); scratch scale and platter rotation. */
+  get secPerRev() { return secPerRev(this.vinyl.rpm); }
+  get shadowPosition() { return this.slip ? this._shadow : null; }
   floorBeat(t) {
     if (!this.bpm) return t;
     const b = this.beatLen; return this.gridOffset + Math.floor((t - this.gridOffset) / b + 0.02) * b;
@@ -106,7 +128,8 @@ export class Deck extends Emitter {
 
   // ---------- loading ----------
   async load(track) {
-    if (this.playing && this.engine.settings.lockPlayingDecks) throw new Error('Deck is playing');
+    if (this.playing && (this.engine.settings.lockPlayingDecks || this.hardLock || this.engine.settings.deckOptions?.hardLock)) throw new Error('Deck is playing');
+    if (this.scratchSample) this.post('altReturn', { frame: 0 }); // the worklet's saved track is dropped by the load below
     this.post('play', { value: false }); this.post('loop', { value: null }); this.post('unload');
     this.reset(); this.track = track; this.loading = true;
     const tok = ++this._loadSeq;
@@ -160,7 +183,7 @@ export class Deck extends Emitter {
       this.frames = left.length;
       this.node.port.postMessage({ type: 'load', left, right, sampleRate: buf.sampleRate, scale }, right ? [left.buffer, right.buffer] : [left.buffer]);
       this.resetStemControls(); this.postStemGains();
-      this.post('rate', { value: this.rate }); this.post('keylock', { value: this.keyLock });
+      this.rateMul = 1; this.post('rate', { value: this.rate }); this.post('keylock', { value: this.keyLock });
       this.keyShift = 0; this.post('pitch', { value: 1 });
       // first memory cue, else first beat, becomes the cue point
       const mem = (track.cues || []).filter((c) => c.index < 0).sort((a, b) => a.position - b.position)[0];
@@ -169,6 +192,7 @@ export class Deck extends Emitter {
       this.seek(this.cuePoint);
       this.engine.channels[this.index].setAutoGain(this.engine.settings.autoGain ? (track.gain || 0) : 0);
       this.loading = false; this.loadPhase = null;
+      this.armActiveLoop();
       if (this.syncOn) this.matchTempo();
       this.emit('loaded', track); this.emit('state');
       // AI stems prepared for this track: attach them in the background (the deck already plays the original)
@@ -183,7 +207,7 @@ export class Deck extends Emitter {
   }
 
   // ++_loadSeq: a load still in flight becomes stale (it must not finish into an ejected deck)
-  eject() { if (this.playing) return; ++this._loadSeq; this.post('unload'); this.reset(); this.emit('load', null); this.emit('state'); }
+  eject() { if (this.playing) return; if (this.scratchSample) this.scratchSampleReturn(); ++this._loadSeq; this.post('unload'); this.reset(); this.emit('load', null); this.emit('state'); }
 
   // ---------- transport ----------
   play() {
@@ -197,6 +221,21 @@ export class Deck extends Emitter {
     this.emit('state');
   }
   pause() { this.playing = false; this.post('play', { value: false }); this._pendingPlay = true; setTimeout(() => { this._pendingPlay = false; }, 60); this.emit('state'); }
+  /**
+   * Turntable START/STOP (T1, MIDI deckN.startStop): always with motor ramps, even when the deck's start / stop times
+   * are 0 (then 0.7 s / 0.8 s, like a Technics at its defaults).
+   */
+  startStop() {
+    if (!this.track || this.loading) return;
+    if (this.playing) {
+      const T = this.vinyl.stop > 0 ? this.vinyl.stop : 0.8;
+      this.post('brake', { value: 1 / (T * this.ctx.sampleRate) });
+      return;
+    }
+    const T = this.vinyl.start > 0 ? this.vinyl.start : 0.7;
+    if (!(this.vinyl.start > 0)) { this.post('motor', { value: { start: T } }); clearTimeout(this._ssT); this._ssT = setTimeout(() => this.post('motor', { value: { start: this.vinyl.start } }), T * 1000 + 80); }
+    this.play();
+  }
   togglePlay() { this.playing ? this.pause() : this.play(); }
 
   seek(t) {
@@ -205,6 +244,17 @@ export class Deck extends Emitter {
     this._pos = t; this._t = this.ctx.currentTime; this._seekGuard = this.ctx.currentTime;
     this.post('seek', { frame: t * this.sr, at: this.ctx.currentTime });
     this.emit('seek', t);
+    this.armActiveLoop(t);
+  }
+  /**
+   * Needle drop (T6) at fraction `frac` of the track: the overview waveform, the vinyl skin's tonearm and MIDI
+   * deckN.needle all come here. Snaps to the grid when the needle-snap option asks for it (and keeps the beat phase
+   * while playing).
+   */
+  needleDrop(frac) {
+    if (!this.track || !this.duration || this.scratchSample) return;
+    const snap = this.engine.settings.deckOptions?.needleSnap || 'off';
+    this.seek(needleTarget(frac, { duration: this.duration, bpm: this.bpm, gridOffset: this.gridOffset, position: this.position, playing: this.playing, snap }));
   }
 
   cueDown() {
@@ -267,7 +317,32 @@ export class Deck extends Emitter {
     this.track.cues = [...(this.track.cues || []), { index: -1, type: loop.loopEnd ? 'loop' : 'memory', name: '', ...loop }];
     this.saveCues();
   }
-  saveCues() { this.emit('cues'); api.updateTrack(this.track.id, { cues: this.track.cues }).catch(() => {}); }
+  saveCues() { this.emit('cues'); this.armActiveLoop(); if (!this.track.scratchSample) api.updateTrack(this.track.id, { cues: this.track.cues }).catch(() => {}); }
+
+  // ---------- active loops (T11) ----------
+  /** Memory loops flagged active engage by themselves when the play head reaches them (worklet-armed, sample accurate). */
+  get activeLoops() { return (this.track?.cues || []).filter((c) => c.index < 0 && c.active && c.loopEnd > c.position).sort((a, b) => a.position - b.position); }
+  armActiveLoop(from = this.position) {
+    if (!this.track || this.scratchSample) return;
+    const next = this.activeLoops.find((c) => c.position > from + 0.002);
+    const key = next ? `${next.position}|${next.loopEnd}` : '';
+    if (key === this._armedKey) return;
+    this._armedKey = key;
+    this.post('armLoop', { value: next ? { start: next.position * this.sr, end: next.loopEnd * this.sr } : null });
+  }
+  /** Flag the current loop as an active loop (stored as a memory loop), or clear the flag. */
+  toggleActiveLoop() {
+    if (!this.track || this.scratchSample) return;
+    const cues = this.track.cues || [];
+    const loop = this.loop;
+    const near = (c) => loop && Math.abs(c.position - loop.start) < 0.005 && Math.abs((c.loopEnd || 0) - loop.end) < 0.005;
+    let c = cues.find((x) => x.index < 0 && near(x));
+    if (!c && !loop) { c = cues.filter((x) => x.index < 0 && x.loopEnd > x.position && x.active).sort((a, b) => Math.abs(a.position - this.position) - Math.abs(b.position - this.position))[0]; if (c) { c.active = false; this._armedKey = null; this.saveCues(); } return; }
+    if (!c) { this.track.cues = [...cues, { index: -1, type: 'loop', name: '', position: loop.start, loopEnd: loop.end, active: true }]; }
+    else c.active = !c.active;
+    this._armedKey = null; this.saveCues();
+  }
+  get loopIsActiveLoop() { const l = this.loop; return !!(l && (this.track?.cues || []).some((c) => c.index < 0 && c.active && Math.abs(c.position - l.start) < 0.005 && Math.abs(c.loopEnd - l.end) < 0.005)); }
 
   // ---------- loops ----------
   setLoop(start, end, active = true) {
@@ -287,6 +362,26 @@ export class Deck extends Emitter {
     this.setLoop(start, start + beats * this.beatLen);
   }
   loopInPress() { this.loopIn = this.snap(this.position); if (this.loop?.active) this.exitLoop(); this.emit('loop'); }
+  /**
+   * Loop in / out adjust (T11): while IN or OUT is held on an active loop, the jog moves that loop point.
+   * which: 'in' | 'out' | null.
+   */
+  setLoopAdjust(which) {
+    this.loopAdjust = which && this.loop ? which : null;
+    this._adjAcc = 0; this._adjBase = null; this.emit('loop'); this.emit('state');
+  }
+  /** Move the adjusted loop point by `sec` seconds (snapped to 1/16 beat when quantize is on). */
+  adjustLoop(sec) {
+    const l = this.loop; if (!l || !this.loopAdjust) return;
+    this._adjAcc = (this._adjAcc || 0) + sec;
+    const k = this.loopAdjust === 'in' ? 'start' : 'end';
+    let v = (this._adjBase ??= l[k]) + this._adjAcc;
+    if (this.quantize && this.bpm) v = snapTo(v, this.gridOffset, this.beatLen, 1 / 16);
+    const minLen = this.bpm ? this.beatLen / 16 : 0.02;
+    if (k === 'start') v = Math.max(0, Math.min(v, l.end - minLen)); else v = Math.min(this.duration, Math.max(v, l.start + minLen));
+    if (Math.abs(v - l[k]) < 1e-6) return;
+    this.setLoop(k === 'start' ? v : l.start, k === 'end' ? v : l.end, l.active);
+  }
   loopOutPress() {
     const start = this.loopIn ?? this.loop?.start;
     if (start == null) return;
@@ -326,6 +421,10 @@ export class Deck extends Emitter {
     this.rolling = false; this.exitLoop(); this.loop = this._rollSavedLoop || null; this._rollSavedLoop = null; this.setSlip(this._rollPrevSlip); this.emit('loop');
   }
 
+  /** Beat jump by the deck's selected size (½ .. 64 beats), back (dir -1) or forward (dir 1). */
+  jumpBySize(dir) { this.beatJump(dir * this.jumpSize); }
+  setJumpSize(b) { if ([0.5, 1, 2, 4, 8, 16, 32, 64].includes(b)) { this.jumpSize = b; this.emit('state'); } }
+  jumpSizeStep(dir) { this.setJumpSize(jumpSizeStep(this.jumpSize, dir)); }
   beatJump(beats) {
     if (!this.track) return;
     const d = beats * this.beatLen;
@@ -340,12 +439,13 @@ export class Deck extends Emitter {
    * cap off its track; user input (fader, MIDI, keys) is clamped to the range by its callers.
    */
   setTempo(pct) {
+    if (this._glide && !this._glideSetting) this.cancelGlide();
     pct = clamp(Number(pct) || 0, -100, 100);
     if (Math.abs(pct) > this.tempoRange + 1e-9) { this.tempoRange = TEMPO_RANGES.find((r) => r >= Math.abs(pct) - 1e-9) || 100; this.emit('tempo-range', this.tempoRange); }
     this.tempo = pct; this.post('rate', { value: this.rate }); this.emit('tempo'); this.engine.onTempoChange(this);
     if (this.stemFxOn && this.effectiveBpm) this.stemFx?.setBeat(60 / this.effectiveBpm);
   }
-  setTempoFader(v) { this.setTempo(clamp(Number(v) || 0, -1, 1) * this.tempoRange); if (this.syncOn && !this.isMaster) { this.syncOn = false; this.emit('state'); } } // -1..1
+  setTempoFader(v) { if (this.vinyl.quartz) return; this.setTempo(clamp(Number(v) || 0, -1, 1) * this.tempoRange); if (this.syncOn && !this.isMaster) { this.syncOn = false; this.emit('state'); } } // -1..1
   /** Pick the tempo range. The tempo keeps its value when it fits the new range, otherwise it is clamped to the range. */
   setTempoRange(r) {
     r = TEMPO_RANGES.includes(Number(r)) ? Number(r) : clamp(Number(r) || 8, 1, 100);
@@ -356,11 +456,57 @@ export class Deck extends Emitter {
   /** Step the tempo by `pct` (MIDI tempo +/- buttons), staying inside the tempo range. */
   stepTempo(pct) { this.setTempo(clamp(this.tempo + pct, -this.tempoRange, this.tempoRange)); }
   resetTempo() { this.setTempo(0); }
-  setBend(b) { this.bend = b; this.post('rate', { value: this.rate }); }
+  setBend(b) { if (this._glide) this.cancelGlide(); this.bend = b; this.post('rate', { value: this.rate }); }
+  /** Hold-to-bend (T5): the bend grows from 1 % to 8 % over a second (or a fixed ±4 % with bendMode 'fixed'). */
+  bendStart(dir) {
+    clearInterval(this._bendRamp);
+    if ((this.engine.settings.deckOptions?.bendMode || 'ramp') === 'fixed') return this.setBend(0.04 * dir);
+    const t0 = performance.now();
+    this.setBend(bendAt(0) * dir);
+    this._bendRamp = setInterval(() => { const h = (performance.now() - t0) / 1000; this.setBend(bendAt(h) * dir); if (h >= 1) clearInterval(this._bendRamp); }, 25);
+  }
+  bendStop() { clearInterval(this._bendRamp); this.setBend(0); }
+  /** Quartz lock (T1): tempo pinned at 0 % while on; the tempo fader is ignored. */
+  setQuartz(on) { this.vinyl = { ...this.vinyl, quartz: !!on }; if (on) this.setTempo(0); this.emit('state'); }
+
+  // ---------- tempo glide (T5) ----------
+  /**
+   * Glide the tempo to `targetPct` over `beats` beats with the worklet's sample-accurate rate ramp
+   * (message { type: 'rateRamp', to, dur, at? }, the same one the automix engine uses).
+   */
+  tempoGlide(targetPct, beats = 16) {
+    if (!this.track) return false;
+    targetPct = clamp(Number(targetPct) || 0, -100, 100);
+    if (Math.abs(targetPct) > this.tempoRange + 1e-9) { this.tempoRange = [6, 8, 10, 16, 25, 50, 100].find((r) => r >= Math.abs(targetPct) - 1e-9) || 100; this.emit('tempo-range', this.tempoRange); }
+    const mul = (1 + this.bend) * (this.rateMul || 1);
+    const r0 = this.rate, r1 = (1 + targetPct / 100) * mul;
+    if (!this.playing || !this.bpm || Math.abs(r1 - r0) < 1e-6) { this.setTempo(targetPct); return true; }
+    const dur = glideDuration(beats, this.beatLen, r0, r1);
+    const id = (this._glideId = (this._glideId || 0) + 1);
+    this._glide = { id, target: targetPct, from: this.tempo, t0: this.ctx.currentTime, dur };
+    this.post('rateRamp', { to: r1, dur, id });
+    if (this.syncOn && !this.isMaster) { this.syncOn = false; this.emit('state'); }
+    this.emit('glide');
+    return true;
+  }
+  /** Glide to the master deck's tempo (half / double time aware). */
+  glideToMaster(beats = 16) {
+    const m = this.engine.masterDeck(this);
+    if (!m || !m.bpm || !this.bpm) return false;
+    return this.tempoGlide((this.syncTargetRatio(m) - 1) * 100, beats);
+  }
+  cancelGlide() { if (!this._glide) return; this._glide = null; this.post('rate', { value: this.rate }); this.emit('glide'); }
+  get gliding() { return !!this._glide; }
   setKeyLock(v) { this.keyLock = v; this.post('keylock', { value: v }); this.emit('state'); }
   setQuantize(v) { this.quantize = v; this.emit('state'); }
   setSlip(v) { this.slip = v; this.post('slip', { value: v }); this.emit('state'); }
-  setReverse(v) { this.reverse = v; this.post('reverse', { value: v }); this.emit('state'); }
+  setReverse(v) { if (this.slipReverse && !v) { this.slipReverse = false; this.setSlip(this._slipRevPrev); } this.reverse = v; this.post('reverse', { value: v }); this.emit('state'); }
+  /** Latching slip reverse (T11): reverse with slip on until pressed again; playback resumes where it would have been. */
+  toggleSlipReverse() {
+    if (!this.track) return;
+    if (this.slipReverse) { this.slipReverse = false; this.post('reverse', { value: false }); this.reverse = false; this.setSlip(this._slipRevPrev); return; }
+    this._slipRevPrev = this.slip; this.setSlip(true); this.reverse = true; this.slipReverse = true; this.post('reverse', { value: true }); this.emit('state');
+  }
 
   syncTargetRatio(master) {
     // allow half / double time matching (e.g. 87 vs 174)
@@ -393,24 +539,72 @@ export class Deck extends Emitter {
   setMaster() { this.engine.setMaster(this); }
 
   // ---------- jog / scratch ----------
-  /** deltaRot: platter rotations since last call, dt seconds; 33⅓ rpm => 1.8 s audio per rotation */
+  /** deltaRot: platter rotations since last call, dt seconds; 33⅓ rpm => 1.8 s audio per rotation (rpm sets it) */
   jogScratch(deltaRot, dt) {
     if (!this.track) return;
+    if (this.loopAdjust) return this.adjustLoop(deltaRot * this.secPerRev * 0.25);
     if (!this.scratching) { this.scratching = true; this._wasPlaying = this.playing; }
-    const v = clamp((deltaRot * 1.8) / Math.max(dt, 0.001), -12, 12);
+    const v = clamp((deltaRot * this.secPerRev) / Math.max(dt, 0.001), -12, 12);
     this.post('scratch', { value: { velocity: v } });
     clearTimeout(this._scratchIdle);
     this._scratchIdle = setTimeout(() => this.scratching && this.post('scratch', { value: { velocity: 0 } }), 40);
   }
   jogRelease() {
     if (!this.scratching) return;
-    this.scratching = false; clearTimeout(this._scratchIdle);
+    this.scratching = false; clearTimeout(this._scratchIdle); this._handPos = false;
     if (!this.external) this.post('scratch', { value: null });
+  }
+
+  // ---------- position-following scratch (T3; shared with the controller plan §4.7) ----------
+  /** Map an input event's timeStamp (performance.now() clock) to the audio clock the worklet runs on. */
+  audioTimeOf(ts = performance.now()) {
+    const off = this.ctx.currentTime - performance.now() / 1000;
+    // the audio clock advances in render-quantum steps: follow the largest offset (a step's leading edge) up at once
+    // and down slowly, so event times do not jitter by a quantum
+    this._audioOff = this._audioOff == null || off > this._audioOff || off < this._audioOff - 0.05 ? off : this._audioOff - 1e-5;
+    return ts / 1000 + this._audioOff;
+  }
+  /** Hand on the record (touch, mouse, a touch-sensitive jog): the platter follows jogPosition() until jogPositionEnd(). */
+  jogPositionStart(ts) {
+    if (!this.track || this.external) return false;
+    if (this.loopAdjust) { this._adjRot = 0; this._handPos = 'adjust'; return true; }
+    this.scratching = true; this._wasPlaying = this.playing; this._handPos = true; clearTimeout(this._scratchIdle);
+    this.post('scratch', { value: { pos: true } });
+    this.post('scratchPos', { pos: 0, t: this.audioTimeOf(ts) });
+    this._handHist = [[ts ?? performance.now(), 0]];
+    return true;
+  }
+  /** rot: platter turns since jogPositionStart (+ = forwards), ts: the event's timeStamp. */
+  jogPosition(rot, ts) {
+    if (!this._handPos) return;
+    if (this._handPos === 'adjust') { const d = rot - this._adjRot; this._adjRot = rot; this.adjustLoop(d * this.secPerRev * 0.25); return; }
+    ts ??= performance.now();
+    this.post('scratchPos', { pos: rot * this.secPerRev * this.sr, t: this.audioTimeOf(ts) });
+    const h = this._handHist; h.push([ts, rot]); while (h.length > 2 && ts - h[0][0] > 60) h.shift();
+  }
+  /** Platter speed (x normal) of the hand over its last ~40 ms. */
+  handSpeed() {
+    const h = this._handHist; if (!h || h.length < 2) return 0;
+    const a = h[0], b = h[h.length - 1], dt = (b[0] - a[0]) / 1000;
+    return dt > 0.004 ? ((b[1] - a[1]) * this.secPerRev) / dt : 0;
+  }
+  /** Hand off: the motor takes over (T1 release), or a fast backwards throw spins the record back (T10). */
+  jogPositionEnd(ts) {
+    if (!this._handPos) return;
+    if (this._handPos === 'adjust') { this._handPos = false; return; }
+    const h = this._handHist;
+    if (h && ts != null && ts - h[h.length - 1][0] > 50) h.push([ts, h[h.length - 1][1]]); // held still before the lift
+    const v = this.handSpeed();
+    this._handPos = false; this.scratching = false;
+    this.post('scratch', { value: null });
+    if (this.playing && v < -3 && this.engine.settings.deckOptions?.flickSpinback) this.backspin(this.vinyl.spinTime, Math.min(8, -v));
+    return v;
   }
   /** Outer-ring nudge (pitch bend) or seek when paused */
   jogNudge(deltaRot) {
     if (!this.track) return;
-    if (!this.playing) { this.seek(this.position + deltaRot * 1.8 * 0.25); return; }
+    if (this.loopAdjust) return this.adjustLoop(deltaRot * this.secPerRev * 0.25);
+    if (!this.playing) { this.seek(this.position + deltaRot * this.secPerRev * 0.25); return; }
     this.setBend(clamp(deltaRot * 4, -0.25, 0.25));
     clearTimeout(this._bendT); this._bendT = setTimeout(() => this.setBend(0), 70);
   }
@@ -502,11 +696,88 @@ export class Deck extends Emitter {
   attachExternalPort(port) { this.node.port.postMessage({ type: 'ext-port', port }, [port]); }
 
   // ---------- performance effects ----------
-  brake(seconds = 1.2) { if (!this.playing) return; this.post('brake', { value: 1 / (seconds * this.ctx.sampleRate) }); }
+  brake(seconds = this.vinyl.brakeTime || 1.2) { if (!this.playing) return; this.post('brake', { value: 1 / (seconds * this.ctx.sampleRate) }); }
   /** Backspin: the record is thrown backwards and spins down (worklet-timed, sample accurate), then the deck stops. */
-  backspin(seconds = 1.0, speed = 4.5) {
+  backspin(seconds = this.vinyl.spinTime || 1.0, speed = this.vinyl.spinSpeed || 4.5) {
     if (!this.track) return;
     this.post('backspin', { seconds, speed });
+  }
+  /** Slip brake / slip spin-back (T10): the effect plays, then the track carries on where it would have been. */
+  slipBrake(seconds = this.vinyl.brakeTime || 1.2) {
+    if (!this.playing) return;
+    this._slipStopPrev ??= this.slip; this.setSlip(true);
+    this.post('brake', { value: 1 / (seconds * this.ctx.sampleRate), slip: true });
+  }
+  slipBackspin(seconds = this.vinyl.spinTime || 1.0, speed = this.vinyl.spinSpeed || 4.5) {
+    if (!this.track || !this.playing) return;
+    this._slipStopPrev ??= this.slip; this.setSlip(true);
+    this.post('backspin', { seconds, speed, slip: true });
+  }
+
+  // ---------- vinyl model (T1-T4) ----------
+  /** Apply vinyl options (see audio/vinyl.js VINYL_DEFAULTS) to the worklet's motor, jog weight and rpm. */
+  applyVinyl(v) {
+    const old = this.vinyl || {};
+    this.vinyl = { ...VINYL_DEFAULTS, ...old, ...v };
+    const n = this.vinyl;
+    if (['start', 'stop', 'inertia', 'slipmat'].some((k) => old[k] !== n[k]) || !this._motorSent) { this._motorSent = true; this.post('motor', { value: { start: n.start, stop: n.stop, inertia: n.inertia, slipmat: n.slipmat } }); }
+    if (old.jogWeight !== n.jogWeight || !this._weightSent) { this._weightSent = true; this.post('jogWeight', { value: n.jogWeight }); }
+    if (n.quartz && !old.quartz) this.setTempo(0);
+    this.emit('vinyl');
+  }
+
+  // ---------- scale play (T11: pads change the platter speed) ----------
+  /** Play at `semis` semitones by platter speed (key lock off while held); null returns to normal speed. */
+  setRateStep(semis) {
+    if (semis == null) {
+      this.rateMul = 1;
+      if (this._rateKeyLock != null) { this.setKeyLock(this._rateKeyLock); this._rateKeyLock = null; }
+    } else {
+      if (this._rateKeyLock == null) { this._rateKeyLock = this.keyLock; if (this.keyLock) this.setKeyLock(false); }
+      this.rateMul = semitoneRate(semis);
+    }
+    this.post('rate', { value: this.rate }); this.emit('state');
+  }
+
+  // ---------- scratch samples (T9) ----------
+  /**
+   * Swap the deck to a short sample (an AudioBuffer under ~15 s): the platter, faders and FX work on it as on a track.
+   * The track's audio stays in the worklet; scratchSampleReturn() puts it back where it would have been.
+   */
+  scratchSampleIn(buffer, name = 'Sample', slot = 0) {
+    if (!buffer || this.loading) return false;
+    const now = this.ctx.currentTime;
+    if (!this.scratchSample) {
+      if (!this.track) return false;
+      this.scratchSample = { saved: { track: this.track, duration: this.duration, sr: this.sr, waveform: this.waveform, bpm: this.bpm, gridOffset: this.gridOffset, cuePoint: this.cuePoint, loop: this.loop, loopIn: this.loopIn, frames: this.frames, slip: this.slip, playing: this.playing, rate: this.rate, position: this.position, at: now, countedPlay: this._countedPlay } };
+      if (this.loop?.active) this.post('loop', { value: null });
+    }
+    const ss = this.scratchSample; ss.slot = slot; ss.name = name;
+    const ch0 = buffer.getChannelData(0), ch1 = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : null;
+    const left = new Float32Array(ch0), right = ch1 ? new Float32Array(ch1) : null;
+    this.node.port.postMessage({ type: 'altLoad', left, right, sampleRate: buffer.sampleRate, scale: 1 }, right ? [left.buffer, right.buffer] : [left.buffer]);
+    this.track = { id: `scratch:${slot}`, title: name, artist: 'Scratch sample', scratchSample: true, cues: [] };
+    this.duration = buffer.duration; this.sr = buffer.sampleRate; this.waveform = null; this.bpm = 0; this.gridOffset = 0;
+    this.cuePoint = 0; this.loop = null; this.loopIn = null; this.frames = buffer.length; this._countedPlay = true;
+    this._pos = 0; this._t = now; this._seekGuard = now;
+    this.emit('sample'); this.emit('loop'); this.emit('state');
+    return true;
+  }
+  /** Back to the track: at the snapshot position, or where it would be now if slip was on and it was playing. */
+  scratchSampleReturn() {
+    const ss = this.scratchSample; if (!ss) return false;
+    const s = ss.saved, now = this.ctx.currentTime;
+    let pos = s.position;
+    if (s.slip && s.playing) pos += (now - s.at) * s.rate;
+    pos = clamp(pos, 0, Math.max(0, s.duration - 0.001));
+    this.scratchSample = null;
+    Object.assign(this, { track: s.track, duration: s.duration, sr: s.sr, waveform: s.waveform, bpm: s.bpm, gridOffset: s.gridOffset, cuePoint: s.cuePoint, loop: s.loop, loopIn: s.loopIn, frames: s.frames, _countedPlay: s.countedPlay });
+    this.post('altReturn', { frame: pos * this.sr });
+    this._pos = pos; this._t = now; this._seekGuard = now;
+    if (this.loop?.active) this.post('loop', { value: { start: this.loop.start * this.sr, end: this.loop.end * this.sr } });
+    this._armedKey = null; this.armActiveLoop(pos);
+    this.emit('sample'); this.emit('loop'); this.emit('state');
+    return true;
   }
   censorOn() { this._censorSlip = this.slip; this.setSlip(true); this.setReverse(true); }
   censorOff() { this.setReverse(false); this.setSlip(this._censorSlip); }
@@ -586,7 +857,7 @@ export class Deck extends Emitter {
 
   // ---------- instant doubles ----------
   async cloneFrom(src) {
-    if (!src?.track || src === this) return;
+    if (!src?.track || src === this || src.track.scratchSample) return;
     if ((await this.load({ ...src.track })) === false) return;
     this.setTempo(src.tempo); this.setKeyLock(src.keyLock); this.setKeyShift(src.keyShift);
     this.stemMute = [...src.stemMute]; this.stemLevels = [...src.stemLevels]; this.postStemGains();

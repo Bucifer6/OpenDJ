@@ -14,7 +14,7 @@ import { Library, newId } from './library.js';
 import { scanFolder, addFile, walk, AUDIO_EXT, isMediaPath } from './scanner.js';
 import { listDrives, browseDir } from './drives.js';
 import { aiffToWav } from './aiff.js';
-import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clientFor, isInside, uniqueName, safe, sourcePlaylists, openSourcePlaylist, remoteError } from './remote.js';
+import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clientFor, isInside, uniqueName, safe, sourcePlaylists, openSourcePlaylist, remoteError, plexUsers, switchPlexUser } from './remote.js';
 import { findFfmpeg, needsTranscode, remoteBrowserDecodable, browserPlayableVideo, formatList, DSD_EXT, VIDEO_MIME, extOf, probe, isVideoByName, BROWSER_VIDEO_EXT } from './media.js';
 import { Transcoder } from './transcode.js';
 import { Auth, parseCookies, parseTrustProxy } from './auth.js';
@@ -30,6 +30,8 @@ import { registerLightingRoutes } from './lighting/routes.js';
 import { registerLinkRoutes } from './link/index.js';
 import { registerLyricsRoutes } from './lyrics.js';
 import { registerRecordingRoutes } from './recorder.js';
+import { registerTtsRoutes } from './tts.js';
+import { registerMcp } from './mcp.js';
 import { registerBroadcastRoutes } from './broadcast.js';
 import { registerCdjRoutes } from './cdj/routes.js';
 import { findIdenticalTrack } from './upload-dedupe.js';
@@ -213,7 +215,7 @@ async function proxy(req, res, { url, headers = {}, name }, { connectTimeout = 1
  * @param {string} [o.launchToken]  Electron only: every request must carry this token in the LAUNCH_COOKIE cookie, so
  *   other local users / processes cannot use the password-less desktop server. Not set by `npm run web` / tests.
  */
-export function createServer({ dataDir = defaultDataDir(), log = console, auth: authOpt, ffmpeg: ffmpegOpt, allowedHosts, roots: rootsOpt, password, trustProxy, launchToken } = {}) {
+export function createServer({ dataDir = defaultDataDir(), log = console, auth: authOpt, ffmpeg: ffmpegOpt, allowedHosts, roots: rootsOpt, password, trustProxy, launchToken, tts, mcp: mcpOpts } = {}) {
   const library = new Library(dataDir);
   const sse = new Set();
   const emit = (type, payload) => {
@@ -777,6 +779,18 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     if (!params.pid || params.pid.length > 256) throw new HttpError(400, 'Bad playlist id');
     try { return await openSourcePlaylist(library, params.id, params.pid, { name: query.get('name') || undefined }); } catch (e) { throw remoteFail(e); }
   });
+  // Plex Home: list users and switch the connection to one (then re-sync: each user sees their own libraries)
+  route('GET', '/api/sources/:id/users', async ({ params }) => {
+    if (!library.getSource(params.id)) throw new HttpError(404, 'No source');
+    try { return await plexUsers(library, params.id); } catch (e) { throw remoteFail(e); }
+  });
+  route('POST', '/api/sources/:id/user', async ({ params, body }) => {
+    if (!library.getSource(params.id)) throw new HttpError(404, 'No source');
+    let r;
+    try { r = await switchPlexUser(library, params.id, body?.userId, body?.pin); } catch (e) { throw remoteFail(e); }
+    runJob('sync:' + params.id, () => syncSource(library, params.id, { onProgress: (p) => emit('sync', p) }));
+    return r;
+  });
   route('DELETE', '/api/sources/:id', async ({ params }) => { library.removeSource(params.id); return { ok: true }; });
 
   // ---------------- downloads ----------------
@@ -789,7 +803,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   route('PUT', '/api/settings', async ({ body }) => {
     const patch = { ...body };
     delete patch.allowedRoots; // set in settings.json or OPENDJ_MUSIC_ROOTS, never from the web UI
-    delete patch.recording; delete patch.broadcast; // only via their own validated endpoints
+    delete patch.recording; delete patch.broadcast; delete patch.mcp; // only via their own validated endpoints
     for (const k of ['downloadDir', 'uploadDir']) if (k in patch && patch[k]) allowPath(String(patch[k]), 'This folder');
     const hue = patch.lighting?.outputs?.hue, curHue = library.settings.lighting?.outputs?.hue;
     // the redacted Hue key stands for the stored one, but only for the same bridge
@@ -805,6 +819,9 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   registerLyricsRoutes({ route, library, emit, dataDir, canRead: readable, canWrite: readable });
   const recording = registerRecordingRoutes({ route, library, emit, pathAllowed, allowedRoots });
   const broadcast = registerBroadcastRoutes({ route, library, emit, pathAllowed: readable, log });
+  registerTtsRoutes({ route, httpError: (status, msg) => new HttpError(status, msg), detect: tts });
+  // remote control for AI assistants (MCP): off by default; own loopback listener, or session + token when hosted
+  const mcp = registerMcp({ route, library, emit, auth, hosted: auth.enabled, version: VERSION, log, broadcastConfig: () => library.settings.broadcast || { targets: [] }, ...(mcpOpts || {}) });
   registerCdjRoutes({ route, library, emit, allowPath, readable });
   const updates = registerUpdateRoutes({ route, library, version: VERSION, hosted: restricted });
 
@@ -925,10 +942,11 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     try { stems?.close?.(); } catch { /* already closed */ }
     try { recording?.close?.(); } catch { /* already closed */ }
     try { broadcast?.close?.(); } catch { /* already closed */ }
+    try { mcp?.close?.(); } catch { /* already closed */ }
     downloads.queue = [];
     for (const j of downloads.active.values()) j.ctrl.abort();
   };
-  return { server, library, history, downloads, transcoder, auth, lighting, link, stems, recording, broadcast, updates, ffmpegReady: ffReady, shutdown, newId };
+  return { server, library, history, downloads, transcoder, auth, lighting, link, stems, recording, broadcast, mcp, updates, ffmpegReady: ffReady, shutdown, newId };
 }
 
 /**

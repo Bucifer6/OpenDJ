@@ -204,3 +204,9 @@ Xcode, so these are correct by construction but only CI / a device can prove the
   against real media servers (iOS ATS allows plain HTTP only on the local network; Android allows cleartext);
 - audio latency and performance on real mid-range hardware; MediaRecorder AAC/Opus availability per OS version;
 - the signed iOS archive / TestFlight and signed Android steps (they only run when the secrets exist).
+
+## Scratching on a phone or tablet
+- **Scratch view:** tap SCRATCH in a deck header (or double-tap the header) for a full-screen platter with a crossfader strip on your thumb side (*Settings → Decks → Scratch view crossfader*), a CUT button for transforms, the scratch-sample pads and the estimated touch-to-sound latency. Use wired headphones: Bluetooth adds 100 ms or more.
+- **Multitouch:** one finger scratches, a second finger anywhere on the platter holds the record still. Fingers on the platter and the crossfader / CUT work at the same time.
+- **Haptics:** a groove tick while scratching and a bump on hot cues (*Settings → Decks → Haptic feedback*: Off, Subtle, Full). The apps use `@capacitor/haptics`; Android browsers use `navigator.vibrate`; iOS Safari has no vibration API.
+- **Needle lock** is on by default on phones: a playing deck needs a short press-and-hold on the overview waveform before the needle drops.

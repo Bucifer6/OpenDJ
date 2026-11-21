@@ -33,7 +33,8 @@ export const DEFAULT_MODEL = Object.freeze({
   sha256: 'da9e5101ee0804d04933974b59d8aae9c862e80e14f2f24e7c74cae76bdbe748',
   bytes: 174263526,
   downloadBytes: 98176342,
-  licence: 'Demucs (code and pretrained HT-Demucs weights) by Meta Platforms, released under the MIT licence in facebookresearch/demucs. The ONNX export\'s packager notes the weights may be meant for personal and research use; check before commercial use.',
+  // Text only (docs/RESOURCES_AND_LICENSING.md §0.1): the Demucs code is MIT, the pretrained weights are not.
+  licence: 'Demucs code (Meta Platforms / Alexandre Défossez) is MIT-licensed, but the pretrained HT-Demucs weights are not covered by the MIT licence: their author says their licence is unclear (trained partly on research-only data), and the ONNX package says personal and research use only. Use these weights for personal, research or other non-commercial use only.',
   homepage: 'https://github.com/facebookresearch/demucs',
 });
 

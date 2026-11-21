@@ -1,4 +1,5 @@
-// Sample pads: a bank of built-in DJ FX one-shots (no copyrighted audio) plus user-loaded samples.
+// Sample pads: a bank of built-in DJ FX one-shots plus user-loaded samples. Pad 1 (Air Horn) plays a bundled CC0
+// recording (public/samples/air-horn.mp3, mastered like the rest: recordedHorn below); the others are synthesised.
 //
 // Every built-in sound is synthesised with real Web Audio nodes (oscillators, filters, wave shapers, a convolver
 // with a generated room / hall impulse, parameter envelopes) in an OfflineAudioContext, then mastered the same way:
@@ -6,6 +7,7 @@
 // -1 dBFS (look-ahead limiter) and faded at both edges (no clicks). Each sound is rendered once per sample rate and
 // cached. Pad order and names stay compatible with older settings / MIDI maps (pads 1-8 = Air Horn, Siren, Laser,
 // Kick, Clap, Rewind, Riser, Impact).
+import { SAMPLE_CATALOG, SAMPLE_SOURCE } from './sample-catalog.js';
 
 const TARGET_LUFS = -14;
 const CEILING = 10 ** (-1 / 20); // -1 dBFS
@@ -409,6 +411,27 @@ export function master(channels, sampleRate) {
 
 const cache = new Map(); // `${id}@${sampleRate}` -> Promise<AudioBuffer>
 
+/**
+ * The bundled recorded air horn (public/samples/air-horn.mp3, CC0, see CREDITS.txt), decoded once per sample rate
+ * and mastered like the synthesised bank (loudness target, -1 dBFS ceiling: the file itself peaks at 0 dBFS).
+ * Falls back to the synthesised horn when the file can't be loaded.
+ */
+export function recordedHorn(ctx) {
+  const key = `airhorn-rec@${ctx.sampleRate}`;
+  if (cache.has(key)) return cache.get(key);
+  const p = (async () => {
+    try {
+      const r = await fetch(new URL('../../samples/air-horn.mp3', import.meta.url));
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const b = await ctx.decodeAudioData(await r.arrayBuffer());
+      b.stats = master(Array.from({ length: b.numberOfChannels }, (_, c) => b.getChannelData(c)), b.sampleRate);
+      return b;
+    } catch (e) { console.warn('sampler: recorded air horn unavailable, using the synthesised one', e); return renderSound('airhorn', ctx.sampleRate); }
+  })();
+  cache.set(key, p);
+  return p;
+}
+
 /** Render (once, cached) a built-in sound at a sample rate. Resolves a stereo AudioBuffer with `.stats`. */
 export function renderSound(id, sampleRate = 48000) {
   const key = `${id}@${sampleRate}`;
@@ -462,6 +485,7 @@ async function idbDo(mode, fn) {
   } finally { db.close(); }
 }
 
+const MAX_SAMPLE_BYTES = 8 * 1024 * 1024; // the largest catalogue file is about 0.7 MB
 const clampVol = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.min(1.5, n)) : 1; };
 
 // ------------------------------------------------------------------ the sampler
@@ -475,6 +499,7 @@ export class Sampler {
   constructor(ctx, destination, config = {}) {
     this.ctx = ctx;
     this.out = ctx.createGain(); this.out.gain.value = 0.8; this.out.connect(destination);
+    this.pre = ctx.createGain(); this.pre.connect(this.out); // pads -> pre (sampler cue taps here, before the volume) -> out
     /** () => AudioContext time of the master deck's next beat, or null. Set by the engine. */
     this.nextBeat = null;
     /** Called when a pad's sound / name / settings change (UI refresh). */
@@ -490,12 +515,7 @@ export class Sampler {
   }
   async _fill(i, slot) {
     try {
-      let b;
-      if (slot.sound === 'airhorn') {
-        const response = await fetch(new URL('../../samples/air-horn.mp3', import.meta.url));
-        if (!response.ok) throw new Error('Could not load the air horn recording');
-        b = await this.ctx.decodeAudioData(await response.arrayBuffer());
-      } else b = await renderSound(slot.sound, this.ctx.sampleRate);
+      const b = slot.sound === 'airhorn' ? await recordedHorn(this.ctx) : await renderSound(slot.sound, this.ctx.sampleRate);
       if (this.slots[i] === slot) { slot.buffer = b; this.onChange?.(); }
     } catch (e) { console.warn('sampler: could not render', slot.sound, e); }
   }
@@ -512,18 +532,31 @@ export class Sampler {
     idbDo('readwrite', (st) => st.delete(i)).catch(() => {});
     await this._fill(i, s);
   }
-  /** Download a curated CC0 one-shot and assign it to a pad. */
+  /**
+   * Download a curated CC0 one-shot (an entry of SAMPLE_CATALOG, matched by id: only its pinned URL is fetched) and
+   * assign it to a pad. Resolves { saved } (false: kept for this session only, browser storage refused it).
+   */
   async loadCatalogSample(i, sample) {
-    if (!sample?.url || !sample?.name) throw new Error('Invalid sample selection');
-    const response = await fetch(sample.url);
-    if (!response.ok) throw new Error(`Sample download failed (${response.status})`);
-    const bytes = await response.arrayBuffer();
+    const entry = SAMPLE_CATALOG.find((x) => x.id === sample?.id);
+    if (!entry || !this.slots[i]) throw new Error('Invalid sample selection');
+    if (!entry.url.startsWith(SAMPLE_SOURCE)) throw new Error('This sample is not from the pinned source');
+    const token = (this._dl ||= [])[i] = {};
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 30000);
+    let bytes;
+    try {
+      const response = await fetch(entry.url, { credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer', cache: 'no-store', signal: ctl.signal });
+      if (!response.ok) throw new Error(`Sample download failed (HTTP ${response.status})`);
+      if (Number(response.headers.get('content-length')) > MAX_SAMPLE_BYTES) throw new Error('Sample file is too large');
+      bytes = await response.arrayBuffer();
+      if (bytes.byteLength > MAX_SAMPLE_BYTES) throw new Error('Sample file is too large');
+    } catch (e) { throw e.name === 'AbortError' ? new Error('Sample download timed out') : e; } finally { clearTimeout(timer); }
     const buf = await this.ctx.decodeAudioData(bytes.slice(0));
+    if (this._dl[i] !== token) return { saved: false, superseded: true }; // another sound was chosen meanwhile
     const old = this.slots[i] || {};
-    const metadata = { name: sample.name, creator: sample.creator, source: sample.source, license: sample.license || 'CC0 1.0' };
+    const metadata = { name: entry.name, creator: entry.creator, source: entry.source, license: entry.license || 'CC0 1.0', catalogId: entry.id };
     this.slots[i] = { ...old, ...metadata, sound: old.sound, buffer: buf, builtin: false, playing: null, mode: 'oneshot', volume: clampVol(old.volume), sync: !!old.sync };
     this.onChange?.();
-    idbDo('readwrite', (st) => st.put({ ...metadata, bytes }, i)).catch(() => {});
+    try { await idbDo('readwrite', (st) => st.put({ ...metadata, bytes }, i)); return { saved: true }; } catch { return { saved: false }; }
   }
   async loadFile(i, file) {
     const bytes = await file.arrayBuffer();
@@ -564,7 +597,7 @@ export class Sampler {
     const src = this.ctx.createBufferSource(); src.buffer = s.buffer;
     const g = this.ctx.createGain(); g.gain.value = velocity * (s.volume ?? 1);
     src.gainNode = g;
-    src.connect(g); g.connect(this.out); src.start(at || 0);
+    src.connect(g); g.connect(this.pre); src.start(at || 0);
     s.playing = src; src.onended = () => { if (s.playing === src) s.playing = null; };
   }
   stop(i) {

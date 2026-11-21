@@ -78,6 +78,7 @@ html.touch .lr .art { width: 28px; height: 28px; margin: 6px 1px; }
     padding: var(--sat) var(--sar) var(--sab) var(--sal); box-sizing: border-box; --wave-h: 46px; }
   .topbar { flex: none; gap: 6px; flex-wrap: wrap; }
   .topbar .btn { min-height: 44px; min-width: 44px; }
+  .deck .transport .deck-mix-now { min-height: 44px; } /* finger-sized like CUE / PLAY */
   .topbar .logo { margin-right: auto; }
   .topbar .shift-btn, .topbar .seg, .topbar .cpu, .topbar .clock { display: none; }
   .waves { flex: none; }
@@ -101,7 +102,7 @@ html.touch .lr .art { width: 28px; height: 28px; margin: 6px 1px; }
   .deck-mid .btn, .deck-toggles .btn { min-height: 44px; font-size: 12px; }
   .deck-toggles, .loop-row { flex-wrap: nowrap; }
   .deck-toggles .btn, .loop-row .btn { flex: 1 1 0; }
-  .pad-modes { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .pad-modes { grid-template-columns: repeat(9, minmax(0, 1fr)); }
   .pad-mode { min-height: 40px; font-size: 10px; }
   .pads { gap: 6px; }
   .pad { height: 54px; }
@@ -157,6 +158,7 @@ html.touch:not(.compact) .topbar { min-height: 50px; }
    usable channel fader and 36-44 px tap targets (QA M4: 37 px fader, 16-21 px buttons, clipped labels). */
 html.tablet { --wave-h: 44px; --browser-h: clamp(140px, 19vh, 220px); }
 html.tablet body:not(.four-decks) .deck .pads .pad { height: 44px; min-height: 44px; }
+html.tablet .deck .transport .deck-mix-now { min-height: 44px; }
 html.tablet body:not(.four-decks) .deck-mid { gap: 3px; }
 html.tablet .deck-toggles .btn.sm { min-height: 36px; font-size: 10px; letter-spacing: 0; padding-left: 1px; padding-right: 1px; text-overflow: clip; }
 html.tablet .panel-tab { min-height: 34px; font-size: 10.5px; }
@@ -170,13 +172,14 @@ html.tablet .mixer .btn-pfl { min-height: 36px; }
 html.tablet .mixer .xf-assign { width: 100%; }
 html.tablet .mixer .xf-assign .btn { flex: 1 1 0; min-width: 0; min-height: 36px; padding: 0; font-size: 11px; }
 html.tablet .mixer .mic-box .btn { min-height: 36px; min-width: 44px; }
+html.tablet .mixer .smart-xf { min-height: 36px; } /* Smart Fader toggle */
 html.tablet .strip .fader-v .fader-track { min-height: 110px; }
 html.tablet .crossfader .fader-track { height: 44px; }
 html.tablet .fx-unit .btn, html.tablet .fx-unit .sel { min-height: 36px; }
 /* narrow decks: a smaller platter column, toggles in 3 columns, pad modes in two rows of 4 (finger-wide) */
 html.tablet body:not(.four-decks) .deck-body { grid-template-columns: minmax(84px, 0.4fr) minmax(0, 1.8fr) 54px; }
 html.tablet .deck-toggles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-html.tablet .pad-modes { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+html.tablet .pad-modes { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 
 /* touch screens: finger-sized crossfader assign / mic buttons; on narrow mixers (tablet portrait, phones) the
    crossfader gets the whole row and the two selects move below it (QA m8: 16x40 A/T/B, 35x18 MIC/TALK, 85 px fader) */
@@ -187,3 +190,20 @@ html.touch.compact .xfader-row { flex-wrap: wrap; row-gap: 6px; }
 html.touch.compact .xfader-row .crossfader { order: -1; flex: 1 0 100%; }
 html.touch.compact .xfader-row .xf-l { display: none; }
 html.touch.compact .xfader-row .sel { flex: 1 1 0; min-width: 0; }
+
+/* touch tablets at short / narrow sizes (1024x576, 1280x720 landscape): the deck's left column holds the platter,
+   CUE / PLAY and MIX NOW without spilling into the controls next to it */
+html.tablet body:not(.four-decks) .deck-left { container-type: size; min-width: 0; }
+html.tablet body:not(.four-decks) .deck-left .jog { flex: none; width: min(100cqw, max(0px, 100cqh - 176px)); max-width: 220px; }
+html.tablet body:not(.four-decks) .deck-left .transport { min-width: 0; grid-template-columns: 1fr; justify-items: center; gap: 4px; }
+html.tablet body:not(.four-decks) .deck-left .btn.big { height: auto; width: min(100%, 52px); min-width: 44px; aspect-ratio: 1; }
+html.tablet .deck .transport .deck-mix-now { min-width: 0; overflow: hidden; font-size: 10px; letter-spacing: 0; padding: 0 2px; }
+html.tablet.h920 body:not(.four-decks) .deck .deck-panel[data-panel="cues"] .pads { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: 44px; max-height: none; }
+html.tablet.h920 body:not(.four-decks) .deck-toggles { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+/* narrow tablet decks: no room for the SCRATCH chip in the header; a double-tap on the deck header opens the scratch view */
+html.tablet.w1200 .deck .scratch-view-btn { display: none; }
+/* sequencer header on narrow screens: wrap the row instead of squeezing the hint to one word per line */
+.seq-head { flex-wrap: wrap; row-gap: 4px; }
+.seq-head .hint { min-width: 0; }
+.seq-head > .hint:first-of-type { flex: 1 1 14em; }
+html.compact .seq-head > .hint:first-of-type { flex-basis: 100%; order: 10; }

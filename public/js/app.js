@@ -2,6 +2,9 @@ import { el, fmtTime } from './util.js';
 import { api } from './api.js';
 import { Engine } from './audio/engine.js';
 import { SAMPLE_CATALOG } from './audio/sample-catalog.js';
+import { VoiceBus } from './audio/voice.js';
+import { Dedications } from './dedications.js';
+import { setupRemoteControl } from './remote-control.js';
 import { buildDeck, DECK_COLORS } from './ui/deck-ui.js';
 import { buildMixer } from './ui/mixer-ui.js';
 import { DetailWaveform } from './ui/waveform.js';
@@ -52,11 +55,14 @@ class App {
     // (not in the mobile app: its files are inside the app already)
     if ('serviceWorker' in navigator && !/Electron/.test(navigator.userAgent) && !platform.native) navigator.serviceWorker.register('/sw.js').catch(() => {});
     this.automix = new AutoMix(this);
+    this.voice = new VoiceBus(this.engine); // MC voice: spoken intros and dedications through the master bus
+    this.dedications = new Dedications(this);
     this.midi = new MidiManager(this);
     this.sequencer = new Sequencer(this.engine);
     this.buildLayout();
     setupStems(this);
     this.recording = setupRecording(this); this.engine.attachRecorder(this.recording.recorder);
+    setupRemoteControl(this, api).then((r) => { this.remote = r; }).catch(() => {}); // AI assistant (MCP) actions, when on
     this.wireEvents(); // subscribe to server events before loading the library so no change is missed
     if (!unavailable('link')) setupLink(this); // Ableton Link: UDP multicast through the server
     setupLyrics(this);
@@ -107,6 +113,7 @@ class App {
       if (r === 'handled') return;
       if (r === 'load') confirmed = true;
     }
+    if (deck.playing && !automix && (deck.hardLock || this.settings.deckOptions?.hardLock)) { this.toast(`Deck ${deckIndex + 1} is locked while it plays`); return; }
     if (deck.playing && !confirmed && !(await this.dialogs.confirm(`Deck ${deckIndex + 1} is playing. Load "${t.title}" anyway?`))) return;
     try {
       if (!(await deck.load({ ...t }))) return;
@@ -137,8 +144,9 @@ class App {
     this.clock = el('span', { class: 'clock' });
     this.recBtn = el('button', { class: 'btn rec', onclick: () => this.toggleRecord(), title: 'Record your mix to disk. R = start / stop' }, el('span', { class: 'rec-dot' }), 'REC');
     this.recTime = el('span', { class: 'rec-time' });
-    this.amBtn = el('button', { class: 'btn automix-btn', onclick: () => this.toggleAutomix(), title: 'Automix the current library view' }, iconLabel('automix', 'AUTOMIX'));
-    this.amNowBtn = el('button', { class: 'btn am-now-btn', onclick: () => this.automixNow(), title: 'Start automix on the current library view using saved preferences', 'aria-label': 'Automix now' }, iconLabel('automix', 'AUTOMIX NOW'));
+    // one click: start a smart automix of the queue / this library view at once (what the separate AUTOMIX NOW
+    // button did); click again to stop. Shift-click or right-click: the Automix dialog (order, profile, transitions).
+    this.amBtn = el('button', { class: 'btn automix-btn', onclick: (e) => this.toggleAutomix({ dialog: e.shiftKey || this.shift }), oncontextmenu: (e) => { e.preventDefault(); if (!this.automix.enabled && !this._amStarting) this.toggleAutomix({ dialog: true }); }, title: 'Automix: start a smart mix of the queue, or else of this library view, with your saved preferences. Click again to stop. Shift-click or right-click: Automix options. Key: A' }, iconLabel('automix', 'AUTOMIX'));
     this.amSkip = el('button', { class: 'btn sm icon-only', onclick: () => this.automix.skip(), title: 'Mix to next track now', 'aria-label': 'Mix to next track now' }, icon('next'));
     this.amInfo = el('span', { class: 'am-info' });
     this.amQueueBtn = el('button', { class: 'btn sm am-queue-btn', onclick: () => this.toggleQueuePanel(), title: 'Automix queue: upcoming tracks, transition styles, smart-mix reasons' }, 'QUEUE');
@@ -158,7 +166,7 @@ class App {
     const topbar = el('header', { class: 'topbar' },
       el('div', { class: 'logo' }, logoMark(), el('span', { class: 'logo-word' }, 'Open', el('b', {}, 'DJ'))),
       deckSel, shiftBtn,
-      el('div', { class: 'tb-group automix-actions' }, this.amBtn, this.amNowBtn, this.amSkip, this.amQueueBtn), this.amInfo,
+      el('div', { class: 'tb-group automix-actions' }, this.amBtn, this.amSkip, this.amQueueBtn), this.amInfo,
       el('div', { class: 'tb-spacer' }),
       el('div', { class: 'tb-group' }, this.recBtn, this.recTime),
       this.midiDot, this.cpu, this.clock,
@@ -316,8 +324,8 @@ class App {
         if (!selected) { this.toast('Choose a sound first'); return false; }
         try {
           this.toast('Downloading ' + selected.name + '…');
-          await sampler.loadCatalogSample(i, selected); save(); this.engine.resume(); sampler.trigger(i);
-          this.toast(selected.name + ' loaded to pad ' + (i + 1));
+          const r = await sampler.loadCatalogSample(i, selected); save(); this.engine.resume(); sampler.trigger(i);
+          this.toast(selected.name + ' loaded to pad ' + (i + 1) + (r?.saved === false && !r.superseded ? ' (for this session only: the browser did not allow saving it)' : ''));
         } catch (e) { this.toast('Could not download sample: ' + e.message); return false; }
       } },
     ], { wide: true, cls: 'sample-catalog-modal' });
@@ -403,27 +411,50 @@ class App {
   }
 
   // ---------------- automix / record ----------------
-  toggleAutomix() {
-    if (this.automix.enabled) { this.automix.stop(); this.toast('Automix stopped'); }
-    else this.dialogs.automixQueue(this.automix.queue.length > this.automix.idx ? this.automix.queue.slice(this.automix.idx) : this.library.rows);
+  /** The tracks AUTOMIX starts from: what is left in the automix queue, else the library view (playlist, crate…). */
+  automixSource() {
+    const a = this.automix;
+    return a.queue.length > a.idx ? { tracks: a.queue.slice(a.idx), from: 'queue' } : { tracks: this.library?.rows || [], from: 'view' };
+  }
+  /** AUTOMIX button / key A / MIDI automix.toggle: start at once, or stop; { dialog: true } opens the options dialog. */
+  toggleAutomix({ dialog = false } = {}) {
+    // pressed again while a start is still analysing / loading the first track: cancel it
+    if (this._amStarting) { this._amStarting.cancelled = true; this.automix.stop(); this.toast('Automix cancelled'); return; }
+    if (this.automix.enabled) { this.automix.stop(); this.toast('Automix stopped'); return; }
+    if (dialog) { this.dialogs.automixQueue(this.automixSource().tracks); return; }
+    return this.automixStart();
   }
 
-  /** Start a smart automix immediately using the visible library rows and saved preferences. */
-  async automixNow() {
-    if (this.automix.enabled) {
-      const result = this.automix.skip();
-      if (result === 'started') this.toast('Transition started');
-      else if (result === 'preparing') this.toast('Preparing the next track; transition will start as soon as it is ready');
-      else if (this.automix.transition) this.toast('A transition is already in progress');
-      else this.toast(this.automix.nextTrack() ? 'Could not start the transition yet' : 'No upcoming track queued');
-      return;
-    }
-    const tracks = this.library?.rows || [];
-    if (!tracks.length) { this.toast('No tracks in this view'); return; }
+  /** MC announcement (e.g. the Local AI intro): spoken over the mix at the next phrase, music ducked. */
+  announce(text, { lang = 'en', overlay = false } = {}) {
+    try { return this.dedications.add(text, { lang, overlay, meta: false, from: 'announce' }); } catch (e) { this.toast(e.message); return null; }
+  }
+  /** Queue a live dedication (UI, MCP). */
+  queueDedication(text, opts = {}) { return this.dedications.add(text, opts); }
+
+  /** Deck MIX NOW: start the queued transition now (waits for the next deck's preload if needed). */
+  mixNow() {
+    if (!this.automix.enabled) return;
+    const result = this.automix.skip();
+    if (result === 'started') this.toast('Transition started');
+    else if (result === 'preparing') this.toast('Preparing the next track; transition will start as soon as it is ready');
+    else if (this.automix.transition) this.toast('A transition is already in progress');
+    else this.toast(this.automix.nextTrack() ? 'Could not start the transition yet' : 'No upcoming track queued');
+  }
+  /**
+   * One-click start with the saved preferences: a smart mix of the remaining queue, else of the library view
+   * (playlist, crate, search…); shuffled when "shuffle" is the saved preference.
+   */
+  async automixStart() {
+    const { tracks, from } = this.automixSource();
+    if (!tracks.length) { this.toast('No tracks in this view: open a playlist or add music, or right-click AUTOMIX for options'); return; }
     const opts = this.settings.automix || {};
     const mode = opts.shuffle ? 'shuffle' : 'smart';
-    await this.startAutomix(tracks, { mode, shape: opts.shape, sliders: opts.sliders });
+    // same set length as the Automix dialog's default: a smart order over a whole big library would block the UI
+    await this.startAutomix(tracks, { mode, shape: opts.shape, sliders: opts.sliders, limit: from === 'view' && tracks.length > 200 ? 40 : undefined });
   }
+  /** Older name (MCP / scripts): MIX NOW while automix runs, else the one-click start. */
+  automixNow() { return this.automix.enabled ? this.mixNow() : this.automixStart(); }
   queueAdd(tracks) {
     if (!this.automix.enabled) { this.automix.queue = [...this.automix.queue.slice(this.automix.idx), ...tracks]; this.automix.idx = 0; }
     else if (this.shift) this.automix.insertNext(tracks); // Shift = play next
@@ -436,8 +467,6 @@ class App {
     this.amBtn.classList.toggle('active', a.enabled);
     const next = a.nextTrack();
     this.amSkip.disabled = !a.enabled || !!a.transition || !next;
-    this.amNowBtn.title = a.enabled ? (a.transition ? 'A transition is already in progress' : next ? 'Start the queued transition now' : 'No upcoming track queued') : 'Start automix on the current library view using saved preferences';
-    this.amNowBtn.setAttribute('aria-label', a.enabled ? 'Start transition now' : 'Automix now');
     for (const [i, deck] of (this.deckEls || []).entries()) {
       const mixButton = deck.querySelector('.deck-mix-now');
       if (!mixButton) continue;
@@ -462,6 +491,12 @@ class App {
    * have no analysis yet (remote tracks included) for a short while, then score with whatever data there is.
    */
   async startAutomix(tracks, opts = {}) {
+    // one start at a time: repeated AUTOMIX / MIX NOW presses during the analysis wait used to start several
+    if (this._amStarting) { this.toast('Automix is starting…'); return; }
+    const run = this._amStarting = { cancelled: false };
+    try { await this._startAutomix(tracks, opts, run); } finally { if (this._amStarting === run) this._amStarting = null; }
+  }
+  async _startAutomix(tracks, opts, run) {
     let list = tracks.filter(Boolean);
     if (opts.mode === 'smart' || opts.mode === 'live') {
       const todo = list.filter((t) => !t.analyzed && !t.unreadable);
@@ -470,13 +505,14 @@ class App {
         if (n) {
           this.toast(`Analysing ${n} track(s) before smart mix (BPM, key, energy)…`);
           const t0 = performance.now(), maxMs = Math.min(45000, 4000 + n * 3000);
-          while (performance.now() - t0 < maxMs && todo.some((t) => { const f = this.library.track(t.id); return f && !f.analyzed && !f.unreadable; }) && this.analyser.running) await new Promise((r) => setTimeout(r, 300));
+          while (!run.cancelled && performance.now() - t0 < maxMs && todo.some((t) => { const f = this.library.track(t.id); return f && !f.analyzed && !f.unreadable; }) && this.analyser.running) await new Promise((r) => setTimeout(r, 300));
           const left = todo.filter((t) => !this.library.track(t.id)?.analyzed).length;
           if (left) this.toast(`${left} track(s) not analysed yet: smart mix uses the data it has for them`);
         }
       }
       list = list.map((t) => this.library.track(t.id) || t); // analysed copies
     }
+    if (run.cancelled) return;
     try { await this.automix.start(list, opts); } catch (e) { this.toast(e.message); }
   }
 
@@ -534,9 +570,10 @@ class App {
   padFx(deck, fx, down) {
     const ch = this.engine.channels[deck.index];
     switch (fx) {
-      case 'brake': if (down) deck.brake(1.2); break;
-      case 'tapeStop': if (down) deck.brake(3); break;
-      case 'backspin': if (down) deck.backspin(1); break;
+      // amounts from the deck's Vinyl panel (defaults 1.2 s brake, 3 s tape stop, 1 s / 4.5x spin back)
+      case 'brake': if (down) deck.brake(deck.vinyl?.brakeTime || 1.2); break;
+      case 'tapeStop': if (down) deck.brake((deck.vinyl?.brakeTime || 1.2) * 2.5); break;
+      case 'backspin': if (down) deck.backspin(); break;
       case 'censor': down ? deck.censorOn() : deck.censorOff(); break;
       case 'roll1': down ? deck.rollOn(1 / 4) : deck.rollOff(); break;
       case 'roll2': down ? deck.rollOn(1 / 8) : deck.rollOff(); break;

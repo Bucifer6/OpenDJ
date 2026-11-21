@@ -21,7 +21,7 @@ export class PcmTap {
     this.connect();
     this._offOutputs = this.engine.on?.('outputs', () => this.connect());
   }
-  connect() { try { this.engine.masterOut.connect(this.node); } catch { /* connecting twice is harmless */ } }
+  connect() { try { (this.engine.recTap || this.engine.masterOut).connect(this.node); } catch { /* connecting twice is harmless */ } } // recTap: the master, or the record mix (mixer M15)
   _onChunk(m) {
     for (const fn of [...this.subs]) { try { fn(m); } catch (e) { console.error(e); } }
     if (m.cut !== undefined && m.cut !== true) { const r = this._cuts.get(m.cut); this._cuts.delete(m.cut); r?.(); }

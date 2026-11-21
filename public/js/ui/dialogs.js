@@ -1,8 +1,11 @@
 import { icon, glyphIcon } from './icons.js';
+import { deckSettingsFields } from './deck-settings.js';
+import { WAVEFORM_STYLES } from './waveform.js';
 import { el, uiZoom } from '../util.js';
 import { api } from '../api.js';
 import { THEMES, JOG_STYLE_OPTIONS, applyTheme, refreshSkinCatalog, selectedTheme } from './themes.js';
 import { controllersPanel } from './controllers-panel.js';
+import { remoteSettingsPane } from './remote-settings.js';
 import { platform, MOBILE_UNAVAILABLE, APP_VERSION } from '../platform.js';
 import { STYLES, normStyle } from '../automix.js';
 import { SET_SHAPES, PRESETS } from '../smartmix.js';
@@ -204,6 +207,59 @@ export class Dialogs {
     if (r) { this.app.toast(`Connected to ${r.info?.serverName || r.source.name}. Syncing library…`); this.app.library.refresh(); }
   }
 
+  /** Plex Home: pick who the connection browses and streams as (their libraries, playlists and restrictions). */
+  async switchPlexUser(source) {
+    const status = el('div', { class: 'hint', role: 'status' }, 'Loading Plex Home users…');
+    const list = el('div', { class: 'plex-users', role: 'list' });
+    const pinIn = el('input', { class: 'inp', type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: 4, pattern: '[0-9]*', placeholder: '4-digit PIN', 'aria-label': 'Plex PIN' });
+    const pinRow = el('label', { class: 'field', hidden: true }, el('span', {}, 'PIN'), pinIn);
+    let chosen = null;
+    let users = [];
+    const pick = (u) => {
+      chosen = u;
+      for (const b of list.children) b.setAttribute('aria-pressed', String(b.dataset.id === u.id));
+      pinRow.hidden = !(u.protected && !u.admin);
+      pinIn.value = '';
+      if (!pinRow.hidden) setTimeout(() => pinIn.focus(), 0);
+    };
+    const body = el('div', { class: 'form' },
+      el('p', { class: 'hint' }, 'Browse and stream as another member of your Plex Home. Each user sees their own libraries and playlists, so the library syncs again after switching. Cues, analysis and downloads stay in OpenDJ.'),
+      list, pinRow, status);
+    const go = async () => {
+      if (!chosen) { status.textContent = 'Choose a user'; return false; }
+      if (chosen.current) return null;
+      const pin = pinIn.value.trim();
+      if (!pinRow.hidden && !/^\d{4}$/.test(pin)) { status.textContent = 'Enter the 4-digit PIN'; pinIn.focus(); return false; }
+      status.textContent = 'Switching…';
+      try { return await api.switchPlexUser(source.id, chosen.id, pinRow.hidden ? undefined : pin); } catch (e) {
+        status.textContent = `✕ ${e.message}`;
+        if (/PIN/.test(e.message)) { pinRow.hidden = false; pinIn.value = ''; pinIn.focus(); }
+        return false;
+      }
+    };
+    pinIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); [...document.querySelectorAll('.overlay')].at(-1)?.querySelector('.modal-foot .btn.primary')?.click(); } });
+    const shown = this.modal(`Plex users · ${source.name || 'Plex'}`, body, [{ label: 'Cancel', value: null }, { label: 'Switch', primary: true, action: go }]);
+    try {
+      ({ users } = await api.plexUsers(source.id));
+      if (!users.length) status.textContent = 'This Plex account has no Plex Home users. Add them at plex.tv (Settings → Plex Home).';
+      else status.textContent = '';
+      list.replaceChildren(...users.map((u) => {
+        const b = el('button', { type: 'button', class: 'btn plex-user', role: 'listitem', 'aria-pressed': 'false', onclick: () => pick(u) },
+          el('span', { class: 'pu-name' }, u.title),
+          el('small', { class: 'hint' }, [u.admin ? 'owner' : u.restricted ? 'managed' : 'member', u.protected && !u.admin ? 'PIN' : '', u.current ? 'current' : ''].filter(Boolean).join(' · ')));
+        b.dataset.id = u.id;
+        return b;
+      }));
+      const cur = users.find((u) => u.current);
+      if (cur) pick(cur);
+    } catch (e) { status.textContent = `✕ ${e.message}`; }
+    const r = await shown;
+    if (r?.source) {
+      this.app.toast(`Plex: now browsing as ${r.user?.title || r.source.plexUser?.title || 'the owner'}. Syncing library…`);
+      this.app.library.refresh();
+    }
+  }
+
   async exportUsb(playlistIds) {
     const pls = this.app.library.playlists;
     const checks = pls.map((p) => { const c = el('input', { type: 'checkbox', checked: playlistIds.includes(p.id) }); c.dataset.id = p.id; return el('label', { class: 'check' }, c, ` ${p.name} (${p.trackIds.length})`); });
@@ -276,31 +332,44 @@ export class Dialogs {
       el('label', { class: 'check' }, vary, ' Vary transition styles'),
       el('label', { class: 'check' }, keySync, ' Fix key clashes with Key Sync'));
     const native = window.opendjNative;
-    const model = el('input', { class: 'inp', placeholder: 'Installed Ollama model', value: localStorage.getItem('dj-model') || '' });
-    const voice = el('select', { class: 'sel' }, ...[['off','Off'],['en','English'],['ro','Romanian']].map(([value,label]) => el('option',{value},label)));
+    const savedModel = (() => { try { return localStorage.getItem('dj-model') || ''; } catch { return ''; } })();
+    const model = el('input', { class: 'inp', placeholder: 'Installed Ollama model, e.g. llama3.2', value: savedModel, list: 'odj-ollama-models', 'data-am': 'model', maxlength: 180 });
+    const modelList = el('datalist', { id: 'odj-ollama-models' });
+    const voice = el('select', { class: 'sel', 'data-am': 'voice' }, ...[['off', 'Off'], ['en', 'English'], ['ro', 'Romanian']].map(([value, label]) => el('option', { value }, label)));
+    const aiNote = el('p', { class: 'hint', 'data-am': 'ai-note' });
     if (native?.planSet) {
-      modeSel.append(el('option',{value:'local'},'Local AI (Ollama)'));
-      const settings = el('div',{class:'form'}, el('label',{class:'field'},'Model',model), el('label',{class:'field'},'Spoken introduction',voice));
+      modeSel.append(el('option', { value: 'local' }, 'Local AI (Ollama)'));
+      const settings = el('div', { class: 'form' }, el('label', { class: 'field' }, el('span', {}, 'Model'), model, modelList), el('label', { class: 'field' }, el('span', {}, 'Spoken introduction'), voice), aiNote);
       settings.hidden = true;
-      modeSel.addEventListener('change', () => { settings.hidden = modeSel.value !== 'local'; });
-      profile.addEventListener('change', () => { settings.hidden = modeSel.value !== 'local'; });
+      const showLocal = () => {
+        settings.hidden = modeSel.value !== 'local';
+        if (settings.hidden || settings.dataset.checked) return;
+        settings.dataset.checked = '1';
+        // installed models (Ollama on this computer only), so a typo is not the first thing the user finds out
+        native.planModels?.().then((r) => {
+          modelList.replaceChildren(...(r?.models || []).map((m) => el('option', { value: m })));
+          if (!r?.running) aiNote.textContent = 'Ollama is not running on this computer. Install it from ollama.com and start it, then choose a model.';
+          else if (!r.models.length) aiNote.textContent = 'Ollama is running but has no models. Install one, e.g. "ollama pull llama3.2".';
+          else { aiNote.textContent = `The first 60 tracks are ranked by ${r.models.length > 1 ? 'the chosen model' : r.models[0]} on this computer; nothing leaves it.`; if (!model.value) model.value = r.models[0]; }
+        }).catch(() => {});
+      };
+      modeSel.addEventListener('change', showLocal);
+      profile.addEventListener('change', showLocal);
       body.append(settings);
     }
-    const r = await this.modal('Automix', body, [{ label: 'Cancel', value: null }, { label: 'Start automix', primary: true, value: true }]);
+        const r = await this.modal('Automix', body, [{ label: 'Cancel', value: null }, { label: 'Start automix', primary: true, value: true }]);
     if (!r) return;
     if (modeSel.value === 'local') {
-      const candidates = tracks.slice(0,60);
+      const candidates = tracks.slice(0, 60);
       try {
-        localStorage.setItem('dj-model',model.value.trim());
+        try { localStorage.setItem('dj-model', model.value.trim()); } catch { /* storage optional */ }
         this.app.toast('Planning your set with Ollama…');
-        const plan = await native.planSet({model:model.value.trim(),language:voice.value,tracks:candidates.map(({title,artist,bpm,key,energy})=>({title,artist,bpm,key,energy}))});
-        tracks = [...plan.order.map(i=>candidates[i]), ...tracks.slice(60)];
+        const plan = await native.planSet({ model: model.value.trim(), language: voice.value === 'ro' ? 'ro' : 'en', tracks: candidates.map(({ title, artist, bpm, key, energy }) => ({ title, artist, bpm, key, energy })) });
+        // the main process already validated the order; re-check here anyway (indices into `candidates`)
+        const order = (plan.order || []).filter((i) => Number.isInteger(i) && i >= 0 && i < candidates.length);
+        tracks = [...new Set([...order.map((i) => candidates[i]), ...candidates])].concat(tracks.slice(60));
         modeSel.value = 'order';
-        if (voice.value !== 'off' && window.speechSynthesis && plan.intro) {
-          const line = new SpeechSynthesisUtterance(plan.intro);
-          line.lang = voice.value === 'ro' ? 'ro-RO' : 'en-GB';
-          window.speechSynthesis.speak(line);
-        }
+        if (voice.value !== 'off' && plan.intro) this.app.announce?.(plan.intro, { lang: voice.value });
       } catch (error) { this.app.toast('Local DJ: ' + error.message); return; }
     }
     const sm = smartBox.value();
@@ -369,6 +438,7 @@ export class Dialogs {
       field('Sync mode', sel(s.syncMode, [['beat', 'Beat sync (tempo + phase)'], ['tempo', 'Tempo sync only']], (v) => set('syncMode', v))),
       el('label', { class: 'check' }, chk(s.keyLockDefault, (v) => set('keyLockDefault', v)), ' Key lock on by default'),
       el('label', { class: 'check' }, chk(s.quantize, (v) => { set('quantize', v); for (const d of app.engine.decks) d.setQuantize(v); }), ' Quantize'),
+      ...deckSettingsFields(app, { field, sel, chk }),
     );
     const am = s.automix;
     const amSet = (patch) => set('automix', { ...app.settings.automix, ...patch });
@@ -435,7 +505,7 @@ export class Dialogs {
       ['Space', 'Play/pause deck 1'], ['Z / X / C', 'Deck 1 cue / play / sync'], ['M / , / .', 'Deck 2 cue / play / sync'],
       ['1 – 4', 'Deck 1 hot cues A–D (Shift = delete)'], ['7 – 0', 'Deck 2 hot cues A–D'], ['Q / W', 'Deck 1 loop 4 / exit'], ['O / P', 'Deck 2 loop 4 / exit'],
       ['← / →', 'Crossfader'], ['↑ / ↓', 'Browser selection'], ['Shift + ← / →', 'Load selected track to deck 1 / 2'],
-      ['Ctrl + F', 'Search library'], ['R', 'Start / stop recording'], ['A', 'Automix on/off'], ['Shift (hold)', 'Shift layer (delete cues, set master…)'],
+      ['Ctrl + F', 'Search library'], ['R', 'Start / stop recording'], ['A', 'Automix: start (smart mix of the queue or view) / stop'], ['Shift (hold)', 'Shift layer (delete cues, set master…)'],
     ].map(([k, d]) => el('tr', {}, el('td', {}, el('kbd', {}, k)), el('td', {}, d)))));
 
     // ---- appearance ----
@@ -494,13 +564,13 @@ export class Dialogs {
       el('div', { class: 'row' }, field('Accent colour', accent), el('button', { class: 'btn sm', onclick: async () => { await set('accentColor', ''); applyTheme(app.settings); } }, 'Use theme accent')),
       field('Interface size', sel(s.uiScale || 100, [80, 90, 100, 110, 125, 150].map((v) => [v, `${v}%`]), async (v) => { await set('uiScale', Number(v)); applyTheme(app.settings); scaleNote(); }), 'Shrink for small laptop screens, enlarge for touchscreens and big displays.'),
       scaleNoteEl,
-      field('Waveform colours', sel(s.waveformColors, [['rgb', '3-band RGB'], ['blue', 'Blue'], ['mono', 'Monochrome']], (v) => set('waveformColors', v))),
+      field('Waveform style', sel(s.waveformColors, WAVEFORM_STYLES, (v) => set('waveformColors', v)), 'Player Blue and Player RGB look like the waveforms of club media players.'),
     );
     const dvsTab = el('div', { class: 'form' }, el('p', { class: 'hint' }, 'Control decks with Serato or Traktor timecode vinyl / CDs through your audio interface inputs.'), el('button', { class: 'btn', onclick: () => import('../dvs/dvs-ui.js').then((m) => m.openDvsPanel(app)) }, 'Open DVS setup…'));
     const about = this.aboutPane(chk);
     const tabs = platform.local
       ? { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], mobile: ['Mobile', this.mobileInfo()], about: ['About', about] }
-      : { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], mapper: ['Controller Mapper', mapperPane], dvs: ['DVS', dvsTab], keys: ['Shortcuts', shortcuts], about: ['About', about] };
+      : { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], mapper: ['Controller Mapper', mapperPane], dvs: ['DVS', dvsTab], remote: ['Remote control', remoteSettingsPane(app)], keys: ['Shortcuts', shortcuts], about: ['About', about] };
     if (!tabs[tab]) tab = 'audio';
     const tabBar = el('div', { class: 'tabs' });
     const pane = el('div', { class: 'tab-pane' });

@@ -29,7 +29,7 @@ wav(path.join(music, 'Sweep - Four.wav'), 45, 122, 262);
 
 const app = await start({ port: 0, dataDir: path.join(tmp, 'data') });
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+let page = await browser.newPage({ viewport: { width: 1920, height: 1080 } }); // reassigned for the DPI-scaled pass (section 6)
 const errors = [];
 page.on('pageerror', (e) => errors.push(`pageerror: ${e}`));
 page.on('console', (m) => { if (m.type() === 'error' && !/favicon|Failed to load resource.*(cover|404)/i.test(m.text())) errors.push(`console: ${m.text()}`); });
@@ -104,6 +104,20 @@ const fit = (panels) => ev(async (panels) => {
       if (a.right > tr.right + 1) out.push(`top bar: ${items[i].className || items[i].tagName} outside the bar`);
       for (let j = i + 1; j < items.length; j++) { const b = items[j].getBoundingClientRect(); if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1) out.push(`top bar: ${items[i].className} overlaps ${items[j].className}`); }
     }
+    // mixer: full-width crossfader, strips edge to edge (no empty bands between the columns)
+    const mx = document.querySelector('.mixer');
+    if (vis(mx)) {
+      const R = mx.getBoundingClientRect(), zr = R.width / mx.offsetWidth || 1, W = R.width, pad = parseFloat(getComputedStyle(mx).paddingLeft) * zr;
+      const xf = document.querySelector('.mixer .crossfader .fader-track')?.getBoundingClientRect();
+      if (!mx.classList.contains('mx-noxf') && (!xf || xf.width < 0.8 * W - 2 * zr)) out.push(`crossfader squished: ${Math.round(xf?.width || 0)} of ${Math.round(W)} px mixer`);
+      const cols = [...mx.querySelectorAll('.mixer-strips > .strip, .mixer-top > .mixer-master')].filter(vis).map((e) => e.getBoundingClientRect()).sort((a, b) => a.left - b.left);
+      const edges = [R.left + pad, ...cols.flatMap((c) => [c.left, c.right]), R.right - pad];
+      const maxGap = Math.max(16 * zr, 0.03 * W);
+      for (let i = 0; i < edges.length; i += 2) if (edges[i + 1] - edges[i] > maxGap + 0.5) out.push(`mixer: ${Math.round(edges[i + 1] - edges[i])} px empty band between columns ${i / 2} and ${i / 2 + 1}`);
+      const side = [...mx.querySelectorAll('.mixer-top > .mixer-master')].filter(vis).reduce((a, e) => a + e.getBoundingClientRect().width, 0);
+      const sum = [...mx.querySelectorAll('.mixer-strips > .strip')].filter(vis).reduce((a, e) => a + e.getBoundingClientRect().width, 0), avail = W - 2 * pad - side;
+      if (sum < 0.9 * avail) out.push(`mixer strips fill ${Math.round(sum)} of ${Math.round(avail)} px`);
+    }
     for (const d of decks()) {
       const n = `${panel}@deck${+d.dataset.deck + 1}`, mid = d.querySelector('.deck-mid');
       if (d.getBoundingClientRect().right > innerWidth + 1) out.push(`deck${+d.dataset.deck + 1} outside the window`);
@@ -117,6 +131,22 @@ const fit = (panels) => ev(async (panels) => {
   return [...new Set(out)];
 }, panels);
 const PANELS = ['cues', 'loops', 'fx', 'stems', 'key'];
+// Channel faders: never shorter than before the mixer v2 layout (scripts/fixtures-fader-travel.json, measured at
+// 0a5fa16) and at least 35 % of the strip; knob rows line up across the channels (within 2 px), like hardware.
+const FADER_BASE = JSON.parse(fs.readFileSync(new URL('./fixtures-fader-travel.json', import.meta.url), 'utf8')).travel;
+const faderCheck = (key) => ev((base) => {
+  const out = [], strips = [...document.querySelectorAll('.mixer .strip')].filter((e) => e.offsetParent);
+  if (document.querySelector('.mixer.mx-rotary')) return out; // rotary levels are knobs
+  for (const s of strips) {
+    const f = s.querySelector('.ch-fader'), t = f?.querySelector('.fader-track'); if (!t) { out.push('no channel fader'); continue; }
+    const cap = parseFloat(getComputedStyle(f).getPropertyValue('--cap')) || 16, travel = t.offsetHeight - cap;
+    if (base != null && travel < base) out.push(`channel ${s.dataset.ch * 1 + 1} fader travel ${travel} px < ${base} px before`);
+    if (travel < 0.35 * s.offsetHeight) out.push(`channel ${s.dataset.ch * 1 + 1} fader travel ${travel} px < 35 % of a ${s.offsetHeight} px strip`);
+  }
+  const rows = strips.map((s) => [...s.querySelectorAll(':scope > .knob-wrap .knob')].filter((k) => k.offsetParent).map((k) => k.getBoundingClientRect().top));
+  for (let r = 0; rows.length && r < rows[0].length; r++) { const tops = rows.map((x) => x[r]); if (Math.max(...tops) - Math.min(...tops) > 2) out.push(`knob row ${r + 1} not aligned (${tops.map(Math.round).join('/')})`); }
+  return out;
+}, FADER_BASE[key]);
 const summary = (a) => [a.overlap.length && `overlap ${a.overlap.slice(0, 4).join('; ')}`, a.escape.length && `outside ${a.escape.slice(0, 4).join('; ')}`, a.covered.length && `covered ${a.covered.slice(0, 4).join('; ')}`, a.fader.length && `fader ${a.fader.join('; ')}`].filter(Boolean).join(' | ');
 
 const setUi = (o) => ev(async ({ layout, theme, zoom }) => {
@@ -155,6 +185,8 @@ try {
       // every panel fits on every visible deck; then the full audit again with the FX panel open on all decks
       const f = await fit(PANELS);
       check(!f.length, `${w}x${h} ${layout} @${zoom}%: all decks' panels fit, nothing outside the window${f.length ? ' — ' + f.slice(0, 4).join('; ') : ''}`);
+      const fc = await faderCheck(`${w}x${h} ${layout} ${zoom}`);
+      check(!fc.length, `${w}x${h} ${layout} @${zoom}%: long channel faders (>= the old travel, >= 35 % of the strip), knob rows aligned${fc.length ? ' — ' + fc.slice(0, 4).join('; ') : ''}`);
       await fit(['fx']);
       const fa = await audit();
       check(fa.count > 30 && !summary(fa), `${w}x${h} ${layout} @${zoom}% FX panel on both decks: ${fa.count} controls in bounds${summary(fa) ? ' — ' + summary(fa) : ''}`);
@@ -169,7 +201,34 @@ try {
       await page.waitForTimeout(120);
       const f = await fit(PANELS);
       check(!f.length, `${w}x${h} ${layout} @${zoom}%: all decks' panels fit, nothing outside the window${f.length ? ' — ' + f.slice(0, 4).join('; ') : ''}`);
+      const fc = await faderCheck(`${w}x${h} ${layout} ${zoom}`);
+      check(!fc.length, `${w}x${h} ${layout} @${zoom}%: long channel faders, knob rows aligned${fc.length ? ' — ' + fc.slice(0, 4).join('; ') : ''}`);
     }
+  }
+  // ---------- the personalities ----------
+  await page.setViewportSize({ width: 1280, height: 800 });
+  for (const p of ['classic', 'rotary', 'battle', 'club']) {
+    await setUi({ layout: 'classic', theme: 'midnight', zoom: 100 });
+    await ev((id) => window.opendjMixer.setPersonality(id), p); await page.waitForTimeout(200);
+    const a = await audit(), f = await fit(['cues']);
+    check(!summary(a) && !f.length, `1280x800 classic, ${p} personality: controls in bounds, mixer fits${summary(a) ? ' — ' + summary(a) : ''}${f.length ? ' — ' + f.slice(0, 4).join('; ') : ''}`);
+  }
+  // advanced drawer: closed by default, every tab's controls inside the drawer (vertical scroll allowed), no overlaps
+  check(await ev(() => document.querySelector('.mixer-drawer')?.hidden === true), 'advanced mixer drawer is closed by default');
+  for (const [w, h, zoom] of [[1280, 800, 100], [1920, 1080, 150], [1024, 768, 80]]) {
+    await page.setViewportSize({ width: w, height: h }); await setUi({ layout: 'classic', theme: 'midnight', zoom });
+    for (const tab of ['channel', 'faders', 'master', 'mic', 'fx', 'loudness']) {
+      await ev((t) => window.opendjMixer.toggleDrawer(true, t), tab); await page.waitForTimeout(80);
+      const bad = await ev(() => {
+        const d = document.querySelector('.mixer-drawer'), dr = d.getBoundingClientRect(), out = [];
+        const els = [...d.querySelectorAll('.btn, .knob, select, .fx-strip')].filter((e) => e.offsetParent).map((e) => ({ e, r: e.getBoundingClientRect() }));
+        for (const { e, r } of els) if (r.left < dr.left - 1 || r.right > dr.right + 1) out.push(`${e.className} outside`);
+        for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) { const a = els[i].r, b = els[j].r; if (els[i].e.contains(els[j].e) || els[j].e.contains(els[i].e)) continue; if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1.5) out.push(`${els[i].e.className} x ${els[j].e.className}`); }
+        return out;
+      });
+      check(!bad.length, `${w}x${h} @${zoom}% advanced drawer ${tab} tab: controls inside, none overlapping${bad.length ? ' — ' + bad.slice(0, 3).join('; ') : ''}`);
+    }
+    await ev(() => window.opendjMixer.toggleDrawer(false));
   }
   await ev(() => window.opendj.engine.decks.forEach((d) => d.showPanel?.('cues')));
   // top bar in its busiest state: hosted mode's Sign out shown and automix announcing a long "Next: …" line
@@ -189,9 +248,31 @@ try {
   await page.keyboard.press('Escape'); await ev(() => { document.querySelector('.tb-menu')?.remove(); const a = window.opendj; a.signOutBtn.hidden = true; a.amInfo.textContent = ''; });
   await page.setViewportSize({ width: 1920, height: 1080 });
 
+  // ---------- 1b. platter styles and waveform styles ----------
+  await setUi({ layout: 'classic', theme: 'midnight', zoom: 100 }); await page.waitForTimeout(500);
+  for (const skin of ['minimal', 'vinyl', 'player']) {
+    await ev((skin) => { window.opendj.settings.deckOptions = { ...(window.opendj.settings.deckOptions || {}), platterSkin: skin }; }, skin);
+    await page.waitForTimeout(250);
+    const a = await audit();
+    const painted = await ev(() => [...document.querySelectorAll('.deck .jog')].filter((j) => j.offsetParent).every((j) => { const c = j.querySelector('canvas'); return c.getContext('2d').getImageData(c.width / 2, c.height * 0.15, 1, 1).data[3] > 0; }));
+    check(!summary(a) && painted, `platter skin ${skin}: platters painted, controls in bounds${summary(a) ? ' — ' + summary(a) : ''}`);
+  }
+  await ev(() => { window.opendj.settings.deckOptions = { ...window.opendj.settings.deckOptions, platterSkin: 'minimal' }; });
+  for (const style of ['rgb', 'blue', 'mono', 'player-blue', 'player-rgb']) {
+    const r = await ev(async (style) => {
+      window.opendj.settings.waveformColors = style; await new Promise((r) => setTimeout(r, 600));
+      const c = document.querySelector('.wf-detail'), g = c.getContext('2d'), d = g.getImageData(0, 0, c.width, c.height).data;
+      let lit = 0; for (let i = 0; i < d.length; i += 64) if (d[i] + d[i + 1] + d[i + 2] > 200) lit++;
+      const o = document.querySelector('.wf-overview'), od = o.getContext('2d').getImageData(0, 0, o.width, o.height).data; let olit = 0; for (let i = 0; i < od.length; i += 64) if (od[i] + od[i + 1] + od[i + 2] > 200) olit++;
+      return { lit, olit };
+    }, style);
+    check(r.lit > 20 && r.olit > 5, `waveform style ${style}: detail and overview render (${r.lit} / ${r.olit} lit samples)`);
+  }
+  await ev(() => { window.opendj.settings.waveformColors = 'rgb'; });
+
   // ---------- 2. click sweep per layout ----------
   await page.setViewportSize({ width: 1920, height: 1080 });
-  const SKIP = /eject|stems-prep|rec\b|live-btn|dvs-btn|video-btn|light-btn|signout|fullscreen|automix-btn|lib-collapse|upl-btn|import-btn/;
+  const SKIP = /eject|stems-prep|mc-btn|rec\b|live-btn|dvs-btn|video-btn|light-btn|signout|fullscreen|automix-btn|lib-collapse|upl-btn|import-btn|mixer-adv-btn/; // (the drawer has its own checks)
   for (const layout of layouts) {
     await setUi({ layout, theme: 'midnight', zoom: 100 });
     await page.waitForTimeout(200);
@@ -272,6 +353,109 @@ try {
   const after = await audit();
   check(!summary(after), `after live resizes: controls in bounds${summary(after) ? ' — ' + summary(after) : ''}`);
   await ev(() => window.opendj.engine.decks.forEach((d) => d.pause()));
+
+  // ---------- 5. crossfader travel and EQ preset in the narrow mixer of wide windows (handover checks) ----------
+  // The mixer keeps ~340 px at any window width; the crossfader used to share its row with three selects (150 px of
+  // track, selects squashed to bare arrows). It now wraps onto its own line.
+  await ev(() => { const E = window.opendj.engine; E.decks[0].play(); E.decks[1].play(); });
+  for (const [w, h, n] of [[1920, 1080, 2], [2560, 1080, 2], [2560, 1080, 4], [3440, 1440, 4], [1366, 768, 4], [1100, 700, 2]]) {
+    await page.setViewportSize({ width: w, height: h });
+    await ev((k) => window.opendj.setDeckCount(k, false), n); await page.waitForTimeout(350);
+    const g = await ev(() => {
+      const t = document.querySelector('.crossfader .fader-track').getBoundingClientRect();
+      const sels = [...document.querySelectorAll('.xfader-options .sel')].map((x) => { const r = x.getBoundingClientRect(); return { w: Math.round(r.width), text: x.selectedOptions[0]?.textContent }; });
+      return { track: Math.round(t.width), sels, mixer: Math.round(document.querySelector('.mixer').getBoundingClientRect().width) };
+    });
+    check(g.track >= 250 && g.sels.every((x) => x.w >= 64), `${w}x${h} ${n} decks: crossfader track ${g.track} px in a ${g.mixer} px mixer, options ${g.sels.map((x) => `${x.text} ${x.w}px`).join(', ')}`);
+    // drag end to end with the mouse while two decks play: full travel and smooth frames
+    const box = await page.locator('.crossfader .fader-track').boundingBox(), thumb = await page.locator('.crossfader .fader-thumb').boundingBox(), y = box.y + box.height / 2;
+    await ev(() => { window.opendj.engine.setCrossfader(0); window.__fr = []; let last = 0; window.__frOn = true; const f = (t) => { if (last) window.__fr.push(t - last); last = t; if (window.__frOn) requestAnimationFrame(f); }; requestAnimationFrame(f); });
+    await page.mouse.move(thumb.x + thumb.width / 2, y); await page.mouse.down();
+    let lo = 1, hi = -1;
+    for (const dir of [1, -1]) {
+      for (let k = 0; k <= 40; k++) await page.mouse.move(box.x + box.width / 2 + dir * (box.width / 2 + 30) * (k / 40), y);
+      const v = await ev(() => window.opendj.engine.crossfader); lo = Math.min(lo, v); hi = Math.max(hi, v);
+      for (let k = 40; k >= 0; k--) await page.mouse.move(box.x + box.width / 2 + dir * (box.width / 2 + 30) * (k / 40), y);
+    }
+    await page.mouse.up();
+    const fr = await ev(() => { window.__frOn = false; const s = [...window.__fr].sort((a, b) => a - b); return { n: s.length, p95: s[Math.floor(s.length * 0.95)] || 0 }; });
+    check(lo <= -0.999 && hi >= 0.999 && fr.p95 < 50, `${w}x${h} ${n} decks: crossfader drag reaches ${lo.toFixed(2)} … ${hi.toFixed(2)}, 95th-percentile frame ${fr.p95.toFixed(1)} ms`);
+  }
+  await page.setViewportSize({ width: 1920, height: 1080 }); await ev(() => window.opendj.setDeckCount(2, false));
+  // EQ preset: only an EQ change makes it "Custom"; volume / filter moves and automix fades do not
+  const eqp = await ev(async () => {
+    const E = window.opendj.engine, sel = document.querySelector('.mixer-eq-preset');
+    for (const ch of E.channels) for (const k of ['eqLow', 'eqMid', 'eqHigh']) ch.set(k, 0);
+    const flat = sel.value;
+    E.channels[0].set('volume', 0.5); E.channels[1].set('filter', 0.3); E.channels[1].set('filter', 0); E.setCrossfader(0.4);
+    const afterVol = sel.value;
+    sel.value = 'warm'; sel.dispatchEvent(new Event('change'));
+    const warm = sel.value, low = E.channels[2].state.eqLow;
+    E.channels[0].set('eqHigh', 0.5);
+    const custom = sel.value;
+    for (const ch of E.channels) for (const k of ['eqLow', 'eqMid', 'eqHigh']) ch.set(k, 0);
+    return { flat, afterVol, warm, low, custom, back: sel.value };
+  });
+  check(eqp.flat === 'flat' && eqp.afterVol === 'flat' && eqp.warm === 'warm' && Math.abs(eqp.low - 0.12) < 1e-6 && eqp.custom === 'custom' && eqp.back === 'flat', `EQ preset follows EQ changes only (${JSON.stringify(eqp)})`);
+  await ev(() => window.opendj.engine.decks.forEach((d) => d.pause()));
+  // ---------- 6. Windows display scaling (125 % / 150 %) with the hardware skins ----------
+  // A 1920x1080 screen at 125 % is a 1536x864 CSS window at device pixel ratio 1.25; at 150 % 1280x720 at 1.5;
+  // 2560x1440 at 150 % is 1707x960. The controller / vinyl skins change borders and radii (the vinyl jog has a 7 px
+  // rim): check them there in both layouts. (Real Windows font rendering / ClearType still needs a Windows run.)
+  if (!QUICK) {
+    const mainPage = page;
+    for (const [w, h, dpr] of [[1536, 864, 1.25], [1280, 720, 1.5], [1707, 960, 1.5], [1366, 768, 1.25]]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: dpr });
+      page = await ctx.newPage();
+      page.on('pageerror', (e) => errors.push(`pageerror: ${e}`));
+      try {
+        await page.goto(app.url); await page.waitForFunction(() => window.opendj?.ready, null, { timeout: 30000 });
+        await page.locator('.overlay.start button').click({ timeout: 1000 }).catch(() => {});
+        for (let i = 0; i < 4; i++) await ev(([i, id]) => window.opendj.loadTrack(i, id), [i, ids[i]]);
+        for (const theme of ['cdj', 'vinyl', 'performance', 'studio']) for (const layout of ['classic', 'four']) {
+          await setUi({ layout, theme, zoom: 100 }); await page.waitForTimeout(200);
+          const a = await audit(), f = await fit(['cues', 'fx']);
+          check(a.count > 40 && !summary(a) && !f.length, `DPI ${Math.round(dpr * 100)}% ${w}x${h} ${theme} ${layout}: ${a.count} controls in bounds, panels fit${summary(a) ? ' — ' + summary(a) : ''}${f.length ? ' — ' + f.slice(0, 3).join('; ') : ''}`);
+        }
+      } finally { await ctx.close(); page = mainPage; }
+    }
+  }
+  // ---------- touch tablets at short sizes and phone width (store-screenshot bugs): no overlapping deck controls,
+  // the platter / CUE / PLAY / MIX NOW stay in their column, the sequencer hint wraps as a line, not word by word ----------
+  {
+    const tctx = await browser.newContext({ viewport: { width: 1024, height: 576 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+    const tp = await tctx.newPage();
+    tp.on('pageerror', (e) => errors.push(`pageerror (touch): ${e}`));
+    await tp.goto(app.url); await tp.waitForFunction(() => window.opendj?.ready, null, { timeout: 30000 });
+    const deckOverlaps = () => tp.evaluate(() => {
+      const out = []; const vis = (e) => e.offsetParent && e.getBoundingClientRect().width > 1;
+      for (const d of document.querySelectorAll('.deck')) {
+        if (!vis(d)) continue;
+        const els = [...d.querySelectorAll('.btn, .knob, .pad, .panel-tab, .pad-mode, select, .jog, .fader-track')].filter(vis).filter((e) => !e.parentElement.closest('.btn, .knob, .pad'));
+        for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) {
+          if (els[i].contains(els[j]) || els[j].contains(els[i])) continue;
+          const A = els[i].getBoundingClientRect(), B = els[j].getBoundingClientRect(), w = Math.min(A.right, B.right) - Math.max(A.left, B.left), h = Math.min(A.bottom, B.bottom) - Math.max(A.top, B.top);
+          if (w > 1.5 && h > 1.5) out.push(`${els[i].className.split(' ').slice(0, 3).join('.')}"${els[i].textContent.trim().slice(0, 10)}" x ${els[j].className.split(' ').slice(0, 3).join('.')}"${els[j].textContent.trim().slice(0, 10)}"`);
+        }
+        const left = d.querySelector('.deck-left')?.getBoundingClientRect();
+        for (const e of d.querySelectorAll('.deck-left .btn')) if (vis(e) && left) { const r = e.getBoundingClientRect(); if (r.right > left.right + 1 || r.left < left.left - 1) out.push(`${e.className.split(' ').slice(0, 3).join('.')} leaves the platter column`); }
+      }
+      return [...new Set(out)];
+    });
+    for (const [w, h] of [[1024, 576], [1280, 720], [1080, 810]]) for (const layout of ['classic', 'performance']) for (const panel of ['cues', 'loops', 'fx', 'platter']) {
+      await tp.setViewportSize({ width: w, height: h });
+      await tp.evaluate(([layout, panel]) => { window.opendj.setLayout(layout, false); window.opendj.engine.decks.slice(0, 2).forEach((d) => d.showPanel(panel)); }, [layout, panel]);
+      await tp.waitForTimeout(250);
+      const o = await deckOverlaps();
+      check(!o.length, `touch tablet ${w}x${h} ${layout} ${panel} panel: deck controls don't overlap${o.length ? ' — ' + o.slice(0, 4).join('; ') : ''}`);
+    }
+    await tp.setViewportSize({ width: 390, height: 844 });
+    await tp.evaluate(() => window.opendj.toggleSequencer()); await tp.waitForTimeout(300);
+    const hint = await tp.evaluate(() => { const h = document.querySelector('.seq-head .hint'); if (!h) return null; const r = h.getBoundingClientRect(), lh = parseFloat(getComputedStyle(h).lineHeight) || 14; return { lines: Math.round(r.height / lh), w: Math.round(r.width) }; });
+    check(hint && hint.lines <= 3 && hint.w > 120, `phone width: the sequencer hint reads as a line, not one word per line (${JSON.stringify(hint)})`);
+    await tctx.close();
+  }
+
   check(errors.length === 0, `no page errors, console errors or unhandled rejections${errors.length ? ': ' + errors.slice(0, 5).join(' | ') : ''}`);
 } catch (e) { console.error(e); failed = true; }
 await browser.close(); app.server.close();

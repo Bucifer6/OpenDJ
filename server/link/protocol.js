@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomInt } from 'node:crypto';
 // Ableton Link wire format (clean-room implementation from public protocol descriptions; no Link source code used).
 //
 // Discovery ("_asdp_v" + version 1), UDP multicast 224.76.78.75:20808, all integers big-endian:
@@ -160,8 +160,8 @@ export function decodeMeasurement(buf) {
 }
 
 /** 8 random bytes as hex. Link uses printable characters; any bytes are valid on the wire. */
-export function randomNodeId(randomByte = () => randomBytes(1)[0]) {
-  let s = '';
-  for (let i = 0; i < 8; i++) s += (33 + (randomByte() % 94)).toString(16).padStart(2, '0');
+export function randomNodeId(pick = () => randomInt(33, 127)) {
+  let s = ''; // printable ASCII 33..126, uniformly distributed (crypto.randomInt has no modulo bias)
+  for (let i = 0; i < 8; i++) s += pick().toString(16).padStart(2, '0');
   return s;
 }

@@ -40,11 +40,15 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 - **Key shift** (±12 semitones) and **Key Sync** to the nearest harmonically compatible key of the master deck
 - **Sync** (tempo + phase, half/double-time aware) with a **phase meter**; phase-locked hot cue jumps; **instant doubles** (drag a deck header onto another deck)
 - CDJ-style cue, 8 colour-coded **hot cues**, memory cues and **saved loops**
-- Pad modes: Hot Cue, Roll, **Slicer**, Beat Jump, **Pitch Play**, Sampler, Pad FX
+- Pad modes: Hot Cue, Roll, **Slicer**, Beat Jump, **Pitch Play**, Scale, Scratch samples, Sampler, Pad FX
 - Auto loops (⅛ to 64 beats), loop roll, beat jump, quantize, **slip**, reverse, censor
 - Jog wheels with vinyl scratch, nudge, motor brake and backspin
+- **Turntable feel:** motor start / stop times, release spin-up, platter inertia, slip-mat, jog weight, 33 / 45 / 78 rpm scratch scale, quartz lock, user-set brake and spin-back, flick to spin back, slip brake; touch and mouse scratching follow the hand's position (multitouch: a second finger holds the record)
+- **Platter styles:** Minimal, **Vinyl** (spinning record with the cover art, strobe dots, a tonearm you drag to drop the needle) and **Player** (jog display with artwork, position ring, slip ghost and loop arc); a phone **scratch view** with a crossfader strip, CUT button, scratch samples and haptics
+- Tempo glide (to 0 % or the master over 1-64 beats), ramped pitch bend, needle lock / snap, **active loops**, quantize divisions, beat jump ½-64, loop in / out adjust with the jog, scale play, deck lock, latching slip reverse
 - Scrolling 3-band colour waveforms with beat grid, cue, loop and **phrase** markers, plus a full-track overview; beat grid editor with tap tempo
-- Mixer: trim, 3-band isolator EQ with kill, one-knob filter / **Color FX** (Filter, Space, Dub Echo, Noise, Crush, Jet), headphone cue, VU meters, crossfader curves, master limiter, auto-gain
+- Mixer: trim, selectable **EQ presets** (isolator, classic full-kill, 4-band, rotary, battle, vintage, sculpt), one-knob or dual HP/LP filter, **Color FX** (Filter, Space, Dub Echo, Noise, Crush, Jet, Sweep, Crunch, Pitch), headphone cue A/B, RMS meters and an EBU R128 loudness card, full-width crossfader with a continuous curve, hamster reverse and a 1 ms fast cut, fader curves, master limiter, auto-gain
+- Mixer extras (Advanced mixer drawer): booth output with booth EQ, mic EQ / FX / auto talkover, two beat FX units with an FX strip, send / return, channel compressor, master isolator, warmth, record level, and optional **personalities** (Club, Classic, Rotary, Battle)
 - 10 beat-synced effects per channel (Echo, Ping Pong, Reverb, Flanger, Phaser, Auto Filter, Trans, Bit Crusher, Distortion, Noise Sweep) with **post-fader tails** (echo and reverb keep ringing when you close the fader, for echo-outs; switchable to pre-fader in Settings → Audio) and pad FX (brake, tape stop, backspin, echo out, filter sweep, rolls)
 - 8-slot sampler with a bank of synthesised DJ FX (air horn single blast and "ba-ba-baaah" triplet, dub siren, laser, rewind, vinyl stop, riser, downlifter, impact, noise sweep, clap, kick), rendered with Web Audio and loudness-matched; per pad: choose a sound, load your own sample, pad volume, **sync to beat**. Plus a **16-step sequencer** locked to the master deck, microphone / aux input with **talkover**, MIDI clock out
 - Headphone cueing on a second sound card, on channels 3-4 of a 4-channel controller interface, or as split cue on one stereo jack
@@ -74,7 +78,7 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 
 <img src="docs/images/automix.png" alt="Automix dialog with smart ordering, energy curve and transition options" width="60%">
 
-- Non-stop mixing of any playlist or library view on decks 1 and 2
+- Non-stop mixing of any playlist or library view on decks 1 and 2. **One click on AUTOMIX** starts a smart mix of the queue (or, without one, of the playlist / library view shown) with your saved preferences; click it again to stop. **Shift-click or right-click AUTOMIX** (or **Automix view** above the track list, or a playlist's menu) opens the Automix dialog with order, mix profile, transition style and length. While automix runs, each deck's **MIX NOW** starts the next transition at once
 - Beat-matched, **phrase-aligned** transitions in 10 **mixing styles** that drive the real EQ, filter and FX: smooth blend (bass swap on the phrase), quick bass swap, crossfade, filter sweep, echo out, cut on the downbeat, backspin, vinyl brake, loop out (rolling loop) and reverb wash, or **Auto**, which picks one per transition from the BPM jump, energy change, key and genre. Length 4–32 bars, "vary styles", and a per-transition override in the **queue panel**, which also shows the next transition's style and when it starts. Afterwards the new track eases back to its original tempo over 8 bars (can be turned off)
 - **Smart mix**: orders a playlist, crate, media-server playlist, search result or the whole library by how well tracks go together (Camelot compatibility, BPM incl. half/double time, energy flow toward a set shape such as warm-up → peak → cool-down, genre/tags, no repeated artists or recently played tracks, intro phrases), or picks each next track live while playing; each transition is explained ("8A → 9A, 124 → 126 BPM, energy +1, same genre"). Presets plus harmonic / energy / variety sliders. **Shuffle & mix** plays a random order, still beat-matched
 - Loading a track on a deck while automix runs works like a pro DJ app: on the next deck it becomes the next track, on the playing deck automix asks (play next / stop and load), during a transition it is queued; optional Key Sync fixes key clashes
@@ -90,7 +94,10 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 
 - Any class-compliant **MIDI controller** (Web MIDI) with **MIDI Learn**: 14-bit faders, relative jogs and encoders, LED feedback and a shift layer
 - Import **Mixxx community mappings** (hundreds of controllers) with online search, a **guided mapping wizard**, generic **HID** devices and gamepads; mappings auto-load per device and export as JSON
-- Includes a best-effort Pioneer DDJ-400 / DDJ-FLX4 preset; if a control doesn't respond, fix it with Learn
+- Bundled mappings, loaded automatically when the controller is plugged in:
+  - **AlphaTheta DDJ-FLX2**: first-party mapping from the manufacturer's MIDI chart, with LEDs, pad modes and shift layers, SMART FADER and SMART CFX (Settings → Controllers → Controller test helps check it on your unit)
+  - Pioneer DDJ-400 / DDJ-FLX4 (best-effort); if a control doesn't respond, fix it with Learn
+- **Smart Fader** (SMART next to the crossfader): the crossfader alone blends BPM, bass and levels; **deck select** lets a 2-deck controller drive decks 3 / 4
 - **Recognises controllers when you plug them in**: loads a built-in [community mapping](mappings/README.md) (kept up to date from GitHub), offers a matching Mixxx mapping, or says the controller isn't supported yet and needs mapping by hand
 - **Controller Mapper** (Settings → Controller Mapper, or the standalone `OpenDJ-Controller-Mapper.html` on the release page): test and fix every control, and send new mappings and fixes to the community collection, where other owners verify them
 - **DVS**: control decks with Serato CV02 or Traktor MK1/MK2 timecode vinyl and CDs (relative, absolute and internal modes, auto-calibration). *Absolute mode has not been verified with real timecode media yet.*
@@ -136,7 +143,7 @@ Run OpenDJ on a NAS or home server and open it from any computer's browser: pass
 
 <img src="docs/images/themes.jpg" alt="Six of the nine themes: Midnight, Neon, Club Red, Daylight, Black & Gold and High Contrast" width="100%">
 
-Nine themes in *Settings → Appearance*: Midnight, Graphite, Club Red, Neon, Ocean, Black & Gold, Forest, **Daylight** (a light theme for outdoor gigs) and **High Contrast**. Pick a custom accent colour, a waveform colour scheme, and scale the interface from 80 % to 150 % for small laptops or touchscreens.
+Nine themes in *Settings → Appearance*: Midnight, Graphite, Club Red, Neon, Ocean, Black & Gold, Forest, **Daylight** (a light theme for outdoor gigs) and **High Contrast**. Pick a custom accent colour, a waveform style (3-band RGB, Blue, Monochrome, **Player Blue**, **Player RGB**), and scale the interface from 80 % to 150 % for small laptops or touchscreens.
 
 <p align="center"><img src="docs/images/settings-appearance.png" alt="Settings → Appearance" width="70%"></p>
 
@@ -174,7 +181,7 @@ Installers are built by GitHub Actions ([`build.yml`](.github/workflows/build.ym
 Install from the [download table](#download), start OpenDJ, then add music (the empty library shows the same options):
 
 - **Folders, USB and NAS**: in the browser's left panel, click a detected drive or use **+ Folder**. NAS shares must be mounted by your OS first (Windows: map a network drive or use `\\nas\music`; macOS: Finder → Go → Connect to Server; Linux: an SMB/NFS mount).
-- **Media servers**: click **+ Media server** and pick the type. Plex: server URL plus an X-Plex-Token, or your plex.tv login. Jellyfin, Emby, Subsonic: URL, username and password. MediaMax: URL plus username and password, or an API key (`mmk_…`). Passwords are exchanged for a token where the server supports it.
+- **Media servers**: click **+ Media server** and pick the type. Plex: server URL plus an X-Plex-Token, or your plex.tv login; with Plex Home, the 👥 button next to the server switches to another home user (PIN if they have one). Jellyfin, Emby, Subsonic: URL, username and password. MediaMax: URL plus username and password, or an API key (`mmk_…`). Passwords are exchanged for a token where the server supports it.
 - **rekordbox users**: in rekordbox use *File → Export Collection in xml format*, then *Settings → Library → Import rekordbox XML* in OpenDJ. Traktor, Serato (crates only, see [Library](#library--media-servers)) and VirtualDJ libraries import from the same tab.
 
 The desktop app keeps its library in `OpenDJ/library` inside the OS app-data folder: `%APPDATA%\OpenDJ\library` (Windows), `~/Library/Application Support/OpenDJ/library` (macOS), `~/.config/OpenDJ/library` (Linux). Set `OPENDJ_DATA` to use another folder (for example a portable library on a USB stick).
@@ -335,7 +342,7 @@ The full feature-by-feature table is in **[docs/GAP_ANALYSIS.md](docs/GAP_ANALYS
 | ↑ / ↓ | Browse tracks |
 | Shift + ← / → | Load to deck 1 / 2 |
 | R | Record |
-| A | Automix |
+| A | Automix: start (smart mix of the queue or view) / stop |
 | Ctrl+F | Search |
 
 ## Building from source & tests

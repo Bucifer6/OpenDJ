@@ -5,7 +5,7 @@
 .key-lbl { font-size: 9px; font-weight: 800; color: var(--text-3); }
 .key-val { font: 600 11px var(--mono); min-width: 24px; text-align: center; color: var(--amber); }
 .phase-meter { width: 100%; height: 12px; display: block; }
-.pad-modes { grid-template-columns: repeat(7, 1fr); }
+.pad-modes { grid-template-columns: repeat(9, minmax(0, 1fr)); }
 .knob-xs { width: 20px; height: 20px; }
 .knob-xs .knob-ind { top: 2px; }
 .stem-knobs { display: flex; gap: 4px; }
@@ -287,7 +287,7 @@ html.odj-local .panel-tab[data-panel="stems"] { display: none; }
 
 /* mixer: compact, prominent crossfader */
 .xfader-row { padding: 6px 6px 2px; border-top: 1px solid var(--line); }
-.crossfader { --cap: 26px; }
+.crossfader { --cap: 28px; }
 .crossfader .fader-track { height: 34px; }
 .crossfader .fader-slot { height: 6px; margin-top: -3px; }
 .crossfader .fader-thumb { top: 1px; bottom: 1px; }
@@ -486,7 +486,7 @@ body:not(.four-decks) .mixer.mx-short .mixer-master > .strip-num, body:not(.four
 :root :is(.four-decks, body.layout-performance) .deck-stems .stems-row:last-child > .btn { min-width: 0; overflow: hidden; text-overflow: clip; padding-left: 2px; padding-right: 2px; }
 :root :is(.four-decks, body.layout-performance) .deck-stems .stems-prep { flex: 0 1 auto; }
 /* the 7 pad-mode buttons share the row evenly and clip their label rather than widen the deck (1100 px windows) */
-.pad-modes { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.pad-modes { grid-template-columns: repeat(9, minmax(0, 1fr)); }
 .pad-mode { min-width: 0; overflow: hidden; white-space: nowrap; }
 :root.w1200 .pad-mode { letter-spacing: 0; font-size: 7.5px; }
 /* waveform focus keeps its single row of 8 pads on narrow windows too (two rows overflowed the short deck) */
@@ -520,3 +520,6 @@ body:not(.four-decks) .mixer.mx-short .mixer-master > .strip-num, body:not(.four
 :root.h1250 body:not(.four-decks) .deck-body { grid-template-columns: minmax(190px, 0.9fr) minmax(0, 1.6fr) 62px; }
 :root.h1250 .jog { max-width: 300px; }
 :root.h1250 .btn.big { height: 60px; max-width: 72px; }
+/* short mixers: the crossfader options row (EQ preset, Color FX, curve) stays on its own line but slimmer */
+.mixer.mx-400 .xfader-options .sel { height: 20px; min-height: 20px; padding-top: 0; padding-bottom: 0; font-size: 10px; }
+.mixer.mx-400 .xfader-row { row-gap: 3px; }

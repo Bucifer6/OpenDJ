@@ -32,8 +32,10 @@ export const DEFAULT_SETTINGS = {
   latencyHint: 'interactive',
   micDeviceId: '',
   talkoverDb: -12,
+  voiceDuckDb: -14, voiceVolume: 1, dedicationLang: 'en', // MC voice / dedications (audio/voice.js, dedications.js)
   midiClockOutput: '',
   colorFx: 'filter',
+  mixer: {},                  // mixer v2 config (audio/mixer-config.js fills defaults; crossfaderCurve migrates into it)
   fxPostFader: true,          // beat FX tails ring out after the channel fader / crossfader closes (false = pre-fader FX)
   autoCues: true,
   autoAnalyse: true,          // analyse new tracks (BPM, key, waveform, cues) in the background, in the browser
@@ -54,6 +56,10 @@ export const DEFAULT_SETTINGS = {
   downloadMaxMB: 4096,        // per-file limit for offline copies downloaded from media servers
   allowedRoots: null,
   youtubeApiKey: '',          // YouTube Data API key for search (never written to backups)         // hosted mode: folders the web UI may browse/add/export to (OPENDJ_MUSIC_ROOTS wins)
+  // turntables (docs/MIXER_AND_TURNTABLES_PLAN.md §6): defaults live in public/js/audio/vinyl.js; {} = all defaults
+  vinyl: {},                  // vinyl model for every deck: start, stop, inertia, slipmat, jogWeight, rpm, brakeTime, spinTime, spinSpeed, quartz
+  vinylDecks: [],             // per-deck changes to `vinyl` (index = deck), made in each deck's Vinyl panel
+  deckOptions: {},            // platterSkin, haptics, needleLock, needleSnap, flickSpinback, bendMode, fineStep, hardLock, scratchHand
 };
 // Object-valued settings that are replaced on update instead of shallow-merged.
 export const REPLACE_SETTINGS = new Set(['midiMappings', 'sequencer', 'lighting', 'sampler', 'updateSnooze']);
@@ -215,7 +221,7 @@ export class LibraryCore {
 
   // ---------- remote sources ----------
   publicSource(s) {
-    const { password, token, ...rest } = s; // never send secrets to the UI
+    const { password, token, accountToken, ...rest } = s; // never send secrets to the UI
     return { ...rest, hasPassword: !!password, hasToken: !!token };
   }
   getSource(sid) { return okId(sid) ? this.data.sources.find((s) => s.id === sid) : undefined; }

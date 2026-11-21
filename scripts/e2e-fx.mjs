@@ -19,7 +19,8 @@ let cpuMs = 0, cpuSec = 0;
 
 try {
   // ---------------------------------------------------------------- beat FX: clicks, zipper, level
-  const NOISY = new Set(['bitcrush', 'noise', 'distortion']); // these make steps / noise by design: compare to their own steady state
+  if (argv.includes('--mixer-only')) { const { mixerChecks } = await import('./fx/mixer-checks.mjs'); const M = await mixerChecks(lab, check, f); const j = argv.find((a) => a.startsWith('--mixer-json='))?.slice(13); if (j) (await import('node:fs')).writeFileSync(j, JSON.stringify(M, null, 1)); throw Object.assign(new Error('done'), { done: true }); }
+  const NOISY = new Set(['bitcrush', 'noise', 'distortion', 'spiral']); // spiral: repeats climb in pitch (higher frequencies by design) // these make steps / noise by design: compare to their own steady state
   for (const { id, label, kind } of lab.effects) {
     const init = [{ call: 'setBeatSec', args: [0.5] }, { call: 'setType', args: [id] }, { call: 'setMix', args: [0.5] }, { call: 'setParam', args: [0.5] }, { call: 'setParam2', args: [0.5] }, { call: 'setBeats', args: [0.5] }, { call: 'setClock', args: [0, 0, 0.5] }];
     const s = await lab.render({ chain: 'fx', ...SINE, secs: 3, init, events: [{ t: 1, call: 'setOn', args: [true] }, { t: 2, call: 'setOn', args: [false] }] });
@@ -147,14 +148,14 @@ try {
   }
 
   // ---------------------------------------------------------------- filter + Color FX
-  for (const color of ['filter', 'space', 'dubecho', 'noise', 'crush', 'pitch']) {
+  for (const color of (lab.page ? await lab.page.evaluate(() => window.fxlab.colorFx.map(([id]) => id)) : ['filter', 'space', 'dubecho', 'noise', 'crush', 'pitch'])) {
     const p = await lab.render({ chain: 'channel', settings: { colorFx: color }, signal: 'multitone', signalOpts: { freqs: [30, 100, 1000, 5000, 12000, 18000], amp: 0.05 }, secs: 1.5 });
     const lv0 = [30, 100, 1000, 5000, 12000, 18000].map((q) => db(bandLevel(p.L, p.sr, q, 0.5, 1.5) / 0.05 / 0.64));
     check(Math.max(...lv0.map(Math.abs)) < 0.05, `${color}: knob at 12 o'clock leaves the sound untouched (30 Hz–18 kHz within ${f(Math.max(...lv0.map(Math.abs)), 3)} dB)`);
     const ev = [...sweep(0.8, 1.8, 0, -1, (v) => ({ call: 'set', args: ['filter', v] })), ...sweep(1.8, 2.2, -1, 0, (v) => ({ call: 'set', args: ['filter', v] })), ...sweep(2.2, 3.2, 0, 1, (v) => ({ call: 'set', args: ['filter', v] })), ...sweep(3.2, 3.6, 1, 0, (v) => ({ call: 'set', args: ['filter', v] }))];
     const s = await lab.render({ chain: 'channel', settings: { colorFx: color }, ...SINE, secs: 4, events: ev });
     const j = stepRatio(s.L, s.sr, 0.8, 3.9);
-    const lim = color === 'crush' || color === 'noise' ? 2 : SINE_RATIO * 1.6;
+    const lim = color === 'crush' || color === 'noise' || color === 'crunch' ? 2 : color === 'pitchshift' ? SINE_RATIO * 3.2 : SINE_RATIO * 1.6; // (crunch distorts, pitch doubles the frequency by design)
     check(j <= lim, `${color}: knob sweep without clicks / zipper (step ratio ${f(j, 3)} ≤ ${f(lim, 3)})`);
     const m = await lab.render({ chain: 'channel', settings: { colorFx: color }, signal: 'drums', secs: 6, events: sweep(1, 2.5, 0, -0.7, (v) => ({ call: 'set', args: ['filter', v] })).concat(sweep(2.5, 3.5, -0.7, 0.7, (v) => ({ call: 'set', args: ['filter', v] }))) });
     const lv = db(rms(m.L, m.sr, 2.5, 3.5) / rms(m.L, m.sr, 0.2, 1));
@@ -199,6 +200,26 @@ try {
     const after = rms(s.L, s.sr, 2.2, 3);
     check(after < 1e-5 && rms(s.L, s.sr, 0.9, 1.3) > 0.01, `backspin: spins back, then stops (rms after ${after.toExponential(1)})`);
     save('deck-backspin', s);
+    // turntable model (docs/MIXER_AND_TURNTABLES_PLAN.md T1/T3/T5/T10): motor start / stop, release spin-up, reverse
+    // ramps, slip brake, position-following scratch and the tempo glide ramp, rendered by the real worklet
+    const motor = [{ msg: { type: 'motor', value: { start: 0.5, stop: 0.7, inertia: 1, slipmat: 0.3 } } }, { msg: { type: 'keylock', value: true } }, ...play];
+    const m = await lab.render({ chain: 'deck', ...SINE, secs: 7, init: motor, events: [
+      { t: 1.0, msg: { type: 'play', value: false } }, { t: 1.4, msg: { type: 'play', value: true } },
+      { t: 2.2, msg: { type: 'reverse', value: true } }, { t: 3.2, msg: { type: 'reverse', value: false } },
+      { t: 4.2, msg: { type: 'scratch', value: { velocity: 0 } } }, { t: 4.5, msg: { type: 'scratch', value: null } },
+      { t: 5.2, msg: { type: 'slip', value: true } }, { t: 5.2, msg: { type: 'brake', value: 1 / (0.6 * 48000), slip: true } },
+      { t: 6.2, msg: { type: 'rateRamp', to: 1.04, dur: 0.6 } },
+    ] });
+    check(maxJump(m.L, m.sr, 0.05, 7) <= base * 1.3, `motor start / pause brake / reverse ramps / release spin-up / slip brake / tempo glide are click-free (max step ${f(maxJump(m.L, m.sr, 0.05, 7) * 1e3)} ≤ ${f(base * 1.3e3)} ×1e-3)`);
+    save('deck-motor', m);
+    // position scratch: a baby scratch from 60 Hz input samples (hand travel, audio-clock timestamps)
+    const ev = [{ t: 0.5, msg: { type: 'scratch', value: { pos: true } } }];
+    for (let k = 0; k <= 90; k++) { const t = 0.5 + k / 60; ev.push({ t, msg: { type: 'scratchPos', pos: 0.3 * (1 - Math.cos(2 * Math.PI * 1.5 * (t - 0.5))) * 48000, t } }); }
+    ev.push({ t: 2.1, msg: { type: 'scratch', value: null } });
+    const sc = await lab.render({ chain: 'deck', signal: 'sine', signalOpts: { f: 220, amp: 0.5 }, secs: 2.5, init: [{ msg: { type: 'seek', frame: 48000 } }], events: ev });
+    const scj = maxJump(sc.L, sc.sr, 0.45, 2.5), scLim = SINE_JUMP * 3.2; // a 3x hand stroke: up to 3x the sine's step, no spikes
+    check(scj <= scLim && rms(sc.L, sc.sr, 0.6, 2) > 0.02, `position scratch (60 Hz touch input) is smooth: max step ${f(scj * 1e3)} ≤ ${f(scLim * 1e3)} ×1e-3`);
+    save('deck-scratch-pos', sc);
   }
   // ---------------------------------------------------------------- CPU: the whole 4-channel mixer, every channel busy
   {
@@ -214,8 +235,15 @@ try {
     check(Math.max(peak(busy.L, busy.sr), peak(busy.R, busy.sr)) <= Math.pow(10, -1 / 20) + 1e-6, 'and the master stays under the limiter ceiling');
   }
   console.log(`# offline render cost of the beat FX: ${f(cpuMs / cpuSec / 10, 2)} % of one core per FX unit (incl. test signal)`);
+  // ---------------------------------------------------------------- mixer v2 (plan §4 M1-M17 acceptance checks)
+  if (!argv.includes('--no-mixer')) {
+    const { mixerChecks } = await import('./fx/mixer-checks.mjs');
+    const only = argv.find((a) => a.startsWith('--mixer-json='))?.slice(13);
+    const M = await mixerChecks(lab, check, f);
+    if (only) { const fs = await import('node:fs'); fs.writeFileSync(only, JSON.stringify(M, null, 1)); }
+  }
 } catch (e) {
-  console.error(e); failed = true;
+  if (!e.done) { console.error(e); failed = true; }
 } finally {
   if (lab.errors.length) { console.log('page errors:', lab.errors); failed = true; }
   await lab.close();

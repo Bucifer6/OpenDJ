@@ -1,5 +1,7 @@
 // CC0 one-shots from Sonic Pi's sample collection, pinned to ed4b23ccb77f0845cbad2b8d911cd36a455ec597.
 // Per-file creator and original Freesound source are retained for attribution and provenance.
+/** Every catalogue file comes from this pinned commit; the sampler refuses anything else. */
+export const SAMPLE_SOURCE = 'https://raw.githubusercontent.com/sonic-pi-net/sonic-pi/ed4b23ccb77f0845cbad2b8d911cd36a455ec597/etc/samples/';
 export const SAMPLE_CATALOG = [
   {
     "id": "bass_dnb_f",

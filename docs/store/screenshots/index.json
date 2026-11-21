@@ -1,0 +1,308 @@
+[
+  {
+    "file": "docs/store/screenshots/desktop-1080/01-mix.jpg",
+    "pixels": "1920x1080",
+    "mode": "desktop",
+    "kb": 330
+  },
+  {
+    "file": "docs/store/screenshots/desktop-1080/02-library.jpg",
+    "pixels": "1920x1080",
+    "mode": "desktop",
+    "kb": 321
+  },
+  {
+    "file": "docs/store/screenshots/desktop-1080/03-automix.jpg",
+    "pixels": "1920x1080",
+    "mode": "desktop",
+    "kb": 207
+  },
+  {
+    "file": "docs/store/screenshots/desktop-1080/04-sampler.jpg",
+    "pixels": "1920x1080",
+    "mode": "desktop",
+    "kb": 337
+  },
+  {
+    "file": "docs/store/screenshots/desktop-1080/05-effects.jpg",
+    "pixels": "1920x1080",
+    "mode": "desktop",
+    "kb": 321
+  },
+  {
+    "file": "docs/store/screenshots/desktop-1080/06-video.jpg",
+    "pixels": "1920x1080",
+    "mode": "desktop",
+    "kb": 313
+  },
+  {
+    "file": "docs/store/screenshots/desktop-1080/07-settings.jpg",
+    "pixels": "1920x1080",
+    "mode": "desktop",
+    "kb": 210
+  },
+  {
+    "file": "docs/store/screenshots/desktop-1440/01-mix.jpg",
+    "pixels": "2560x1440",
+    "mode": "desktop",
+    "kb": 481
+  },
+  {
+    "file": "docs/store/screenshots/desktop-1440/02-library.jpg",
+    "pixels": "2560x1440",
+    "mode": "desktop",
+    "kb": 468
+  },
+  {
+    "file": "docs/store/screenshots/desktop-1440/03-automix.jpg",
+    "pixels": "2560x1440",
+    "mode": "desktop",
+    "kb": 307
+  },
+  {
+    "file": "docs/store/screenshots/desktop-1440/04-sampler.jpg",
+    "pixels": "2560x1440",
+    "mode": "desktop",
+    "kb": 491
+  },
+  {
+    "file": "docs/store/screenshots/desktop-1440/05-effects.jpg",
+    "pixels": "2560x1440",
+    "mode": "desktop",
+    "kb": 467
+  },
+  {
+    "file": "docs/store/screenshots/desktop-1440/06-video.jpg",
+    "pixels": "2560x1440",
+    "mode": "desktop",
+    "kb": 469
+  },
+  {
+    "file": "docs/store/screenshots/desktop-1440/07-settings.jpg",
+    "pixels": "2560x1440",
+    "mode": "desktop",
+    "kb": 305
+  },
+  {
+    "file": "docs/store/screenshots/ios-ipad-13/01-mix.jpg",
+    "pixels": "2752x2064",
+    "mode": "phone mode (?local=1)",
+    "kb": 671
+  },
+  {
+    "file": "docs/store/screenshots/ios-ipad-13/02-library.jpg",
+    "pixels": "2752x2064",
+    "mode": "phone mode (?local=1)",
+    "kb": 628
+  },
+  {
+    "file": "docs/store/screenshots/ios-ipad-13/03-automix.jpg",
+    "pixels": "2752x2064",
+    "mode": "phone mode (?local=1)",
+    "kb": 414
+  },
+  {
+    "file": "docs/store/screenshots/ios-ipad-13/04-sampler.jpg",
+    "pixels": "2752x2064",
+    "mode": "phone mode (?local=1)",
+    "kb": 671
+  },
+  {
+    "file": "docs/store/screenshots/ios-ipad-13/05-effects.jpg",
+    "pixels": "2752x2064",
+    "mode": "phone mode (?local=1)",
+    "kb": 664
+  },
+  {
+    "file": "docs/store/screenshots/ios-ipad-13/07-settings.jpg",
+    "pixels": "2752x2064",
+    "mode": "phone mode (?local=1)",
+    "kb": 388
+  },
+  {
+    "file": "docs/store/screenshots/ios-iphone-6.3/01-mix.jpg",
+    "pixels": "1206x2622",
+    "mode": "phone mode (?local=1)",
+    "kb": 318
+  },
+  {
+    "file": "docs/store/screenshots/ios-iphone-6.3/02-library.jpg",
+    "pixels": "1206x2622",
+    "mode": "phone mode (?local=1)",
+    "kb": 176
+  },
+  {
+    "file": "docs/store/screenshots/ios-iphone-6.3/03-automix.jpg",
+    "pixels": "1206x2622",
+    "mode": "phone mode (?local=1)",
+    "kb": 192
+  },
+  {
+    "file": "docs/store/screenshots/ios-iphone-6.3/04-sampler.jpg",
+    "pixels": "1206x2622",
+    "mode": "phone mode (?local=1)",
+    "kb": 230
+  },
+  {
+    "file": "docs/store/screenshots/ios-iphone-6.3/05-effects.jpg",
+    "pixels": "1206x2622",
+    "mode": "phone mode (?local=1)",
+    "kb": 258
+  },
+  {
+    "file": "docs/store/screenshots/ios-iphone-6.3/07-settings.jpg",
+    "pixels": "1206x2622",
+    "mode": "phone mode (?local=1)",
+    "kb": 193
+  },
+  {
+    "file": "docs/store/screenshots/ios-iphone-6.9/01-mix.jpg",
+    "pixels": "1320x2868",
+    "mode": "phone mode (?local=1)",
+    "kb": 349
+  },
+  {
+    "file": "docs/store/screenshots/ios-iphone-6.9/02-library.jpg",
+    "pixels": "1320x2868",
+    "mode": "phone mode (?local=1)",
+    "kb": 197
+  },
+  {
+    "file": "docs/store/screenshots/ios-iphone-6.9/03-automix.jpg",
+    "pixels": "1320x2868",
+    "mode": "phone mode (?local=1)",
+    "kb": 208
+  },
+  {
+    "file": "docs/store/screenshots/ios-iphone-6.9/04-sampler.jpg",
+    "pixels": "1320x2868",
+    "mode": "phone mode (?local=1)",
+    "kb": 268
+  },
+  {
+    "file": "docs/store/screenshots/ios-iphone-6.9/05-effects.jpg",
+    "pixels": "1320x2868",
+    "mode": "phone mode (?local=1)",
+    "kb": 294
+  },
+  {
+    "file": "docs/store/screenshots/ios-iphone-6.9/07-settings.jpg",
+    "pixels": "1320x2868",
+    "mode": "phone mode (?local=1)",
+    "kb": 230
+  },
+  {
+    "file": "docs/store/screenshots/play-feature-graphic/feature-graphic-1024x500.png",
+    "pixels": "1024x500",
+    "mode": "composed",
+    "kb": 358
+  },
+  {
+    "file": "docs/store/screenshots/play-phone/01-mix.jpg",
+    "pixels": "1080x1920",
+    "mode": "phone mode (?local=1)",
+    "kb": 225
+  },
+  {
+    "file": "docs/store/screenshots/play-phone/02-library.jpg",
+    "pixels": "1080x1920",
+    "mode": "phone mode (?local=1)",
+    "kb": 122
+  },
+  {
+    "file": "docs/store/screenshots/play-phone/03-automix.jpg",
+    "pixels": "1080x1920",
+    "mode": "phone mode (?local=1)",
+    "kb": 124
+  },
+  {
+    "file": "docs/store/screenshots/play-phone/04-sampler.jpg",
+    "pixels": "1080x1920",
+    "mode": "phone mode (?local=1)",
+    "kb": 167
+  },
+  {
+    "file": "docs/store/screenshots/play-phone/05-effects.jpg",
+    "pixels": "1080x1920",
+    "mode": "phone mode (?local=1)",
+    "kb": 173
+  },
+  {
+    "file": "docs/store/screenshots/play-phone/07-settings.jpg",
+    "pixels": "1080x1920",
+    "mode": "phone mode (?local=1)",
+    "kb": 158
+  },
+  {
+    "file": "docs/store/screenshots/play-tablet-10/01-mix.jpg",
+    "pixels": "2560x1440",
+    "mode": "phone mode (?local=1)",
+    "kb": 482
+  },
+  {
+    "file": "docs/store/screenshots/play-tablet-10/02-library.jpg",
+    "pixels": "2560x1440",
+    "mode": "phone mode (?local=1)",
+    "kb": 481
+  },
+  {
+    "file": "docs/store/screenshots/play-tablet-10/03-automix.jpg",
+    "pixels": "2560x1440",
+    "mode": "phone mode (?local=1)",
+    "kb": 286
+  },
+  {
+    "file": "docs/store/screenshots/play-tablet-10/04-sampler.jpg",
+    "pixels": "2560x1440",
+    "mode": "phone mode (?local=1)",
+    "kb": 476
+  },
+  {
+    "file": "docs/store/screenshots/play-tablet-10/05-effects.jpg",
+    "pixels": "2560x1440",
+    "mode": "phone mode (?local=1)",
+    "kb": 465
+  },
+  {
+    "file": "docs/store/screenshots/play-tablet-10/07-settings.jpg",
+    "pixels": "2560x1440",
+    "mode": "phone mode (?local=1)",
+    "kb": 281
+  },
+  {
+    "file": "docs/store/screenshots/play-tablet-7/01-mix.jpg",
+    "pixels": "1080x1920",
+    "mode": "phone mode (?local=1)",
+    "kb": 219
+  },
+  {
+    "file": "docs/store/screenshots/play-tablet-7/02-library.jpg",
+    "pixels": "1080x1920",
+    "mode": "phone mode (?local=1)",
+    "kb": 123
+  },
+  {
+    "file": "docs/store/screenshots/play-tablet-7/03-automix.jpg",
+    "pixels": "1080x1920",
+    "mode": "phone mode (?local=1)",
+    "kb": 125
+  },
+  {
+    "file": "docs/store/screenshots/play-tablet-7/04-sampler.jpg",
+    "pixels": "1080x1920",
+    "mode": "phone mode (?local=1)",
+    "kb": 167
+  },
+  {
+    "file": "docs/store/screenshots/play-tablet-7/05-effects.jpg",
+    "pixels": "1080x1920",
+    "mode": "phone mode (?local=1)",
+    "kb": 176
+  },
+  {
+    "file": "docs/store/screenshots/play-tablet-7/07-settings.jpg",
+    "pixels": "1080x1920",
+    "mode": "phone mode (?local=1)",
+    "kb": 163
+  }
+]

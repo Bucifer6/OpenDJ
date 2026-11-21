@@ -49,7 +49,7 @@ const unsupported = path.join(music, 'Old Format.wma');
 fs.writeFileSync(unsupported, 'not really wma');
 
 // ---------------------------------------------------------------- static server (its API must never be used)
-const app = await start({ port: 7702, dataDir: path.join(tmp, 'data') });
+const app = await start({ port: Number(process.env.E2E_MOBILE_PORT) || 7702, dataDir: path.join(tmp, 'data') });
 const base = `http://127.0.0.1:${app.port}/?local=1`;
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
 let failed = false;
@@ -106,6 +106,8 @@ async function runProfile({ name, device }) {
     check(mp3 && mp3.artist === 'Mobile Artist' && mp3.album === 'Phone Sessions' && mp3.hasCover, `ID3 tags + cover art read in the browser (${JSON.stringify(mp3)})`);
     check(tags.find((t) => t.title === 'Tram Loop')?.artist === 'Third Artist', 'title / artist from the file name when there are no tags');
     check(tags.every((t) => /^music\/[0-9a-f]{16}\.(mp3|m4a|wav)$/.test(t.path)), 'files copied into app storage (music/<id>.<ext>)');
+    // (the row art is set lazily: wait for it instead of reading it once)
+    await page.waitForFunction(() => [...document.querySelectorAll('.lib-rows .art')].some((e) => /blob:/.test(getComputedStyle(e).backgroundImage)), null, { timeout: 5000 }).catch(() => {});
     const coverSrc = await page.evaluate(() => { const t = [...window.opendj.library.tracks.values()].find((x) => x.hasCover); return window.opendj.library.app && (document.querySelector('.lib-rows .art') ? getComputedStyle([...document.querySelectorAll('.lib-rows .lr')].find((r) => r.textContent.includes(t.title)).querySelector('.art')).backgroundImage : ''); });
     check(/blob:/.test(coverSrc), `cover shown from app storage (${coverSrc.slice(0, 40)}…)`);
 
@@ -155,6 +157,58 @@ async function runProfile({ name, device }) {
     const back = await page.evaluate(() => window.opendj.engine.decks[0].position);
     check(Math.abs(back - cue) < 0.6, `tapping hot cue A jumps back (${back.toFixed(2)} s)`);
     await shot('3-decks');
+
+    // ---- scratch view (T8): open, touch targets, platter + CUT transforms with two fingers, second finger holds ----
+    const svBtn = page.locator('.deck[data-deck="0"] .scratch-view-btn');
+    if (await svBtn.isVisible() && (await svBtn.boundingBox())?.width >= 44) await svBtn.tap({ timeout: 3000, force: true }).catch((e) => console.log('scratch button tap:', e.message.split('\n').slice(0, 6).join(' / ')));
+    await page.waitForSelector('.scratch-view', { timeout: 800 }).catch(() => {});
+    if (!(await page.locator('.scratch-view').count())) { const t = page.locator('.deck[data-deck="0"] .deck-num'); await t.tap(); await page.waitForTimeout(60); await t.tap(); } // double-tap the deck header
+    await page.waitForSelector('.scratch-view', { timeout: 3000 });
+    await page.waitForTimeout(300);
+    const sv = await page.evaluate(() => {
+      const v = document.querySelector('.scratch-view'), r = (s) => { const e = v.querySelector(s); const b = e.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2, w: b.width, h: b.height }; };
+      const small = [...v.querySelectorAll('button, .sv-strip')].filter((e) => e.offsetParent).map((e) => e.getBoundingClientRect()).filter((b) => b.width < 44 || b.height < 44).length;
+      return { jog: r('.sv-jog canvas'), cut: r('.sv-cut'), strip: r('.sv-strip'), small, vw: innerWidth };
+    });
+    check(sv.small === 0, `scratch view: every control is a ≥44 px touch target (${sv.small} smaller)`);
+    check(sv.jog.w >= Math.min(260, sv.vw * 0.6), `scratch view platter is big (${Math.round(sv.jog.w)} px)`);
+    await shot('6-scratch-view');
+    const cdp2 = await ctx.newCDPSession(page);
+    const jx = sv.jog.x, jy = sv.jog.y, jr = sv.jog.w * 0.3;
+    const P = (id, a) => ({ x: jx + jr * Math.cos(a), y: jy + jr * Math.sin(a), id });
+    const C = (id) => ({ x: sv.cut.x, y: sv.cut.y, id });
+    await page.evaluate(() => { const a = window.opendj; a.engine.setCrossfader(0); a.engine.channels[0].set('xfAssign', 'A'); a.engine.decks[0].pause(); a.engine.decks[0].seek(10); });
+    await page.waitForTimeout(150);
+    const s0 = await page.evaluate(() => window.opendj.engine.decks[0].position);
+    await cdp2.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [P(1, -1.6)] });
+    const xfs = []; let ang = -1.6;
+    for (let k = 0; k < 8; k++) { // platter finger moves forward while the other finger taps CUT (transformer)
+      await cdp2.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [P(1, ang), C(2)] });
+      xfs.push(await page.evaluate(() => window.opendj.engine.crossfader));
+      ang += 0.12; await cdp2.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [P(1, ang), C(2)] });
+      await cdp2.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [C(2)] });
+      xfs.push(await page.evaluate(() => window.opendj.engine.crossfader));
+      ang += 0.12; await cdp2.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [P(1, ang)] });
+    }
+    await page.waitForTimeout(200);
+    const s1 = await page.evaluate(() => window.opendj.engine.decks[0].position);
+    await cdp2.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [P(1, ang)] });
+    const cuts = xfs.filter((v, k) => k % 2 === 0).every((v) => v > 0.99) && xfs.filter((v, k) => k % 2 === 1).every((v) => v < 0.01);
+    check(cuts, `transformer: each CUT tap closes deck 1, each release reopens it, while the other finger scratches (${xfs.map((v) => v.toFixed(1)).join(' ')})`);
+    check(s1 - s0 > 0.2, `the platter finger moved the record forwards during the cuts (+${(s1 - s0).toFixed(2)} s)`);
+    // second finger on the platter holds a playing record still
+    await page.evaluate(() => window.opendj.engine.decks[0].play());
+    await page.waitForTimeout(250);
+    await cdp2.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [P(1, Math.PI)] }); // left half: away from the tonearm
+    await cdp2.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [P(1, Math.PI), P(2, 2)] });
+    await page.waitForTimeout(250);
+    const held = await page.evaluate(() => Math.abs(window.opendj.engine.decks[0]._rate));
+    await cdp2.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [P(1, Math.PI), P(2, 2)] });
+    check(held < 0.01, `second finger holds the playing record (rate ${held.toFixed(3)})`);
+    await page.evaluate(() => window.opendj.engine.decks[0].pause());
+    await page.locator('.scratch-view .sv-close').tap();
+    check(!(await page.locator('.scratch-view').count()), 'scratch view closes');
+    await page.evaluate(() => window.opendj.engine.setCrossfader(0));
 
     // ---- playlist ----
     await page.locator('.tree-head button[title="New playlist"]').tap();

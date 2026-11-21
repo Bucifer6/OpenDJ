@@ -66,6 +66,32 @@
 .ctl-offer-text { color: var(--text-2); font-size: 12px; }
 .ctl-offer-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .ctl-actions .sel { max-width: 190px; }
+.ctl-layers { gap: 12px; flex-wrap: wrap; }
+.ctl-layer { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); font-size: 12px; }
+
+/* ---------- Controller test (js/ui/controller-test.js) ---------- */
+.ctltest-modal { width: min(1100px, calc(100vw - 32px)); }
+.ctltest { display: grid; gap: 10px; }
+.ctltest-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ctltest-dev { min-width: 220px; flex: 1 1 220px; }
+.ctltest-rec.active { background: var(--red, #e5484d); border-color: transparent; color: #fff; }
+.ctltest-status { font-weight: 600; color: var(--text); }
+.ctltest-cols { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 12px; }
+.ctltest-cols h3, .ctltest > h3 { margin: 0 0 6px; font-size: 12px; color: var(--text-2); text-transform: uppercase; letter-spacing: .06em; }
+.ctltest-log, .ctltest-list { height: min(46vh, 420px); overflow: auto; background: var(--inset); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px; font-size: 12px; user-select: text; }
+.ctltest-row { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 8px; padding: 2px 4px; border-radius: 4px; }
+.ctltest-row code, .ctltest-item code { font-family: var(--mono, ui-monospace, monospace); color: var(--text-2); }
+.ctltest-row.miss { background: color-mix(in srgb, #e5484d 14%, transparent); }
+.ctltest-row.ok span { color: var(--text); }
+.ctltest-empty { color: var(--text-3); padding: 8px; }
+.ctltest-item { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; gap: 6px; align-items: center; padding: 2px 4px; color: var(--text-2); }
+.ctltest-item.seen { color: var(--text); }
+.ctltest-item.seen .ctltest-tick { color: #37d46e; font-weight: 800; }
+.ctltest-badge { font-size: 10px; padding: 1px 5px; border-radius: 99px; background: color-mix(in srgb, #f0c330 22%, transparent); color: #f0c330; }
+.ctltest-badge.inf { background: color-mix(in srgb, #6fb8ff 20%, transparent); color: #6fb8ff; }
+.ctltest-item.seen .ctltest-badge { background: color-mix(in srgb, #37d46e 22%, transparent); color: #37d46e; }
+.ctltest-unmapped { display: flex; flex-wrap: wrap; gap: 6px; }
+@media (max-width: 760px) { .ctltest-cols { grid-template-columns: minmax(0, 1fr); } }
 
 /* Settings → Controller Mapper (public/controller-mapper.html in a frame, themed with the app's tokens) */
 .modal.mapper-wide { width: min(1320px, calc(100vw - 32px)); }

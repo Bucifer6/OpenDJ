@@ -363,6 +363,17 @@ export async function createLocalBackend(o) {
     if (!params.pid || params.pid.length > 256) throw new HttpError(400, 'Bad playlist id');
     try { return await sources.openSourcePlaylist(params.id, params.pid, { name: query?.get?.('name') || undefined }); } catch (e) { throw new HttpError(e.status || 502, scrub(e.message)); }
   });
+  route('GET', '/api/sources/:id/users', async ({ params }) => {
+    if (!library.getSource(params.id)) throw new HttpError(404, 'No source');
+    try { return await sources.plexUsers(params.id); } catch (e) { throw new HttpError(e.status || 502, scrub(e.message)); }
+  });
+  route('POST', '/api/sources/:id/user', async ({ params, body }) => {
+    if (!library.getSource(params.id)) throw new HttpError(404, 'No source');
+    let r;
+    try { r = await sources.switchPlexUser(params.id, body?.userId, body?.pin); } catch (e) { throw new HttpError(e.status || 502, scrub(e.message)); }
+    runJob('sync:' + params.id, () => sources.syncSource(params.id, { onProgress: (p) => emit('sync', p) }));
+    return r;
+  });
   route('DELETE', '/api/sources/:id', async ({ params }) => { library.removeSource(params.id); return { ok: true }; });
   route('GET', '/api/downloads', () => sources.downloads.list());
   route('POST', '/api/downloads', async ({ body }) => ({ queued: sources.downloads.enqueue(Array.isArray(body.trackIds) ? body.trackIds : []) }));
