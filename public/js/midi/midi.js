@@ -203,6 +203,9 @@ export class MidiManager extends Emitter {
   bind() {
     for (const inp of this.inputs()) {
       inp.onmidimessage = (e) => this.onMessage(inp, e.data);
+      // a bundled preset that was updated since it was stored (corrected chart values): refresh its entries
+      const old = this.mappings[inp.name], cur = old?.presetId && PRESETS.find((p) => p.id === old.presetId);
+      if (cur && (cur.version || 0) !== (old.presetVersion || 0)) { this.mappings[inp.name] = this.presetMapping(cur); this.resetRuntime(); this.save(); }
       if (this.hasMapping(inp.name)) continue;
       // auto-apply a preset the first time a known controller shows up
       const preset = PRESETS.find((p) => p.match.test(inp.name));
@@ -221,7 +224,7 @@ export class MidiManager extends Emitter {
   }
   hasMapping(name) { return !!this.mappings[name]?.entries?.length; }
   /** Stored form of a bundled preset: entries plus its id so the bundled extras (init, skin, audio) can be found. */
-  presetMapping(p) { return { name: p.name, entries: structuredClone(p.entries), ...(p.id ? { presetId: p.id } : {}) }; }
+  presetMapping(p) { return { name: p.name, entries: structuredClone(p.entries), ...(p.id ? { presetId: p.id, presetVersion: p.version || 0 } : {}) }; }
   /** The bundled preset a device's current mapping came from (null for learned / imported mappings). */
   presetOf(name) { const id = this.mappings[name]?.presetId; return id ? PRESETS.find((p) => p.id === id) || null : null; }
 
@@ -379,10 +382,17 @@ export class MidiManager extends Emitter {
       for (const e of map.entries) {
         const t = this.byId.get(e.target);
         if (!t?.led || e.noLed || e.key.includes('hid') || e.key.startsWith('gp:')) continue;
-        const [type, ch, num] = e.key.split(':').map((x, i) => (i ? +x : x));
+        const lk = e.ledKey || e.key; // ledKey: the LED answers on another note than the button sends
+        const [type, ch, num] = lk.split(':').map((x, i) => (i ? +x : x));
         if (type !== 'note' && type !== 'cc') continue;
         const on = !!t.led();
-        send(out.id + e.key, [(type === 'cc' ? 0xb0 : 0x90) | ch, num, on ? 127 : 0]);
+        send(out.id + lk, [(type === 'cc' ? 0xb0 : 0x90) | ch, num, on ? 127 : 0]);
+      }
+      // a bundled preset's output-only messages (track loaded, vinyl mode...): { state, status, midino, on, off }
+      const preset = map.presetId ? PRESETS.find((p) => p.id === map.presetId) : null;
+      for (const o of preset?.outputsExtra || []) {
+        const on = this.stateValue(o.state) > 0;
+        send(`${out.id}|x|${o.status}|${o.midino}`, [o.status & 0xff, o.midino & 0x7f, (on ? o.on : o.off) & 0x7f]);
       }
     }
   }

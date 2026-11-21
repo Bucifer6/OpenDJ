@@ -120,10 +120,17 @@ try {
   await midi([0x97, 0x64, 0x7f]); await midi([0x97, 0x64, 0x00]);
   check(await ev(() => window.opendj.engine.decks[0].loop?.active && Math.abs(window.opendj.engine.decks[0].loopBeats - 4) < 1e-3), 'LOOP bank pad 5 (note 0x64) sets a 4-beat loop');
   await ev(() => window.opendj.engine.decks[0].exitLoop());
-  await midi([0x90, 0x5c, 0x7f]); await midi([0x90, 0x5c, 0x00]);
-  check(await ev(() => window.opendj.ctl.padMode[1] === 'padfx'), 'SHIFT + BEAT SYNC (PAD MODE) cycles to PAD FX');
-  await midi([0x90, 0x1b, 0x7f]); await midi([0x90, 0x1b, 0x00]);
-  check(await ev(() => window.opendj.ctl.padMode[1] === 'hotcue'), 'HOT CUE pad mode button');
+  await midi([0x90, 0x5c, 0x7f]); await midi([0x90, 0x5c, 0x00]); // SHIFT + BEAT SYNC: pad mode selection on the unit
+  await midi([0x90, 0x05, 0x7f]); await midi([0x90, 0x05, 0x00]); // then pad 2
+  check(await ev(() => window.opendj.ctl.padMode[1] === 'padfx'), 'pad mode selection: pad 2 (note 0x05 ch1) selects PAD FX');
+  await midi([0x90, 0x00, 0x7f]); await midi([0x90, 0x00, 0x00]);
+  check(await ev(() => window.opendj.ctl.padMode[1] === 'hotcue'), 'pad mode selection: pad 1 (note 0x00) selects HOT CUE');
+  await midi([0xb0, 0x00, 0x00]); await midi([0xb0, 0x20, 0x00]);
+  check(await ev(() => window.opendj.engine.decks[0].tempo <= -window.opendj.engine.decks[0].tempoRange + 0.01), 'TEMPO at 0x00 is the − end');
+  await midi([0xb0, 0x00, 0x40]); await midi([0xb0, 0x20, 0x00]);
+  await midi([0xb6, 0x0d, 0x00]); await midi([0xb6, 0x2d, 0x00]);
+  check(await ev(() => (window.opendj.engine.hpVolume ?? 1) < 0.01), 'HEADPHONES LEVEL (CC 0x0D ch7)');
+  await midi([0xb6, 0x0d, 0x66]); await midi([0xb6, 0x2d, 0x00]);
   // jog: touch + scratch, ring nudge, shift search
   const pos0 = await ev(() => window.opendj.engine.decks[1].position);
   await midi([0xb1, 0x29, 0x50]);
@@ -132,12 +139,12 @@ try {
   check(await ev(() => window.opendj.engine.decks[1]._jogTouched), 'jog touch (note 0x36)');
   await midi([0x91, 0x36, 0x00]);
   // smart functions
-  await midi([0x96, 0x03, 0x7f]); await midi([0x96, 0x03, 0x00]);
-  check(await ev(() => window.opendj.ctl.smartCfx && window.opendj.engine.channels[0].state.colorFx !== 'filter'), 'SMART CFX on: CFX knobs play a Color FX preset');
-  await midi([0x96, 0x05, 0x7f]); await midi([0x96, 0x05, 0x00]);
+  await midi([0x96, 0x00, 0x7f]); await midi([0x96, 0x00, 0x00]);
+  check(await ev(() => window.opendj.ctl.smartCfx && window.opendj.engine.channels[0].state.colorFx !== 'filter'), 'SHIFT + MASTER (SMART CFX, note 0x00 ch7) on: CFX knobs play a Color FX preset');
+  await midi([0x91, 0x08, 0x7f]); await midi([0x91, 0x08, 0x00]);
   const preset = await ev(() => window.opendj.engine.channels[0].state.colorFx);
-  await midi([0x96, 0x03, 0x7f]); await midi([0x96, 0x03, 0x00]);
-  check(await ev(() => !window.opendj.ctl.smartCfx && window.opendj.engine.channels[0].state.colorFx === 'filter') && preset !== 'filter', `FX SELECT ▶ picks the next preset (${preset}); SMART CFX off restores the filter`);
+  await midi([0x96, 0x00, 0x7f]); await midi([0x96, 0x00, 0x00]);
+  check(await ev(() => !window.opendj.ctl.smartCfx && window.opendj.engine.channels[0].state.colorFx === 'filter') && preset !== 'filter', `SHIFT + CUE 2 (FX SELECT ▶, note 0x08 ch2) picks the next preset (${preset}); SMART CFX off restores the filter`);
   await midi([0x96, 0x01, 0x7f]); await midi([0x96, 0x01, 0x00]);
   await midi([0xb6, 0x1f, 0x7f]); await midi([0xb6, 0x3f, 0x7f]);
   check(await ev(() => window.opendj.ctl.smartFader && window.opendj.engine.channels[0].state.eqLow < -0.9), 'SMART FADER: crossfader to B swaps the bass out of deck 1');
@@ -156,7 +163,8 @@ try {
   check(has('144,11,127'), 'LED: deck 1 PLAY lit while playing');
   check(has('151,0,127') && has('151,1,0'), 'LED: hot cue pad A lit, B dark');
   check(has('144,84,127') && has('145,84,0'), 'LED: headphone CUE 1 lit, CUE 2 dark');
-  check(has('144,27,127') && has('144,30,0'), 'LED: HOT CUE pad mode lit, PAD FX dark');
+  check(has('144,0,127') && has('144,5,0'), 'LED: HOT CUE pad mode lit, PAD FX dark (pad mode selection notes)');
+  check(has('159,0,127') && has('159,1,127') && has('144,23,127'), 'MIDI-OUT: track-loaded LEDs (ch16) and vinyl mode on (note 0x17)');
   check(leds.some((s) => s.startsWith('144,12,')) && leds.some((s) => s.startsWith('144,88,')), 'LED: CUE and BEAT SYNC sent');
   await ev(() => window.opendj.engine.decks.forEach((d) => d.pause()));
 
@@ -167,7 +175,7 @@ try {
   await midi([0x90, 0x0c, 0x7f]); await midi([0x90, 0x0c, 0x00]); await midi([0x90, 0x7e, 0x7f]);
   await page.waitForTimeout(100);
   check(await page.locator('.ctltest-row.ok').count() >= 2 && await page.locator('.ctltest-row.miss').count() >= 1, 'Controller test: shows mapped and unmapped messages live');
-  check(await page.locator('.ctltest-item.seen').count() >= 1 && await page.locator('.ctltest-item.unv').count() > 10, 'Controller test: checklist marks seen controls and unverified ones');
+  check(await page.locator('.ctltest-item.seen').count() >= 1 && await page.locator('.ctltest-item.unv').count() === 0 && await page.locator('.ctltest-item.inf').count() >= 3, 'Controller test: checklist marks seen controls; every entry is from the chart, inferred functions are labelled');
   const [dl] = await Promise.all([page.waitForEvent('download'), page.locator('.ctltest-rec').click()]);
   const capPath = path.join(tmp, 'capture.json'); await dl.saveAs(capPath);
   const cap = JSON.parse(fs.readFileSync(capPath, 'utf8'));

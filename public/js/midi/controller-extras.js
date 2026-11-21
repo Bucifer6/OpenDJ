@@ -248,6 +248,7 @@ export function controllerTargets(app, existing = new Set()) {
     const deck = eng.decks[d], n = d + 1, P = `deck${n}`;
     for (const m of Object.keys(PAD_MODES)) add(`${P}.ctlPadMode.${m}`, `Deck ${n} Pad mode: ${PAD_MODES[m].label}`, 'button', (down) => down && setPadMode(app, d, m), () => st.padMode[n] === m);
     const CYCLE = ['hotcue', 'padfx', 'loop', 'sampler'];
+    add(`${P}.ctlPadModeSelect`, `Deck ${n} Pad mode selection (SHIFT + BEAT SYNC on the controller)`, 'button', (down) => { st.padSelect = st.padSelect || []; st.padSelect[n] = !!down; });
     add(`${P}.ctlPadModeNext`, `Deck ${n} Pad mode: next (HOT CUE → PAD FX → LOOP → SAMPLER)`, 'button', (down) => down && setPadMode(app, d, CYCLE[(CYCLE.indexOf(st.padMode[n]) + 1) % CYCLE.length]));
     for (let p = 0; p < 8; p++) {
       add(`${P}.ctlPad${p + 1}`, `Deck ${n} Performance pad ${p + 1} (controller pad mode)`, 'button', (down) => padAction(app, d, p, down), () => padInfo(app, d, p).lit);

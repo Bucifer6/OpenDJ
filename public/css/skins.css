@@ -124,6 +124,7 @@
 .ctltest-item.seen { color: var(--text); }
 .ctltest-item.seen .ctltest-tick { color: #37d46e; font-weight: 800; }
 .ctltest-badge { font-size: 10px; padding: 1px 5px; border-radius: 99px; background: color-mix(in srgb, #f0c330 22%, transparent); color: #f0c330; }
+.ctltest-badge.inf { background: color-mix(in srgb, #6fb8ff 20%, transparent); color: #6fb8ff; }
 .ctltest-item.seen .ctltest-badge { background: color-mix(in srgb, #37d46e 22%, transparent); color: #37d46e; }
 .ctltest-unmapped { display: flex; flex-wrap: wrap; gap: 6px; }
 @media (max-width: 760px) { .ctltest-cols { grid-template-columns: minmax(0, 1fr); } }

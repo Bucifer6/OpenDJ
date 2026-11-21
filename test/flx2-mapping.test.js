@@ -47,7 +47,8 @@ test('FLX2: every entry points at an existing target, no key is mapped twice', (
   for (const e of FLX2_PRESET.entries) {
     assert.ok(m.byId.has(e.target), `target ${e.target}`);
     assert.ok(!keys.has(e.key), `duplicate ${e.key}`); keys.add(e.key);
-    assert.ok(e.verified || e.unverified, `${e.key} carries its provenance flag`);
+    assert.equal(e.verified, 'chart', `${e.key} is checked against the chart`);
+    assert.ok(!e.unverified, `${e.key} is not flagged unverified`);
   }
 });
 
@@ -57,7 +58,15 @@ test('FLX2: chart-cited facts', () => {
   assert.equal(t('cc:0:7'), 'mixer1.eqHigh'); assert.equal(t('cc:0:11'), 'mixer1.eqMid'); assert.equal(t('cc:0:15'), 'mixer1.eqLow');
   assert.equal(t('cc:1:19'), 'mixer2.volume'); assert.equal(t('note:0:84'), 'mixer1.cue'); assert.equal(t('note:1:84'), 'mixer2.cue');
   assert.equal(t('cc:6:23'), 'mixer1.filter'); assert.equal(t('cc:6:24'), 'mixer2.filter'); assert.equal(t('cc:6:31'), 'mixer.crossfader');
-  assert.equal(t('cc:6:8'), 'master.volume'); assert.equal(t('note:0:63'), 'global.shift'); assert.equal(t('note:1:63'), 'global.shift');
+  assert.equal(t('cc:6:8'), 'master.volume'); assert.equal(t('cc:6:13'), 'master.hpVolume');
+  assert.equal(t('note:0:11'), 'deck1.play'); assert.equal(t('note:0:71'), 'deck1.ctlStutter'); assert.equal(t('note:1:12'), 'deck2.cue'); assert.equal(t('note:1:72'), 'deck2.ctlToStart');
+  assert.equal(t('note:0:88'), 'deck1.sync'); assert.equal(t('note:0:42'), 'deck1.master'); assert.equal(by.get('note:0:42').ledKey, 'note:0:120'); assert.equal(t('note:0:92'), 'deck1.ctlPadModeSelect');
+  assert.equal(t('note:0:54'), 'deck1.jogTouch'); assert.equal(t('note:0:103'), 'deck1.jogTouch');
+  assert.equal(t('note:6:99'), 'master.cue'); assert.equal(t('note:6:1'), 'smart.fader'); assert.equal(t('note:6:9'), 'smart.faderAuto'); assert.equal(t('note:6:0'), 'smart.cfx');
+  assert.equal(t('note:0:8'), 'smart.cfxPrev'); assert.equal(t('note:1:8'), 'smart.cfxNext');
+  assert.deepEqual([0, 5, 1, 3].map((n) => t(`note:0:${n}`)), ['deck1.ctlPadMode.hotcue', 'deck1.ctlPadMode.padfx', 'deck1.ctlPadMode.loop', 'deck1.ctlPadMode.sampler']);
+  assert.equal(by.get('cc:0:0').lsbKey, 'cc:0:32'); assert.ok(!by.get('cc:0:0').invert, 'tempo: 0x00 is the − end (not inverted)');
+  assert.equal(by.get('cc:6:23').lsbKey, 'cc:6:55'); assert.equal(by.get('cc:0:7').lsbKey, 'cc:0:39'); assert.equal(by.get('cc:6:8').lsbKey, 'cc:6:40'); assert.equal(t('note:0:63'), 'global.shift'); assert.equal(t('note:1:63'), 'global.shift');
   assert.equal(t('cc:0:34'), 'deck1.jog'); assert.equal(t('cc:0:35'), 'deck1.jogRing'); assert.equal(t('cc:1:33'), 'deck2.jogRing'); assert.equal(t('cc:1:41'), 'deck2.jogSearch');
   assert.deepEqual(FLX2_PAD_BANKS, { hotcue: 0, padfx: 16, loop: 96, sampler: 48 });
   assert.deepEqual(FLX2_PAD_CH, { 1: [7, 8], 2: [9, 10] });
@@ -107,8 +116,9 @@ test('FLX2: replayed messages drive decks, mixer, jog and shift layers', () => {
   assert.ok(calls.some((c) => c[0] === 'sampler.trigger' && c[1] === 4));
   calls.length = 0; send([0x9a, 0x34, 0x7f]);
   assert.ok(calls.some((c) => c[0] === 'sampler.stop' && c[1] === 4));
-  // pad mode button: selects the mode (LED state) and the deck UI's pad mode
-  send([0x90, 0x22, 0x7f]);
+  // pad mode selection (SHIFT + BEAT SYNC, then pad 4 sends note 0x03 on the deck channel)
+  send([0x90, 0x5c, 0x7f]); send([0x90, 0x5c, 0x00]);
+  send([0x90, 0x03, 0x7f]);
   assert.equal(ctlState(app).padMode[1], 'sampler');
   // headphone cue toggles
   send([0x91, 0x54, 0x7f]); assert.equal(channels[1].state.cue, true);
@@ -126,7 +136,8 @@ test('FLX2: LEDs follow state for pads, transport, sync, pad modes and cue butto
   assert.ok(has('144,11,127'), 'deck 1 PLAY lit'); assert.ok(has('145,11,0'), 'deck 2 PLAY dark');
   assert.ok(has('145,88,127'), 'deck 2 SYNC lit'); assert.ok(has('145,84,127'), 'deck 2 headphone CUE lit');
   assert.ok(has('151,2,127'), 'hot cue pad C lit (cue set)'); assert.ok(has('151,0,0'), 'empty hot cue pad dark');
-  assert.ok(has('144,109,127'), 'LOOP pad mode lit'); assert.ok(has('144,27,0'), 'HOT CUE pad mode dark');
+  assert.ok(has('144,1,127'), 'LOOP pad mode (select pad 3, note 0x01) lit'); assert.ok(has('144,0,0'), 'HOT CUE pad mode (note 0x00) dark');
+  assert.ok(has('159,0,127') && has('159,1,127'), 'track-loaded LEDs on channel 16'); assert.ok(has('144,23,127'), 'vinyl mode on sent to deck 1 (note 0x17)');
 });
 
 test('Smart CFX and Smart Fader', () => {

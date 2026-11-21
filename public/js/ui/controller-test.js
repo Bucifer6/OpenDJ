@@ -81,17 +81,17 @@ export function openControllerTest(app, device = null) {
     const entries = map?.entries || [];
     const uniq = [...new Map(entries.map((e) => [e.key, e])).values()];
     const seenN = uniq.filter((e) => seen.has(e.key)).length;
-    const unv = uniq.filter((e) => e.unverified), unvSeen = unv.filter((e) => seen.has(e.key)).length;
+    const unv = uniq.filter((e) => e.unverified || e.interpreted), unvSeen = unv.filter((e) => seen.has(e.key)).length;
     status.textContent = !dev ? 'Connect your controller with USB: it shows up here.'
       : !entries.length ? `${dev}: no mapping yet. Messages are still shown below.`
-      : `${map.name}: ${seenN} of ${uniq.length} mapped controls seen${unv.length ? ` · ${unvSeen} of ${unv.length} unverified ones confirmed` : ''}${unmapped.size ? ` · ${unmapped.size} unmapped message${unmapped.size === 1 ? '' : 's'}` : ''}${rec ? ` · recording (${rec.events.length} messages)` : ''}`;
+      : `${map.name}: ${seenN} of ${uniq.length} mapped controls seen${unv.length ? ` · ${unv.length} with an inferred function (${unvSeen} seen)` : ''}${unmapped.size ? ` · ${unmapped.size} unmapped message${unmapped.size === 1 ? '' : 's'}` : ''}${rec ? ` · recording (${rec.events.length} messages)` : ''}`;
     logEl.replaceChildren(...log.map((l) => el('div', { class: `ctltest-row ${l.mapped ? 'ok' : 'miss'}` }, el('code', {}, l.bytes), el('span', {}, l.what))));
     if (!log.length) logEl.append(el('div', { class: 'ctltest-empty' }, 'Move a control on your controller…'));
-    listEl.replaceChildren(...uniq.map((e) => el('div', { class: `ctltest-item ${seen.has(e.key) ? 'seen' : ''} ${e.unverified ? 'unv' : ''}`, title: e.unverified ? 'Not yet confirmed on a real unit: if this control does nothing, record a capture and send it to us' : 'Value from the manufacturer chart' },
+    listEl.replaceChildren(...uniq.map((e) => el('div', { class: `ctltest-item ${seen.has(e.key) ? 'seen' : ''} ${e.unverified ? 'unv' : ''} ${e.interpreted ? 'inf' : ''}`, title: e.unverified ? 'Not yet confirmed: if this control does nothing, record a capture and send it to us' : e.interpreted ? 'Message from the manufacturer chart; the function is read from the silkscreen (tell us if it does something else)' : e.verified ? 'From the manufacturer chart' : '' },
       el('span', { class: 'ctltest-tick', 'aria-hidden': 'true' }, seen.has(e.key) ? '✓' : '·'),
       el('span', { class: 'ctltest-name' }, targetLabel(e.target)),
       el('code', {}, describeKey(e.key)),
-      e.unverified ? el('span', { class: 'ctltest-badge' }, 'unverified') : null)));
+      e.unverified ? el('span', { class: 'ctltest-badge' }, 'unverified') : e.interpreted ? el('span', { class: 'ctltest-badge inf' }, 'function inferred') : null)));
     unmappedEl.replaceChildren(...[...unmapped].map(([key, n]) => el('span', { class: 'chip' }, `${describeKey(key)} ×${n}`)));
     unmappedEl.hidden = !unmapped.size;
     recBtn.textContent = rec ? 'Stop and save capture' : 'Record a capture';
