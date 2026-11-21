@@ -200,6 +200,26 @@ try {
     const after = rms(s.L, s.sr, 2.2, 3);
     check(after < 1e-5 && rms(s.L, s.sr, 0.9, 1.3) > 0.01, `backspin: spins back, then stops (rms after ${after.toExponential(1)})`);
     save('deck-backspin', s);
+    // turntable model (docs/MIXER_AND_TURNTABLES_PLAN.md T1/T3/T5/T10): motor start / stop, release spin-up, reverse
+    // ramps, slip brake, position-following scratch and the tempo glide ramp, rendered by the real worklet
+    const motor = [{ msg: { type: 'motor', value: { start: 0.5, stop: 0.7, inertia: 1, slipmat: 0.3 } } }, { msg: { type: 'keylock', value: true } }, ...play];
+    const m = await lab.render({ chain: 'deck', ...SINE, secs: 7, init: motor, events: [
+      { t: 1.0, msg: { type: 'play', value: false } }, { t: 1.4, msg: { type: 'play', value: true } },
+      { t: 2.2, msg: { type: 'reverse', value: true } }, { t: 3.2, msg: { type: 'reverse', value: false } },
+      { t: 4.2, msg: { type: 'scratch', value: { velocity: 0 } } }, { t: 4.5, msg: { type: 'scratch', value: null } },
+      { t: 5.2, msg: { type: 'slip', value: true } }, { t: 5.2, msg: { type: 'brake', value: 1 / (0.6 * 48000), slip: true } },
+      { t: 6.2, msg: { type: 'rateRamp', to: 1.04, dur: 0.6 } },
+    ] });
+    check(maxJump(m.L, m.sr, 0.05, 7) <= base * 1.3, `motor start / pause brake / reverse ramps / release spin-up / slip brake / tempo glide are click-free (max step ${f(maxJump(m.L, m.sr, 0.05, 7) * 1e3)} ≤ ${f(base * 1.3e3)} ×1e-3)`);
+    save('deck-motor', m);
+    // position scratch: a baby scratch from 60 Hz input samples (hand travel, audio-clock timestamps)
+    const ev = [{ t: 0.5, msg: { type: 'scratch', value: { pos: true } } }];
+    for (let k = 0; k <= 90; k++) { const t = 0.5 + k / 60; ev.push({ t, msg: { type: 'scratchPos', pos: 0.3 * (1 - Math.cos(2 * Math.PI * 1.5 * (t - 0.5))) * 48000, t } }); }
+    ev.push({ t: 2.1, msg: { type: 'scratch', value: null } });
+    const sc = await lab.render({ chain: 'deck', signal: 'sine', signalOpts: { f: 220, amp: 0.5 }, secs: 2.5, init: [{ msg: { type: 'seek', frame: 48000 } }], events: ev });
+    const scj = maxJump(sc.L, sc.sr, 0.45, 2.5), scLim = SINE_JUMP * 3.2; // a 3x hand stroke: up to 3x the sine's step, no spikes
+    check(scj <= scLim && rms(sc.L, sc.sr, 0.6, 2) > 0.02, `position scratch (60 Hz touch input) is smooth: max step ${f(scj * 1e3)} ≤ ${f(scLim * 1e3)} ×1e-3`);
+    save('deck-scratch-pos', sc);
   }
   // ---------------------------------------------------------------- CPU: the whole 4-channel mixer, every channel busy
   {

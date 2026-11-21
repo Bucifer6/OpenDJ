@@ -9,7 +9,7 @@ const BUILT_IN_THEMES = [
   { id: 'forest', name: 'Forest', desc: 'Dark green, easy on the eyes', swatch: ['#08100c', '#13211a', '#3ddc84', '#f2c94c'] },
   { id: 'light', name: 'Daylight', desc: 'Bright theme for outdoor & daytime gigs', swatch: ['#eef1f5', '#ffffff', '#0a6cff', '#e8590c'] },
   { id: 'contrast', name: 'High Contrast', desc: 'Maximum legibility (sunlight, accessibility)', swatch: ['#000000', '#000000', '#ffff00', '#00ffff'] },
-  { id: 'cdj', name: 'Club Decks', desc: 'CDJ-style decks, bright displays and a central mixer', swatch: ['#090c10', '#20262d', '#32c7dd', '#ffb64d'] },
+  { id: 'cdj', name: 'Club Decks', desc: 'Media-player style decks, bright displays and a central mixer', swatch: ['#090c10', '#20262d', '#32c7dd', '#ffb64d'] },
   { id: 'vinyl', name: 'Vinyl Booth', desc: 'Turntable-inspired platters and warm analogue tones', swatch: ['#10100f', '#282725', '#d9b56d', '#e66a4b'] },
   { id: 'performance', name: 'Pad Performance', desc: 'Colour-coded pads and a modern performance controller', swatch: ['#101018', '#23232e', '#b276ff', '#3de0c1'] },
   { id: 'studio', name: 'Studio Mixer', desc: 'Brushed-metal mixer with classic channel colours', swatch: ['#111418', '#252b31', '#70a9d8', '#e6a759'] },

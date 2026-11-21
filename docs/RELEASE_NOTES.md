@@ -24,6 +24,15 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
 ### New in 0.5
+**Turntables and decks** (docs/MIXER_AND_TURNTABLES_PLAN.md §6). Every new option defaults to the old behaviour.
+- **Vinyl feel:** each deck's new *Vinyl* panel sets motor start and stop times (play, pause, reverse and the spin-up after you let go of the platter), jog weight, platter coast (a thrown record on a stopped deck), slip-mat, brake time, spin-back length and throw speed, 33 / 45 / 78 rpm (the scratch scale) and quartz lock. *Settings → Decks* has motor presets from instant (CDJ) to low torque.
+- **Scratching that follows your hand:** touch and mouse scratching drive the record by position, using each input event's own time (and the extra samples browsers collect between frames), so the record stays where your hand puts it. A second finger on the platter holds the record still. Optional *flick to spin back*.
+- **Platter styles** (*Settings → Decks*): Minimal (as before, the default), Vinyl (a spinning record with the cover art on its label, strobe dots that stand still at the right speed, a tonearm showing progress that you drag to drop the needle) and Player (a jog display: artwork, position ring, slip ghost, loop arc, hot-cue ticks, time left).
+- **Waveform styles** *Player Blue* and *Player RGB*.
+- **Scratch view** for phones and tablets: a big platter, a crossfader strip on your thumb side, a CUT button for transforms, scratch samples, the touch-to-sound latency, and haptic feedback (Off / Subtle / Full).
+- **Scratch samples:** a SCR pad mode swaps the deck to a short sound and back (8 built-in OpenDJ-made sounds, CC0 vinyl one-shots to download, or drop your own file).
+- **Deck tools:** tempo glide (hold RESET), ramped pitch bend, needle lock and needle snap, active loops, quantize divisions (1/8 beat to 1 bar), beat jump ½ to 64, loop in / out adjust with the jog (hold IN or OUT), SCALE pad mode (play a hot cue at scale steps by platter speed), deck lock, latching slip reverse (Shift + REV), slip brake, turntable start / stop.
+- New MIDI targets for all of it (`deckN.vinylMode`, `deckN.motorStart`, `deckN.brake`, `deckN.activeLoop`, `deckN.quantizeDiv.next`, `deckN.loopInAdjust`, `deckN.needle`, `deckN.rpm45`…); existing mappings keep working.
 
 #### Mixer
 - **Full-width crossfader** with a continuous curve (linear … smooth … fast cut), hamster reverse, cut-in and a fast-cut ramp of 1 ms (Battle) or 5 ms (Club); the old 4 ms time constant took 28 ms to reach -60 dB. Channel strips now fill the mixer edge to edge; the setup dropdowns live in the MASTER column.

@@ -248,6 +248,28 @@ try {
   await page.keyboard.press('Escape'); await ev(() => { document.querySelector('.tb-menu')?.remove(); const a = window.opendj; a.signOutBtn.hidden = true; a.amInfo.textContent = ''; });
   await page.setViewportSize({ width: 1920, height: 1080 });
 
+  // ---------- 1b. platter styles and waveform styles ----------
+  await setUi({ layout: 'classic', theme: 'midnight', zoom: 100 }); await page.waitForTimeout(500);
+  for (const skin of ['minimal', 'vinyl', 'player']) {
+    await ev((skin) => { window.opendj.settings.deckOptions = { ...(window.opendj.settings.deckOptions || {}), platterSkin: skin }; }, skin);
+    await page.waitForTimeout(250);
+    const a = await audit();
+    const painted = await ev(() => [...document.querySelectorAll('.deck .jog')].filter((j) => j.offsetParent).every((j) => { const c = j.querySelector('canvas'); return c.getContext('2d').getImageData(c.width / 2, c.height * 0.15, 1, 1).data[3] > 0; }));
+    check(!summary(a) && painted, `platter skin ${skin}: platters painted, controls in bounds${summary(a) ? ' — ' + summary(a) : ''}`);
+  }
+  await ev(() => { window.opendj.settings.deckOptions = { ...window.opendj.settings.deckOptions, platterSkin: 'minimal' }; });
+  for (const style of ['rgb', 'blue', 'mono', 'player-blue', 'player-rgb']) {
+    const r = await ev(async (style) => {
+      window.opendj.settings.waveformColors = style; await new Promise((r) => setTimeout(r, 600));
+      const c = document.querySelector('.wf-detail'), g = c.getContext('2d'), d = g.getImageData(0, 0, c.width, c.height).data;
+      let lit = 0; for (let i = 0; i < d.length; i += 64) if (d[i] + d[i + 1] + d[i + 2] > 200) lit++;
+      const o = document.querySelector('.wf-overview'), od = o.getContext('2d').getImageData(0, 0, o.width, o.height).data; let olit = 0; for (let i = 0; i < od.length; i += 64) if (od[i] + od[i + 1] + od[i + 2] > 200) olit++;
+      return { lit, olit };
+    }, style);
+    check(r.lit > 20 && r.olit > 5, `waveform style ${style}: detail and overview render (${r.lit} / ${r.olit} lit samples)`);
+  }
+  await ev(() => { window.opendj.settings.waveformColors = 'rgb'; });
+
   // ---------- 2. click sweep per layout ----------
   await page.setViewportSize({ width: 1920, height: 1080 });
   const SKIP = /eject|stems-prep|mc-btn|rec\b|live-btn|dvs-btn|video-btn|light-btn|signout|fullscreen|automix-btn|lib-collapse|upl-btn|import-btn|mixer-adv-btn/; // (the drawer has its own checks)
@@ -398,6 +420,42 @@ try {
       } finally { await ctx.close(); page = mainPage; }
     }
   }
+  // ---------- touch tablets at short sizes and phone width (store-screenshot bugs): no overlapping deck controls,
+  // the platter / CUE / PLAY / MIX NOW stay in their column, the sequencer hint wraps as a line, not word by word ----------
+  {
+    const tctx = await browser.newContext({ viewport: { width: 1024, height: 576 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+    const tp = await tctx.newPage();
+    tp.on('pageerror', (e) => errors.push(`pageerror (touch): ${e}`));
+    await tp.goto(app.url); await tp.waitForFunction(() => window.opendj?.ready, null, { timeout: 30000 });
+    const deckOverlaps = () => tp.evaluate(() => {
+      const out = []; const vis = (e) => e.offsetParent && e.getBoundingClientRect().width > 1;
+      for (const d of document.querySelectorAll('.deck')) {
+        if (!vis(d)) continue;
+        const els = [...d.querySelectorAll('.btn, .knob, .pad, .panel-tab, .pad-mode, select, .jog, .fader-track')].filter(vis).filter((e) => !e.parentElement.closest('.btn, .knob, .pad'));
+        for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) {
+          if (els[i].contains(els[j]) || els[j].contains(els[i])) continue;
+          const A = els[i].getBoundingClientRect(), B = els[j].getBoundingClientRect(), w = Math.min(A.right, B.right) - Math.max(A.left, B.left), h = Math.min(A.bottom, B.bottom) - Math.max(A.top, B.top);
+          if (w > 1.5 && h > 1.5) out.push(`${els[i].className.split(' ').slice(0, 3).join('.')}"${els[i].textContent.trim().slice(0, 10)}" x ${els[j].className.split(' ').slice(0, 3).join('.')}"${els[j].textContent.trim().slice(0, 10)}"`);
+        }
+        const left = d.querySelector('.deck-left')?.getBoundingClientRect();
+        for (const e of d.querySelectorAll('.deck-left .btn')) if (vis(e) && left) { const r = e.getBoundingClientRect(); if (r.right > left.right + 1 || r.left < left.left - 1) out.push(`${e.className.split(' ').slice(0, 3).join('.')} leaves the platter column`); }
+      }
+      return [...new Set(out)];
+    });
+    for (const [w, h] of [[1024, 576], [1280, 720], [1080, 810]]) for (const layout of ['classic', 'performance']) for (const panel of ['cues', 'loops', 'fx', 'platter']) {
+      await tp.setViewportSize({ width: w, height: h });
+      await tp.evaluate(([layout, panel]) => { window.opendj.setLayout(layout, false); window.opendj.engine.decks.slice(0, 2).forEach((d) => d.showPanel(panel)); }, [layout, panel]);
+      await tp.waitForTimeout(250);
+      const o = await deckOverlaps();
+      check(!o.length, `touch tablet ${w}x${h} ${layout} ${panel} panel: deck controls don't overlap${o.length ? ' — ' + o.slice(0, 4).join('; ') : ''}`);
+    }
+    await tp.setViewportSize({ width: 390, height: 844 });
+    await tp.evaluate(() => window.opendj.toggleSequencer()); await tp.waitForTimeout(300);
+    const hint = await tp.evaluate(() => { const h = document.querySelector('.seq-head .hint'); if (!h) return null; const r = h.getBoundingClientRect(), lh = parseFloat(getComputedStyle(h).lineHeight) || 14; return { lines: Math.round(r.height / lh), w: Math.round(r.width) }; });
+    check(hint && hint.lines <= 3 && hint.w > 120, `phone width: the sequencer hint reads as a line, not one word per line (${JSON.stringify(hint)})`);
+    await tctx.close();
+  }
+
   check(errors.length === 0, `no page errors, console errors or unhandled rejections${errors.length ? ': ' + errors.slice(0, 5).join(' | ') : ''}`);
 } catch (e) { console.error(e); failed = true; }
 await browser.close(); app.server.close();
