@@ -122,7 +122,7 @@ if (argv.includes('--latency')) {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await playState(2, LAYOUTS[0]);
   await ev(() => { window._lat = []; document.addEventListener('pointerdown', (e) => { const t0 = e.timeStamp; requestAnimationFrame(() => requestAnimationFrame((t2) => window._lat.push({ el: e.target.closest('button, .pad, .knob')?.className || e.target.className, ms: t2 - t0 }))); }, true); });
-  const targets = ['.deck[data-deck="0"] .pad >> nth=4', '.deck[data-deck="0"] .panel-tab >> nth=1', '.deck[data-deck="0"] .panel-tab >> nth=0', '.deck[data-deck="0"] .btn-sync', '.mixer .btn-pfl >> nth=0', '.layout-seg .seg-btn >> nth=0'];
+  const targets = ['.deck[data-deck="0"] .pad >> nth=4', '.deck[data-deck="0"] .panel-tab >> nth=1', '.deck[data-deck="0"] .panel-tab >> nth=0', '.deck[data-deck="0"] .btn-sync', '.strip[data-ch="0"] .btn-pfl', '.layout-seg .seg-btn >> nth=0'];
   for (let k = 0; k < 4; k++) for (const t of targets) { await page.locator(t).click(); await sleep(60); }
   const lat = await ev(() => window._lat.map((x) => x.ms).sort((a, b) => a - b));
   const res = { samples: lat.length, p50: +lat[Math.floor(lat.length / 2)].toFixed(1), p95: +lat[Math.floor(lat.length * 0.95)].toFixed(1), max: +lat.at(-1).toFixed(1) };
