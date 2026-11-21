@@ -7,6 +7,7 @@
 import { el, clamp, uiZoom } from '../util.js';
 import { cssVar } from './themes.js';
 import { smoothTime } from './clock.js';
+import { NEEDLE_HOLD_MS } from '../audio/vinyl.js';
 
 // 3-band colours: low (kick/bass), mid (vocals, synths), high (hats, cymbals). 'rgb' follows the theme tokens.
 const PALETTES = {
@@ -84,19 +85,25 @@ export class DetailWaveform {
       if (e.ctrlKey || e.metaKey) { const z = clamp(this.zoom * (e.deltaY > 0 ? 1.15 : 0.87), 2, 60); for (const w of DetailWaveform.all) w.zoom = z; }
       else this.deck.jogNudge(-e.deltaY / 1500);
     }, { passive: false });
-    // drag to scratch / seek on the waveform
+    // drag to scratch (playing: the same position-following API as the platter, pixels -> seconds from the zoom) or
+    // seek (paused)
     let last = null;
-    this.canvas.addEventListener('pointerdown', (e) => { this.canvas.setPointerCapture(e.pointerId); last = { x: e.clientX, t: performance.now(), scratch: this.deck.playing }; });
+    this.canvas.addEventListener('pointerdown', (e) => {
+      if (last) return; // one pointer drags the waveform
+      this.canvas.setPointerCapture(e.pointerId);
+      const w = this.canvas.getBoundingClientRect().width || 1;
+      last = { id: e.pointerId, x0: e.clientX, x: e.clientX, w, scratch: this.deck.playing && this.deck.jogPositionStart(e.timeStamp) };
+    });
     this.canvas.addEventListener('pointermove', (e) => {
-      if (!last) return;
-      const w = this.canvas.getBoundingClientRect().width;
-      const secs = -(e.clientX - last.x) / w * this.zoom;
-      const now = performance.now();
-      if (last.scratch) this.deck.jogScratch(secs / 1.8, (now - last.t) / 1000); else this.deck.seek(this.deck.position + secs);
-      last = { ...last, x: e.clientX, t: now };
+      if (!last || e.pointerId !== last.id) return;
+      if (last.scratch) {
+        const spr = this.deck.secPerRev || 1.8;
+        for (const ce of e.getCoalescedEvents?.() || [e]) this.deck.jogPosition((-(ce.clientX - last.x0) / last.w * this.viewZoom) / spr, ce.timeStamp);
+      } else { this.deck.seek(this.deck.position - (e.clientX - last.x) / last.w * this.zoom); }
+      last.x = e.clientX;
     });
     // release based on how the drag started, not on whether the deck is still playing (it may have stopped mid-drag)
-    const up = () => { if (last?.scratch) this.deck.jogRelease(); last = null; };
+    const up = (e) => { if (!last || (e.pointerId != null && e.pointerId !== last.id)) return; if (last.scratch) this.deck.jogPositionEnd(e.timeStamp); last = null; };
     for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) this.canvas.addEventListener(ev, up);
     // size from a ResizeObserver instead of reading layout every frame (contentRect is in layout px: zoom-safe)
     // (the size comes from the observer entry: reading it back with getBoundingClientRect in the next frame forced a
@@ -250,21 +257,33 @@ export class DetailWaveform {
 }
 
 export class OverviewWaveform {
-  constructor(deck, getSettings) {
-    this.deck = deck; this.getSettings = getSettings;
+  /** opts: { needleLocked() -> bool, needleHint() } (needle lock, T6) */
+  constructor(deck, getSettings, opts = {}) {
+    this.deck = deck; this.getSettings = getSettings; this.opts = opts;
     this.canvas = el('canvas', { class: 'wf-overview' });
     this.g = this.canvas.getContext('2d', { alpha: false });
     this.cache = null; this.cacheKey = ''; this.sig = ''; this.cw = 0; this.ch = 0;
-    const seek = (e) => {
+    // needle drop (T6): click / drag = drop the needle there (deck.needleDrop: optional grid snap). With needle lock
+    // (Settings → Decks; on by default on phones) a playing deck needs a 400 ms press first, so a stray tap on air
+    // never jumps the track.
+    let rect = null, frac = 0;
+    const fracOf = (e) => clamp((e.clientX - rect.left) / rect.width, 0, 1);
+    const drop = () => { if (deck.duration) deck.needleDrop(frac); };
+    let down = false, armed = false, holdT = 0;
+    this.canvas.addEventListener('pointerdown', (e) => {
       if (!deck.duration) return;
-      const r = this.canvas.getBoundingClientRect();
-      const t = clamp((e.clientX - r.left) / r.width, 0, 1) * deck.duration;
-      deck.seek(t);
-    };
-    let down = false;
-    this.canvas.addEventListener('pointerdown', (e) => { down = true; this.canvas.setPointerCapture(e.pointerId); seek(e); });
-    this.canvas.addEventListener('pointermove', (e) => { if (down) seek(e); });
-    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) this.canvas.addEventListener(ev, () => { down = false; });
+      down = true; this.canvas.setPointerCapture(e.pointerId); rect = this.canvas.getBoundingClientRect(); frac = fracOf(e);
+      const locked = deck.playing && !!this.opts.needleLocked?.();
+      armed = !locked;
+      clearTimeout(holdT);
+      if (armed) drop();
+      else { this.canvas.classList.add('needle-hold'); holdT = setTimeout(() => { if (down) { armed = true; this.canvas.classList.remove('needle-hold'); drop(); } }, NEEDLE_HOLD_MS); }
+    });
+    this.canvas.addEventListener('pointermove', (e) => { if (!down) return; frac = fracOf(e); if (armed) drop(); });
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) this.canvas.addEventListener(ev, () => {
+      if (down && !armed && ev === 'pointerup') this.opts.needleHint?.();
+      clearTimeout(holdT); this.canvas.classList.remove('needle-hold'); down = false; armed = false; rect = null;
+    });
     this.ro = new ResizeObserver((es) => { const r = es.at(-1).contentRect, z = uiZoom(); this.cw = r.width * z; this.ch = r.height * z; });
     this.ro.observe(this.canvas);
   }

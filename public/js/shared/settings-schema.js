@@ -26,6 +26,11 @@ const shape = (fields) => (v) => {
   return out;
 };
 
+const VINYL_SHAPE = {
+  start: num(0, 3), stop: num(0, 3), inertia: num(0, 4), slipmat: num(0, 1), jogWeight: num(0, 1), rpm: oneOf(33, 45, 78),
+  brakeTime: num(0.2, 6), spinTime: num(0.4, 4), spinSpeed: num(2, 8), quartz: bool(),
+};
+
 const SCHEMA = {
   deckCount: oneOf(2, 4),
   theme: (v) => (typeof v === 'string' && (THEME_IDS.includes(v) || /^remote-[a-z0-9]+(?:-[a-z0-9]+){0,5}$/.test(v)) ? v : undefined),
@@ -75,6 +80,13 @@ const SCHEMA = {
   allowedRoots: (v) => (v === null || (Array.isArray(v) && v.every((x) => typeof x === 'string')) ? v : undefined),
   youtubeApiKey: str(512),
   updateCheck: bool(),
+  vinyl: shape(VINYL_SHAPE),
+  vinylDecks: (v) => (Array.isArray(v) ? v.slice(0, 4).map((d) => (d && typeof d === 'object' && !Array.isArray(d) ? shape(VINYL_SHAPE)(d) : null)) : undefined),
+  deckOptions: shape({
+    platterSkin: oneOf('minimal', 'vinyl', 'cdj'), haptics: oneOf('auto', 'off', 'subtle', 'full'), needleLock: oneOf('auto', 'on', 'off'),
+    needleSnap: oneOf('off', 'beat', 'bar'), flickSpinback: bool(), bendMode: oneOf('ramp', 'fixed'), fineStep: oneOf(0.02, 0.05, 0.5),
+    hardLock: bool(), scratchHand: oneOf('right', 'left'),
+  }),
   updateSnooze: (v) => {
     if (v === null) return null;
     if (!v || typeof v !== 'object' || typeof v.version !== 'string' || !/^\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(v.version)) return undefined;

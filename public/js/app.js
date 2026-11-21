@@ -107,6 +107,7 @@ class App {
       if (r === 'handled') return;
       if (r === 'load') confirmed = true;
     }
+    if (deck.playing && !automix && (deck.hardLock || this.settings.deckOptions?.hardLock)) { this.toast(`Deck ${deckIndex + 1} is locked while it plays`); return; }
     if (deck.playing && !confirmed && !(await this.dialogs.confirm(`Deck ${deckIndex + 1} is playing. Load "${t.title}" anyway?`))) return;
     try {
       if (!(await deck.load({ ...t }))) return;
@@ -534,9 +535,10 @@ class App {
   padFx(deck, fx, down) {
     const ch = this.engine.channels[deck.index];
     switch (fx) {
-      case 'brake': if (down) deck.brake(1.2); break;
-      case 'tapeStop': if (down) deck.brake(3); break;
-      case 'backspin': if (down) deck.backspin(1); break;
+      // amounts from the deck's Platter panel (defaults 1.2 s brake, 3 s tape stop, 1 s / 4.5x spin back)
+      case 'brake': if (down) deck.brake(deck.vinyl?.brakeTime || 1.2); break;
+      case 'tapeStop': if (down) deck.brake((deck.vinyl?.brakeTime || 1.2) * 2.5); break;
+      case 'backspin': if (down) deck.backspin(); break;
       case 'censor': down ? deck.censorOn() : deck.censorOff(); break;
       case 'roll1': down ? deck.rollOn(1 / 4) : deck.rollOff(); break;
       case 'roll2': down ? deck.rollOn(1 / 8) : deck.rollOff(); break;

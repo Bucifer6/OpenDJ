@@ -10,6 +10,7 @@
 import { Emitter, clamp } from '../util.js';
 import { linkMidiTargets } from '../link/link.js';
 import { lyricsMidiTargets } from '../lyrics/lyrics.js';
+import { deckMidiTargets } from './deck-targets.js';
 import { PRESETS } from './presets.js';
 import { BEATLOOPS, BEATJUMPS, ROLLS, convertMixxx, toStoredMapping } from './mixxx.js';
 import { HidManager, describeHidKey } from './hid.js';
@@ -38,10 +39,11 @@ export function buildTargets(app) {
     add(`${P}.eject`, `Deck ${n} Eject`, 'button', (down) => down && deck.eject());
     add(`${P}.tempo`, `Deck ${n} Tempo fader`, 'abs', (v) => deck.setTempoFader(v * 2 - 1), null, () => (deck.tempo / deck.tempoRange + 1) / 2);
     add(`${P}.tempoReset`, `Deck ${n} Tempo reset`, 'button', (down) => down && deck.resetTempo());
-    add(`${P}.tempoUp`, `Deck ${n} Tempo +0.5 %`, 'button', (down) => down && deck.stepTempo(0.5));
-    add(`${P}.tempoDown`, `Deck ${n} Tempo −0.5 %`, 'button', (down) => down && deck.stepTempo(-0.5));
-    add(`${P}.bendUp`, `Deck ${n} Pitch bend +`, 'button', (down) => deck.setBend(down ? 0.04 : 0));
-    add(`${P}.bendDown`, `Deck ${n} Pitch bend −`, 'button', (down) => deck.setBend(down ? -0.04 : 0));
+    const fine = () => app.settings.deckOptions?.fineStep || 0.5; // Settings → Decks: tempo step 0.02 / 0.05 / 0.5 %
+    add(`${P}.tempoUp`, `Deck ${n} Tempo + (fine step)`, 'button', (down) => down && deck.stepTempo(fine()));
+    add(`${P}.tempoDown`, `Deck ${n} Tempo − (fine step)`, 'button', (down) => down && deck.stepTempo(-fine()));
+    add(`${P}.bendUp`, `Deck ${n} Pitch bend +`, 'button', (down) => (down ? deck.bendStart(1) : deck.bendStop()));
+    add(`${P}.bendDown`, `Deck ${n} Pitch bend −`, 'button', (down) => (down ? deck.bendStart(-1) : deck.bendStop()));
     add(`${P}.jogTouch`, `Deck ${n} Jog touch`, 'button', (down) => { deck._jogTouched = down; if (!down) deck.jogRelease(); });
     add(`${P}.jog`, `Deck ${n} Jog platter (scratch when touched)`, 'rel', (delta) => {
       const now = performance.now(), dt = (now - (deck._jogT || now)) / 1000 || 0.01; deck._jogT = now;
@@ -124,7 +126,7 @@ export function buildTargets(app) {
   });
   add('automix.toggle', 'Automix on/off', 'button', (down) => down && app.toggleAutomix(), () => app.automix.enabled);
   add('record.toggle', 'Record mix on/off', 'button', (down) => down && app.toggleRecord(), () => app.engine.recording);
-  T.push(...linkMidiTargets(app), ...lyricsMidiTargets(app));
+  T.push(...linkMidiTargets(app), ...lyricsMidiTargets(app), ...deckMidiTargets(app));
   return T;
 }
 

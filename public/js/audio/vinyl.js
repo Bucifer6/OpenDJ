@@ -110,14 +110,19 @@ export const semitoneRate = (s) => 2 ** (s / 12);
 /** Strobe dot rows: pitch offsets each row stands still at (0 and ±3.3 %). */
 export const STROBE_ROWS = [0.033, 0, -0.033];
 /**
- * Strobe row angle (radians) at time t. A real strobe lights its dots 100 times a second and a row has as many dots as
- * pass in 1/100 s at its nominal speed, so at that speed the row stands still and 1 % off it drifts one dot a second.
- * `spacing` is the drawn dot spacing (radians); speeds are in revolutions per second.
+ * Strobe row drift (radians per second). A real strobe lights its dots 100 times a second and a row has as many dots
+ * as pass in 1/100 s at its nominal speed, so at that speed the row stands still and 1 % off it drifts one dot a
+ * second (a stopped platter stands still too: the apparent motion is the aliased step per flash). `rate` is the
+ * platter speed relative to nominal (1 = 33⅓ at 0 %), `spacing` the drawn dot spacing (radians).
  */
-export function strobeAngle(speedRps, nominalRps, rowPct, t, spacing = Math.PI / 30) {
-  return spacing * 100 * (speedRps / (nominalRps * (1 + rowPct)) - 1) * t;
+export function strobeRate(rate, rowPct, spacing = Math.PI / 30) {
+  const x = Math.abs(rate) / (1 + rowPct);
+  return spacing * 100 * (x - Math.round(x)) * Math.sign(rate || 0);
 }
-/** Tonearm: angle from the rest-side outer groove (progress 0) to the inner groove (progress 1), linear in progress. */
-export const TONEARM = Object.freeze({ outer: 0.33, inner: 0.62 }); // radians from the arm's vertical
-export const tonearmAngle = (progress) => TONEARM.outer + (TONEARM.inner - TONEARM.outer) * Math.max(0, Math.min(1, progress || 0));
-export const tonearmProgress = (angle) => Math.max(0, Math.min(1, (angle - TONEARM.outer) / (TONEARM.inner - TONEARM.outer)));
+/** strobeRate() integrated over t seconds at a steady speed (speeds in revolutions per second). */
+export const strobeAngle = (speedRps, nominalRps, rowPct, t, spacing) => strobeRate(speedRps / nominalRps, rowPct, spacing) * t;
+
+/** Tonearm: angle from the outer groove (progress 0) to the inner groove (progress 1), linear in progress. */
+export const TONEARM = Object.freeze({ outer: 0.33, inner: 0.62 }); // default end angles (radians); skins pass their own
+export const tonearmAngle = (progress, outer = TONEARM.outer, inner = TONEARM.inner) => outer + (inner - outer) * Math.max(0, Math.min(1, progress || 0));
+export const tonearmProgress = (angle, outer = TONEARM.outer, inner = TONEARM.inner) => Math.max(0, Math.min(1, (angle - outer) / (inner - outer)));

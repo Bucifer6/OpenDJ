@@ -1,4 +1,5 @@
 import { icon, glyphIcon } from './icons.js';
+import { deckSettingsFields } from './deck-settings.js';
 import { el, uiZoom } from '../util.js';
 import { api } from '../api.js';
 import { THEMES, applyTheme, refreshSkinCatalog } from './themes.js';
@@ -369,6 +370,7 @@ export class Dialogs {
       field('Sync mode', sel(s.syncMode, [['beat', 'Beat sync (tempo + phase)'], ['tempo', 'Tempo sync only']], (v) => set('syncMode', v))),
       el('label', { class: 'check' }, chk(s.keyLockDefault, (v) => set('keyLockDefault', v)), ' Key lock on by default'),
       el('label', { class: 'check' }, chk(s.quantize, (v) => { set('quantize', v); for (const d of app.engine.decks) d.setQuantize(v); }), ' Quantize'),
+      ...deckSettingsFields(app, { field, sel, chk }),
     );
     const am = s.automix;
     const amSet = (patch) => set('automix', { ...app.settings.automix, ...patch });

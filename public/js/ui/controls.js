@@ -2,6 +2,8 @@
 import { el, clamp, uiZoom } from '../util.js';
 import { cssVar } from './themes.js';
 import { smoothTime } from './clock.js';
+import { makeSkin, coverBitmap, STROBE_DOTS } from './platter-skins.js';
+import { strobeRate, STROBE_ROWS } from '../audio/vinyl.js';
 
 /** Rotary knob. Drag vertically, wheel to fine-tune, double-click to reset. */
 export function knob({ label, min = -1, max = 1, def = 0, get, set, size = 'md', bipolar = min < 0, title, format }) {
@@ -138,118 +140,160 @@ export function button(label, { cls = '', title, down, up, click, active, disabl
   return b;
 }
 
-/** Jog wheel: drag on the platter to scratch (vinyl mode) / nudge; outer ring always nudges. */
-export function jogWheel(deck) {
-  const canvas = el('canvas', { class: 'jog-canvas', width: 360, height: 360 });
+/**
+ * Jog wheel / platter (T3, T7, T8). Every pointer is tracked on its own (pointerId):
+ *  - the first finger on the platter top scratches through the position-following API (deck.jogPositionStart /
+ *    jogPosition / jogPositionEnd), using the events' own timestamps and getCoalescedEvents() samples;
+ *  - a second finger anywhere on the same platter holds the record still ("hand on the record") until it lifts; if
+ *    the scratching finger lifts first, the holding finger takes over;
+ *  - the outer ring (or the whole platter with VINYL off) nudges; the mouse wheel nudges;
+ *  - on the Vinyl skin the tonearm head can be dragged: the needle drops where it is let go (T6).
+ * opts: { skin: () => skin id, haptics, onTouch(bool) }.
+ */
+export function jogWheel(deck, opts = {}) {
+  const canvas = el('canvas', { class: 'jog-canvas', width: 360, height: 360, 'aria-label': `Deck ${deck.index + 1} platter` });
   const root = el('div', { class: 'jog' }, canvas);
   const g = canvas.getContext('2d');
-  let last = null;
+  const pointers = new Map(); // pointerId -> { kind: 'scratch' | 'hold' | 'nudge' | 'arm', a, rot }
+  let rect = null; // measured once per gesture (no layout read per move)
   const angleOf = (e) => {
-    const r = canvas.getBoundingClientRect();
+    const r = rect || canvas.getBoundingClientRect();
     const x = e.clientX - r.left - r.width / 2, y = e.clientY - r.top - r.height / 2;
-    return { a: Math.atan2(y, x), d: Math.hypot(x, y) / (r.width / 2) };
+    return { a: Math.atan2(y, x), d: Math.hypot(x, y) / (r.width / 2), cx: ((e.clientX - r.left) / r.width) * canvas.width, cy: ((e.clientY - r.top) / r.height) * canvas.height };
+  };
+  const wrap = (da) => (da > Math.PI ? da - 2 * Math.PI : da < -Math.PI ? da + 2 * Math.PI : da);
+  let rot = 0, holding = 0, lastTick = 0, lastBeat = null;
+  const scratcher = () => [...pointers.values()].find((p) => p.kind === 'scratch');
+  const setTouched = (on) => { if (on !== touched) { touched = on; root.classList.toggle('touched', on); opts.onTouch?.(on); } };
+  const feel = () => { // haptics: a groove tick every 1/16 turn, a bump on beats (Full) and hot cues
+    const h = opts.haptics; if (!h) return;
+    const k = Math.floor(rot * 16); if (k !== lastTick) { lastTick = k; h.tick(); }
+    if (deck.bpm) {
+      const pos = deck.position, b = deck.beatIndex(pos);
+      if (lastBeat != null && b !== lastBeat) {
+        const lo = Math.min(lastBeat, b) * deck.beatLen + deck.gridOffset, hi = Math.max(lastBeat, b) * deck.beatLen + deck.gridOffset + deck.beatLen;
+        if (deck.hotCues.some((c) => c.position >= lo && c.position < hi)) h.impact('light'); else h.impact('light', 'full');
+      }
+      lastBeat = b;
+    }
   };
   canvas.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
     canvas.setPointerCapture(e.pointerId);
-    const { a, d } = angleOf(e);
-    last = { a, t: performance.now(), outer: d > 0.78 || !deck.vinylMode };
-    root.classList.add('touched'); touched = true;
+    if (!pointers.size) rect = canvas.getBoundingClientRect();
+    const { a, d, cx, cy } = angleOf(e);
+    if (skin.hitArm && deck.track && !deck.track.scratchSample && skin.hitArm(cx, cy, canvas.width, frameState) && !pointers.size) {
+      pointers.set(e.pointerId, { kind: 'arm', a }); armK = skin.armProgressAt(cx, cy, canvas.width); sig = ''; e.preventDefault(); return;
+    }
+    const s = scratcher();
+    if (s || [...pointers.values()].some((p) => p.kind === 'hold')) { // another finger is on the record: hold it still
+      pointers.set(e.pointerId, { kind: 'hold', a });
+      if (!holding++ && s) deck.jogPosition(rot, e.timeStamp);
+      e.preventDefault(); return;
+    }
+    if (pointers.size) { pointers.set(e.pointerId, { kind: 'ignore', a }); return; } // extra finger while nudging
+    const outer = d > 0.78 || !deck.vinylMode;
+    if (!outer && deck.jogPositionStart(e.timeStamp)) { rot = 0; lastTick = 0; lastBeat = null; pointers.set(e.pointerId, { kind: 'scratch', a }); }
+    else pointers.set(e.pointerId, { kind: 'nudge', a });
+    setTouched(true);
+    e.preventDefault();
   });
   canvas.addEventListener('pointermove', (e) => {
-    if (!last) return;
-    const { a } = angleOf(e);
-    let da = a - last.a; if (da > Math.PI) da -= 2 * Math.PI; if (da < -Math.PI) da += 2 * Math.PI;
-    const now = performance.now(), dt = (now - last.t) / 1000;
-    const rot = da / (2 * Math.PI);
-    if (last.outer) deck.jogNudge(rot * 4); else deck.jogScratch(rot, dt);
-    last.a = a; last.t = now;
+    const p = pointers.get(e.pointerId);
+    if (!p) return;
+    const evs = (p.kind === 'scratch' && e.getCoalescedEvents?.()) || [e];
+    for (const ce of evs.length ? evs : [e]) {
+      const { a, cx, cy } = angleOf(ce);
+      const da = wrap(a - p.a); p.a = a;
+      if (p.kind === 'scratch') {
+        if (holding) continue; // the other finger holds the record
+        rot += da / (2 * Math.PI);
+        deck.jogPosition(rot, ce.timeStamp);
+      } else if (p.kind === 'nudge') deck.jogNudge((da / (2 * Math.PI)) * 4);
+      else if (p.kind === 'arm') { armK = skin.armProgressAt(cx, cy, canvas.width); sig = ''; }
+    }
+    if (p.kind === 'scratch' && !holding) feel();
   });
-  const end = () => { if (last && !last.outer) deck.jogRelease(); last = null; root.classList.remove('touched'); touched = false; };
-  canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', end);
+  const end = (e) => {
+    const p = pointers.get(e.pointerId);
+    if (!p) return;
+    pointers.delete(e.pointerId);
+    if (p.kind === 'arm') { if (e.type === 'pointerup' && armK != null) deck.needleDrop(armK); armK = null; sig = ''; }
+    else if (p.kind === 'hold') {
+      holding = Math.max(0, holding - 1);
+      const s = scratcher();
+      if (!s) { // the scratching finger lifted first: this was the last hand on the record
+        const other = [...pointers.entries()].find(([, q]) => q.kind === 'hold');
+        if (other) { other[1].kind = 'scratch'; holding--; } else deck.jogPositionEnd(e.timeStamp);
+      }
+    } else if (p.kind === 'scratch') {
+      const h = [...pointers.values()].find((q) => q.kind === 'hold');
+      if (h) { h.kind = 'scratch'; holding = Math.max(0, holding - 1); } // the holding finger becomes the scratching one
+      else deck.jogPositionEnd(e.timeStamp);
+    }
+    if (![...pointers.values()].some((q) => q.kind !== 'ignore')) { pointers.clear(); holding = 0; rect = null; setTouched(false); }
+  };
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(ev, end);
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); deck.jogNudge(-e.deltaY / 2000); }, { passive: false });
+  root.pointerCount = () => pointers.size;
+  root.holding = () => holding > 0;
 
-  // The platter body (rim, grooves, light sheen) is static: render it once per size/theme into a bitmap and only draw
-  // the moving parts (marker, progress ring, centre label) per frame. Frames where nothing changed are skipped.
-  let touched = false, size = 0, body = null, sig = '', deckColor = null;
+  // Static layers are rendered once per size / theme / skin (platter-skins.js); a frame draws the moving parts only,
+  // and frames whose signature did not change are skipped.
+  let touched = false, size = 0, body = null, sig = '', deckColor = null, skinId = '', skin = null, armK = null;
   let roW = 0; // platter size from the observer entry (no layout read in the draw)
+  let art = null, artKey = '', artFor = null, lastNow = 0;
+  const strobe = [0, 0, 0];
+  const reducedQ = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+  const frameState = { ang: 0, k: 0, strobe, cues: [] };
   const ro = new ResizeObserver((es) => { roW = es.at(-1).contentRect.width * uiZoom(); size = 0; });
   ro.observe(canvas);
   window.addEventListener('opendj-theme', () => { body = null; deckColor = null; sig = ''; });
-  const renderBody = (W) => {
-    const off = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(W, W) : Object.assign(document.createElement('canvas'), { width: W, height: W });
-    const b = off.getContext('2d'), c = W / 2, R = c - W * 0.012;
-    // outer rim (brushed metal)
-    const rim = b.createLinearGradient(0, 0, 0, W);
-    rim.addColorStop(0, cssVar('--platter-rim-1')); rim.addColorStop(1, cssVar('--platter-rim-2'));
-    b.fillStyle = rim; b.beginPath(); b.arc(c, c, R, 0, 2 * Math.PI); b.fill();
-    // ring track for the position indicator
-    b.fillStyle = cssVar('--platter-3'); b.beginPath(); b.arc(c, c, R * 0.93, 0, 2 * Math.PI); b.fill();
-    // platter / vinyl
-    const pr = R * 0.86;
-    const grad = b.createRadialGradient(c, c, pr * 0.2, c, c, pr);
-    grad.addColorStop(0, cssVar('--platter-1')); grad.addColorStop(0.92, cssVar('--platter-2')); grad.addColorStop(1, cssVar('--platter-4'));
-    b.fillStyle = grad; b.beginPath(); b.arc(c, c, pr, 0, 2 * Math.PI); b.fill();
-    // fine grooves
-    b.lineWidth = Math.max(1, W / 360);
-    for (let r = pr * 0.4, k = 0; r < pr * 0.97; r += W / 120, k++) { b.strokeStyle = k % 5 === 0 ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.022)'; b.beginPath(); b.arc(c, c, r, 0, 2 * Math.PI); b.stroke(); }
-    // light sheen (fixed: the light doesn't rotate with the record)
-    if (b.createConicGradient) {
-      const sheen = b.createConicGradient(-Math.PI / 4, c, c);
-      sheen.addColorStop(0, 'rgba(255,255,255,0.07)'); sheen.addColorStop(0.12, 'rgba(255,255,255,0)'); sheen.addColorStop(0.5, 'rgba(255,255,255,0.05)'); sheen.addColorStop(0.62, 'rgba(255,255,255,0)'); sheen.addColorStop(1, 'rgba(255,255,255,0.07)');
-      b.fillStyle = sheen; b.beginPath(); b.arc(c, c, pr, 0, 2 * Math.PI); b.fill();
-    }
-    // edge shadow
-    b.strokeStyle = 'rgba(0,0,0,0.55)'; b.lineWidth = W * 0.008; b.beginPath(); b.arc(c, c, pr, 0, 2 * Math.PI); b.stroke();
-    return off;
+  const pickSkin = () => {
+    const id = opts.skin?.() || 'minimal';
+    if (id !== skinId) { skinId = id; skin = makeSkin(id); body = null; sig = ''; root.dataset.skin = id; }
   };
   root.draw = (now = performance.now()) => {
+    pickSkin();
     if (!size) {
       const w = roW || canvas.getBoundingClientRect().width;
       size = Math.max(64, Math.min(1024, Math.round(w * (devicePixelRatio || 1)))) || 360;
       if (canvas.width !== size) { canvas.width = size; canvas.height = size; body = null; sig = ''; }
     }
-    const W = canvas.width, c = W / 2, R = c - W * 0.012;
+    const W = canvas.width;
+    const dt = lastNow ? Math.min(0.1, (now - lastNow) / 1000) : 0; lastNow = now;
+    const t = deck.track;
+    // cover art for the skins that show it (decoded once per track, off the frame path)
+    if (skinId !== 'minimal' && (t?.id ?? null) !== artFor) {
+      artFor = t?.id ?? null; art = null; artKey = `${artFor}|none`;
+      if (t && !t.scratchSample) { const want = artFor; coverBitmap(want).then((b) => { if (artFor === want) { art = b; artKey = `${want}|${b ? 'art' : 'none'}`; sig = ''; } }); }
+    }
     const pos = deck.positionAt(smoothTime(deck.ctx, now));
-    const ang = (pos / 1.8) * 2 * Math.PI; // 33⅓ rpm
+    const spr = deck.secPerRev || 1.8;
+    const reduced = !!reducedQ?.matches;
+    const ang = reduced && skinId !== 'minimal' ? 0 : (pos / spr) * 2 * Math.PI;
     const k = deck.duration ? pos / deck.duration : 0;
     const warn = deck.duration > 0 && deck.remaining < 30 && deck.playing;
     const blink = warn && Math.floor(now / 400) % 2 === 1;
     const bpm = deck.effectiveBpm ? deck.effectiveBpm.toFixed(1) : '--';
-    const s = `${W}|${ang.toFixed(3)}|${Math.round(k * 720)}|${blink}|${warn}|${bpm}|${deck.playing}|${touched}|${!!deck.track}`;
+    if (skinId === 'vinyl') { const r = deck.playing || touched ? (deck._rate || 0) : 0; for (let i = 0; i < 3; i++) strobe[i] = reduced ? 0 : (strobe[i] + strobeRate(r, STROBE_ROWS[i], (2 * Math.PI) / STROBE_DOTS) * dt) % (2 * Math.PI); }
+    deckColor ||= getComputedStyle(root).getPropertyValue('--deck-color').trim() || '#3ea6ff';
+    const st = Object.assign(frameState, { ang, k, warn, blink, bpm, playing: deck.playing, touched, hasTrack: !!t, deckColor, art, artKey, title: t?.title || '', reduced, armK, rpmLabel: deck.vinyl?.rpm === 45 ? '45' : deck.vinyl?.rpm === 78 ? '78' : '33⅓' });
+    if (skinId === 'cdj') {
+      const sh = deck.shadowPosition;
+      st.shadowAng = sh != null && Math.abs(sh - pos) > 0.05 ? (sh / spr) * 2 * Math.PI : null;
+      const l = deck.loop, D = deck.duration || 1;
+      st.loop = l && deck.duration ? { a: l.start / D, b: l.end / D, on: !!l.active } : null;
+      const hc = deck.hotCues;
+      st.cues = hc.map((c) => ({ k: c.position / D, color: c.color || '#2ecc71' }));
+      st.cueSig = hc.map((c) => c.position.toFixed(2)).join(',');
+      st.remaining = Math.max(0, (deck.duration || 0) - pos);
+    }
+    const s = `${W}|${skinId}|${skin.sig(st)}`;
     if (s === sig && body) return;
     sig = s;
-    if (!body) body = renderBody(W);
-    deckColor ||= getComputedStyle(root).getPropertyValue('--deck-color').trim() || '#3ea6ff';
-    g.clearRect(0, 0, W, W);
-    g.drawImage(body, 0, 0);
-    // position ring (track progress)
-    const rr = R * 0.895, lw = R * 0.05;
-    g.lineCap = 'round'; g.lineWidth = lw;
-    g.strokeStyle = 'rgba(255,255,255,0.06)'; g.beginPath(); g.arc(c, c, rr, 0, 2 * Math.PI); g.stroke();
-    if (deck.track && k > 0) {
-      g.strokeStyle = blink ? cssVar('--red') : warn ? cssVar('--amber') : deckColor;
-      g.beginPath(); g.arc(c, c, rr, -Math.PI / 2, -Math.PI / 2 + Math.max(0.01, k) * 2 * Math.PI); g.stroke();
-    }
-    // rotating marker: a bright notch on the vinyl and a dot on the label
-    const pr = R * 0.86;
-    g.save(); g.translate(c, c); g.rotate(ang);
-    g.lineCap = 'round';
-    g.strokeStyle = cssVar('--platter-mark'); g.lineWidth = W * 0.016;
-    g.beginPath(); g.moveTo(0, -pr * 0.94); g.lineTo(0, -pr * 0.58); g.stroke();
-    g.strokeStyle = deckColor; g.globalAlpha = 0.55; g.lineWidth = W * 0.006;
-    g.beginPath(); g.arc(0, 0, pr * 0.97, -Math.PI / 2 - 0.12, -Math.PI / 2 + 0.12); g.stroke(); g.globalAlpha = 1;
-    g.restore();
-    // centre label
-    const lr = pr * 0.36;
-    g.fillStyle = deck.playing || touched ? cssVar('--platter-label-on') : cssVar('--platter-label');
-    g.beginPath(); g.arc(c, c, lr, 0, 2 * Math.PI); g.fill();
-    g.strokeStyle = touched ? deckColor : 'rgba(255,255,255,0.08)'; g.lineWidth = W * 0.01;
-    g.beginPath(); g.arc(c, c, lr, 0, 2 * Math.PI); g.stroke();
-    g.fillStyle = cssVar('--platter-text'); g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.font = `600 ${Math.round(W * 0.074)}px ${cssVar('--mono')}`;
-    g.fillText(bpm, c, c - W * 0.018);
-    g.font = `700 ${Math.round(W * 0.036)}px ${cssVar('--font')}`; g.fillStyle = cssVar('--platter-text-2');
-    g.fillText('BPM', c, c + W * 0.05);
+    if (!body) body = skin.body(W);
+    skin.draw(g, W, st, body);
   };
   return root;
 }
