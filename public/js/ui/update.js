@@ -105,7 +105,7 @@ export function setupUpdates(app) {
     const current = r.current || APP_VERSION;
     const native = window.opendjNative?.update;
     const action = chooseUpdateAction(info, { electron: !!native, local: platform.local, native: platform.native, os: platform.os, hosted: !!r.hosted }, UPDATE_CONFIG);
-    const uid = Math.random().toString(36).slice(2, 8);
+    const uid = crypto.randomUUID().slice(0, 8);
 
     // ---- body ----
     const notes = el('div', { class: 'upd-notes', id: `upd-notes-${uid}`, hidden: true, tabindex: -1 },

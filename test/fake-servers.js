@@ -47,7 +47,7 @@ function serve(handler) {
       }
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify(out.json ?? null));
-    } catch (e) { res.statusCode = 500; res.end(String(e)); }
+    } catch (e) { log.push({ error: String(e?.message || e) }); res.statusCode = 500; res.end('internal error'); }
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({
     url: `http://127.0.0.1:${server.address().port}`, log, server, close: () => new Promise((r) => server.close(r)),

@@ -24,7 +24,7 @@ test('N9: broadcast User-Agent carries the package.json version', async () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(VERSION, pkg.version);
   const head = String(icecastRequest({ host: 'h', port: 8000, mount: '/live' }, { password: 'x', contentType: 'audio/mpeg', bitrate: 128 }));
-  assert.match(head, new RegExp(`User-Agent: OpenDJ/${pkg.version.replace(/\./g, '\\.')}`));
+  assert.ok(head.includes(`User-Agent: OpenDJ/${pkg.version}\r\n`) || head.includes(`User-Agent: OpenDJ/${pkg.version}\n`), head);
 });
 
 test('N10: lyrics in ID3 TXXX frames (LYRICS / UNSYNCEDLYRICS / SYNCEDLYRICS, as ffmpeg writes them)', async () => {
