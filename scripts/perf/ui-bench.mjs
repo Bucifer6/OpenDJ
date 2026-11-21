@@ -14,7 +14,7 @@
 //              (fails when the 95th-percentile frame is over 20 ms)
 //   * --electron: run all of the above in the desktop app (Electron, Playwright _electron; use xvfb-run -a on Linux)
 //
-//   node scripts/perf/ui-bench.mjs [--shots] [--perf] [--fx] [--latency] [--analysis] [--electron] [--out=<dir>] [--themes=midnight,light,neon] [--secs=6]
+//   node scripts/perf/ui-bench.mjs [--shots] [--perf] [--fx] [--latency] [--analysis] [--electron] [--out=<dir>] [--themes=midnight,light,neon] [--secs=6] [--perf-theme=compact-controller]
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -110,6 +110,7 @@ if (argv.includes('--shots')) {
 }
 
 if (argv.includes('--perf')) {
+  if (opt('perf-theme')) { await setTheme(opt('perf-theme')); await sleep(800); } // e.g. a whole-layout skin: compact-controller, all-in-one
   const cdp = await context.newCDPSession(page);
   await cdp.send('Performance.enable');
   const metric = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map((m) => [m.name, m.value]));

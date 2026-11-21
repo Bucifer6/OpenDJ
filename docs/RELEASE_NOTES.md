@@ -47,6 +47,13 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **One-click AUTOMIX:** AUTOMIX starts a smart mix of your queue or the view you're looking at straight away; Shift-click or right-click it for the options. The separate AUTOMIX NOW button is gone; each deck keeps **MIX NOW**.
 - **Fixes:** sampler sounds, the sequencer pattern and other preferences now survive restarting the desktop app; a wider crossfader in the mixer; stopping automix while it loads no longer starts the track anyway.
 
+#### Controllers
+- **AlphaTheta DDJ-FLX2: plug and play.** A first-party mapping (CC0), written from AlphaTheta's published MIDI message list, loads as soon as the controller is plugged in: jogs (scratch, bend, SHIFT + jog search), tempo faders, SHIFT, BEAT SYNC (long press: master; SHIFT: pad mode selection), the HOT CUE / PAD FX / LOOP / SAMPLER pad modes with 8 pads per deck and their SHIFT layers, CUE and PLAY/PAUSE with their SHIFT functions, HI / MID / LOW and CFX, channel faders, crossfader, master and headphone levels, MASTER and headphone cues 1 / 2, with LED feedback, track-loaded lights and vinyl mode.
+- **SMART FADER**: the crossfader alone blends two tracks (both decks follow a BPM that morphs between the tracks, the basslines swap in the middle); SHIFT + SMART FADER runs a beat-synced 16-beat transition by itself. **SMART CFX** (SHIFT + MASTER): the CFX knobs play a Color FX preset (Space, Dub Echo, Crush, Noise, Jet), picked with FX SELECT (SHIFT + cue 1 / 2).
+- **The controller's own sound card**: OpenDJ offers once to send the master to its outputs 1-2 and the headphone cue to 3-4 (or suggests split cue when the interface only has 2 channels).
+- **Controller test** (Settings → Controllers): every incoming message live, which function it hits, a checklist of mapped controls, an LED check, and a capture recorder that saves a JSON file to attach to a bug report.
+- **Controller skins**: *Compact Controller* draws the decks and mixer as a compact 2-channel controller and *All-in-One 4-Channel* as a standalone 4-channel system with the waveforms in a centre screen and DECK SELECT layers. Pick them in Settings → Appearance; when a DDJ-FLX2 is connected OpenDJ offers the matching skin once. Every on-screen control works with mouse or touch and moves when the hardware is used.
+
 ### New in 0.4.2
 - MIX NOW on the active deck and wider crossfader travel.
 - 111 downloadable samples and a bundled recorded air horn.
