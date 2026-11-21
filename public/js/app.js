@@ -274,7 +274,7 @@ class App {
     this.dialogs.menu(x, y, [
       { label: 'Built-in sound', sub: s.constructor.bank.map((b) => ({ label: b.name, checked: !!(slot.builtin && slot.sound === b.id), action: async () => { await s.setSound(i, b.id); save(); this.engine.resume(); s.trigger(i); } })) },
       { label: 'Load your own sample…', action: pickFile },
-      { label: 'Browse 112 CC0 samples…', action: () => this.openSamplerCatalog(i, save) },
+      { label: 'Browse CC0 sound library…', action: () => this.openSamplerCatalog(i, save) },
       { label: `Pad volume (${vol} %)`, sub: [25, 50, 75, 100, 125, 150].map((v) => ({ label: `${v} %`, checked: vol === v, action: () => { s.setPadVolume(i, v / 100); save(); } })) },
       { label: 'Sync to beat (start on the next beat of the master deck)', checked: !!slot.sync, action: () => { s.setPadSync(i, !slot.sync); save(); } },
       '-',
