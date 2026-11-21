@@ -6,7 +6,7 @@
 //   sanitizeSetting(key, value) -> { ok: true, value } | { ok: false }
 //   sanitizeSettings(obj, defaults) -> a copy with every known key valid (invalid ones replaced by the default)
 
-export const THEME_IDS = ['midnight', 'graphite', 'club', 'neon', 'ocean', 'gold', 'forest', 'light', 'contrast', 'cdj', 'vinyl', 'performance', 'studio', 'booth'];
+export const THEME_IDS = ['midnight', 'graphite', 'club', 'neon', 'ocean', 'gold', 'forest', 'light', 'contrast', 'cdj', 'vinyl', 'performance', 'studio'];
 
 const bool = () => (v) => (typeof v === 'boolean' ? v : v === 'true' ? true : v === 'false' ? false : undefined);
 const str = (max = 4096) => (v) => (typeof v === 'string' ? v.slice(0, max) : v == null ? '' : undefined);
@@ -65,17 +65,16 @@ const SCHEMA = {
     eqType: oneOf('isolator', 'classic', 'fourBand', 'rotaryIso', 'battle', 'vintage', 'sculpt'), classicKill: bool(),
     eqXover: (v) => (Array.isArray(v) && v.length === 2 && v.every((x) => Number.isFinite(x) && x >= 50 && x <= 12000) && v[0] < v[1] ? v.map(Number) : undefined),
     masterIsoXover: (v) => (Array.isArray(v) && v.length === 2 && v.every((x) => Number.isFinite(x) && x >= 50 && x <= 12000) && v[0] < v[1] ? v.map(Number) : undefined),
-    filterMode: oneOf('oneKnob', 'dual'), centerLock: bool(), colorPerChannel: bool(), colorHidden: bool(),
+    filterMode: oneOf('oneKnob', 'dual'), centerLock: bool(), colorHidden: bool(),
     masterIsoBoost: oneOf(6, 12), showMasterIso: bool(), showWarmth: bool(), limiterCeiling: num(-3, -0.3), mono: bool(),
     boothRoute: oneOf('off', 'device', 'channels34', 'channels56'), boothDeviceId: str(512), micToBooth: bool(), showBooth: bool(),
     cuePost: bool(), hp2Route: oneOf('off', 'device', 'channels56', 'channels78'), hp2DeviceId: str(512),
     talkoverMode: oneOf('manual', 'auto', 'advanced'), talkoverThreshold: num(-80, 0), micFx: oneOf('echo', 'reverb', 'megaphone', 'pitch'),
     micToRecord: bool(), feedbackReducer: bool(),
     sendType: oneOf('shortDelay', 'longDelay', 'dubEcho', 'reverb'), returnTo: oneOf('master', 'ch1', 'ch2', 'ch3', 'ch4'),
-    sendRoute: oneOf('internal', 'channels56', 'channels78'), returnDeviceId: str(512), showComp: bool(), showSend: bool(), fxBusCollapsed: bool(),
+    showComp: bool(),
     fx1: shape({ type: str(32), assign: oneOf('off', 'ch1', 'ch2', 'ch3', 'ch4', 'master', 'xfA', 'xfB'), quantize: bool() }),
     fx2: shape({ type: str(32), assign: oneOf('off', 'ch1', 'ch2', 'ch3', 'ch4', 'master', 'xfA', 'xfB'), quantize: bool() }),
-    drawerTab: oneOf('channel', 'master', 'mic', 'faders', 'fx', 'loudness'),
   }),
   sequencer: objOrNull(),
   sampler: (v) => {

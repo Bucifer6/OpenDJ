@@ -488,10 +488,7 @@ export class Engine extends Emitter {
       if (!changed(k)) continue;
       if (c.assign !== 'off' || this.fxBuses[u]) { const b = this.fxBus(u); b.setType(c.type); b.setQuantize(c.quantize); if (b.assign !== c.assign) this.setFxAssign(u, c.assign, false); }
     }
-    if (!initial && changed('boothRoute', 'boothDeviceId', 'hp2Route', 'hp2DeviceId', 'sendRoute', 'returnDeviceId')) {
-      if (changed('returnDeviceId', 'sendRoute')) this.setExternalReturn();
-      this.applyOutputs();
-    }
+    if (!initial && changed('boothRoute', 'boothDeviceId', 'hp2Route', 'hp2DeviceId')) this.applyOutputs();
     this._mxApplied = { ...mx };
     this.emit('mixer-config');
   }
@@ -741,20 +738,6 @@ export class Engine extends Emitter {
   }
   setReturnLevel(v) { this.returnLevel = clamp(Number(v) || 0, 0, 1); this.returnGain?.gain.setTargetAtTime(this.returnLevel, this.ctx.currentTime, 0.01); this.emit('master', 'returnLevel', this.returnLevel); }
   setSendOn(on) { this.sendOn = !!on; this.sendGate?.gain.setTargetAtTime(on ? 1 : 0, this.ctx.currentTime, 0.005); this.emit('master', 'sendOn', this.sendOn); }
-  /** External return (desktop / web with an interface): an input device mixed into the return. */
-  async setExternalReturn() {
-    const id = this.mx.returnDeviceId;
-    this.returnStream?.getTracks().forEach((t) => t.stop()); try { this.returnSrc?.disconnect(); } catch { /* */ }
-    this.returnStream = null; this.returnSrc = null;
-    if (!id || this.mx.sendRoute === 'internal' || typeof navigator === 'undefined' || !navigator.mediaDevices) return;
-    try {
-      this.ensureSendFx();
-      this.returnStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: id }, echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 } });
-      this.returnSrc = this.ctx.createMediaStreamSource(this.returnStream); this.returnSrc.connect(this.returnGain);
-    } catch (e) { this.emit('warning', `Could not open the return input: ${e.message}`); }
-  }
-  /** Round-trip estimate for an external send / return (output + input latency; a parallel send is not compensated). */
-  externalReturnLatency() { const c = this.ctx, inLat = this.returnStream?.getAudioTracks?.()[0]?.getSettings?.().latency || 0; return (c.baseLatency || 0) + (c.outputLatency || 0) + inLat; }
 
   // ---------- global FX units (M9) ----------
   fxBus(u) {
@@ -812,15 +795,14 @@ export class Engine extends Emitter {
 
   /**
    * Outputs. The master always sits on channels 1/2 (split cue: master mono L, cue mono R). Further stereo outputs
-   * take channel pairs on the same interface (headphones 3/4, booth 3/4 or 5/6, headphones B / send 5/6 or 7/8) when
+   * take channel pairs on the same interface (headphones 3/4, booth 3/4 or 5/6, headphones B 5/6 or 7/8) when
    * the device has the channels, or a second / third sound card via MediaStreamDestination + <audio>.setSinkId.
    */
   async applyOutputs() {
     const s = this.settings, mx = this.mx, ctx = this.ctx;
     if (mx.boothRoute !== 'off') this.ensureBooth();
     if (mx.hp2Route !== 'off') this.ensureHp2();
-    if (mx.sendRoute !== 'internal') { this.ensureSendFx(); if (!this.portSend) { this.portSend = ctx.createGain(); this.sendBus.connect(this.portSend); } }
-    for (const n of [this.portMaster, this.portHp, this.booth?.out, this.hp2?.out, this.portSend]) { try { n?.disconnect(); } catch { /* */ } }
+    for (const n of [this.portMaster, this.portHp, this.booth?.out, this.hp2?.out]) { try { n?.disconnect(); } catch { /* */ } }
     for (const k of ['hpAudio', 'boothAudio', 'hp2Audio']) if (this[k]) { this[k].pause(); this[k].srcObject = null; this[k] = null; }
     try {
       const sink = s.masterDeviceId && s.masterDeviceId !== 'default' ? s.masterDeviceId : '';
@@ -846,7 +828,6 @@ export class Engine extends Emitter {
       if (mx.hp2Route === 'device') { if (mx.hp2DeviceId) devices.push(['hp2Audio', this.hp2.out, mx.hp2DeviceId, 'headphones B']); }
       else place(this.hp2.out, mx.hp2Route === 'channels78' ? 6 : 4, 'Headphones B');
     }
-    if (this.portSend && mx.sendRoute !== 'internal') place(this.portSend, mx.sendRoute === 'channels78' ? 6 : 4, 'Send');
     const n = Math.max(...map.map((m) => m.ch + (m.mono ? 1 : 2)));
     if (n <= 2 && !split) {
       if (ctx.destination.channelCount !== 2) { ctx.destination.channelCount = 2; ctx.destination.channelInterpretation = 'speakers'; }

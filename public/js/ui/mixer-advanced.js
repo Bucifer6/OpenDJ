@@ -162,8 +162,7 @@ export function buildDrawer(app, mixerRoot) {
         kn({ label: 'RETURN', min: 0, max: 1, def: 0.7, bipolar: false, title: 'Return level', get: () => eng.returnLevel, set: (v) => { eng.ensureSendFx(); eng.setReturnLevel(v); } })),
       row('Send FX', select(SEND_FX.map((f) => [f.id, f.label]), () => mx().sendType, (v) => set({ sendType: v }), 'Send FX')),
       row('Return to', select([['master', 'Master'], ['ch1', 'Channel 1'], ['ch2', 'Channel 2'], ['ch3', 'Channel 3'], ['ch4', 'Channel 4']], () => mx().returnTo, (v) => set({ returnTo: v }), 'Return to')),
-      row('External FX', select([['internal', 'Built-in only'], ['channels56', 'Send on outputs 5-6'], ['channels78', 'Send on outputs 7-8']], () => mx().sendRoute, (v) => set({ sendRoute: v }), 'External send route')),
-      el('div', { class: 'adv-note' }, 'External returns are not latency-compensated: use them for effects, not dry blending.')),
+    ),
   );
   // ---------- Loudness ----------
   const L = {};
@@ -189,7 +188,7 @@ export function buildDrawer(app, mixerRoot) {
     el('div', { class: 'adv-head' }, el('span', { class: 'adv-title' }, 'Advanced mixer'), persSel, pState,
       el('button', { class: 'btn xs adv-close', 'aria-label': 'Close the advanced mixer', title: 'Close (Esc)', onclick: () => api.toggle(false) }, '✕')),
     el('div', { class: 'adv-tabs', role: 'tablist' }, ...tabBtns), body);
-  let tab = mx().drawerTab || 'channel', raf = 0;
+  let tab = 'channel', raf = 0;
   function show(id) {
     tab = id; body.replaceChildren(pane[id]);
     for (const b of tabBtns) { const on = b.dataset.tab === id; b.classList.toggle('active', on); b.setAttribute('aria-selected', String(on)); }

@@ -886,17 +886,17 @@ Each preset is in `public/js/audio/eq.js` (`EQ_PRESETS`). Generic names only. Th
 
 | Preset (UI) | Reference behaviour | Band type | Frequencies | Range and knob law | Character |
 |---|---|---|---|---|---|
-| Club Isolator (default) | club 4-channel mixers in isolator mode | LR8 isolator, bands sum to an all-pass | 200 Hz / 2.5 kHz | +6 dB … -26 dB at 8 o'clock, then a full kill | clean |
+| Isolator (default) | club 4-channel mixers in isolator mode | LR8 isolator, bands sum to an all-pass | 200 Hz / 2.5 kHz | +6 dB … -26 dB at 8 o'clock, then a full kill | clean |
 | Club Classic | 900-class club EQ ⚠ (spec sheets list +6 / -26 dB at 70 Hz / 1 kHz / 13 kHz) | low shelf, peak (Q 0.7), high shelf | 70 Hz / 1 kHz / 13 kHz | +6 / -26 dB at 8 o'clock; the last tenth of the travel slides into a kill (shelves -50 dB, corners glide to 180 Hz / 5 kHz) | overlapping analogue-style bands |
-| 4-Band Club | flagship 6-channel mixer ⚠ (frequencies not verified) | LR8 isolator, 4 bands | 150 Hz / 1 kHz / 5 kHz | Hi and Low +6 / kill; Mid-Hi and Mid-Lo +6 / -26 dB | clean |
-| Rotary Isolator | boutique rotary and 4th-order isolator mixers ⚠ (+12 / -inf) | LR4 isolator (24 dB/oct) | 300 Hz / 4 kHz | +12 dB … -inf, long log taper (kill from 10 o'clock) | gentle tanh colour |
+| 4-Band | flagship 6-channel mixer ⚠ (frequencies not verified) | LR8 isolator, 4 bands | 150 Hz / 1 kHz / 5 kHz | Hi and Low +6 / kill; Mid-Hi and Mid-Lo +6 / -26 dB | clean |
+| Rotary | boutique rotary and 4th-order isolator mixers ⚠ (+12 / -inf) | LR4 isolator (24 dB/oct) | 300 Hz / 4 kHz | +12 dB … -inf, long log taper (kill from 10 o'clock) | gentle tanh colour |
 | Battle | scratch mixers | LR8 isolator | 250 Hz / 3 kHz | +6 dB; steep kill, silent from 9 o'clock | clean |
 | Vintage Warm | classic analogue EQ | low shelf, peak (Q 0.5), high shelf | 100 Hz / 800 Hz / 8 kHz | +10 / -20 dB, kill at the end | mild tanh colour |
 | Sculpt | one-band sweep EQ with HP / LP ⚠ (70 Hz – 7 kHz on the 1.4 model) | HP + peak (Q 0.35) + LP | peak 70 Hz – 7 kHz (FREQ) | +8 / -20 dB; LOW left sweeps the HP up to 400 Hz (bass kill), HIGH left sweeps the LP down | clean |
 
 Measured (offline render, `e2e-fx`): every preset is flat at noon within 0.02 dB and the automix bass swap (LOW at -1) removes 43–97 dB at 60 Hz. The shelving presets match their RBJ target curves within 0.01–0.03 dB. The centre detent is the knob's existing 2 % detent for every preset.
 
-Personalities pick a preset: Club → Club Isolator, Classic → Club Classic, Rotary → Rotary Isolator, Battle → Battle.
+Personalities pick a preset: Club → Isolator, Classic → Club Classic, Rotary → Rotary, Battle → Battle. Personalities change behaviour and which controls are shown; they keep OpenDJ's own look.
 
 ### 9.2 Deviations from the plan text
 
@@ -915,7 +915,8 @@ Personalities pick a preset: Club → Club Isolator, Classic → Club Classic, R
 - **Per-preset centre-detent widths.**
 - **Mobius beat FX (P2):** its behaviour is unverified.
 - **Triplet Roll:** it needs deck rolls.
-- **External send/return latency** is only an estimate (`externalReturnLatency()`). There is no loopback measurement.
+- **External send/return** (send on extra outputs, return from an input device): left out, because it could not be verified end to end in this pass. Built-in send FX with return to the master or a channel ship.
+- **Look-alike mixer skins:** left out by the owner's decision. Features live in OpenDJ's own layout.
 - **The suggestion chip** reads the automix queue's genre tags. This stands in until `automix/context.js` (automix P2) exists.
 
 ### 9.4 Voice bus (for the MC / text-to-speech voice)

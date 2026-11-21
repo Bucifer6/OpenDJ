@@ -5,7 +5,6 @@ import { cssVar } from './themes.js';
 import { COLOR_FX } from '../audio/effects.js';
 import { EQ_PRESETS as EQ_MODEL_LIST } from '../audio/eq.js';
 import { updateMixer } from './mixer-state.js';
-import { buildClubSections } from './mixer-club.js';
 import { buildDrawer, setPersonality } from './mixer-advanced.js';
 import { centerLock } from '../audio/curves.js';
 import { suggestPersonality, PERSONALITIES } from '../audio/personalities.js';
@@ -126,8 +125,8 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     v('v-warm', R(knob({ label: 'WARMTH', min: 0, max: 1, def: 0, bipolar: false, size: 'sm', title: 'Warmth (2nd-harmonic saturation)', get: () => eng.warmth, set: (x) => eng.setWarmth(x) }))),
     v('v-booth', R(knob({ label: 'BOOTH', min: 0, max: 1, def: 0.8, bipolar: false, size: 'sm', title: 'Booth level', get: () => eng.boothVolume, set: (x) => { eng.ensureBooth(); eng.setBoothVolume(x); } }))),
     R(knob({ label: 'MASTER', min: 0, max: 1, def: 0.8, get: () => eng.masterVolume ?? 0.8, set: (v) => eng.setMasterVolume(v) })),
-    v('v-hp', R(knob({ label: 'CUE/MST', min: 0, max: 1, def: 0, bipolar: false, get: () => eng.cueMix ?? 0, set: (v) => eng.setCueMix(v), size: 'sm', title: 'Headphone mix: cue ↔ master' }))),
-    v('v-hp', R(knob({ label: 'PHONES', min: 0, max: 1, def: 0.8, get: () => eng.hpVolume ?? 0.8, set: (v) => eng.setHeadphoneVolume(v), size: 'sm' }))),
+    R(knob({ label: 'CUE/MST', min: 0, max: 1, def: 0, bipolar: false, get: () => eng.cueMix ?? 0, set: (v) => eng.setCueMix(v), size: 'sm', title: 'Headphone mix: cue ↔ master' })),
+    R(knob({ label: 'PHONES', min: 0, max: 1, def: 0.8, get: () => eng.hpVolume ?? 0.8, set: (v) => eng.setHeadphoneVolume(v), size: 'sm' })),
     R(knob({ label: 'SAMPLER', min: 0, max: 1, def: 0.8, get: () => eng.sampler.out.gain.value, set: (v) => eng.sampler.setVolume(v), size: 'sm' })),
     el('div', { class: 'mic-box' },
       R(button('MIC', { cls: 'xs mic-on', click: () => app.toggleMic(), active: () => eng.micOn, title: 'Microphone / aux input on/off' })),
@@ -176,16 +175,12 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   eqModel.value = eng.mx.eqType;
   eqModel.addEventListener('change', () => updateMixer(app, { eqType: eqModel.value }));
   const tools = el('div', { class: 'mixer-tools' }, el('div', { class: 'mixer-tools-pair' }, eqModel, advBtn), el('div', { class: 'mixer-tools-pair' }, colorSel, curveSel, revBtn));
-  // club booth faceplate sections (shown only with the Club Booth skin)
-  const club = buildClubSections(app, R);
-  master.querySelector('.mic-box').before(club.masterExtra);
   master.append(tools);
   const toolsRow = el('div', { class: 'mixer-tools-row' });
   const root = el('section', { class: 'mixer' },
-    el('div', { class: 'mixer-top' }, club.left, stripsWrap, master, club.fx),
+    el('div', { class: 'mixer-top' }, stripsWrap, master),
     toolsRow,
     el('div', { class: 'xfader-row' },
-      club.curves,
       el('div', { class: 'xfader-control' }, el('span', { class: 'xf-l' }, 'A'), xfader, el('span', { class: 'xf-l' }, 'B')),
     ),
   );
@@ -222,7 +217,7 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     for (const [c, on] of Object.entries(cls)) root.classList.toggle(c, !!on);
     revBtn.render();
   };
-  eng.on('mixer-config', () => { applyVariants(); requestAnimationFrame(() => fit(lastH, lastW)); });
+  eng.on('mixer-config', () => { applyVariants(); requestAnimationFrame(() => fit(lastH, lastW, true)); });
   applyVariants();
   eng.on('mixer-config', () => { renderCurve(); eqModel.value = eng.mx.eqType; });
 
@@ -230,7 +225,7 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   const EQ_KEYS = new Set(['eqLow', 'eqMid', 'eqHigh']);
   eng.on('mixer', (i, key) => { for (const r of byCh[i] || renderers) r.render(); if (!applyingEqPreset && EQ_KEYS.has(key)) eqPreset.value = eqPresetFor(); });
   eng.on('master', () => { for (const r of renderers) r.render(); });
-  window.addEventListener('opendj-theme', () => requestAnimationFrame(() => fit(lastH, lastW)));
+  window.addEventListener('opendj-theme', () => requestAnimationFrame(() => fit(lastH, lastW, true)));
   app.dedications?.on('change', () => { mcBtn?.render?.(); mcBtn?.setAttribute('data-count', String(app.dedications.pending() || '')); });
   eng.on('mic', () => { for (const r of renderers) r.render(); });
   // compact strips when the layout leaves the mixer little height (.mx-short / .mx-400 / .mx-tiny in performance.css);
@@ -239,26 +234,29 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   let lastW = 0, lastH = 0;
   /** The setup dropdowns go where there is room: MASTER's free space first, else the row above the crossfader. */
   const placeTools = () => {
-    if (tools.parentNode !== master) master.append(tools);
-    root.classList.remove('tools-row');
-    if (master.scrollHeight > master.clientHeight + 1 || master.clientWidth < 104 || document.documentElement.classList.contains('compact') || (document.body.classList.contains('four-decks') && !document.body.classList.contains('skin-club-booth'))) { toolsRow.append(tools); root.classList.add('tools-row'); }
+    const toRow = () => { if (tools.parentNode !== toolsRow) toolsRow.append(tools); root.classList.add('tools-row'); };
+    const body = document.body.classList;
+    if (document.documentElement.classList.contains('compact') || master.clientWidth < 104 || body.contains('four-decks')) return toRow();
+    // try MASTER (only moves the node when it is elsewhere), fall back to the row when it overflows
+    if (tools.parentNode !== master) { master.append(tools); root.classList.remove('tools-row'); }
+    if (master.scrollHeight > master.clientHeight + 1) toRow();
   };
-  const fit = (h, w = lastW) => {
+  const fit = (h, w = lastW, force = false) => {
+    if (!force && Math.abs(h - lastH) < 0.5 && Math.abs(w - lastW) < 0.5) return; // (no re-layout loop from our own moves)
     const on = desk.matches;
     root.classList.toggle('mx-short', on && h <= 470); root.classList.toggle('mx-400', on && h <= 400); root.classList.toggle('mx-tiny', on && h <= 330);
     // strips flex to fill the width; larger knobs, meters and fader caps when a strip is wide
     const vis = strips.filter((x) => x.style.display !== 'none').length || 2;
-    const side = (club.left.offsetWidth || 0) + (club.fx.offsetWidth || 0);
-    const sw = (w - 16 - (master.offsetWidth || 110) - side - 6 * vis) / vis;
-    root.classList.toggle('mx-w1', sw >= 88); root.classList.toggle('mx-w2', sw >= 128);
-    // Club Booth faceplate: narrow mixers move the beat FX unit to the drawer and keep mic / phones in MASTER
-    root.classList.toggle('mx-booth-narrow', w < 560); root.classList.toggle('mx-booth-short', h <= 520);
+    // (a fixed MASTER estimate and hysteresis: the classes change knob / meter sizes, which must not feed back here)
+    const mw = document.documentElement.classList.contains('compact') ? 84 : 118;
+    const sw = (w - 16 - mw - 6 * vis) / vis, has = (c) => root.classList.contains(c);
+    root.classList.toggle('mx-w1', has('mx-w1') ? sw >= 80 : sw >= 88); root.classList.toggle('mx-w2', has('mx-w2') ? sw >= 118 : sw >= 128);
     lastW = w; lastH = h;
     placeTools();
   };
   new ResizeObserver((ents) => { const e = ents[0], b = e.contentBoxSize?.[0]; fit(b?.blockSize ?? e.contentRect.height, b?.inlineSize ?? e.contentRect.width); }).observe(root);
   desk.addEventListener?.('change', () => fit(root.getBoundingClientRect().height / (parseFloat(document.documentElement.style.zoom) || 1)));
-  root.setDeckCount = (n) => { for (const s of strips) s.style.display = s.idx < n ? '' : 'none'; requestAnimationFrame(() => fit(lastH, lastW)); };
+  root.setDeckCount = (n) => { for (const s of strips) s.style.display = s.idx < n ? '' : 'none'; requestAnimationFrame(() => fit(lastH, lastW, true)); };
   root.frame = () => {
     for (const s of strips) if (s.style.display !== 'none') s.vu.draw(s.ch.level());
     const m = eng.masterMeter(); mvuL.draw(m.peak[0], undefined, m.rms[0]); mvuR.draw(m.peak[1], undefined, m.rms[1]);

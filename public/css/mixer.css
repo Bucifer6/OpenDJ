@@ -49,7 +49,7 @@
 .mixer .mxv.v-eq4, .mixer .mxv.v-sculpt, .mixer .mxv.v-dual, .mixer .mxv.v-comp, .mixer .mxv.v-rotary, .mixer .mxv.v-iso, .mixer .mxv.v-warm, .mixer .mxv.v-booth, .mixer .mxv.v-rev { display: none; }
 .mixer.mx-eq4 .mxv.v-eq4, .mixer.mx-sculpt .mxv.v-sculpt, .mixer.mx-dual .mxv.v-dual, .mixer.mx-comp .mxv.v-comp, .mixer.mx-iso .mxv.v-iso, .mixer.mx-warm .mxv.v-warm, .mixer.mx-booth .mxv.v-booth { display: flex; }
 .mixer.mx-rev .mxv.v-rev { display: inline-flex; }
-.mixer.mx-eq4 .mxv.v-mid, .mixer.mx-dual .mxv.v-filter, .mixer.mx-nocolor .mixer-color, .mixer.mx-nocolor .club-color-grid { display: none; }
+.mixer.mx-eq4 .mxv.v-mid, .mixer.mx-dual .mxv.v-filter, .mixer.mx-nocolor .mixer-color { display: none; }
 .mixer.mx-dual.mx-nocolor .mxv.v-filter { display: none; }
 .mixer.mx-rotary .mxv.v-rotary { display: flex; align-self: center; }
 .mixer.mx-rotary .mxv.v-fader { display: none; }
@@ -112,3 +112,7 @@
 .mixer-tools-pair .mixer-color { flex: 1 1 0; } .mixer-tools-pair .mixer-curve { flex: 1 1 0; }
 .mixer-tools-pair .mixer-eq-model { flex: 1 1 auto; min-width: 0; }
 .mixer-tools .sel.tiny { padding-left: 3px; padding-right: 0; font-size: 10px; }
+/* meters never size their row: the canvas buffer is resized from the element's size (ResizeObserver), so an intrinsic
+   size from the buffer would grow the strip on every resize where the row height is content-sized (phones) */
+.mixer canvas.vu { contain: size; }
+:root.compact .mixer .strip .fader-row { flex: none; height: 220px; } /* definite: the meter canvas must not set it */

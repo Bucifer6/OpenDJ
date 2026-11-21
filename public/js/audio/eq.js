@@ -8,14 +8,14 @@ import { isoKnobGain, cutKnobDb, sculptKnobDb, sculptFreq, dbToGain } from './cu
 /**
  * EQ presets (mixer M3): modelled on how real club / rotary / battle mixers behave. Generic names only. Reference and
  * target curve for each (⚠ = from published spec sheets / reviews, not measured on the hardware):
- *  isolator   "Club Isolator" (default, today's): 3-band LR8 isolator 200 Hz / 2.5 kHz, +6 dB .. -26 dB at 8 o'clock
+ *  isolator   "Isolator" (default, today's): 3-band LR8 isolator 200 Hz / 2.5 kHz, +6 dB .. -26 dB at 8 o'clock
  *             then a full kill; bands sum to a flat all-pass. Ref: club 4-channel mixers in isolator mode.
  *  classic    "Club Classic": 3-band shelving / peaking EQ like a 900-class club mixer: low shelf 70 Hz, mid peak 1 kHz
  *             (Q 0.7), high shelf 13 kHz, +6 / -26 dB (⚠ spec sheets list +6 / -26 dB at 70 Hz / 1 kHz / 13 kHz); the last
  *             tenth of the travel slides into a kill (shelves -50 dB, corners glide to 180 Hz / 5 kHz).
- *  fourBand   "4-Band Club": LR8 isolator 150 Hz / 1 kHz / 5 kHz with separate low-mid and high-mid; Hi and Low full
+ *  fourBand   "4-Band": LR8 isolator 150 Hz / 1 kHz / 5 kHz with separate low-mid and high-mid; Hi and Low full
  *             kill, mids +6 / -26 dB (⚠ flagship 6-channel mixer, exact frequencies unverified).
- *  rotaryIso  "Rotary Isolator": wide-range, smooth 24 dB/oct (LR4) isolator at 300 Hz / 4 kHz, +12 dB .. -inf with a
+ *  rotaryIso  "Rotary": wide-range, smooth 24 dB/oct (LR4) isolator at 300 Hz / 4 kHz, +12 dB .. -inf with a
  *             long log taper and a gentle tanh "colour" stage (⚠ boutique rotary / 4th-order isolator mixers: +12 / -inf).
  *  battle     "Battle": simple 3-band LR8 isolator at 250 Hz / 3 kHz with a steep kill (silent from 9 o'clock, v = -0.67) for
  *             cuts on scratch mixers, +6 dB boost.
@@ -26,10 +26,10 @@ import { isoKnobGain, cutKnobDb, sculptKnobDb, sculptFreq, dbToGain } from './cu
  * FREQ (sculpt). The automix's bass swap (LOW = -1) removes >= 30 dB at 60 Hz with every preset.
  */
 export const EQ_PRESETS = [
-  { id: 'isolator', label: 'Club Isolator', type: 'isolator', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { xover: [200, 2500], order: 8, boost: 6, cut: 26, killFrom: -0.8 } },
+  { id: 'isolator', label: 'Isolator', type: 'isolator', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { xover: [200, 2500], order: 8, boost: 6, cut: 26, killFrom: -0.8 } },
   { id: 'classic', label: 'Club Classic', type: 'shelving', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { freqs: [70, 1000, 13000], q: 0.7, boost: 6, cut: 26, kill: [180, 5000] } },
-  { id: 'fourBand', label: '4-Band Club', type: 'fourBand', knobs: ['eqHigh', 'eqMidHigh', 'eqMidLow', 'eqLow'], opts: { xover: [150, 1000, 5000], order: 8 } },
-  { id: 'rotaryIso', label: 'Rotary Isolator', type: 'isolator', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { xover: [300, 4000], order: 4, boost: 12, cut: 30, killFrom: -0.55, color: 'soft' } },
+  { id: 'fourBand', label: '4-Band', type: 'fourBand', knobs: ['eqHigh', 'eqMidHigh', 'eqMidLow', 'eqLow'], opts: { xover: [150, 1000, 5000], order: 8 } },
+  { id: 'rotaryIso', label: 'Rotary', type: 'isolator', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { xover: [300, 4000], order: 4, boost: 12, cut: 30, killFrom: -0.55, color: 'soft' } },
   { id: 'battle', label: 'Battle', type: 'isolator', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { xover: [250, 3000], order: 8, boost: 6, cut: 30, killFrom: -0.4, killTo: -0.67 } },
   { id: 'vintage', label: 'Vintage Warm', type: 'shelving', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { freqs: [100, 800, 8000], q: 0.5, boost: 10, cut: 20, kill: [300, 4000], color: 'warm' } },
   { id: 'sculpt', label: 'Sculpt', type: 'sculpt', knobs: ['eqHigh', 'eqMid', 'eqFreq', 'eqLow'], opts: {} },
@@ -172,7 +172,7 @@ function sculpt(ctx) {
   };
 }
 
-/** Create the EQ of preset `id` (EQ_PRESETS; unknown ids give the Club Isolator). opts override the preset's. */
+/** Create the EQ of preset `id` (EQ_PRESETS; unknown ids give the Isolator). opts override the preset's. */
 export function createEq(ctx, id = 'isolator', opts = {}) {
   const p = eqPreset(id), o = { ...p.opts, ...opts };
   const f = { isolator, shelving, fourBand, sculpt }[p.type];

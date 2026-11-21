@@ -81,11 +81,11 @@ export async function mixerChecks(lab, check, f, M = {}) {
       check(err < 0.3 && Math.abs(mid[fr[1]] + cut) < 0.3, `EQ ${type} matches its target curve within ${f(err, 2)} dB (low shelf ${fr[0]} Hz / mid ${fr[1]} Hz Q ${qv} at -${cut} dB: ${f(mid[fr[1]], 2)} dB; high shelf ${fr[2]} Hz +${boost} dB)`);
     }
     const iso = await eqResp('isolator', { eqLow: -1 }), isoM = await eqResp('isolator', { eqMid: -1 }), isoH = await eqResp('isolator', { eqHigh: -1 });
-    check(Math.min(-iso[40], -iso[60], -iso[100], -isoM[500], -isoM[1000], -isoH[8000], -isoH[12000]) > 40, `EQ Club Isolator kills > 40 dB in band (low ${f(-iso[60], 0)}, mid ${f(-isoM[1000], 0)}, high ${f(-isoH[12000], 0)} dB)`);
+    check(Math.min(-iso[40], -iso[60], -iso[100], -isoM[500], -isoM[1000], -isoH[8000], -isoH[12000]) > 40, `EQ Isolator kills > 40 dB in band (low ${f(-iso[60], 0)}, mid ${f(-isoM[1000], 0)}, high ${f(-isoH[12000], 0)} dB)`);
     const fb = await eqResp('fourBand', { eqHigh: -1, eqLow: -1 }), fmh = await eqResp('fourBand', { eqMidHigh: -1 });
-    check(Math.min(-fb[40], -fb[60], -fb[12000]) > 40 && fmh[2000] <= -24, `EQ 4-Band Club: Hi / Low kills > 40 dB (${f(-fb[60], 0)} / ${f(-fb[12000], 0)} dB), Mid-Hi at min ${f(fmh[2000], 1)} dB at 2 kHz (<= -24)`);
+    check(Math.min(-fb[40], -fb[60], -fb[12000]) > 40 && fmh[2000] <= -24, `EQ 4-Band: Hi / Low kills > 40 dB (${f(-fb[60], 0)} / ${f(-fb[12000], 0)} dB), Mid-Hi at min ${f(fmh[2000], 1)} dB at 2 kHz (<= -24)`);
     const rb = await eqResp('rotaryIso', { eqMid: 1 }), bt = await eqResp('battle', { eqMid: -0.67 }), btc = await eqResp('isolator', { eqMid: -0.67 });
-    check(Math.abs(rb[1000] - 12) < 0.5 && bt[1000] <= -60 && btc[1000] > -25, `EQ Rotary Isolator boosts +${f(rb[1000], 1)} dB (target +12); Battle mid at 9 o'clock ${f(bt[1000], 1)} dB (killed) vs club ${f(btc[1000], 1)} dB`);
+    check(Math.abs(rb[1000] - 12) < 0.5 && bt[1000] <= -60 && btc[1000] > -25, `EQ Rotary boosts +${f(rb[1000], 1)} dB (target +12); Battle mid at 9 o'clock ${f(bt[1000], 1)} dB (killed) vs club ${f(btc[1000], 1)} dB`);
     const sMax = await eqResp('sculpt', { eqMid: 1 }), sMin = await eqResp('sculpt', { eqMid: -1 });
     check(Math.abs(sMax[700] - 8) <= 0.5 && Math.abs(sMin[700] + 20) <= 0.5, `EQ Sculpt at 700 Hz: +${f(sMax[700], 2)} dB max, ${f(sMin[700], 2)} dB min (targets +8 / -20 ±0.5)`);
     // type switch: click-free, level at noon matches

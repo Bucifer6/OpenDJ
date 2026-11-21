@@ -110,11 +110,11 @@ const fit = (panels) => ev(async (panels) => {
       const R = mx.getBoundingClientRect(), zr = R.width / mx.offsetWidth || 1, W = R.width, pad = parseFloat(getComputedStyle(mx).paddingLeft) * zr;
       const xf = document.querySelector('.mixer .crossfader .fader-track')?.getBoundingClientRect();
       if (!mx.classList.contains('mx-noxf') && (!xf || xf.width < Math.min(0.8 * W, 220 * zr) || xf.width < 0.7 * W)) out.push(`crossfader squished: ${Math.round(xf?.width || 0)} of ${Math.round(W)} px mixer`);
-      const cols = [...mx.querySelectorAll('.mixer-strips > .strip, .mixer-top > .mixer-master, .mixer-top > .club-col')].filter(vis).map((e) => e.getBoundingClientRect()).sort((a, b) => a.left - b.left);
+      const cols = [...mx.querySelectorAll('.mixer-strips > .strip, .mixer-top > .mixer-master)].filter(vis).map((e) => e.getBoundingClientRect()).sort((a, b) => a.left - b.left);
       const edges = [R.left + pad, ...cols.flatMap((c) => [c.left, c.right]), R.right - pad];
       const maxGap = Math.max(16 * zr, 0.03 * W);
       for (let i = 0; i < edges.length; i += 2) if (edges[i + 1] - edges[i] > maxGap + 0.5) out.push(`mixer: ${Math.round(edges[i + 1] - edges[i])} px empty band between columns ${i / 2} and ${i / 2 + 1}`);
-      const side = [...mx.querySelectorAll('.mixer-top > .mixer-master, .mixer-top > .club-col')].filter(vis).reduce((a, e) => a + e.getBoundingClientRect().width, 0);
+      const side = [...mx.querySelectorAll('.mixer-top > .mixer-master)].filter(vis).reduce((a, e) => a + e.getBoundingClientRect().width, 0);
       const sum = [...mx.querySelectorAll('.mixer-strips > .strip')].filter(vis).reduce((a, e) => a + e.getBoundingClientRect().width, 0), avail = W - 2 * pad - side;
       if (sum < 0.9 * avail) out.push(`mixer strips fill ${Math.round(sum)} of ${Math.round(avail)} px`);
     }
@@ -185,18 +185,7 @@ try {
       check(!f.length, `${w}x${h} ${layout} @${zoom}%: all decks' panels fit, nothing outside the window${f.length ? ' — ' + f.slice(0, 4).join('; ') : ''}`);
     }
   }
-  // ---------- Club Booth skin (players around a 4-channel club mixer) and the personalities ----------
-  for (const [w, h] of QUICK ? [[1920, 1080], [1280, 800]] : [[2560, 1440], [1920, 1080], [1600, 960], [1440, 900], [1280, 800]]) {
-    await page.setViewportSize({ width: w, height: h });
-    for (const layout of ['classic', 'four']) {
-      await setUi({ layout, theme: 'booth', zoom: 100 });
-      await page.waitForTimeout(200);
-      const a = await audit(), f = await fit(['cues']);
-      check(a.count > 40 && !summary(a) && !f.length, `${w}x${h} ${layout} Club Booth: ${a.count} controls in bounds, mixer fits${summary(a) ? ' — ' + summary(a) : ''}${f.length ? ' — ' + f.slice(0, 4).join('; ') : ''}`);
-      const tops = await ev(() => { const r = (s) => document.querySelector(s)?.getBoundingClientRect(); const m = r('.mixer'), d = [...document.querySelectorAll('.deck')].filter((e) => e.offsetParent).map((e) => e.getBoundingClientRect()); return { m: m.top, d: d.map((x) => x.top), club: [...document.querySelectorAll('.mixer .mx-club')].filter((e) => e.offsetParent).length }; });
-      check(tops.club >= 2 && Math.abs(tops.m - Math.min(...tops.d)) <= 2, `${w}x${h} ${layout} Club Booth: faceplate sections shown (${tops.club}), mixer and players' tops aligned (${Math.round(tops.m)} vs ${tops.d.map(Math.round).join('/')})`);
-    }
-  }
+  // ---------- the personalities ----------
   await page.setViewportSize({ width: 1280, height: 800 });
   for (const p of ['classic', 'rotary', 'battle', 'club']) {
     await setUi({ layout: 'classic', theme: 'midnight', zoom: 100 });
