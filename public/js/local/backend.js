@@ -352,6 +352,16 @@ export async function createLocalBackend(o) {
     const c = sources.clientFor(params.id);
     try { await c.connect(); return await c.listLibraries(); } catch (e) { throw new HttpError(502, scrub(e.message)); }
   });
+  // live media-server playlists and one playlist's tracks (stored as remote tracks, mirrored like the server does)
+  route('GET', '/api/sources/:id/playlists', async ({ params }) => {
+    if (!library.getSource(params.id)) throw new HttpError(404, 'No source');
+    try { return await sources.sourcePlaylists(params.id); } catch (e) { throw new HttpError(e.status || 502, scrub(e.message)); }
+  });
+  route('GET', '/api/sources/:id/playlists/:pid', async ({ params, query }) => {
+    if (!library.getSource(params.id)) throw new HttpError(404, 'No source');
+    if (!params.pid || params.pid.length > 256) throw new HttpError(400, 'Bad playlist id');
+    try { return await sources.openSourcePlaylist(params.id, params.pid, { name: query?.get?.('name') || undefined }); } catch (e) { throw new HttpError(e.status || 502, scrub(e.message)); }
+  });
   route('DELETE', '/api/sources/:id', async ({ params }) => { library.removeSource(params.id); return { ok: true }; });
   route('GET', '/api/downloads', () => sources.downloads.list());
   route('POST', '/api/downloads', async ({ body }) => ({ queued: sources.downloads.enqueue(Array.isArray(body.trackIds) ? body.trackIds : []) }));

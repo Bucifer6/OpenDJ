@@ -170,8 +170,22 @@ export class JellyfinClient extends SourceClient {
     return tracks;
   }
 
-  async listPlaylists() {
+  /**
+   * The user's audio playlists. Default: { remoteId, name, trackRemoteIds } (one items call each, used by sync).
+   * opts.tracks === false: summaries only, { remoteId, name, trackCount, duration }.
+   */
+  async listPlaylists(opts = {}) {
     if (!this.config.userId) await this.connect();
+    if (opts.tracks === false) {
+      const lists = [];
+      await this._pagedItems({ IncludeItemTypes: 'Playlist', Recursive: 'true', Fields: 'ChildCount' }, (items) => lists.push(...items));
+      return lists
+        .filter((p) => !p.MediaType || p.MediaType === 'Audio')
+        .map((p) => ({
+          remoteId: String(p.Id), name: p.Name || String(p.Id),
+          trackCount: Number(p.ChildCount) || 0, duration: p.RunTimeTicks ? p.RunTimeTicks / 1e7 : null,
+        }));
+    }
     const lists = [];
     await this._pagedItems({ IncludeItemTypes: 'Playlist', Recursive: 'true' }, (items) => lists.push(...items));
     const out = [];
@@ -185,6 +199,25 @@ export class JellyfinClient extends SourceClient {
           .filter((i) => !i.Type || i.Type === 'Audio')
           .map((i) => String(i.Id)),
       });
+    }
+    return out;
+  }
+
+  /** Tracks of one playlist, in playlist order, as normalised tracks (same shape as listTracks()). */
+  async playlistTracks(id) {
+    if (!this.config.userId) await this.connect();
+    const out = [];
+    let start = 0, total = Infinity;
+    while (start < total) {
+      const q = new URLSearchParams({
+        UserId: this.config.userId, Fields: 'Genres,MediaSources,ProductionYear,Path', StartIndex: String(start), Limit: String(PAGE_SIZE),
+      });
+      const body = await this._req(`/Playlists/${encodeURIComponent(id)}/Items?${q}`);
+      const items = asArray(body?.Items);
+      total = Number(body?.TotalRecordCount ?? items.length) || 0;
+      for (const it of items) if (!it.Type || it.Type === 'Audio') out.push(this._normTrack(it));
+      if (items.length === 0) break;
+      start += items.length;
     }
     return out;
   }

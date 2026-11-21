@@ -14,7 +14,7 @@ import { Library, newId } from './library.js';
 import { scanFolder, addFile, walk, AUDIO_EXT, isMediaPath } from './scanner.js';
 import { listDrives, browseDir } from './drives.js';
 import { aiffToWav } from './aiff.js';
-import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clientFor, isInside, uniqueName, safe } from './remote.js';
+import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clientFor, isInside, uniqueName, safe, sourcePlaylists, openSourcePlaylist, remoteError } from './remote.js';
 import { findFfmpeg, needsTranscode, remoteBrowserDecodable, browserPlayableVideo, formatList, DSD_EXT, VIDEO_MIME, extOf, probe, isVideoByName, BROWSER_VIDEO_EXT } from './media.js';
 import { Transcoder } from './transcode.js';
 import { Auth, parseCookies, parseTrustProxy } from './auth.js';
@@ -733,7 +733,22 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     runJob('sync:' + params.id, () => syncSource(library, params.id, { onProgress: (p) => emit('sync', p) }));
     return { started: true };
   });
-  route('GET', '/api/sources/:id/libraries', async ({ params }) => { const c = clientFor(library, params.id); await c.connect(); return c.listLibraries(); });
+  // Live playlists of a media server, and one playlist's tracks (stored as remote library tracks so they play,
+  // analyse and download like synced ones; the playlist is mirrored in the library under the server).
+  const remoteFail = (e) => (e.expose ? new HttpError(e.status, e.message) : e);
+  route('GET', '/api/sources/:id/libraries', async ({ params }) => {
+    if (!library.getSource(params.id)) throw new HttpError(404, 'No source');
+    try { const c = clientFor(library, params.id); await c.connect(); return await c.listLibraries(); } catch (e) { throw remoteFail(remoteError(e)); }
+  });
+  route('GET', '/api/sources/:id/playlists', async ({ params }) => {
+    if (!library.getSource(params.id)) throw new HttpError(404, 'No source');
+    try { return await sourcePlaylists(library, params.id); } catch (e) { throw remoteFail(e); }
+  });
+  route('GET', '/api/sources/:id/playlists/:pid', async ({ params, query }) => {
+    if (!library.getSource(params.id)) throw new HttpError(404, 'No source');
+    if (!params.pid || params.pid.length > 256) throw new HttpError(400, 'Bad playlist id');
+    try { return await openSourcePlaylist(library, params.id, params.pid, { name: query.get('name') || undefined }); } catch (e) { throw remoteFail(e); }
+  });
   route('DELETE', '/api/sources/:id', async ({ params }) => { library.removeSource(params.id); return { ok: true }; });
 
   // ---------------- downloads ----------------

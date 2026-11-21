@@ -53,13 +53,7 @@ export async function syncSource(library, sourceId, { onProgress } = {}) {
   const persist = client.persistable();
   if (Object.keys(persist).length) Object.assign(cfg, persist);
   const tracks = await client.listTracks({ onProgress: (done, total) => onProgress?.({ source: sourceId, done, total }) });
-  const seen = new Set();
-  for (const rt of tracks) {
-    const tid = Library.remoteId(sourceId, rt.remoteId);
-    seen.add(tid);
-    const { coverUrl, ...rest } = rt;
-    library.upsertTrack({ ...rest, id: tid, sourceType: 'remote', sourceId, sourceKind: cfg.type, hasCover: !!coverUrl });
-  }
+  const seen = new Set(upsertRemoteTracks(library, cfg, tracks).map((t) => t.id));
   // Tracks no longer on the server. A server that suddenly lists nothing (or less than half of what it had) is
   // more likely broken or half-indexed than emptied, so nothing is pruned then. Tracks with the user's work on
   // them (cues, analysis, ratings, plays…) are kept and flagged `remoteMissing` instead of deleted.
@@ -92,6 +86,75 @@ export async function syncSource(library, sourceId, { onProgress } = {}) {
   library.changed('tracks');
   onProgress?.({ source: sourceId, done: tracks.length, total: tracks.length, finished: true });
   return { tracks: tracks.length, playlists: playlists.length, pruned, keptMissing: kept, skippedPrune: !!suspicious };
+}
+
+/** Store normalised remote tracks (listTracks() / playlistTracks() shape) as library tracks; returns them. */
+export function upsertRemoteTracks(library, cfg, tracks) {
+  return tracks.map((rt) => {
+    const { coverUrl, ...rest } = rt;
+    return library.upsertTrack({ ...rest, id: Library.remoteId(cfg.id, rt.remoteId), sourceType: 'remote', sourceId: cfg.id, sourceKind: cfg.type, hasCover: !!coverUrl });
+  });
+}
+
+/**
+ * Errors from a media server, as an HTTP status + reason for the UI. A remote 401/403 is never passed through
+ * (the UI would take it for the OpenDJ login): it becomes 400 with a readable reason; anything else 502 (or 404).
+ */
+export function remoteError(e) {
+  if (e?.status && e.expose) return e;
+  const bad = (status, msg) => Object.assign(new Error(msg), { status, expose: true });
+  const code = e?.code;
+  if (e?.status === 401 || e?.status === 403 || code === 40 || code === 41 || code === 50) return bad(400, `The media server refused the request (check the connection's user name / password / token): ${String(e.message).slice(0, 200)}`);
+  if (e?.status === 404 || code === 70) return bad(404, 'Not found on the media server');
+  const c = e?.cause?.code || (typeof code === 'string' ? code : null);
+  if (c || e instanceof TypeError) return bad(502, `Could not reach the media server: ${c === 'ECONNREFUSED' ? 'connection refused' : c === 'ENOTFOUND' ? 'host not found' : e?.cause?.message || e.message}`);
+  return bad(502, `Media server error: ${String(e?.message || e).slice(0, 300)}`);
+}
+
+/** Connect a source's client and persist refreshed account state (tokens), like a sync does. */
+async function connected(library, sourceId) {
+  const cfg = library.getSource(sourceId);
+  const client = clientFor(library, sourceId);
+  await client.connect();
+  const persist = client.persistable();
+  if (Object.keys(persist).some((k) => cfg[k] !== persist[k])) { Object.assign(cfg, persist); library.save(); }
+  return { cfg, client };
+}
+
+/** Live playlist list of a media server: [{ remoteId, name, trackCount, duration, smart, playlistId }]. */
+export async function sourcePlaylists(library, sourceId) {
+  try {
+    const { client } = await connected(library, sourceId);
+    const lists = await client.listPlaylists({ tracks: false });
+    return lists.map((p) => ({
+      remoteId: String(p.remoteId), name: String(p.name || p.remoteId).slice(0, 200), trackCount: p.trackCount ?? null,
+      duration: p.duration ?? null, smart: !!p.smart,
+      playlistId: library.data.playlists.find((x) => x.sourceId === sourceId && x.remoteId === String(p.remoteId))?.id || null,
+    }));
+  } catch (e) { throw remoteError(e); }
+}
+
+/**
+ * Open a media-server playlist: fetch its tracks, store them as remote library tracks (so they stream, analyse and
+ * download like synced ones) and mirror the playlist in the library (sourceId + remoteId, like a sync does).
+ * Returns { playlist, tracks } with the library track objects in playlist order.
+ */
+export async function openSourcePlaylist(library, sourceId, remoteId, { name } = {}) {
+  let cfg, client, list;
+  try {
+    ({ cfg, client } = await connected(library, sourceId));
+    list = await client.playlistTracks(remoteId);
+  } catch (e) { throw remoteError(e); }
+  const tracks = upsertRemoteTracks(library, cfg, list);
+  const trackIds = [...new Set(tracks.map((t) => t.id))];
+  let pl = library.data.playlists.find((p) => p.sourceId === sourceId && p.remoteId === remoteId);
+  if (!pl) {
+    if (!name) { try { name = (await client.listPlaylists({ tracks: false })).find((p) => String(p.remoteId) === remoteId)?.name; } catch { /* name is cosmetic */ } }
+    pl = { id: Library.remoteId(sourceId, 'pl:' + remoteId), name: String(name || 'Playlist').slice(0, 200), trackIds, sourceId, remoteId, folder: cfg.name, createdAt: Date.now() };
+    library.data.playlists.push(pl);
+  } else pl.trackIds = trackIds;
+  library.changed('tracks');
+  return { playlist: pl, tracks: trackIds.map((t) => library.getTrack(t)) };
 }
 
 /** Request info for streaming a remote track through our local proxy. */

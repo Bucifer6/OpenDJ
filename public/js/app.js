@@ -6,7 +6,7 @@ import { buildMixer } from './ui/mixer-ui.js';
 import { DetailWaveform } from './ui/waveform.js';
 import { LibraryUI } from './ui/library-ui.js';
 import { Dialogs } from './ui/dialogs.js';
-import { AutoMix } from './automix.js';
+import { AutoMix, STYLES, STYLE_LABEL } from './automix.js';
 import { MidiManager } from './midi/midi.js';
 import { Sequencer } from './audio/sequencer.js';
 import { applyTheme } from './ui/themes.js';
@@ -89,11 +89,22 @@ class App {
     document.body.append(o);
   }
 
-  async loadTrack(deckIndex, trackId) {
+  /**
+   * Load a library track on a deck. Every user load path (drag & drop, "Load to deck", double-click / Enter, Shift+arrow,
+   * MIDI) comes through here; automix passes { automix: true } for its own loads. While automix runs a user load on
+   * deck 1 / 2 is handed to automix (next track / ask / queue), so automix never loads over the user's pick.
+   */
+  async loadTrack(deckIndex, trackId, { automix = false } = {}) {
     const t = this.library.track(trackId);
     const deck = this.engine.decks[deckIndex];
     if (!t) { this.toast('That track is no longer in the library'); throw new Error('Track not found in the library'); }
-    if (deck.playing && !this.automix.enabled && !(await this.dialogs.confirm(`Deck ${deckIndex + 1} is playing. Load "${t.title}" anyway?`))) return;
+    let confirmed = automix;
+    if (!automix && this.automix?.enabled) {
+      const r = await this.automix.userLoad(deckIndex, t);
+      if (r === 'handled') return;
+      if (r === 'load') confirmed = true;
+    }
+    if (deck.playing && !confirmed && !(await this.dialogs.confirm(`Deck ${deckIndex + 1} is playing. Load "${t.title}" anyway?`))) return;
     try {
       if (!(await deck.load({ ...t }))) return;
       if (t.unreadable) api.updateTrack(t.id, { unreadable: false }).then((x) => this.library.updateTrack(x)).catch(() => {});
@@ -126,6 +137,7 @@ class App {
     this.amBtn = el('button', { class: 'btn automix-btn', onclick: () => this.toggleAutomix(), title: 'Automix the current library view' }, iconLabel('automix', 'AUTOMIX'));
     this.amSkip = el('button', { class: 'btn sm icon-only', onclick: () => this.automix.skip(), title: 'Mix to next track now', 'aria-label': 'Mix to next track now' }, icon('next'));
     this.amInfo = el('span', { class: 'am-info' });
+    this.amQueueBtn = el('button', { class: 'btn sm am-queue-btn', onclick: () => this.toggleQueuePanel(), title: 'Automix queue: upcoming tracks, transition styles, smart-mix reasons' }, 'QUEUE');
     this.midiDot = el('span', { class: 'midi-dot', title: 'MIDI activity' }, 'MIDI');
     this.cpu = el('span', { class: 'cpu' });
     // layout modes: three 2-deck views + 4 decks (deckCount). data-n stays on each button for the deck count it shows.
@@ -142,7 +154,7 @@ class App {
     const topbar = el('header', { class: 'topbar' },
       el('div', { class: 'logo' }, logoMark(), el('span', { class: 'logo-word' }, 'Open', el('b', {}, 'DJ'))),
       deckSel, shiftBtn,
-      el('div', { class: 'tb-group' }, this.amBtn, this.amSkip, this.amInfo),
+      el('div', { class: 'tb-group' }, this.amBtn, this.amSkip, this.amQueueBtn, this.amInfo),
       el('div', { class: 'tb-spacer' }),
       el('div', { class: 'tb-group' }, this.recBtn, this.recTime),
       this.midiDot, this.cpu, this.clock,
@@ -227,18 +239,43 @@ class App {
     const bar = el('div', { class: 'sampler-bar' }, el('span', { class: 'sb-title' }, 'SAMPLER'));
     const fileIn = el('input', { type: 'file', accept: 'audio/*', style: { display: 'none' } });
     let target = 0;
-    fileIn.addEventListener('change', async () => { try { await s.loadFile(target, fileIn.files[0]); render(); } catch (e) { this.toast(`Could not load sample: ${e.message}`); } fileIn.value = ''; });
+    const save = () => this.setSetting('sampler', s.config());
+    fileIn.addEventListener('change', async () => { try { await s.loadFile(target, fileIn.files[0]); save(); } catch (e) { this.toast(`Could not load sample: ${e.message}`); } fileIn.value = ''; });
     const pads = s.slots.map((_, i) => {
-      const b = el('button', { class: 'spad', title: 'Click: play · Shift-click: stop · Right-click: load your own sample' });
-      b.addEventListener('pointerdown', () => { this.engine.resume(); this.shift ? s.stop(i) : s.trigger(i); });
-      b.addEventListener('contextmenu', (e) => { e.preventDefault(); target = i; fileIn.click(); });
+      const b = el('button', { class: 'spad', 'data-pad': i, title: 'Click: play · Shift-click: stop · Right-click: choose sound, load your own sample, volume, sync to beat' });
+      b.addEventListener('pointerdown', (e) => { if (e.button !== 0) return; this.engine.resume(); this.shift ? s.stop(i) : s.trigger(i); });
+      b.addEventListener('contextmenu', (e) => { e.preventDefault(); this.samplerPadMenu(i, e.clientX, e.clientY, () => { target = i; fileIn.click(); }, save); });
       return b;
     });
-    const render = () => { pads.forEach((b, i) => { b.textContent = s.slots[i]?.name || '—'; }); this.seqPanel?.renderNames?.(); };
+    const render = () => {
+      pads.forEach((b, i) => {
+        const slot = s.slots[i];
+        b.textContent = slot?.name || '—';
+        b.classList.toggle('synced', !!slot?.sync);
+        b.classList.toggle('user', slot && !slot.builtin);
+      });
+      this.seqPanel?.renderNames?.();
+    };
+    s.onChange = render;
     render();
     const seqBtn = el('button', { class: 'btn sm seq-btn', title: 'Step sequencer (synced to the master deck)', onclick: () => this.toggleSequencer() }, 'SEQ');
     bar.append(...pads, seqBtn, fileIn);
     return bar;
+  }
+
+  /** Sampler pad options: built-in sound bank, own sample, pad volume, start on the next beat. */
+  samplerPadMenu(i, x, y, pickFile, save) {
+    const s = this.engine.sampler, slot = s.slots[i];
+    const mark = (on) => (on ? '✓ ' : '\u2003');
+    const vol = Math.round((slot.volume ?? 1) * 100);
+    this.dialogs.menu(x, y, [
+      { label: 'Built-in sound', sub: s.constructor.bank.map((b) => ({ label: mark(slot.builtin && slot.sound === b.id) + b.name, action: async () => { await s.setSound(i, b.id); save(); this.engine.resume(); s.trigger(i); } })) },
+      { label: 'Load your own sample…', action: pickFile },
+      { label: `Pad volume (${vol} %)`, sub: [25, 50, 75, 100, 125, 150].map((v) => ({ label: mark(vol === v) + `${v} %`, action: () => { s.setPadVolume(i, v / 100); save(); } })) },
+      { label: `${mark(slot.sync)}Sync to beat (start on the next beat of the master deck)`, action: () => { s.setPadSync(i, !slot.sync); save(); } },
+      '-',
+      { label: 'Preview', action: () => { this.engine.resume(); s.trigger(i); } },
+    ]);
   }
 
   toggleSequencer() {
@@ -337,8 +374,86 @@ class App {
     this.amBtn.classList.toggle('active', a.enabled);
     const next = a.nextTrack();
     this.amSkip.disabled = !a.enabled || !!a.transition;
-    const info = a.enabled ? (a.transition ? 'Mixing…' : next ? `Next: ${next.artist ? next.artist + ' – ' : ''}${next.title}` : 'Last track') : (a.queue.length ? `${a.queue.length - a.idx} queued` : '');
+    let info = '';
+    if (a.enabled) {
+      if (a.transition) info = `Mixing: ${STYLE_LABEL[a.transition.style] || a.transition.style}`;
+      else if (next) {
+        const nt = a.nextTransition();
+        info = `Next: ${next.artist ? next.artist + ' – ' : ''}${next.title}${nt ? ` · ${STYLE_LABEL[nt.style] || nt.style} in ${fmtTime(nt.beginsIn).slice(0, 5)}` : ''}`;
+      } else info = 'Last track';
+    } else if (a.queue.length) info = `${a.queue.length - a.idx} queued`;
     if (this.amInfo.textContent !== info) this.amInfo.textContent = info;
+    this.queuePanel?.render?.();
+  }
+
+  /**
+   * Start automix on tracks (mode: 'order' | 'shuffle' | 'smart' | 'live'). Smart modes first analyse tracks that
+   * have no analysis yet (remote tracks included) for a short while, then score with whatever data there is.
+   */
+  async startAutomix(tracks, opts = {}) {
+    let list = tracks.filter(Boolean);
+    if (opts.mode === 'smart' || opts.mode === 'live') {
+      const todo = list.filter((t) => !t.analyzed && !t.unreadable);
+      if (todo.length && this.analyser) {
+        const n = this.analyser.request(todo.slice(0, 60));
+        if (n) {
+          this.toast(`Analysing ${n} track(s) before smart mix (BPM, key, energy)…`);
+          const t0 = performance.now(), maxMs = Math.min(45000, 4000 + n * 3000);
+          while (performance.now() - t0 < maxMs && todo.some((t) => { const f = this.library.track(t.id); return f && !f.analyzed && !f.unreadable; }) && this.analyser.running) await new Promise((r) => setTimeout(r, 300));
+          const left = todo.filter((t) => !this.library.track(t.id)?.analyzed).length;
+          if (left) this.toast(`${left} track(s) not analysed yet: smart mix uses the data it has for them`);
+        }
+      }
+      list = list.map((t) => this.library.track(t.id) || t); // analysed copies
+    }
+    try { await this.automix.start(list, opts); } catch (e) { this.toast(e.message); }
+  }
+
+  /** Automix queue: what plays next, with which transition style (overridable per transition) and why. */
+  toggleQueuePanel() {
+    if (this.queuePanel) { this.queuePanel.remove(); this.queuePanel = null; return; }
+    const a = this.automix;
+    const list = el('ol', { class: 'am-queue' });
+    const head = el('div', { class: 'am-queue-next' });
+    let lastKey = '';
+    const styleSelect = (i) => {
+      const t = a.queue[i], ov = a.overrides.get(t);
+      const s = el('select', { class: 'sel sm', 'data-q': i, title: 'Transition style into this track' },
+        el('option', { value: 'default' }, `Default (${STYLE_LABEL[a.opts.style === 'auto' ? 'auto' : a.opts.style] || STYLE_LABEL[{ phrase: 'blend', eqswap: 'bassswap' }[a.opts.style]] || a.opts.style})`),
+        ...STYLES.map(([v, l]) => el('option', { value: v }, l)));
+      s.value = ov || 'default';
+      s.addEventListener('change', () => a.setOverride(i, s.value));
+      return s;
+    };
+    const render = () => {
+      const nt = a.enabled ? a.nextTransition() : null;
+      const key = `${a.enabled}|${a.idx}|${a.queue.length}|${a.queue.slice(a.idx, a.idx + 50).map((t) => t.id).join()}|${[...a.overrides.values()].join()}|${a.opts.style}|${!!a.transition}`;
+      head.textContent = !a.enabled ? 'Automix is off' : a.transition ? `Mixing now: ${STYLE_LABEL[a.transition.style]}${a.transition.why ? ` (${a.transition.why})` : ''}`
+        : nt ? `Next transition: ${STYLE_LABEL[nt.style]} in ${fmtTime(nt.beginsIn).slice(0, 5)} — ${nt.why}` : 'No next track';
+      if (key === lastKey) return;
+      lastKey = key;
+      const rows = [];
+      for (let i = a.idx; i < Math.min(a.queue.length, a.idx + 50); i++) {
+        const t = a.queue[i], st = a.styleFor(i, i === a.idx ? (a.current?.track && this.library.track(a.current.track.id)) || a.current?.track : null);
+        rows.push(el('li', { class: 'am-q-item', 'data-id': t.id },
+          el('div', { class: 'am-q-title' }, `${t.artist ? t.artist + ' – ' : ''}${t.title}`),
+          el('div', { class: 'am-q-meta' }, styleSelect(i), el('span', { class: 'hint' }, ` ${STYLE_LABEL[st?.style] || ''}${a.reasons.get(t) ? ` · ${a.reasons.get(t)}` : ''}`)),
+          el('div', { class: 'am-q-acts' },
+            i > a.idx ? el('button', { class: 'btn xs', title: 'Play next', onclick: () => a.move(i, a.idx) }, '⤒') : null,
+            el('button', { class: 'btn xs', title: 'Remove from the queue', onclick: () => a.remove(i) }, '✕'))));
+      }
+      list.replaceChildren(...rows);
+      if (!rows.length) list.append(el('li', { class: 'hint' }, 'Nothing queued. Right-click tracks → Add to automix queue, or start automix on a playlist.'));
+    };
+    const panel = el('div', { class: 'am-queue-panel seq-panel', role: 'dialog', 'aria-label': 'Automix queue' },
+      el('div', { class: 'seq-head' }, el('b', {}, 'AUTOMIX QUEUE'),
+        el('button', { class: 'btn sm', onclick: () => a.skip(), title: 'Mix to the next track now' }, 'Mix now'),
+        el('button', { class: 'btn sm', onclick: () => this.toggleQueuePanel() }, '✕')),
+      head, list);
+    panel.render = render;
+    render();
+    document.body.append(panel);
+    this.queuePanel = panel;
   }
 
   toggleRecord() { return this.recording.toggle(); }

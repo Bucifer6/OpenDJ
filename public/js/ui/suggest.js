@@ -1,13 +1,15 @@
-// "Suggested next" scoring: how well a library track would mix out of the reference (master / playing) track.
-// Deliberately small and self-contained so a smarter scorer (e.g. a smart-mix module from automix) can replace it:
-// anything exporting suggestNext(ref, tracks, opts) with the same result shape works.
+// "Suggested next": how well a library track would mix out of the reference (master / playing) track.
+// Ranking uses smart mix's transition score (js/smartmix.js: harmonic relation, tempo, energy, genre, artist
+// variety) on top of a hard filter (beatmatchable within ±8 %, key known-compatible flagged); the local scorer
+// below remains as the fallback when smart mix can't score a pair.
 import { toCamelot, camelotCompatible } from '../audio/analysis-core.js';
+import { scoreTransition, styleWords, explain } from '../smartmix.js';
 
 /** Reference for scoring from a deck: { id, cam, bpm, energy, genre }. */
 export function refFromDeck(deck) {
   const t = deck?.track;
   if (!t) return null;
-  return { id: t.id, cam: deck.playingCamelot || toCamelot(t.key), bpm: deck.effectiveBpm || t.bpm || 0, energy: Number(t.energy) || 0, genre: (t.genre || '').toLowerCase() };
+  return { id: t.id, cam: deck.playingCamelot || toCamelot(t.key), bpm: deck.effectiveBpm || t.bpm || 0, energy: Number(t.energy) || 0, genre: (t.genre || '').toLowerCase(), track: t };
 }
 
 /** Score 0..1 (higher mixes better), or -1 when the track should not be suggested. */
@@ -28,13 +30,20 @@ export function scoreTrack(ref, t) {
 }
 
 /** Best `limit` tracks to play after `ref`: [{ track, score, keyMatch, bpmDelta }] (best first). */
+const words = (t) => { if (!t._words) Object.defineProperty(t, '_words', { value: styleWords(t), enumerable: false, configurable: true, writable: true }); return t; };
+
 export function suggestNext(ref, tracks, { limit = 10, exclude = new Set() } = {}) {
   if (!ref) return [];
+  // smart mix compares the playing key / tempo: a pitched or tempo-shifted deck is scored as heard
+  const cur = ref.track ? words({ ...ref.track, key: ref.cam || ref.track.key, bpm: ref.bpm || ref.track.bpm }) : null;
   const out = [];
   for (const t of tracks) {
     if (exclude.has(t.id)) continue;
-    const score = scoreTrack(ref, t);
-    if (score > 0.3) out.push({ track: t, score, keyMatch: !!(ref.cam && camelotCompatible(ref.cam, toCamelot(t.key))), bpmDelta: ref.bpm && t.bpm ? (t.bpm / ref.bpm - 1) * 100 : null });
+    const local = scoreTrack(ref, t);
+    if (local <= 0.3) continue; // not beatmatchable / missing / same track
+    let score = local, reason = '';
+    if (cur) { try { score = scoreTransition(cur, words(t)).score; reason = explain(cur, t); } catch { score = local; } }
+    out.push({ track: t, score, reason, keyMatch: !!(ref.cam && camelotCompatible(ref.cam, toCamelot(t.key))), bpmDelta: ref.bpm && t.bpm ? (t.bpm / ref.bpm - 1) * 100 : null });
   }
   return out.sort((a, b) => b.score - a.score).slice(0, limit);
 }

@@ -84,9 +84,9 @@ export function setupLibraryExtras(app) {
     stripTitle.replaceChildren(icon('sparkles'), el('span', {}, 'Next'));
     stripTitle.title = `Mixes well with ${ref.track.title || 'this track'} (deck ${ref.index + 1})`;
     if (!list.length) { cards.replaceChildren(el('div', { class: 'sg-empty' }, 'No close matches yet — analyse more tracks or widen your library.')); return; }
-    cards.replaceChildren(...list.map(({ track: t, keyMatch, bpmDelta }) => {
+    cards.replaceChildren(...list.map(({ track: t, keyMatch, bpmDelta, reason }) => {
       const cam = toCamelot(t.key);
-      const c = el('button', { class: 'sg-card', draggable: 'true', title: `${t.artist ? t.artist + ' – ' : ''}${t.title}\nClick: load onto the free deck · drag onto a deck` },
+      const c = el('button', { class: 'sg-card', draggable: 'true', title: `${t.artist ? t.artist + ' – ' : ''}${t.title}${reason ? `\n${reason}` : ''}\nClick: load onto the free deck · drag onto a deck` },
         el('span', { class: 'sg-art', style: { backgroundImage: `url(${api.coverUrl(t.id)})` } }),
         el('span', { class: 'sg-text' }, el('span', { class: 'sg-t' }, t.title || 'Untitled'), el('span', { class: 'sg-a' }, t.artist || '')),
         el('span', { class: 'sg-meta' },
