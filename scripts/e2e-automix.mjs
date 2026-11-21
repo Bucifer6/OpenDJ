@@ -286,6 +286,50 @@ try {
   check(true, 'playlist "Shuffle & mix" starts a shuffled automix');
   await page.evaluate(() => window.opendj.automix.stop());
 
+  // ================= E) local mode (mobile app backend, ?local=1): sampler, smart mix, media-server playlists =================
+  // bypassCSP stands in for the app's native networking (CapacitorHttp): the page CSP only allows 'self', so in a
+  // plain browser the on-device backend cannot reach a media server at all
+  const lctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, bypassCSP: true });
+  const lp = await lctx.newPage();
+  const lerr = [];
+  lp.on('pageerror', (e) => lerr.push(String(e)));
+  lp.on('console', (m) => { if (m.type() === 'error') lerr.push(m.text()); });
+  await lp.goto(app.url + '?local=1');
+  await lp.waitForFunction(() => window.opendj?.ready, null, { timeout: 30000 });
+  await lp.evaluate(() => window.opendj.engine.resume());
+  await lp.locator('.overlay.start button').click({ timeout: 1000 }).catch(() => {});
+  const wavs = [[124, 220], [126, 196], [125, 246.9]].map(([bpm, hz], i) => ({ name: `Local Artist ${i + 1} - Pocket ${i + 1}.wav`, b64: beatWav({ bpm, hz, seconds: 32 }).toString('base64') }));
+  await lp.evaluate(async (files) => {
+    const { api } = await import('/js/api.js');
+    for (const f of files) { const bin = Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0)); await api.upload(new File([bin], f.name, { type: 'audio/wav' })); }
+    await window.opendj.library.refresh();
+  }, wavs);
+  await lp.waitForFunction(() => window.opendj.library.tracks.size >= 3 && [...window.opendj.library.tracks.values()].every((t) => t.analyzed), null, { timeout: 120000 });
+  const lsamp = await lp.evaluate(async () => { const s = window.opendj.engine.sampler; await s.ready; return s.slots.every((x) => x.buffer) && s.slots[0].buffer.duration > 1; });
+  check(lsamp, 'local mode: sampler bank rendered');
+  await lp.evaluate(async () => { const a = window.opendj; await a.setSetting('automix', { ...a.settings.automix, style: 'auto', transitionBeats: 8 }); await a.startAutomix([...a.library.tracks.values()], { mode: 'smart', shape: 'rising' }); });
+  const lsm = await lp.evaluate(() => { const a = window.opendj.automix; return { on: a.enabled, mode: a.mode, n: a.queue.length, reason: a.reasons.get(a.queue[1]) }; });
+  check(lsm.on && lsm.mode === 'smart' && lsm.n === 3 && /BPM/.test(lsm.reason || ''), `local mode: smart mix running (${lsm.reason})`);
+  await lp.waitForFunction(() => { const a = window.opendj.automix, d = a.other(a.current), n = a.nextTrack(); return d.track?.id === n?.id && !d.loading; }, null, { timeout: 30000 });
+  const lidx = await lp.evaluate(() => { const a = window.opendj.automix; a.current.seek(Math.max(0, a.nextTransition().begin - 1)); return a.idx; });
+  await lp.waitForFunction((b) => { const a = window.opendj.automix; return a.idx > b && !a.transition && a.current.playing; }, lidx, { timeout: 40000 });
+  check(true, 'local mode: automix transition done');
+  await lp.evaluate(() => window.opendj.automix.stop());
+  const ladd = await lp.evaluate(async (url) => { const { api } = await import('/js/api.js'); return api.addSource({ type: 'subsonic', name: 'Phone Navi', url, username: 'dj', password: 'secret' }); }, sub.url);
+  check(ladd.source?.id, 'local mode: media server connected from the page');
+  await lp.evaluate(() => window.opendj.library.refresh());
+  await lp.waitForSelector('.tree-item[data-remote-pl="p1"]', { timeout: 20000 });
+  await lp.locator('.tree-item[data-remote-pl="p1"] .ti-act').click();
+  await lp.locator('.ctx-menu .ctx-item', { hasText: 'Shuffle & mix' }).click();
+  await lp.locator('.overlay button', { hasText: 'Start automix' }).click();
+  await lp.waitForFunction(() => window.opendj.automix.enabled && window.opendj.automix.mode === 'shuffle' && window.opendj.automix.current?.playing, null, { timeout: 60000 });
+  const lq = await lp.evaluate(() => window.opendj.automix.queue.map((t) => window.opendj.library.track(t.id)?.sourceType));
+  check(lq.length === 3 && lq.every((x) => x === 'remote'), 'local mode: media-server playlist "Shuffle & mix" plays the remote tracks');
+  await lp.evaluate(() => window.opendj.automix.stop());
+  const lbad = lerr.filter((e) => !/Failed to load resource/.test(e));
+  check(lbad.length === 0, `local mode: no console errors ${lbad.join(' | ')}`);
+  await lctx.close();
+
   const bad = errors.filter((e) => !/Failed to load resource/.test(e));
   check(bad.length === 0, `no console errors ${bad.join(' | ')}`);
   console.log('\nE2E AUTOMIX PASSED');

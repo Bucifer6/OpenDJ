@@ -26,6 +26,11 @@ function serve(handler) {
     for await (const c of req) body += c;
     const url = new URL(req.url, 'http://x');
     log.push({ method: req.method, path: url.pathname, query: url.searchParams, headers: req.headers, body });
+    // the mobile app's browser test mode (?local=1) talks to media servers straight from the page: allow CORS
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+    if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
     try {
       const out = (await handler(req, url, body)) || { status: 404, json: { error: 'not found' } };
       res.statusCode = out.status || 200;

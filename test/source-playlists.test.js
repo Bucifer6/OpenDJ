@@ -204,3 +204,33 @@ test('routes: a Jellyfin that answers HTTP 401 gives 400; an unreachable server 
   assert.equal(down.status, 502, down.text);
   assert.ok(app.library.getSource(sid));
 }));
+
+test('local mode (mobile app backend): same playlist routes, tracks mirrored, refused login -> 400 without auth query strings', async () => {
+  const mm = await import('music-metadata');
+  const { XMLParser } = await import('fast-xml-parser');
+  const { createLocalBackend } = await import('../public/js/local/backend.js');
+  const { MemoryFS } = await import('../public/js/local/storage/fs.js');
+  const { MemoryKV } = await import('../public/js/local/storage/kv.js');
+  const srv = await fakeSubsonic({ songs: SONGS, playlists: [{ id: 'p1', name: 'Warmup', songIds: ['s3', 's1'] }] });
+  closers.push(srv.close);
+  const b = await createLocalBackend({ kv: new MemoryKV(), fs: new MemoryFS(), mm, XMLParser, canPlayType: () => false, http: (u, i) => fetch(u, i), log: { error() {}, warn() {} } });
+  const call = async (method, url, body) => {
+    const r = await b.handle(method, url, { body: body === undefined ? undefined : JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
+    return { status: r.status, body: await r.json().catch(() => null) };
+  };
+  const add = await call('POST', '/api/sources', { type: 'subsonic', name: 'Navi', url: srv.url, username: 'dj', password: 'secret' });
+  assert.equal(add.status, 200, JSON.stringify(add.body));
+  const sid = add.body.source.id;
+  const list = await call('GET', `/api/sources/${sid}/playlists`);
+  assert.equal(list.status, 200, JSON.stringify(list.body));
+  assert.deepEqual(list.body.map((p) => [p.remoteId, p.name, p.trackCount]), [['p1', 'Warmup', 2]]);
+  const open = await call('GET', `/api/sources/${sid}/playlists/p1`);
+  assert.equal(open.status, 200, JSON.stringify(open.body));
+  assert.deepEqual(open.body.tracks.map((t) => [t.title, t.sourceType, t.sourceId]), [['Three', 'remote', sid], ['One', 'remote', sid]]);
+  assert.ok((await call('GET', '/api/playlists')).body.some((p) => p.id === open.body.playlist.id && p.remoteId === 'p1'));
+  assert.equal((await call('GET', `/api/sources/${sid}/playlists/nope`)).status, 404);
+  srv.state.refuse = true;
+  const r = await call('GET', `/api/sources/${sid}/playlists`);
+  assert.equal(r.status, 400);
+  assert.doesNotMatch(r.body.error, /[?&](t|s|p)=/);
+});
