@@ -125,8 +125,8 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     v('v-warm', R(knob({ label: 'WARMTH', min: 0, max: 1, def: 0, bipolar: false, size: 'sm', title: 'Warmth (2nd-harmonic saturation)', get: () => eng.warmth, set: (x) => eng.setWarmth(x) }))),
     v('v-booth', R(knob({ label: 'BOOTH', min: 0, max: 1, def: 0.8, bipolar: false, size: 'sm', title: 'Booth level', get: () => eng.boothVolume, set: (x) => { eng.ensureBooth(); eng.setBoothVolume(x); } }))),
     R(knob({ label: 'MASTER', min: 0, max: 1, def: 0.8, get: () => eng.masterVolume ?? 0.8, set: (v) => eng.setMasterVolume(v) })),
-    R(knob({ label: 'CUE/MST', min: 0, max: 1, def: 0, bipolar: false, get: () => eng.cueMix ?? 0, set: (v) => eng.setCueMix(v), size: 'sm', title: 'Headphone mix: cue ↔ master' })),
-    R(knob({ label: 'PHONES', min: 0, max: 1, def: 0.8, get: () => eng.hpVolume ?? 0.8, set: (v) => eng.setHeadphoneVolume(v), size: 'sm' })),
+    v('v-hp', R(knob({ label: 'CUE/MST', min: 0, max: 1, def: 0, bipolar: false, get: () => eng.cueMix ?? 0, set: (v) => eng.setCueMix(v), size: 'sm', title: 'Headphone mix: cue ↔ master' }))),
+    v('v-hp', R(knob({ label: 'PHONES', min: 0, max: 1, def: 0.8, get: () => eng.hpVolume ?? 0.8, set: (v) => eng.setHeadphoneVolume(v), size: 'sm' }))),
     R(knob({ label: 'SAMPLER', min: 0, max: 1, def: 0.8, get: () => eng.sampler.out.gain.value, set: (v) => eng.sampler.setVolume(v), size: 'sm' })),
     el('div', { class: 'mic-box' },
       R(button('MIC', { cls: 'xs mic-on', click: () => app.toggleMic(), active: () => eng.micOn, title: 'Microphone / aux input on/off' })),
@@ -242,6 +242,8 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     const side = (club.left.offsetWidth || 0) + (club.fx.offsetWidth || 0);
     const sw = (w - 16 - (master.offsetWidth || 110) - side - 6 * vis) / vis;
     root.classList.toggle('mx-w1', sw >= 88); root.classList.toggle('mx-w2', sw >= 128);
+    // Club Booth faceplate: narrow mixers move the beat FX unit to the drawer and keep mic / phones in MASTER
+    root.classList.toggle('mx-booth-narrow', w < 560); root.classList.toggle('mx-booth-short', h <= 520);
     lastW = w; lastH = h;
     placeTools();
   };

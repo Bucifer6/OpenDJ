@@ -27,7 +27,7 @@ body.skin-club-booth .club-left { border-right: 1px solid rgba(255,255,255,.08) 
 body.skin-club-booth .mixer .knob { background: radial-gradient(circle at 50% 50%, var(--booth-knob-cap) 0 38%, #8d939b 41%, var(--booth-knob-rubber) 46% 100%); box-shadow: 0 2px 5px rgba(0,0,0,.7), 0 0 0 1px #000; }
 body.skin-club-booth .mixer .knob-ind { background: #111; }
 /* strips: one knob column TRIM / HI / MID / LOW / COLOR, orange CUE with the channel number under it, long fader */
-:root body.skin-club-booth .mixer .strip { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+:root body.skin-club-booth .mixer:not(.mx-short) .strip { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 body.skin-club-booth .strip > .knob-wrap { order: 1; }
 body.skin-club-booth .strip > .btn-pfl { order: 6; }
 body.skin-club-booth .strip > .strip-num { order: 7; color: var(--booth-silk); }
@@ -45,7 +45,7 @@ body.skin-club-booth .ch-fader .fader-thumb { background: linear-gradient(180deg
 .club-title { font: 800 9px var(--mono); margin-top: 4px; text-align: center; white-space: nowrap; }
 .club-mini { font: 700 8px var(--mono); }
 .club-color-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; width: 100%; }
-.club-color-btn { padding: 3px 0; font-size: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.club-color-btn { padding: 3px 1px; font-size: 7.5px; letter-spacing: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .club-color-btn.active { background: color-mix(in srgb, var(--booth-cue, var(--accent)) 30%, #000) !important; border-color: var(--booth-cue, var(--accent)) !important; color: #fff !important; }
 .club-pair, .club-btns { display: flex; gap: 6px; justify-content: center; align-items: center; flex-wrap: wrap; }
 .club-btns .btn { padding: 2px 5px; font-size: 8.5px; }
@@ -60,6 +60,21 @@ body.skin-club-booth .club-left { flex-basis: 112px; }
 body.skin-club-booth .mixer-master { min-width: 118px; }
 :root body.skin-club-booth .mixer .strip .knob-sm { width: 28px; height: 28px; }
 :root body.skin-club-booth .mixer .strip .knob-md { width: 36px; height: 36px; }
-:root body.skin-club-booth .mixer .strip { gap: 2px; }
+:root body.skin-club-booth .mixer:not(.mx-short) .strip { gap: 2px; }
 :root body.skin-club-booth .mixer .strip .knob-wrap { gap: 0; }
-body.skin-club-booth .strip .fader-row { min-height: 120px; }
+body.skin-club-booth .mixer:not(.mx-short) .strip .fader-row { min-height: 120px; }
+:root body.skin-club-booth .mixer.mx-short .strip .knob-sm { width: 22px; height: 22px; }
+:root body.skin-club-booth .mixer.mx-short .strip .knob-md { width: 28px; height: 28px; }
+
+/* headphones and mic live in the left column of the faceplate; narrow mixers keep them in MASTER instead */
+body.skin-club-booth .mixer:not(.mx-booth-narrow) .mixer-master .v-hp, body.skin-club-booth .mixer:not(.mx-booth-narrow) .mixer-master .mic-box { display: none; }
+body.skin-club-booth .mixer.mx-booth-narrow .club-fx, body.skin-club-booth .mixer.mx-booth-narrow .club-mic, body.skin-club-booth .mixer.mx-booth-narrow .club-hp { display: none; }
+body.skin-club-booth .mixer.mx-booth-narrow .club-left { flex-basis: 96px; }
+/* short mixers: no curve row (curve is in the setup menu and the drawer), smaller faceplate knobs */
+body.skin-club-booth .mixer.mx-booth-short .club-curves { display: none; }
+body.skin-club-booth .mixer.mx-booth-short .club-col .knob-sm, body.skin-club-booth .mixer.mx-booth-short .club-master-extra .knob-sm { width: 22px; height: 22px; }
+body.skin-club-booth .mixer.mx-booth-short .club-col { gap: 3px; }
+body.skin-club-booth .mixer.mx-booth-short .club-title { margin-top: 1px; }
+body.skin-club-booth .mixer.mx-booth-short .club-master-extra .knob-xs { width: 18px; height: 18px; }
+body.skin-club-booth .mixer.mx-booth-short .club-bootheq { display: none; } /* (booth EQ stays in the drawer) */
+:root body.skin-club-booth .mixer-top, :root body.skin-club-booth .mixer-strips { gap: 2px; } /* one faceplate: dividers instead of gutters */
