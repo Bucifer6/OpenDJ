@@ -504,3 +504,7 @@ body:not(.four-decks) .mixer.mx-short .mixer-master > .strip-num, body:not(.four
 .lyr-kara .ico, .lyr-edit .ico { width: 13px; height: 13px; }
 .deck-load-note { font: 600 10.5px var(--mono); color: var(--accent); white-space: nowrap; }
 .deck-load-note:empty { display: none; }
+/* deck labels with a short form: shown only when the full word would be clipped (deck-ui fitLabels, QA p1) */
+.lbl-dual .ls { display: none; }
+.deck.short-labels .lbl-dual .lf { display: none; }
+.deck.short-labels .lbl-dual .ls { display: inline; }

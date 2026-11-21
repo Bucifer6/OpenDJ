@@ -110,6 +110,7 @@ const fit = (panels) => ev(async (panels) => {
       if (mid.scrollHeight > mid.clientHeight + 1) out.push(`${n} cut off by ${mid.scrollHeight - mid.clientHeight}px`);
       if (mid.scrollWidth > mid.clientWidth + 1) out.push(`${n} ${mid.scrollWidth - mid.clientWidth}px too wide`);
       if (d.scrollHeight > d.clientHeight + 1) out.push(`${n}: deck content ${d.scrollHeight - d.clientHeight}px taller than the deck`);
+      for (const b of d.querySelectorAll('.btn')) if (vis(b) && b.querySelector('.lbl-dual') && b.scrollWidth > b.clientWidth + 1) out.push(`${n}: label "${b.textContent.trim()}" clipped`);
       for (const p of d.querySelectorAll('.deck-panel')) if (vis(p) && p.scrollHeight > p.clientHeight + 1) out.push(`${n}: the ${p.dataset.panel} panel's content spills ${p.scrollHeight - p.clientHeight}px out of it`);
     }
   }

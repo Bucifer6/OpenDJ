@@ -17,6 +17,9 @@ const fmtBeats = (b) => (b = Math.round(b * 1000) / 1000, b >= 1 ? String(b) : b
 
 export function buildDeck(app, deck) {
   const i = deck.index, ch = app.engine.channels[i];
+  // labels with a short form for narrow decks (KEY LOCK -> KEY ...): the deck switches to them only when a full
+  // label would be clipped (checked when the control column resizes or the panel changes), so wide decks keep words
+  const dual = (full, short) => el('span', { class: 'lbl-dual' }, el('span', { class: 'lf' }, full), el('span', { class: 'ls' }, short));
   const renderers = [];
   const R = (c) => { if (c?.render) renderers.push(c); return c; };
   const shift = () => app.shift;
@@ -47,8 +50,8 @@ export function buildDeck(app, deck) {
   const syncBtn = R(button('SYNC', { cls: 'btn-sync', click: () => deck.sync(), active: () => deck.syncOn }));
   const masterBtn = R(button('MASTER', { cls: 'btn-master', click: () => deck.setMaster(), active: () => deck.isMaster }));
   const toggles = el('div', { class: 'deck-toggles' },
-    R(button('KEY LOCK', { cls: 'sm', click: () => deck.setKeyLock(!deck.keyLock), active: () => deck.keyLock, title: 'Master tempo: change tempo without changing pitch' })),
-    R(button('QUANT', { cls: 'sm', click: () => deck.setQuantize(!deck.quantize), active: () => deck.quantize, title: 'Snap cues, loops and jumps to the beat grid' })),
+    R(button(dual('KEY LOCK', 'KEY'), { cls: 'sm', click: () => deck.setKeyLock(!deck.keyLock), active: () => deck.keyLock, title: 'Master tempo: change tempo without changing pitch' })),
+    R(button(dual('QUANT', 'QNT'), { cls: 'sm', click: () => deck.setQuantize(!deck.quantize), active: () => deck.quantize, title: 'Snap cues, loops and jumps to the beat grid' })),
     R(button('SLIP', { cls: 'sm', click: () => deck.setSlip(!deck.slip), active: () => deck.slip, title: 'Slip mode: track continues silently under loops, scratches and reverse' })),
     R(button('REV', { cls: 'sm', click: () => deck.setReverse(!deck.reverse), active: () => deck.reverse })),
     R(button('VINYL', { cls: 'sm', click: () => { deck.vinylMode = !deck.vinylMode; }, active: () => deck.vinylMode, title: 'Vinyl mode: touching the platter scratches' })),
@@ -88,7 +91,7 @@ export function buildDeck(app, deck) {
   const loopRow = el('div', { class: 'loop-row' },
     R(button('IN', { cls: 'sm', click: () => deck.loopInPress(), active: () => deck.loopIn != null && !deck.loop?.active })),
     R(button('OUT', { cls: 'sm', click: () => deck.loopOutPress() })),
-    R(button('RELOOP', { cls: 'sm', click: () => deck.reloop(), active: () => deck.loop?.active })),
+    R(button(dual('RELOOP', 'RELP'), { cls: 'sm', click: () => deck.reloop(), active: () => deck.loop?.active, title: 'Reloop / exit loop' })),
     button('½', { cls: 'sm', click: () => { if (deck.loop?.active) deck.loopHalve(); else { autoLoopBeats = Math.max(1 / 8, autoLoopBeats / 2); } } }),
     R(button(loopSize, { cls: 'sm loop-btn', click: () => deck.autoLoop(autoLoopBeats), active: () => deck.loop?.active, title: 'Auto beat loop' })),
     button('×2', { cls: 'sm', click: () => { if (deck.loop?.active) deck.loopDouble(); else { autoLoopBeats = Math.min(64, autoLoopBeats * 2); } } }),
@@ -97,7 +100,7 @@ export function buildDeck(app, deck) {
   const jumpLabel = el('span', {}, '4');
   const jumpRow = el('div', { class: 'loop-row jump-row' },
     button(icon('rewind'), { cls: 'sm', click: () => deck.beatJump(-jumpBeats), title: 'Beat jump back' }),
-    button(el('span', {}, 'JUMP ', jumpLabel), { cls: 'sm', click: () => { jumpBeats = jumpBeats >= 32 ? 1 : jumpBeats * 2; jumpLabel.textContent = jumpBeats; } }),
+    button(el('span', {}, dual('JUMP ', 'J'), jumpLabel), { cls: 'sm', title: 'Beat jump size (beats)', click: () => { jumpBeats = jumpBeats >= 32 ? 1 : jumpBeats * 2; jumpLabel.textContent = jumpBeats; } }),
     button(icon('fast-forward'), { cls: 'sm', click: () => deck.beatJump(jumpBeats), title: 'Beat jump forward' }),
     button('MEM', { cls: 'sm', click: () => deck.addMemoryCue(), title: 'Add memory cue' }),
     button('GRID', { cls: 'sm', click: () => app.dialogs.gridEditor(deck), title: 'Edit beat grid' }),
@@ -237,6 +240,12 @@ export function buildDeck(app, deck) {
     for (const [k, p] of Object.entries(panelBodies)) p.classList.toggle('shown', k === id);
   };
   deck.showPanel = showPanel;
+  const fitLabels = () => {
+    root.classList.remove('short-labels');
+    const over = [...root.querySelectorAll('.lbl-dual')].some((x) => { const b = x.closest('.btn'); return b && b.offsetParent && b.scrollWidth > b.clientWidth + 1; });
+    root.classList.toggle('short-labels', over);
+  };
+  let fitRaf = 0; const fitSoon = () => { if (!fitRaf) fitRaf = requestAnimationFrame(() => { fitRaf = 0; fitLabels(); }); };
 
   // ---------- assemble ----------
   const root = el('section', { class: 'deck empty', 'data-deck': i, style: { '--deck-color': DECK_COLORS[i] } },
@@ -258,6 +267,7 @@ export function buildDeck(app, deck) {
     ),
   );
   showPanel('cues');
+  { const mid = root.querySelector('.deck-mid'); new ResizeObserver(fitSoon).observe(mid); for (const t of panelTabs.children) t.addEventListener('click', fitSoon); window.addEventListener('opendj-theme', () => requestAnimationFrame(fitSoon)); }
 
   // drag & drop tracks onto a deck
   root.addEventListener('dragover', (e) => { e.preventDefault(); root.classList.add('drop'); });

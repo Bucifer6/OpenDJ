@@ -252,7 +252,9 @@ export class LibraryUI {
   // ---------------- DOM ----------------
   build() {
     this.tree = el('nav', { class: 'lib-tree' });
-    this.search = el('input', { class: 'lib-search', type: 'search', placeholder: 'Search…  (try bpm:120-128  key:8A  genre:house)' });
+    this.search = el('input', { class: 'lib-search', type: 'search', placeholder: 'Search…  (try bpm:120-128  key:8A  genre:house)', title: 'Search title, artist, album, genre, tags; filters: bpm:120-128  key:8A  genre:house' });
+    // a narrow search box gets the short placeholder instead of a cut-off hint ("Search… (try l")
+    new ResizeObserver((es) => { const w = es.at(-1).contentRect.width; this.search.placeholder = w < 330 ? 'Search…' : 'Search…  (try bpm:120-128  key:8A  genre:house)'; }).observe(this.search);
     let tmr; this.search.addEventListener('input', () => { clearTimeout(tmr); tmr = setTimeout(() => { this.query = this.search.value; this.applyView(); }, 120); });
     this.countEl = el('span', { class: 'lib-count' });
     this.viewTitle = el('span', { class: 'lib-view-title' }, 'Collection');
