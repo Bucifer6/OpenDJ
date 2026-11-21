@@ -9,7 +9,7 @@ const knobToDb = (v) => (v >= 0 ? v * 6 : v <= -0.98 ? -60 : v * 26); // EQ knob
 /** Value range of each continuous channel control (knobs, faders, MIDI, automation are clamped to it). */
 const CHANNEL_LIMITS = { trim: [-1, 1], eqHigh: [-1, 1], eqMid: [-1, 1], eqLow: [-1, 1], filter: [-1, 1], volume: [0, 1], fxMix: [0, 1], fxParam: [0, 1], vocal: [0, 1], inst: [0, 1] };
 
-class Channel extends Emitter {
+export class Channel extends Emitter {
   constructor(engine, index) {
     super();
     const ctx = this.ctx = engine.ctx; this.engine = engine; this.index = index;
