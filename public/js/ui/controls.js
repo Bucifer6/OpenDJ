@@ -1,5 +1,5 @@
 // Reusable hardware-style controls. All are "controlled": they render from get() and call set(v).
-import { el, clamp } from '../util.js';
+import { el, clamp, uiZoom } from '../util.js';
 import { cssVar } from './themes.js';
 import { smoothTime } from './clock.js';
 
@@ -149,7 +149,8 @@ export function jogWheel(deck) {
   // The platter body (rim, grooves, light sheen) is static: render it once per size/theme into a bitmap and only draw
   // the moving parts (marker, progress ring, centre label) per frame. Frames where nothing changed are skipped.
   let touched = false, size = 0, body = null, sig = '', deckColor = null;
-  const ro = new ResizeObserver(() => { size = 0; });
+  let roW = 0; // platter size from the observer entry (no layout read in the draw)
+  const ro = new ResizeObserver((es) => { roW = es.at(-1).contentRect.width * uiZoom(); size = 0; });
   ro.observe(canvas);
   window.addEventListener('opendj-theme', () => { body = null; deckColor = null; sig = ''; });
   const renderBody = (W) => {
@@ -181,8 +182,8 @@ export function jogWheel(deck) {
   };
   root.draw = (now = performance.now()) => {
     if (!size) {
-      const r = canvas.getBoundingClientRect();
-      size = Math.max(64, Math.min(1024, Math.round(r.width * (devicePixelRatio || 1)))) || 360;
+      const w = roW || canvas.getBoundingClientRect().width;
+      size = Math.max(64, Math.min(1024, Math.round(w * (devicePixelRatio || 1)))) || 360;
       if (canvas.width !== size) { canvas.width = size; canvas.height = size; body = null; sig = ''; }
     }
     const W = canvas.width, c = W / 2, R = c - W * 0.012;

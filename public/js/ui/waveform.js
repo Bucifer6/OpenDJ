@@ -4,7 +4,7 @@
 // fixed-width tiles (offscreen canvases at device resolution); each frame just blits the visible tiles at the
 // interpolated play position and draws the thin overlays (grid, cues, playhead) on top. A frame where nothing moved
 // is skipped entirely. Tempo changes scale the blit instead of re-rendering, so beat spacing stays stable.
-import { el, clamp } from '../util.js';
+import { el, clamp, uiZoom } from '../util.js';
 import { cssVar } from './themes.js';
 import { smoothTime } from './clock.js';
 
@@ -97,7 +97,9 @@ export class DetailWaveform {
     const up = () => { if (last?.scratch) this.deck.jogRelease(); last = null; };
     for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) this.canvas.addEventListener(ev, up);
     // size from a ResizeObserver instead of reading layout every frame (contentRect is in layout px: zoom-safe)
-    this.ro = new ResizeObserver(() => { this.cw = 0; });
+    // (the size comes from the observer entry: reading it back with getBoundingClientRect in the next frame forced a
+    // layout per canvas after a layout switch, 10-20 forced layouts in one 50-90 ms task)
+    this.ro = new ResizeObserver((es) => { const r = es.at(-1).contentRect, z = uiZoom(); this.cw = r.width * z; this.ch = r.height * z; });
     this.ro.observe(this.canvas);
   }
 
@@ -234,7 +236,7 @@ export class OverviewWaveform {
     this.canvas.addEventListener('pointerdown', (e) => { down = true; this.canvas.setPointerCapture(e.pointerId); seek(e); });
     this.canvas.addEventListener('pointermove', (e) => { if (down) seek(e); });
     for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) this.canvas.addEventListener(ev, () => { down = false; });
-    this.ro = new ResizeObserver(() => { this.cw = 0; });
+    this.ro = new ResizeObserver((es) => { const r = es.at(-1).contentRect, z = uiZoom(); this.cw = r.width * z; this.ch = r.height * z; });
     this.ro.observe(this.canvas);
   }
   renderCache(W, H, played) {

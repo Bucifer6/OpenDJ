@@ -1,4 +1,4 @@
-import { el, fmtTime } from '../util.js';
+import { el, fmtTime, uiZoom } from '../util.js';
 import { knob, fader, button, jogWheel } from './controls.js';
 import { OverviewWaveform } from './waveform.js';
 import { EFFECTS, BEAT_DIVISIONS, effectParams, effectBeats } from '../audio/effects.js';
@@ -190,7 +190,7 @@ export function buildDeck(app, deck) {
   // ---------- phase meter (beat position in the bar + offset vs master) ----------
   const phase = el('canvas', { class: 'phase-meter', height: 12 });
   let phaseW = 0, phaseSig = '';
-  new ResizeObserver(() => { phaseW = 0; }).observe(phase);
+  new ResizeObserver((es) => { phaseW = es.at(-1).contentRect.width * uiZoom(); }).observe(phase);
   window.addEventListener('opendj-theme', () => { phaseSig = ''; });
   const drawPhase = () => {
     const dpr = devicePixelRatio || 1;

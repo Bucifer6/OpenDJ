@@ -1,4 +1,4 @@
-import { el } from '../util.js';
+import { el, uiZoom } from '../util.js';
 import { knob, fader, button } from './controls.js';
 import { DECK_COLORS } from './deck-ui.js';
 import { cssVar } from './themes.js';
@@ -13,13 +13,14 @@ function vuMeter() {
   const g = c.getContext('2d');
   const SEGS = 20;
   let level = 0, held = 0, heldT = 0, lastT = 0, sig = '', dirty = true;
-  const ro = new ResizeObserver(() => { dirty = true; });
+  let box = null;
+  const ro = new ResizeObserver((es) => { const r = es.at(-1).contentRect, z = uiZoom(); box = { width: r.width * z, height: r.height * z }; dirty = true; });
   ro.observe(c);
   window.addEventListener('opendj-theme', () => { sig = ''; });
   c.draw = (peak, now = performance.now()) => {
     if (dirty) {
       dirty = false;
-      const r = c.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+      const r = box || c.getBoundingClientRect(), dpr = devicePixelRatio || 1;
       const W = Math.max(2, Math.round(r.width * dpr)), H = Math.max(10, Math.round(r.height * dpr));
       if (c.width !== W || c.height !== H) { c.width = W; c.height = H; sig = ''; }
     }
