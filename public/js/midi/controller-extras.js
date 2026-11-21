@@ -5,8 +5,8 @@
 //     incoming track, the basslines swap in the middle, and the levels follow the crossfader. SHIFT (or `smart.faderAuto`)
 //     runs it automatically: the other deck starts on the next bar, beat-synced, and the crossfader moves over 16 beats.
 //     The mixer's SMART button (next to the crossfader) uses the same functions.
-//   - SMART CFX: the channels' filter knobs play a Color FX preset instead of the plain filter; FX SELECT picks it.
-//     (The same Color FX the mixer's Color FX selector sets.)
+//   - SMART CFX: the channels' filter knobs switch between the plain filter and the last Color FX picked (the mixer's
+//     Color FX selector, or FX SELECT = mixer.colorFx.prev / next from mixer-targets.js)
 //   - DECK SELECT layers: the two deck sides of a 2-deck controller switch to decks 3 / 4 (`deckSelect.left` /
 //     `deckSelect.right`, or Settings → Controllers in 4-deck mode). midi.js routes deck1/mixer1 targets to deck3/mixer3
 //     (and 2 to 4) while a layer is switched.
@@ -19,8 +19,6 @@ const UI_MODE = { hotcue: 'hotcue', padfx: 'fx', loop: 'roll', sampler: 'sampler
 export const PAD_FX = ['brake', 'backspin', 'censor', 'echoOut', 'roll1', 'roll2', 'filterSweep', 'tapeStop'];
 const PAD_FX_LABELS = ['Brake', 'Backspin', 'Censor', 'Echo out', 'Roll ¼', 'Roll ⅛', 'Filter sweep', 'Tape stop'];
 export const LOOP_PADS = [1 / 4, 1 / 2, 1, 2, 4, 8, 16, 32];
-/** Smart CFX presets: Color FX ids from audio/effects.js (filter = the plain filter). */
-export const SMART_CFX = ['filter', 'space', 'dubecho', 'crush', 'noise', 'pitch'];
 
 const fmtBeats = (b) => (b >= 1 ? String(b) : `1/${Math.round(1 / b)}`);
 const notify = () => { if (typeof window !== 'undefined') window.dispatchEvent(new Event('opendj-ctl')); };
@@ -31,7 +29,7 @@ export function ctlState(app) {
     app.ctl = {
       padMode: [null, 'hotcue', 'hotcue', 'hotcue', 'hotcue'], // by deck number
       held: [null, new Set(), new Set(), new Set(), new Set()], // Pad FX pads held (LEDs)
-      smartFader: false, smartCfx: false, cfxPreset: 1, masterCue: false, auto: null,
+      smartFader: false, lastColorFx: 'space', masterCue: false, auto: null,
       layer: [0, 1], // DECK SELECT: deck index the left / right side of a 2-deck controller drives
     };
   }
@@ -164,12 +162,15 @@ export function smartAutoTransition(app, beats = 16) {
 }
 
 // ---------- SMART CFX ----------
-export function setSmartCfx(app, on, preset) {
-  const st = ctlState(app);
-  if (preset != null) st.cfxPreset = ((preset % SMART_CFX.length) + SMART_CFX.length) % SMART_CFX.length;
-  st.smartCfx = !!on;
-  const id = st.smartCfx ? SMART_CFX[st.cfxPreset] : 'filter';
+/** Is a Color FX (not the plain filter) on the filter knobs? */
+export const smartCfxOn = (app) => (app.engine.channels[0]?.state.colorFx || 'filter') !== 'filter';
+/** SMART CFX: plain filter <-> the last Color FX used, on every channel (like the mixer's Color FX selector). */
+export function setSmartCfx(app, on) {
+  const st = ctlState(app), cur = app.engine.channels[0]?.state.colorFx || 'filter';
+  if (cur !== 'filter') st.lastColorFx = cur;
+  const id = on ? st.lastColorFx || 'space' : 'filter';
   for (const ch of app.engine.channels) if (ch.state.colorFx !== id) ch.set('colorFx', id);
+  app.setSetting?.('colorFx', id);
   notify();
 }
 
@@ -205,8 +206,6 @@ export function controllerTargets(app, existing = new Set()) {
   add('master.cue', 'Master cue (hear the master in headphones)', 'button', (down) => down && setMasterCue(app, !st.masterCue), () => st.masterCue);
   add('smart.fader', 'Smart Fader on/off (crossfader blends BPM, bass and levels; SHIFT: auto transition)', 'button', (down) => down && (app.shift ? smartAutoTransition(app) : setSmartFader(app, !st.smartFader)), () => st.smartFader || !!st.auto);
   add('smart.faderAuto', 'Smart Fader: automatic 16-beat transition', 'button', (down) => down && smartAutoTransition(app), () => !!st.auto);
-  add('smart.cfx', 'Smart CFX on/off (filter knobs play a Color FX preset)', 'button', (down) => down && setSmartCfx(app, !st.smartCfx), () => st.smartCfx);
-  add('smart.cfxNext', 'Smart CFX: next preset (FX SELECT ▶)', 'button', (down) => down && setSmartCfx(app, true, st.cfxPreset + 1), () => st.smartCfx);
-  add('smart.cfxPrev', 'Smart CFX: previous preset (◀ FX SELECT)', 'button', (down) => down && setSmartCfx(app, true, st.cfxPreset - 1), () => st.smartCfx);
+  add('smart.cfx', 'Smart CFX on/off (filter knobs: plain filter or the last Color FX)', 'button', (down) => down && setSmartCfx(app, !smartCfxOn(app)), () => smartCfxOn(app));
   return T;
 }

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { MidiManager, buildTargets, buildStates } from '../public/js/midi/midi.js';
 import { PRESETS } from '../public/js/midi/presets.js';
 import { FLX2_PRESET, FLX2_MATCH, FLX2_PAD_BANKS, FLX2_PAD_CH } from '../public/js/midi/mappings/ddj-flx2.js';
-import { ctlState, setPadMode, setSmartCfx, setSmartFader, setDeckLayer, routeTarget, SMART_CFX } from '../public/js/midi/controller-extras.js';
+import { ctlState, setPadMode, setSmartCfx, setSmartFader, setDeckLayer, routeTarget } from '../public/js/midi/controller-extras.js';
 
 function fakeApp() {
   const calls = [];
@@ -63,7 +63,7 @@ test('FLX2: chart-cited facts', () => {
   assert.equal(t('note:0:88'), 'deck1.sync'); assert.equal(t('note:0:42'), 'deck1.master'); assert.equal(by.get('note:0:42').ledKey, 'note:0:120'); assert.equal(t('note:0:92'), 'deck1.ctlPadModeSelect');
   assert.equal(t('note:0:54'), 'deck1.jogTouch'); assert.equal(t('note:0:103'), 'deck1.jogTouch');
   assert.equal(t('note:6:99'), 'master.cue'); assert.equal(t('note:6:1'), 'smart.fader'); assert.equal(t('note:6:9'), 'smart.faderAuto'); assert.equal(t('note:6:0'), 'smart.cfx');
-  assert.equal(t('note:0:8'), 'smart.cfxPrev'); assert.equal(t('note:1:8'), 'smart.cfxNext');
+  assert.equal(t('note:0:8'), 'mixer.colorFx.prev'); assert.equal(t('note:1:8'), 'mixer.colorFx.next');
   assert.deepEqual([0, 5, 1, 3].map((n) => t(`note:0:${n}`)), ['deck1.ctlPadMode.hotcue', 'deck1.ctlPadMode.padfx', 'deck1.ctlPadMode.loop', 'deck1.ctlPadMode.sampler']);
   assert.equal(by.get('cc:0:0').lsbKey, 'cc:0:32'); assert.ok(!by.get('cc:0:0').invert, 'tempo: 0x00 is the − end (not inverted)');
   assert.equal(by.get('cc:6:23').lsbKey, 'cc:6:55'); assert.equal(by.get('cc:0:7').lsbKey, 'cc:0:39'); assert.equal(by.get('cc:6:8').lsbKey, 'cc:6:40'); assert.equal(t('note:0:63'), 'global.shift'); assert.equal(t('note:1:63'), 'global.shift');
@@ -142,8 +142,10 @@ test('FLX2: LEDs follow state for pads, transport, sync, pad modes and cue butto
 
 test('Smart CFX and Smart Fader', () => {
   const { app, channels, engine, decks } = fakeApp();
-  setSmartCfx(app, true, 2);
-  assert.ok(channels.every((c) => c.state.colorFx === SMART_CFX[2]));
+  channels.forEach((c) => c.set('colorFx', 'dubecho')); setSmartCfx(app, false);
+  assert.ok(channels.every((c) => c.state.colorFx === 'filter'));
+  setSmartCfx(app, true);
+  assert.ok(channels.every((c) => c.state.colorFx === 'dubecho'), 'SMART CFX brings back the last Color FX');
   setSmartCfx(app, false);
   assert.ok(channels.every((c) => c.state.colorFx === 'filter'));
   decks[0].playing = true;

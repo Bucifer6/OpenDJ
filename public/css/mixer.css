@@ -1,0 +1,122 @@
+/* Mixer v2 layout: strips fill the width edge to edge, the crossfader owns the bottom row, setup dropdowns sit in the
+   MASTER column's free space (or a compact row above the crossfader when MASTER has none). Width classes .mx-w1 /
+   .mx-w2 are set by mixer-ui.js from the strip width (no container queries: they re-ran style on every frame). */
+.mixer-strips { justify-content: stretch; gap: 6px; }
+.mixer-top { gap: 6px; }
+.strip { flex: 1 1 0; max-width: none; min-width: 0; }
+.mixer-master { flex: 0 1 auto; min-width: 0; }
+.mixer-master > .mixer-tools { grid-column: 1 / -1; align-self: end; }
+
+/* setup dropdowns in the MASTER column */
+.mixer-tools { display: flex; flex-direction: column; gap: 4px; width: 0; min-width: 100%; /* never widens MASTER */ margin-top: auto; padding-top: 6px; border-top: 1px solid var(--line); }
+.mixer-tools .sel { width: 100%; min-width: 0; padding-left: 4px; padding-right: 2px; }
+.mixer-tools .mixer-eq-preset { flex: none; width: 100%; }
+.mixer-tools-pair { display: flex; gap: 4px; min-width: 0; }
+.mixer-tools-pair .sel { flex: 1 1 auto; }
+.mixer-adv-btn { flex: 0 0 auto; padding: 1px 7px; font-size: 13px; line-height: 1; }
+.mixer-adv-btn[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+/* ... or the row above the crossfader */
+.mixer-tools-row { display: none; }
+.mixer.tools-row .mixer-tools-row { display: block; }
+.mixer-tools-row .mixer-tools { flex-direction: row; width: 100%; margin: 0; padding: 0; border: 0; }
+.mixer-tools-row .mixer-tools > * { flex: 1 1 0; min-width: 0; }
+.mixer-tools-row .mixer-tools-pair { flex: 1.2 1 0; }
+
+/* full-width crossfader with real travel */
+.xfader-row { display: block; }
+.xfader-control { display: flex; align-items: center; gap: 10px; min-width: 0; width: 100%; }
+.xfader-control .crossfader { flex: 1 1 auto; min-width: 0; width: auto; }
+.mixer .crossfader { --cap: 30px; }
+.mixer .crossfader .fader-thumb { width: var(--cap); } /* (the cap is placed with --cap: width and travel must agree) */
+
+/* wider strips: bigger knobs, wider meters and fader caps, longer fader */
+.mixer.mx-w1:not(.mx-tiny) .strip .knob-sm { width: 28px; height: 28px; }
+.mixer.mx-w1:not(.mx-tiny) .strip .knob-md { width: 34px; height: 34px; }
+.mixer.mx-w1:not(.mx-short) .strip .knob-sm { width: 30px; height: 30px; }
+.mixer.mx-w1:not(.mx-short) .strip .knob-md { width: 36px; height: 36px; }
+.mixer.mx-w1 .strip .vu { width: 8px; }
+.mixer.mx-w1 .ch-fader .fader-track { width: 34px; }
+.mixer.mx-w1 .ch-fader { --cap: 18px; }
+.mixer.mx-w1 .fader-row { gap: 6px; }
+.mixer.mx-w2:not(.mx-short) .strip .knob-sm { width: 36px; height: 36px; }
+.mixer.mx-w2:not(.mx-short) .strip .knob-md { width: 44px; height: 44px; }
+.mixer.mx-w2 .strip .vu { width: 10px; }
+.mixer.mx-w2 .ch-fader .fader-track { width: 40px; }
+.mixer.mx-w2 .strip .xf-assign .btn { padding: 2px 8px; }
+.four-decks .mixer-strips, .four-decks .mixer-top { gap: 4px; }
+
+/* ---------- personality / config variants (Club: none, today's look) ---------- */
+.mixer .mxv.v-eq4, .mixer .mxv.v-sculpt, .mixer .mxv.v-dual, .mixer .mxv.v-comp, .mixer .mxv.v-rotary, .mixer .mxv.v-iso, .mixer .mxv.v-warm, .mixer .mxv.v-booth, .mixer .mxv.v-rev { display: none; }
+.mixer.mx-eq4 .mxv.v-eq4, .mixer.mx-sculpt .mxv.v-sculpt, .mixer.mx-dual .mxv.v-dual, .mixer.mx-comp .mxv.v-comp, .mixer.mx-iso .mxv.v-iso, .mixer.mx-warm .mxv.v-warm, .mixer.mx-booth .mxv.v-booth { display: flex; }
+.mixer.mx-rev .mxv.v-rev { display: inline-flex; }
+.mixer.mx-eq4 .mxv.v-mid, .mixer.mx-dual .mxv.v-filter, .mixer.mx-nocolor .mixer-color { display: none; }
+.mixer.mx-dual.mx-nocolor .mxv.v-filter { display: none; }
+.mixer.mx-rotary .mxv.v-rotary { display: flex; align-self: center; }
+.mixer.mx-rotary .mxv.v-fader { display: none; }
+.mixer.mx-noxf .xfader-row, .mixer.mx-noxf .xf-assign { display: none; }
+.master-iso { flex-direction: row; gap: 4px; justify-content: center; flex-wrap: wrap; grid-column: 1 / -1; }
+.xf-rev { flex: 0 0 auto; padding: 1px 5px; font-size: 9px; }
+.xf-rev.active { background: var(--amber); border-color: var(--amber); color: #000; }
+.gr-led { width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--meter-clip, #f33) 18%, #000); align-self: flex-start; box-shadow: inset 0 0 0 1px rgba(0,0,0,.5); }
+.gr-led.on { background: var(--meter-clip, #f33); box-shadow: 0 0 6px var(--meter-clip, #f33); }
+
+/* ---------- advanced drawer: over the mixer (desktop / tablet), bottom sheet on phones ---------- */
+.mixer { position: relative; }
+.mixer-drawer { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-lg); box-shadow: var(--elev-2, 0 8px 24px rgba(0,0,0,.6)); overflow: hidden; }
+.mixer-drawer[hidden] { display: none; }
+.adv-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.adv-title { font-weight: 800; font-size: var(--fs-xs); letter-spacing: .06em; text-transform: uppercase; color: var(--text-2); }
+.adv-pers { flex: 1 1 90px; min-width: 0; }
+.adv-pstate { font-size: 10px; color: var(--amber); }
+.adv-close { margin-left: auto; }
+.adv-tabs { display: flex; gap: 2px; padding: 4px 6px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.adv-tab { flex: 1 1 auto; padding: 3px 4px; font-size: 10px; }
+.adv-tab.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.adv-body { flex: 1; overflow: auto; padding: 6px 8px 10px; }
+.adv-sec { border: 1px solid var(--line); border-radius: var(--radius); padding: 6px; margin-bottom: 6px; background: var(--deep); }
+.adv-sec-t { font: 800 10px var(--mono); color: var(--text-2); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 4px; }
+.adv-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 2px 0; font-size: 11px; }
+.adv-row .sel { max-width: 62%; min-width: 0; }
+.adv-lbl { color: var(--text-2); font-size: 10.5px; }
+.adv-knobs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 2px 0; }
+.adv-tgl.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.adv-note { font-size: 10px; color: var(--text-3); margin-top: 3px; }
+.adv-ch { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; padding: 3px 0; border-top: 1px solid var(--line); }
+.adv-ch:first-of-type { border-top: 0; }
+.adv-chn { font: 800 11px var(--mono); width: 14px; color: var(--text-2); }
+.adv-ch .sel { width: 74px; }
+.adv-bands { width: 60px; height: 24px; background: var(--wave-bg); border-radius: 3px; }
+.adv-glyph { width: 96px; height: 40px; background: var(--wave-bg); border-radius: 4px; }
+.fx-strip { display: flex; margin-top: 6px; height: 34px; border-radius: 6px; border: 1px solid var(--line-2); background: linear-gradient(180deg, var(--panel-3), var(--deep)); touch-action: none; user-select: none; cursor: pointer; overflow: hidden; }
+.fx-strip span { flex: 1; display: flex; align-items: center; justify-content: center; font: 700 10px var(--mono); color: var(--text-2); border-left: 1px solid var(--line); }
+.fx-strip span:first-child { border-left: 0; }
+.fx-strip.held { border-color: var(--accent); box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 40%, transparent); }
+.loud-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; }
+.loud-cell { background: var(--wave-bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px; text-align: center; }
+.loud-k { font: 800 10px var(--mono); color: var(--text-3); }
+.loud-v { font: 800 20px var(--mono); color: var(--text); }
+.loud-u { font-size: 9px; color: var(--text-3); }
+:root.compact .mixer-drawer { position: fixed; inset: auto 0 0 0; max-height: 70vh; border-radius: 14px 14px 0 0; z-index: 60; }
+
+/* ---------- personality suggestion chip ---------- */
+.mixer-chip { position: absolute; left: 8px; right: 8px; top: 4px; z-index: 20; display: flex; gap: 4px; align-items: center; justify-content: center; padding: 3px; background: color-mix(in srgb, var(--panel) 92%, transparent); border: 1px solid var(--accent); border-radius: 999px; font-size: 10px; }
+.mixer-chip[hidden] { display: none; }
+.mixer-chip .chip-apply { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root.compact .mixer-master { min-width: 84px; }
+/* the mic box (MIC, level, TALK, MC) wraps instead of widening MASTER */
+.mixer .mixer-master > .mic-box { width: 0; min-width: 100%; flex-wrap: wrap; justify-content: center; gap: 3px; }
+.mixer-master > .mic-box .btn { padding: 2px 4px; min-width: 0; }
+.mixer-master > .mic-box .knob-wrap .knob-label { display: none; }
+:root:not(.compact) body:not(.four-decks) .mixer-master { min-width: 118px; }
+.adv-row .mixer-eq-preset { flex: 0 1 auto; width: auto; max-width: 62%; }
+.mixer-tools-pair .mixer-color { flex: 1 1 0; } .mixer-tools-pair .mixer-curve { flex: 1 1 0; }
+.mixer-tools-pair .mixer-eq-model { flex: 1 1 auto; min-width: 0; }
+.mixer-tools .sel.tiny { padding-left: 3px; padding-right: 0; font-size: 10px; }
+/* meters never size their row: the canvas buffer is resized from the element's size (ResizeObserver), so an intrinsic
+   size from the buffer would grow the strip on every resize where the row height is content-sized (phones) */
+.mixer canvas.vu { contain: size; }
+:root.compact .mixer .strip .fader-row { flex: none; height: 220px; } /* definite: the meter canvas must not set it */
+.mixer.mx-noxf .mixer-curve { display: none; } /* no crossfader (rotary): no curve menu */
+/* touch screens: finger-sized setup controls */
+:root.tablet .mixer-tools .btn, :root.tablet .mixer-tools .sel, :root.touch .mixer-tools .btn, :root.touch .mixer-tools .sel { min-height: 32px; }
+.adv-pane[hidden] { display: none; }

@@ -25,6 +25,20 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 ### New in 0.5
 
+#### Mixer
+- **Full-width crossfader** with a continuous curve (linear … smooth … fast cut), hamster reverse, cut-in and a fast-cut ramp of 1 ms (Battle) or 5 ms (Club); the old 4 ms time constant took 28 ms to reach -60 dB. Channel strips now fill the mixer edge to edge; the setup dropdowns live in the MASTER column.
+- **Channel-fader curves** (log, linear, smooth, cut) and per-channel fader reverse.
+- **EQ presets** that behave like the common mixer types: Isolator (default), Club Classic, 4-Band, Rotary, Battle, Vintage Warm and Sculpt. The automix and MIDI maps keep working with every preset. The old "Flat EQ" menu is now "Tone".
+- **Filters and Color FX:** a dual HP/LP filter mode, Center Lock, and three new Color FX (Sweep, Crunch, Pitch) with a PARAMETER control.
+- **Booth output** with a 2-band booth EQ and its own level, on another sound card or on outputs 3-4 or 5-6. The mic stays out of the booth by default, to avoid feedback.
+- **Headphones:** CUE MST, sampler cue, post-fader cue and a second headphone cue (B).
+- **Mic:** 3-band EQ, mic FX (echo, reverb, megaphone, pitch), voice-activated auto talkover (with an option that ducks only the voice band so the bass keeps going), and a feedback reducer. A voice bus lets the MC / text-to-speech voice duck the music like the mic.
+- **Beat FX units:** two global FX units, assignable to a channel, the master or a crossfader side, with FX frequency bands, quantise and a touch **FX strip**. Five new effects: Spiral, Helix, Triplet Filter, Low-Cut Echo and Shimmer.
+- **Send / return** to built-in delays and reverb (returned to the master or a channel), a **one-knob compressor** per channel, a **master isolator**, **warmth**, master balance / mono, an adjustable limiter ceiling with a gain-reduction LED, and a record level, with the mic in or out of the recording.
+- **Metering:** RMS bars with peak dots and an EBU R128 loudness card (momentary, short-term, integrated, true peak).
+- **Mixer personalities** (optional): Club (today's mixer), Classic, Rotary and Battle. A dismissible chip can suggest one from the automix queue's genres; it is never applied automatically.
+- An **Advanced mixer** drawer (⚙, closed by default; a bottom sheet on phones) holds everything above, and each control has a MIDI target.
+
 #### Voice, dedications and remote control
 - **MC voice in the mix:** spoken announcements now play through the master output, so they are heard, recorded and broadcast, with the music ducked underneath. OpenDJ uses your system's speech engine (Windows speech, macOS voices, or espeak-ng on Linux); nothing is downloaded.
 - **Live dedications:** press **MC** in the mixer, write "For Ana and Mihai…", pick English or Română, and it is spoken over the mix at the next phrase. It can also appear on screen, on the video output and in your stream's "now playing". Without a Romanian voice, OpenDJ tells you how to add one and shows the text instead.

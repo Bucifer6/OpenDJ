@@ -8,7 +8,7 @@
 // text is not reproduced. Not covered by the chart (still to confirm with a capture from a real unit):
 //  - which "Pad mode 1-4" is which: taken from the silkscreen order above pads 1-4 (HOT CUE · PAD FX · LOOP · SAMPLER)
 //  - the SHIFT functions of MASTER cue and headphone cue 1 / 2: the chart only lists their messages; they are mapped to
-//    SMART CFX and ◀ / ▶ FX SELECT after the secondary silkscreen labels next to those buttons
+//    SMART CFX and ◀ / ▶ FX SELECT (the mixer's Color FX previous / next) after the secondary silkscreen labels next to those buttons
 //  - jog ticks per revolution (OpenDJ's default ≈ 720 is used) and the sound card's channel layout
 //
 // MIDI channels below are 0-based: chart channel 1 = 0 (deck 1), 2 = 1 (deck 2), 7 = 6 (global), 8-11 = 7-10
@@ -66,7 +66,7 @@ const PAD_TARGETS = {
 };
 
 /** Entries whose function (not number) is our interpretation: see the provenance note above. */
-const INTERPRETED = new Set(['smart.cfx', 'smart.cfxPrev', 'smart.cfxNext']);
+const INTERPRETED = new Set(['smart.cfx', 'mixer.colorFx.prev', 'mixer.colorFx.next']);
 
 function entries() {
   const e = [];
@@ -81,7 +81,7 @@ function entries() {
     e.push(mark({ key: k('cc', ch, 0x00), lsbKey: k('cc', ch, 0x20), target: `${P}.tempo` }));
     for (const [type, num, suffix, lsb] of MIXER_CONTROLS) e.push(mark({ key: k(type, ch, num), ...(lsb ? { lsbKey: k(type, ch, lsb) } : {}), target: `${M}.${suffix}` }));
     // SHIFT + headphone cue: ◀ FX SELECT (CH 1) / FX SELECT ▶ (CH 2); its LED answers on 0x39
-    e.push(mark({ key: k('note', ch, 0x08), target: deck === 1 ? 'smart.cfxPrev' : 'smart.cfxNext', ledKey: k('note', ch, 0x39) }));
+    e.push(mark({ key: k('note', ch, 0x08), target: deck === 1 ? 'mixer.colorFx.prev' : 'mixer.colorFx.next', ledKey: k('note', ch, 0x39) }));
     // CFX knob: channel 7, CC 0x17 / 0x18, LSB 0x37 / 0x38
     e.push(mark({ key: k('cc', 6, 0x16 + deck), lsbKey: k('cc', 6, 0x36 + deck), target: `${M}.filter` }));
     // performance pads: 4 banks x 8 pads x (normal, SHIFT)
@@ -108,7 +108,7 @@ function entries() {
 
 export const FLX2_PRESET = {
   id: FLX2_ID,
-  version: 2, // stored copies of an older version are refreshed on connect (midi.js bind)
+  version: 3, // stored copies of an older version are refreshed on connect (midi.js bind)
   name: FLX2_NAME,
   match: FLX2_MATCH,
   entries: entries(),

@@ -56,7 +56,26 @@ const SCHEMA = {
   latencyHint: (v) => (['interactive', 'balanced', 'playback'].includes(v) ? v : num(1, 1000)(v) !== undefined ? String(Number(v)) : undefined),
   talkoverDb: num(-60, 0),
   voiceDuckDb: num(-40, 0), voiceVolume: num(0, 2), dedicationLang: oneOf('en', 'ro'),
-  colorFx: oneOf('filter', 'space', 'dubecho', 'noise', 'crush', 'pitch'),
+  colorFx: oneOf('filter', 'space', 'dubecho', 'noise', 'crush', 'pitch', 'sweep', 'crunch', 'pitchshift'),
+  // mixer v2 configuration (public/js/audio/mixer-config.js has the defaults; knob positions are not stored)
+  mixer: shape({
+    personality: oneOf('club', 'classic', 'rotary', 'battle'),
+    xfCurve: num(0, 1), xfCutIn: num(0, 0.1), xfCutTime: num(0.5, 30), xfReverse: bool(),
+    faderCurve: oneOf('log', 'linear', 'smooth', 'cut'), rotary: bool(), hideXfader: bool(), revVisible: bool(),
+    eqType: oneOf('isolator', 'classic', 'fourBand', 'rotaryIso', 'battle', 'vintage', 'sculpt'), classicKill: bool(),
+    eqXover: (v) => (Array.isArray(v) && v.length === 2 && v.every((x) => Number.isFinite(x) && x >= 50 && x <= 12000) && v[0] < v[1] ? v.map(Number) : undefined),
+    masterIsoXover: (v) => (Array.isArray(v) && v.length === 2 && v.every((x) => Number.isFinite(x) && x >= 50 && x <= 12000) && v[0] < v[1] ? v.map(Number) : undefined),
+    filterMode: oneOf('oneKnob', 'dual'), centerLock: bool(), colorHidden: bool(),
+    masterIsoBoost: oneOf(6, 12), showMasterIso: bool(), showWarmth: bool(), limiterCeiling: num(-3, -0.3), mono: bool(),
+    boothRoute: oneOf('off', 'device', 'channels34', 'channels56'), boothDeviceId: str(512), micToBooth: bool(), showBooth: bool(),
+    cuePost: bool(), hp2Route: oneOf('off', 'device', 'channels56', 'channels78'), hp2DeviceId: str(512),
+    talkoverMode: oneOf('manual', 'auto', 'advanced'), talkoverThreshold: num(-80, 0), micFx: oneOf('echo', 'reverb', 'megaphone', 'pitch'),
+    micToRecord: bool(), feedbackReducer: bool(),
+    sendType: oneOf('shortDelay', 'longDelay', 'dubEcho', 'reverb'), returnTo: oneOf('master', 'ch1', 'ch2', 'ch3', 'ch4'),
+    showComp: bool(),
+    fx1: shape({ type: str(32), assign: oneOf('off', 'ch1', 'ch2', 'ch3', 'ch4', 'master', 'xfA', 'xfB'), quantize: bool() }),
+    fx2: shape({ type: str(32), assign: oneOf('off', 'ch1', 'ch2', 'ch3', 'ch4', 'master', 'xfA', 'xfB'), quantize: bool() }),
+  }),
   sequencer: objOrNull(),
   sampler: (v) => {
     if (v === null) return null;

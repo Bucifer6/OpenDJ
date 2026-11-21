@@ -139,11 +139,11 @@ try {
   await midi([0x91, 0x36, 0x00]);
   // smart functions
   await midi([0x96, 0x00, 0x7f]); await midi([0x96, 0x00, 0x00]);
-  check(await ev(() => window.opendj.ctl.smartCfx && window.opendj.engine.channels[0].state.colorFx !== 'filter'), 'SHIFT + MASTER (SMART CFX, note 0x00 ch7) on: CFX knobs play a Color FX preset');
+  check(await ev(() => window.opendj.engine.channels[0].state.colorFx !== 'filter'), 'SHIFT + MASTER (SMART CFX, note 0x00 ch7) on: CFX knobs play a Color FX');
   await midi([0x91, 0x08, 0x7f]); await midi([0x91, 0x08, 0x00]);
   const preset = await ev(() => window.opendj.engine.channels[0].state.colorFx);
   await midi([0x96, 0x00, 0x7f]); await midi([0x96, 0x00, 0x00]);
-  check(await ev(() => !window.opendj.ctl.smartCfx && window.opendj.engine.channels[0].state.colorFx === 'filter') && preset !== 'filter', `SHIFT + CUE 2 (FX SELECT ▶, note 0x08 ch2) picks the next preset (${preset}); SMART CFX off restores the filter`);
+  check(await ev(() => window.opendj.engine.channels[0].state.colorFx === 'filter') && preset !== 'filter', `SHIFT + CUE 2 (FX SELECT ▶ = Color FX next, note 0x08 ch2) picks ${preset}; SMART CFX off restores the filter`);
   await midi([0x96, 0x01, 0x7f]); await midi([0x96, 0x01, 0x00]);
   await midi([0xb6, 0x1f, 0x7f]); await midi([0xb6, 0x3f, 0x7f]);
   check(await ev(() => window.opendj.ctl.smartFader && window.opendj.engine.channels[0].state.eqLow < -0.9), 'SMART FADER: crossfader to B swaps the bass out of deck 1');
@@ -183,8 +183,8 @@ try {
   await page.keyboard.press('Escape');
 
   // ---------- Smart Fader button next to the crossfader ----------
-  await page.locator('.xfader-options .smart-xf').click();
-  check(await ev(() => window.opendj.ctl.smartFader) && await page.locator('.smart-xf.active').count() === 1, 'mixer SMART button (crossfader options row) turns the Smart Fader on');
+  await page.locator('.mixer .smart-xf:visible').first().click();
+  check(await ev(() => window.opendj.ctl.smartFader) && await page.locator('.smart-xf.active').count() === 1, 'mixer SMART button turns the Smart Fader on');
   await midi([0x96, 0x01, 0x7f]); await midi([0x96, 0x01, 0x00]); await page.waitForTimeout(80);
   check(await ev(() => !window.opendj.ctl.smartFader) && await page.locator('.smart-xf.active').count() === 0, 'the hardware SMART FADER turns it off and the button follows');
   await page.screenshot({ path: path.join(shots, 'mixer-smart-fader.png'), clip: await page.locator('.mixer').boundingBox() });
