@@ -48,8 +48,10 @@ notes say, and neither does a container.
 - Frame pacing with real demo audio (`scripts/perf/pacing.mjs`, 2,012-track library). Headless Chromium: startup p50
   16.7 ms / p95 16.8 / max 217 ms (the long frames are the deck's decode hand-over), library download ×3 p95 16.8 ms,
   EQ drag p95 16.8 ms (one 100 ms frame), crossfader drag p95 16.7 ms at 1280–3440 px wide with 2 and 4 decks, full
-  −1…+1 travel. Electron under Xvfb (300-track library): startup p95 33 ms (3.2 s to ready), library p95 50 ms, EQ drag
-  p95 33 ms, crossfader p95 33–50 ms. Xvfb software GL is far slower than a real GPU; rerun this script on Windows.
+  −1…+1 travel. Electron under Xvfb (2,012 tracks): 2.5 s to ready, then startup p95 66.6 ms with a 733 ms worst frame (deck
+  load + first waveform paint: the one phase over the script's 50 ms limit), library download ×3 p95 16.8 ms, EQ drag
+  p95 16.8 ms, crossfader drag p95 33–50 ms (worst at 3440x1440). Xvfb software GL is far slower than a real GPU;
+  rerun the script on Windows before drawing conclusions.
 - Crossfader track: 150 → 284 px in the mixer at every window width.
 - MIX NOW pressed 7 times → exactly one transition; queue edits mid-transition; MIX NOW while the next deck loads;
   stop while it waits; stop during the first load; repeated starts (e2e-automix).
