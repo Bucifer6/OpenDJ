@@ -423,3 +423,43 @@ test('MidiManager: HID reports and gamepad snapshots dispatch through the same m
   m.gamepads.process('gamepad:Pad', [0, 0, 1], [0, 1]);
   assert.deepEqual(m.mappings['gamepad:Pad'].entries.at(-1), { key: 'gp:btn:2', target: 'deck1.cue' });
 });
+
+// ---------- community mappings: built in, recognised on plug-in, updated from GitHub ----------
+test('community: a built-in mapping is applied on plug-in and updated when GitHub has a newer version', async () => {
+  const { m, calls } = manager();
+  const { hashEntries } = await import('../public/js/midi/community.js');
+  const v1 = [{ key: 'note:0:11', target: 'deck1.play' }], v2 = [...v1, { key: 'note:0:12', target: 'deck1.cue' }];
+  const entry = (entries) => ({ brand: 'Acme', model: 'DJ-2', status: 'needs-verification', file: 'Acme/Acme-DJ-2.opendj-midi.json', midiNames: ['ACME DJ-2'], hash: hashEntries(entries) });
+  m._bundleP = Promise.resolve({ opendjCommunityBundle: 1, index: { opendjControllerIndex: 1, controllers: [entry(v1)] }, mappings: { 'Acme/Acme-DJ-2.opendj-midi.json': { name: 'Acme DJ-2', entries: v1 } } });
+  assert.equal(await m.applyBundled('Unknown Box'), false);
+  assert.equal(await m.applyBundled('ACME DJ-2 MIDI 1'), true);
+  const stored = m.mappings['ACME DJ-2 MIDI 1'];
+  assert.equal(stored.source, 'community');
+  assert.equal(stored.communityHash, hashEntries(v1));
+  assert.ok(calls.some((c) => c[0] === 'toast' && /recognised Acme DJ-2/.test(c[1])));
+  // a mapping the user made is never replaced
+  m.mappings['Mine MIDI'] = { name: 'Mine', entries: v1 };
+  assert.equal(await m.applyBundled('Mine MIDI'), false);
+
+  const gh = (entries) => async (url) => ({ ok: true, json: async () => (url.endsWith('index.json') ? { opendjControllerIndex: 1, controllers: [entry(entries)] } : { name: 'Acme DJ-2', entries }) });
+  assert.deepEqual(await m.checkCommunityUpdates({ fetchFn: gh(v1) }), []); // same version
+  assert.deepEqual(await m.checkCommunityUpdates({ fetchFn: gh(v2) }), ['ACME DJ-2 MIDI 1']);
+  assert.equal(m.mappings['ACME DJ-2 MIDI 1'].entries.length, 2);
+  // changed by the user since: kept, and they are told once
+  m.mappings['ACME DJ-2 MIDI 1'].entries.push({ key: 'note:0:13', target: 'deck1.sync' });
+  const v3 = [...v2, { key: 'note:0:14', target: 'deck2.play' }];
+  assert.deepEqual(await m.checkCommunityUpdates({ fetchFn: gh(v3) }), []);
+  assert.equal(m.mappings['ACME DJ-2 MIDI 1'].entries.length, 3);
+  assert.ok(calls.some((c) => c[0] === 'toast' && /You changed yours/.test(c[1])));
+  // switched off: no network
+  m.app.settings.controllerLookup = false;
+  assert.deepEqual(await m.checkCommunityUpdates({ fetchFn: () => { throw new Error('no network expected'); } }), []);
+  assert.deepEqual(await m.recognise('X', { fetchFn: () => { throw new Error('no'); } }), { community: null, mixxx: null, online: false });
+});
+
+test('community: recognition falls back to the Mixxx library and reports offline', async () => {
+  const { m } = manager();
+  m._bundleP = Promise.resolve(null);
+  const fail = async () => { throw new Error('offline'); };
+  assert.deepEqual(await m.recognise('Nothing MIDI 1', { fetchFn: fail }), { community: null, mixxx: null, online: false });
+});

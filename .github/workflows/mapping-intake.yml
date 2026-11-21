@@ -73,7 +73,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git checkout -B "$BRANCH"
-            git add mappings public/controller-mapper.html
+            git add mappings public/controller-mapper.html public/community-mappings.json
             if git diff --cached --quiet; then
               echo "Nothing changed" > "$RUNNER_TEMP/comment.md"
             else

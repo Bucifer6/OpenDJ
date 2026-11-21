@@ -8,14 +8,28 @@ reused by anyone.
 |---|---|
 | `<Brand>/<Brand>-<Model>.opendj-midi.json` | a mapping |
 | `requested.json` | controllers people want, with no mapping yet ("needs a mapping") |
-| `index.json` | the controller list the Controller Mapper syncs. **Generated**: run `node scripts/build-controller-mapper.mjs` |
+| `index.json` | the controller list the app and the Controller Mapper sync from GitHub. **Generated**: run `node scripts/build-controller-mapper.mjs` |
+
+## In OpenDJ
+
+Community mappings are **built into the app** (`public/community-mappings.json`, generated; mappings that would take it
+over 2 MB are downloaded when needed instead). When you plug in a controller without a mapping, OpenDJ recognises it
+from its MIDI name:
+
+- **Community mapping available:** it is loaded straight away (built-in DJ-400 / FLX4-style presets are replaced by it).
+- **Not in the OpenDJ collection:** OpenDJ looks for a matching mapping in the Mixxx library and offers it.
+- **Nothing found:** "Not supported yet: this controller needs to be mapped by hand", with **Map it now**.
+
+With **Recognise new controllers online** on (Settings → Controller Mapper; on by default), OpenDJ checks GitHub every
+6 hours for newer versions of the community mappings you use and updates them. A mapping you changed yourself is
+kept; you are told that an update exists. Turning the setting off stops all of these GitHub lookups.
 
 ## The Controller Mapper
 
 The easiest way to contribute. No git or JavaScript needed.
 
-- **In OpenDJ:** Settings → Controllers → select your controller → **Controller Mapper**. When a new controller is
-  plugged in, the "New controller" prompt has the same button.
+- **In OpenDJ:** **Settings → Controller Mapper** (also reachable from Settings → Controllers and from the message
+  shown when a new controller is plugged in). It uses the app's theme.
 - **Without OpenDJ:** download `OpenDJ-Controller-Mapper.html` from the
   [latest release](https://github.com/Bucifer6/OpenDJ/releases/latest) and open it in Google Chrome or Microsoft Edge.
   Close other DJ apps first: on Windows only one program can use a MIDI controller at a time.

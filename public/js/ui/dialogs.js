@@ -413,6 +413,21 @@ export class Dialogs {
       el('p', { class: 'hint' }, 'The rekordbox XML export (cues, loops, beat grids, playlists) can be imported into rekordbox, Serato (via plugins), Traktor or Mixxx.'),
     );
     const controllers = platform.local ? null : controllersPanel(app);
+    // ---- Controller Mapper: public/controller-mapper.html in a frame, themed like the app (see tools/controller-mapper) ----
+    let mapperFrame = null;
+    const mapperHost = el('div', { class: 'mapper-host' });
+    const mapperPane = platform.local ? null : el('div', { class: 'form mapper-pane' },
+      el('div', { class: 'row mapper-intro' },
+        el('p', { class: 'hint' }, 'Test and fix every control of your controller, load the community mapping for it, and share your mapping or fix with everyone. "Apply to OpenDJ" uses your changes right away.'),
+        el('label', { class: 'check', title: 'When a controller without a mapping is plugged in, look it up in the OpenDJ community list and the Mixxx mapping library on GitHub' },
+          chk(s.controllerLookup !== false, (v) => app.setSetting('controllerLookup', v)), ' Recognise new controllers online')),
+      mapperHost);
+    const loadMapper = () => {
+      const dev = app.midi.mapperDevice || '';
+      mapperFrame = el('iframe', { class: 'mapper-frame', title: 'Controller Mapper', allow: 'midi', src: `controller-mapper.html${dev ? `?device=${encodeURIComponent(dev)}` : ''}` });
+      mapperHost.replaceChildren(mapperFrame);
+      app.midi.attachMapper(mapperFrame.contentWindow);
+    };
     const shortcuts = el('div', { class: 'form shortcuts' }, el('table', {}, ...[
       ['Space', 'Play/pause deck 1'], ['Z / X / C', 'Deck 1 cue / play / sync'], ['M / , / .', 'Deck 2 cue / play / sync'],
       ['1 – 4', 'Deck 1 hot cues A–D (Shift = delete)'], ['7 – 0', 'Deck 2 hot cues A–D'], ['Q / W', 'Deck 1 loop 4 / exit'], ['O / P', 'Deck 2 loop 4 / exit'],
@@ -463,14 +478,25 @@ export class Dialogs {
     const about = this.aboutPane(chk);
     const tabs = platform.local
       ? { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], mobile: ['Mobile', this.mobileInfo()], about: ['About', about] }
-      : { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], dvs: ['DVS', dvsTab], keys: ['Shortcuts', shortcuts], about: ['About', about] };
+      : { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], mapper: ['Controller Mapper', mapperPane], dvs: ['DVS', dvsTab], keys: ['Shortcuts', shortcuts], about: ['About', about] };
     if (!tabs[tab]) tab = 'audio';
     const tabBar = el('div', { class: 'tabs' });
     const pane = el('div', { class: 'tab-pane' });
-    const show = (k) => { pane.replaceChildren(tabs[k][1]); for (const b of tabBar.children) b.classList.toggle('active', b.dataset.k === k); };
+    const show = (k, reload = false) => {
+      const wasMapper = pane.firstChild === mapperPane;
+      pane.replaceChildren(tabs[k][1]);
+      for (const b of tabBar.children) b.classList.toggle('active', b.dataset.k === k);
+      pane.closest('.modal')?.classList.toggle('mapper-wide', k === 'mapper');
+      if (k === 'mapper' && (reload || !wasMapper || !mapperFrame)) loadMapper(); // moving a frame in the DOM reloads it anyway
+      else if (k !== 'mapper') { app.midi.attachMapper(null); mapperFrame = null; mapperHost.replaceChildren(); }
+    };
     for (const [k, [label]] of Object.entries(tabs)) tabBar.append(el('button', { class: 'tab', 'data-k': k, onclick: () => show(k) }, label));
-    show(tab);
-    await this.modal('Settings', el('div', {}, tabBar, pane), [{ label: 'Close', primary: true, value: true }], { wide: true });
+    const offOpenMapper = app.midi.on?.('open-mapper', () => tabs.mapper && show('mapper', true));
+    const body = el('div', {}, tabBar, pane);
+    queueMicrotask(() => show(tab));
+    await this.modal('Settings', body, [{ label: 'Close', primary: true, value: true }], { wide: true });
+    offOpenMapper?.();
+    app.midi.attachMapper(null);
     app.midi.cancelLearn();
     controllers?.destroy?.();
   }

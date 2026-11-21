@@ -7,7 +7,8 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { build, buildIndex, targetList, mappingFiles, OUT, INDEX } from '../scripts/build-controller-mapper.mjs';
+import { build, buildIndex, buildBundle, targetList, mappingFiles, OUT, INDEX, BUNDLE } from '../scripts/build-controller-mapper.mjs';
+import { matchController, guessController, hashEntries } from '../public/js/midi/community.js';
 import { mappingErrors, mappingPath, cleanEntries } from '../scripts/lib/mapping-schema.mjs';
 import { parseForm, issueKind, mappingFromForm, processIssue } from '../scripts/mapping-intake.mjs';
 
@@ -16,6 +17,7 @@ const ids = new Set(targetList().map((t) => t.id));
 
 test('controller mapper: committed files are up to date (run node scripts/build-controller-mapper.mjs)', () => {
   assert.equal(readFileSync(INDEX, 'utf8'), buildIndex());
+  assert.equal(readFileSync(BUNDLE, 'utf8'), buildBundle());
   assert.equal(readFileSync(OUT, 'utf8'), build());
 });
 
@@ -35,7 +37,7 @@ test('controller mapper: strict CSP allows exactly its own inline scripts', () =
   const html = build();
   const csp = /<meta http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(html)[1];
   assert.match(csp, /default-src 'none'/);
-  assert.match(csp, /connect-src https:\/\/raw\.githubusercontent\.com;/);
+  assert.match(csp, /connect-src 'self' https:\/\/raw\.githubusercontent\.com;/);
   assert.ok(!/script-src[^;]*unsafe/.test(csp));
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
   assert.equal(scripts.length, 2);
@@ -163,4 +165,22 @@ test('intake: rejects invalid or unlicensed mappings and odd names; requests go 
     assert.deepEqual(list.find((c) => c.model === 'DJ-2'), { brand: 'Acme', model: 'DJ-2', midiNames: ['ACME DJ-2'], requestedBy: '@alice', issue: 7 });
     assert.equal((await run(dir, { title: 'Add controller: Numark Party Mix', body: form({ Brand: 'Numark', Model: 'Party Mix' }) })).action, 'comment');
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('recognition: controllers are matched from their MIDI port name; unknown ones get a brand guess', () => {
+  const list = [{ brand: 'Pioneer DJ', model: 'DDJ-400', midiNames: ['DDJ-400'] }, { brand: 'Pioneer DJ', model: 'DDJ-400-Pro', midiNames: ['DDJ-400-Pro'] }, { brand: 'X', model: 'Y', midiNames: ['ab'] }];
+  assert.equal(matchController(list, 'DDJ-400 MIDI 1').model, 'DDJ-400');
+  assert.equal(matchController(list, 'PIONEER DDJ-400-PRO').model, 'DDJ-400-Pro');
+  assert.equal(matchController(list, 'Lab Synth'), null); // matches shorter than 3 characters are ignored
+  assert.deepEqual(guessController('DDJ-FLX10 MIDI 1'), { brand: 'Pioneer DJ', model: 'DDJ-FLX10' });
+  assert.deepEqual(guessController('Numark Mixtrack Pro FX'), { brand: 'Numark', model: 'Mixtrack Pro FX' });
+  assert.equal(guessController('Some Box 2').brand, '');
+  assert.equal(hashEntries([{ key: 'note:0:1', target: 'deck1.play' }]), hashEntries([{ key: 'note:0:1', target: 'deck1.play' }]));
+  assert.notEqual(hashEntries([{ key: 'note:0:1', target: 'deck1.play' }]), hashEntries([{ key: 'note:0:2', target: 'deck1.play' }]));
+});
+
+test('bundle: community mappings are built into the app with their version hash', () => {
+  const b = JSON.parse(buildBundle());
+  assert.equal(b.opendjCommunityBundle, 1);
+  for (const c of b.index.controllers) if (c.file && b.mappings[c.file]) assert.equal(hashEntries(b.mappings[c.file].entries), c.hash);
 });
