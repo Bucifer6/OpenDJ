@@ -84,8 +84,19 @@ export function buildStemControls(app, deck) {
   const fx = button('V.ECHO', { cls: 'xs stem-macro', title: 'Stem FX: beat-synced echo on the vocals only', click: () => deck.setStemFx(!deck.stemFxOn), active: () => deck.stemFxOn });
   parts.push(acap, inst, fx);
   const status = el('span', { class: 'stems-status' });
-  const prep = button('PREPARE STEMS', { cls: 'xs stems-prep', title: 'Separate this track into vocals, drums, bass and melody with AI (once per track)', click: () => {
-    if (!deck.track) return;
+  let runtimeAvailable = null, modelReady = false, modelDownloading = false;
+  const prep = button('CHECKING AI…', { cls: 'xs stems-prep', title: 'Install the AI stems engine once, then prepare tracks here', click: async () => {
+    if (runtimeAvailable === false) return app.toast('The AI stems engine is missing from this OpenDJ build. Update or reinstall OpenDJ.');
+    if (modelDownloading) return;
+    if (!modelReady) {
+      try {
+        const ok = await stems.ensureModel();
+        if (ok) modelReady = true;
+        render();
+      } catch (e) { app.toast(`⚠ ${e.message}`); }
+      return;
+    }
+    if (!deck.track) return app.toast('Load a track on this deck, then prepare its stems.');
     if (stems.current?.id === deck.track.id) return stems.cancel();
     stems.enqueue([deck.track.id], { force: !!deck.track.stems?.ready }).catch((e) => app.toast(`⚠ ${e.message}`));
   } });
@@ -99,10 +110,23 @@ export function buildStemControls(app, deck) {
     for (const p of parts) { p.render?.(); if (p.tagName === 'BUTTON') p.disabled = !ready; } // knobs: greyed out by CSS (.no-stems)
     status.textContent = !t ? '' : ready ? 'AI STEMS' : deck.stemsLoading ? 'loading stems…' : preparing ? `${stems.current.phase} ${pct(stems.current) || ''}${stems.current.total ? '%' : ''}` : queued ? 'queued' : deck.stemsError ? `⚠ ${deck.stemsError}` : '';
     status.title = ready ? 'AI stems loaded: VOC / INST knobs on the mixer now control the stems' : '';
-    prep.hidden = !t || ready || deck.stemsLoading || queued || (t.stems?.ready && !deck.stemsError);
-    prep.textContent = preparing ? 'CANCEL' : 'PREPARE STEMS';
-    prep.disabled = false;
+    prep.hidden = !!ready || !!deck.stemsLoading || !!queued || (!!t && !!t.stems?.ready && !deck.stemsError) || (!t && modelReady);
+    prep.textContent = runtimeAvailable === null ? 'CHECKING AI…' : runtimeAvailable === false ? 'UPDATE APP' : modelDownloading ? 'INSTALLING…' : preparing ? 'CANCEL' : modelReady ? (t ? 'PREPARE STEMS' : 'STEMS READY') : 'INSTALL STEMS';
+    prep.title = runtimeAvailable === false ? 'Update or reinstall OpenDJ to include its AI stems engine' : modelReady ? (t ? 'Prepare this track into vocals, drums, bass and melody' : 'AI stems engine installed; load a track to prepare stems') : 'Install the AI stems engine once; its model is downloaded to this computer';
+    prep.disabled = runtimeAvailable === null || modelDownloading || (!modelReady && runtimeAvailable === false);
   };
+  stems.status().then((st) => {
+    runtimeAvailable = !!st.ort;
+    modelReady = !!st.model?.ready;
+    modelDownloading = !!st.model?.downloading;
+    render();
+  }).catch(() => { runtimeAvailable = false; render(); });
+  stems.on('model', (m) => {
+    if (m.ready) modelReady = true;
+    if ('downloading' in m) modelDownloading = !!m.downloading;
+    if (m.error) modelDownloading = false;
+    render();
+  });
   deck.on('stems', render); deck.on('load', render); deck.on('loaded', render); deck.on('state', () => { for (const p of parts) p.render?.(); });
   stems.on('progress', render); stems.on('queue', render); stems.on('track', render);
   render();
@@ -142,7 +166,7 @@ export function stemsSettingsPane(app) {
         el('div', { class: 'muted' }, `Runtime: ${st.ort ? `ONNX Runtime Web ${st.ortVersion || ''}` : 'AI stems engine is missing from this app build — update or reinstall OpenDJ'} · stems saved as ${st.format.toUpperCase()} · ${globalThis.crossOriginIsolated ? 'multi-threaded' : 'single-threaded'} WASM, WebGPU ${'gpu' in navigator ? 'available' : 'not available'}`),
         el('div', { class: 'stems-settings-actions' },
           m.ready ? el('button', { class: 'btn sm', onclick: async () => { await fetch('/api/stems/model', { method: 'DELETE', credentials: 'same-origin' }); refresh(); } }, 'Delete model')
-            : el('button', { class: 'btn sm', onclick: async () => { try { await stems.ensureModel(); } catch (e) { app.toast(`⚠ ${e.message}`); } refresh(); } }, 'Install AI stems')),
+            : el('button', { class: 'btn sm', onclick: async () => { try { await stems.ensureModel(); } catch (e) { app.toast(`⚠ ${e.message}`); } refresh(); } }, 'Download model…')),
       );
     } catch (e) { info.textContent = `⚠ ${e.message}`; }
   };
