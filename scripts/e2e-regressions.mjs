@@ -195,7 +195,7 @@ try {
   const knobState = () => page.evaluate(() => {
     const E = window.opendj.engine;
     const knobsOk = [...document.querySelectorAll('.knob')].filter((k) => k.offsetParent).every((k) => { const v = Number(k.getAttribute('aria-valuenow')); return v >= Number(k.getAttribute('aria-valuemin')) - 1e-6 && v <= Number(k.getAttribute('aria-valuemax')) + 1e-6; });
-    const lim = { trim: [-1, 1], eqHigh: [-1, 1], eqMid: [-1, 1], eqLow: [-1, 1], filter: [-1, 1], volume: [0, 1], fxMix: [0, 1], fxParam: [0, 1], vocal: [0, 1], inst: [0, 1] };
+    const lim = { trim: [-1, 1], eqHigh: [-1, 1], eqMid: [-1, 1], eqLow: [-1, 1], filter: [-1, 1], volume: [0, 1], fxMix: [0, 1], fxParam: [0, 1], fxParam2: [0, 1], vocal: [0, 1], inst: [0, 1] };
     const engineOk = E.channels.every((c) => Object.entries(lim).every(([k, [lo, hi]]) => c.state[k] >= lo && c.state[k] <= hi)) && [E.masterVolume, E.cueMix, E.hpVolume].every((v) => v == null || (v >= 0 && v <= 1));
     return { knobsOk, engineOk };
   });

@@ -1,7 +1,7 @@
 import { el, fmtTime } from '../util.js';
 import { knob, fader, button, jogWheel } from './controls.js';
 import { OverviewWaveform } from './waveform.js';
-import { EFFECTS, BEAT_DIVISIONS } from '../audio/effects.js';
+import { EFFECTS, BEAT_DIVISIONS, effectParams, effectBeats } from '../audio/effects.js';
 import { api } from '../api.js';
 import { cssVar } from './themes.js';
 import { icon } from './icons.js';
@@ -166,14 +166,25 @@ export function buildDeck(app, deck) {
   const fxSel = el('select', { class: 'sel' }, ...EFFECTS.map((e) => el('option', { value: e.id }, e.label)));
   fxSel.value = ch.state.fxType;
   fxSel.addEventListener('change', () => ch.set('fxType', fxSel.value));
-  const beatSel = el('select', { class: 'sel tiny' }, ...BEAT_DIVISIONS.map((b) => el('option', { value: b }, `${fmtBeats(b)} beat`)));
+  // beat division: the echo time, or the LFO cycle for modulation effects (labels show what it means for the effect)
+  const beatSel = el('select', { class: 'sel tiny', title: 'Beat division: echo time / LFO cycle' }, ...BEAT_DIVISIONS.map((b) => el('option', { value: b }, `${fmtBeats(b)} beat`)));
   beatSel.value = String(ch.state.fxBeats);
   beatSel.addEventListener('change', () => ch.set('fxBeats', Number(beatSel.value)));
   const fxOn = R(button('FX ON', { cls: 'sm fx-on', click: () => ch.set('fxOn', !ch.state.fxOn), active: () => ch.state.fxOn }));
-  const fxMix = R(knob({ label: 'MIX', min: 0, max: 1, def: 0.5, get: () => ch.state.fxMix, set: (v) => ch.set('fxMix', v), size: 'sm' }));
+  const fxMix = R(knob({ label: 'MIX', min: 0, max: 1, def: 0.5, get: () => ch.state.fxMix, set: (v) => ch.set('fxMix', v), size: 'sm', title: 'FX wet/dry' }));
   const fxParam = R(knob({ label: 'PARAM', min: 0, max: 1, def: 0.5, get: () => ch.state.fxParam, set: (v) => ch.set('fxParam', v), size: 'sm' }));
-  ch.on('change', (k) => { if (k === 'fxType') fxSel.value = ch.state.fxType; if (k === 'fxBeats') beatSel.value = String(ch.state.fxBeats); });
-  const fxUnit = el('div', { class: 'fx-unit' }, el('div', { class: 'fx-col' }, fxSel, beatSel), fxMix, fxParam, fxOn);
+  const fxParam2 = R(knob({ label: 'P2', min: 0, max: 1, def: 0.5, get: () => ch.state.fxParam2 ?? 0.5, set: (v) => ch.set('fxParam2', v), size: 'sm' }));
+  fxParam2.classList.add('fx-p2');
+  const fxLabels = () => {
+    const [p1, p2] = effectParams(ch.state.fxType);
+    fxParam.querySelector('.knob')?.setAttribute('title', `FX parameter: ${p1}`);
+    fxParam2.querySelector('.knob')?.setAttribute('title', `FX parameter 2: ${p2}`);
+    const l2 = fxParam2.querySelector('.knob-label'); if (l2) l2.textContent = p2.slice(0, 5).toUpperCase();
+    beatSel.querySelectorAll('option').forEach((o) => { const b = Number(o.value), e = effectBeats(ch.state.fxType, b); o.textContent = `${fmtBeats(e)} beat${e > 1 ? 's' : ''}`; });
+  };
+  fxLabels();
+  ch.on('change', (k) => { if (k === 'fxType') { fxSel.value = ch.state.fxType; fxLabels(); } if (k === 'fxBeats') beatSel.value = String(ch.state.fxBeats); });
+  const fxUnit = el('div', { class: 'fx-unit' }, el('div', { class: 'fx-col' }, fxSel, beatSel), fxMix, fxParam, fxParam2, fxOn);
 
   // ---------- phase meter (beat position in the bar + offset vs master) ----------
   const phase = el('canvas', { class: 'phase-meter', height: 12 });

@@ -145,7 +145,7 @@ export function mixxxTarget(group, key) {
     if (unit > 4) return null;
     const M = `mixer${unit}`;
     if (!m[2]) return { mix: T(`${M}.fxMix`, 'abs'), super1: T(`${M}.fxParam`, 'abs'), enabled: T(`${M}.fxOn`, 'button') }[k] || null;
-    return { enabled: T(`${M}.fxOn`, 'button'), meta: T(`${M}.fxParam`, 'abs'), parameter1: T(`${M}.fxParam`, 'abs') }[k] || null;
+    return { enabled: T(`${M}.fxOn`, 'button'), meta: T(`${M}.fxParam`, 'abs'), parameter1: T(`${M}.fxParam`, 'abs'), parameter2: T(`${M}.fxParam2`, 'abs') }[k] || null;
   }
   if (/^\[Microphone\d*\]$/i.test(g)) {
     if (k === 'talkover') return T('mic.talkover', 'button');

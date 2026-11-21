@@ -102,6 +102,7 @@ export function buildTargets(app) {
     add(`${M}.fxOn`, `Channel ${n} FX on`, 'button', (down) => down && ch.set('fxOn', !ch.state.fxOn), () => ch.state.fxOn);
     add(`${M}.fxMix`, `Channel ${n} FX mix`, 'abs', (v) => ch.set('fxMix', v), null, () => ch.state.fxMix);
     add(`${M}.fxParam`, `Channel ${n} FX parameter`, 'abs', (v) => ch.set('fxParam', v), null, () => ch.state.fxParam);
+    add(`${M}.fxParam2`, `Channel ${n} FX parameter 2`, 'abs', (v) => ch.set('fxParam2', v), null, () => ch.state.fxParam2 ?? 0.5);
   }
   add('mixer.crossfader', 'Crossfader', 'abs', (v) => eng.setCrossfader(v * 2 - 1), null, () => ((eng.crossfader || 0) + 1) / 2);
   add('master.volume', 'Master volume', 'abs', (v) => eng.setMasterVolume(v), null, () => eng.masterVolume ?? 0.8);
