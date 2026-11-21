@@ -282,6 +282,24 @@ try {
   check(loops.afterSlice?.start === 4 && loops.afterSlice?.end === 6 && !loops.afterSlice.active, `the slicer keeps the stored loop (${JSON.stringify(loops.afterSlice)})`);
   check(loops.loadingWas && !loops.whileLoading.loop && !loops.whileLoading.sync && loops.whileLoading.cues === 0, `loop / hot cue / sync ignored while the deck loads (${JSON.stringify(loops.whileLoading)})`);
 
+  // M5: scrolling a big list recycles row nodes (rows that stay in view are not rebuilt), positions them with
+  // transform and keeps the column template on the container
+  const lib = await page.evaluate(async () => {
+    const L = window.opendj.library, base = L.rows[0];
+    const saved = L.rows;
+    L.rows = Array.from({ length: 2000 }, (_, i) => ({ ...base, id: `fake${i}`, title: `Row ${i}` }));
+    L.renderRows(true);
+    const sc = L.scroller; sc.scrollTop = 0; L.renderRows(true);
+    const keep = L.rowsEl.querySelector('.lr[data-i="12"]');
+    sc.scrollTop = 26 * 3; L.renderRows();
+    const same = L.rowsEl.querySelector('.lr[data-i="12"]') === keep;
+    sc.scrollTop = 26 * 1500; L.renderRows();
+    const out = { same, count: L.rowsEl.children.length, transform: !!L.rowsEl.querySelector('.lr').style.transform, rowTpl: L.rowsEl.querySelector('.lr').style.gridTemplateColumns, varTpl: L.rowsEl.style.getPropertyValue('--lib-cols') };
+    L.rows = saved; sc.scrollTop = 0; L.renderRows(true);
+    return out;
+  });
+  check(lib.same && lib.count < 80 && lib.transform && !lib.rowTpl && !!lib.varTpl, `library rows are recycled while scrolling (${JSON.stringify(lib)})`);
+
   check(errors.length === 0, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
 } catch (e) { console.error(e); failed = true; }
 await browser.close(); app.server.close();

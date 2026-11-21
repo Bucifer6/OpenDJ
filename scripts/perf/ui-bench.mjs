@@ -10,6 +10,8 @@
 //              background analyser while a deck plays
 //   * --analysis: only the last part: long tasks / dropped frames while a deck plays and the background analyser
 //              re-analyses --tracks=N tracks (default 4), --rounds=N times; every long task's duration is listed
+//   * --library: a 2,000-track library: frame times while scrolling the track list with a deck playing
+//              (fails when the 95th-percentile frame is over 20 ms)
 //   * --electron: run all of the above in the desktop app (Electron, Playwright _electron; use xvfb-run -a on Linux)
 //
 //   node scripts/perf/ui-bench.mjs [--shots] [--perf] [--fx] [--latency] [--analysis] [--electron] [--out=<dir>] [--themes=midnight,light,neon] [--secs=6]
@@ -178,6 +180,35 @@ if (argv.includes('--latency') || argv.includes('--analysis')) {
     const ana = { analysed: 0, ...(await measure(analysisRun)) }; ana.analysed = await ev(() => window._analysed);
     console.log(`[analysis] background analysis of ${TRACKS_N} tracks while a deck plays${ROUNDS > 1 ? ` (round ${k + 1})` : ''}:`, JSON.stringify(ana));
   }
+}
+
+if (argv.includes('--library')) {
+  // 2,000 tiny tracks (0.25 s, 8 kHz mono WAV) without background analysis: only the list rendering is measured
+  const big = path.join(tmp, 'Big Library'); fs.mkdirSync(big);
+  const n = 2000, sr = 8000, len = sr / 4, hdr = Buffer.alloc(44);
+  hdr.write('RIFF', 0); hdr.writeUInt32LE(36 + len * 2, 4); hdr.write('WAVEfmt ', 8); hdr.writeUInt32LE(16, 16); hdr.writeUInt16LE(1, 20); hdr.writeUInt16LE(1, 22);
+  hdr.writeUInt32LE(sr, 24); hdr.writeUInt32LE(sr * 2, 28); hdr.writeUInt16LE(2, 32); hdr.writeUInt16LE(16, 34); hdr.write('data', 36); hdr.writeUInt32LE(len * 2, 40);
+  const body = Buffer.alloc(len * 2);
+  for (let k = 0; k < n; k++) fs.writeFileSync(path.join(big, `Artist ${k % 37} - Library Track ${k}.wav`), Buffer.concat([hdr, body]));
+  await ev(() => window.opendj.setSetting('autoAnalyse', false));
+  await ev((dir) => fetch('/api/folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: dir }) }), big);
+  await page.waitForFunction((k) => window.opendj.library.tracks.size >= k, TRACKS.length + n, { timeout: 180000 });
+  await ev(() => window.opendj.analyser.cancel());
+  await playState(2, LAYOUTS[0]);
+  let worst = 0;
+  for (const [name, step, count] of [['400 px steps', 400, 60], ['80 px per frame', 80, 120]]) {
+    const r = await ev(async ([step, count]) => {
+      const sc = document.querySelector('.lib-scroll'); sc.scrollTop = 0; await new Promise((res) => setTimeout(res, 300));
+      const fr = []; let last = performance.now(), run = true; const f = (t) => { fr.push(t - last); last = t; if (run) requestAnimationFrame(f); }; requestAnimationFrame(f);
+      for (let k = 0; k < count; k++) { sc.scrollTop += step; await new Promise((res) => requestAnimationFrame(res)); }
+      run = false; fr.shift(); const s = [...fr].sort((a, b) => a - b);
+      return { frames: fr.length, avg: +(fr.reduce((a, b) => a + b, 0) / fr.length).toFixed(1), p95: +s[Math.floor(s.length * 0.95)].toFixed(1), max: +s.at(-1).toFixed(1), over20ms: fr.filter((x) => x > 20).length };
+    }, [step, count]);
+    worst = Math.max(worst, r.p95);
+    console.log(`[library] scrolling ${n} tracks (${name}) while 2 decks play:`, JSON.stringify(r));
+  }
+  console.log(worst <= 20 ? '[library] ok: 95th-percentile frame <= 20 ms' : `[library] FAIL: 95th-percentile frame ${worst} ms > 20 ms`);
+  if (worst > 20) process.exitCode = 1;
 }
 
 if (ELECTRON) await electronApp.close();

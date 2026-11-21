@@ -92,6 +92,14 @@ export function icon(name, { cls = '', label } = {}) {
   return s;
 }
 
+/** icon() as an HTML string (cached), for markup built with innerHTML such as the library rows. */
+const htmlCache = new Map();
+export function iconHtml(name, cls = '') {
+  const k = `${name}|${cls}`;
+  if (!htmlCache.has(k)) htmlCache.set(k, icon(name, { cls }).outerHTML);
+  return htmlCache.get(k);
+}
+
 /** A button label: icon followed by text (text may be empty for icon-only buttons). */
 export function iconLabel(name, text = '') {
   const f = document.createDocumentFragment();

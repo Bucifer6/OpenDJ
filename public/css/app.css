@@ -321,9 +321,9 @@ body:not(.four-decks) .deck-col > .deck:nth-child(2) { display: none; }
 .lib-scroll { flex: 1; overflow: auto; position: relative; outline: none; contain: strict; }
 .lib-spacer { width: 1px; }
 .lib-rows { position: absolute; inset: 0 0 auto 0; }
-.lr { position: absolute; left: 0; right: 0; height: 26px; border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent); cursor: default; color: var(--text); }
+.lr { position: absolute; left: 0; right: 0; top: 0; height: 26px; grid-template-columns: var(--lib-cols); contain: layout style paint; border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent); cursor: default; color: var(--text); }
 .lr > div { padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lr:nth-child(even) { background: var(--row-alt); }
+.lr.alt { background: var(--row-alt); }
 .lr:hover { background: var(--hover); }
 .lr.sel { background: var(--sel) !important; padding: 0; border: 0; border-bottom: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); border-radius: 0; min-width: 0; box-shadow: inset 2px 0 0 var(--accent); }
 .lr.cursor { box-shadow: inset 2px 0 var(--accent); }

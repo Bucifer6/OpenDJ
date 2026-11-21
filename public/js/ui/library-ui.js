@@ -5,7 +5,7 @@ import { stemsMenuItems } from '../stems/stems-ui.js';
 import { api } from '../api.js';
 import { toCamelot, camelotCompatible } from '../audio/analysis-core.js';
 import { LibraryDialogs, TRACK_COLORS, colorName, flipSubmenus } from './library-dialogs.js';
-import { icon as uiIcon, iconLabel, glyphIcon } from './icons.js';
+import { icon as uiIcon, iconLabel, glyphIcon, iconHtml } from './icons.js';
 import { platform, unavailable } from '../platform.js';
 
 // rows are taller on touch screens (phones, tablets) so a finger can pick one
@@ -287,6 +287,7 @@ export class LibraryUI {
   gridTemplate() { return this.cols().map((c) => (typeof c.w === 'number' ? `${c.w}px` : c.w)).join(' '); }
   renderHeader() {
     this.header.style.gridTemplateColumns = this.gridTemplate();
+    this.rowsEl?.style.setProperty('--lib-cols', this._tpl = this.gridTemplate());
     const label = (c) => (c.id === 'addedAt' && this.view.kind === 'session' ? 'Played' : c.label);
     this.header.replaceChildren(...this.cols().map((c) => el('div', {
       class: `lh ${this.sort.col === c.id ? 'sorted' : ''}`,
@@ -294,6 +295,12 @@ export class LibraryUI {
     }, label(c), this.sort.col === c.id ? (this.sort.dir > 0 ? ' ▲' : ' ▼') : '')));
   }
 
+  /**
+   * Virtualised rows. Scrolling only builds the rows that come into view and drops the ones that leave (rows are
+   * positioned with transform, the column template is one CSS variable on the container); a forced render (data,
+   * selection, sort) rebuilds the visible rows. Cover art is attached once scrolling settles. Rebuilding ~40 rows
+   * through innerHTML with per-row grid templates and cover images on every scroll step cost 50–117 ms a frame.
+   */
   renderRows(force) {
     const H = this.scroller.clientHeight || 300;
     this.spacer.style.height = `${this.rows.length * ROW_H}px`;
@@ -301,39 +308,64 @@ export class LibraryUI {
     const last = Math.min(this.rows.length, first + Math.ceil(H / ROW_H) + 10);
     if (!force && this._range && this._range[0] === first && this._range[1] === last) return;
     this._range = [first, last];
-    const master = this.app.engine.masterDeck();
-    const mCam = master?.camelot, mBpm = master?.effectiveBpm;
-    const loaded = new Set(this.app.engine.decks.map((d) => d.track?.id).filter(Boolean));
-    const dl = new Set([...this.downloads.queued, ...this.downloads.active].map((x) => x.trackId));
+    const tpl = this.gridTemplate();
+    if (tpl !== this._tpl) { this._tpl = tpl; this.rowsEl.style.setProperty('--lib-cols', tpl); }
+    const scrolling = !force && performance.now() - (this._scrollAt || 0) < 400;
+    if (!force) this._scrollAt = performance.now();
+    if (force || !this._rowMap) { this._rowMap = new Map(); this.rowsEl.replaceChildren(); }
+    const map = this._rowMap;
+    for (const [i, row] of map) if (i < first || i >= last) { row.remove(); map.delete(i); }
+    let ctx = null;
     const frag = document.createDocumentFragment();
     for (let i = first; i < last; i++) {
-      const t = this.rows[i];
-      const cam = toCamelot(t.key);
-      const comp = mCam && cam && camelotCompatible(mCam, cam);
-      const bpmClose = mBpm && t.bpm && Math.abs(t.bpm / mBpm - 1) < 0.04;
-      const src = t.sourceType === 'remote' ? (SOURCE_ICONS[t.sourceKind] || 'Server') + (t.localPath ? ' ✓' : '') : 'Local';
-      const dup = this.view.kind === 'duplicates' ? ` dup-${this.dupIndex.get(t.id) % 2 ? 'b' : 'a'} ${this.dupGroups[this.dupIndex.get(t.id)]?.ids[0] === t.id ? 'dup-keep' : ''}` : '';
-      const sw = t.color ? `<i class="lc-sw" style="background:${escapeHtml(t.color)}" title="${escapeHtml(colorName(t.color) || t.color)}"></i>` : '';
-      const when = this.view.kind === 'session' ? (t._playedAt ? new Date(t._playedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') : (t.addedAt ? new Date(t.addedAt).toLocaleDateString() : '');
-      const row = el('div', {
-        class: `lr ${this.selected.has(t.id) ? 'sel' : ''} ${i === this.cursor ? 'cursor' : ''} ${loaded.has(t.id) ? 'loaded' : ''} ${t.playCount ? 'played' : ''} ${t.missing ? 'missing' : ''} ${t.unreadable ? 'unreadable' : ''}${dup}`,
-        title: t.missing ? `File missing: ${t.path}` : t.unreadable ? `Could not decode this file: ${t.path || t.title}` : null,
-        style: { top: `${i * ROW_H}px`, gridTemplateColumns: this.gridTemplate() },
-        draggable: 'true', 'data-i': i,
-        html: (this.showOrder ? `<div class="num ord">${(this.orderOf?.get(t) ?? i) + 1}</div>` : '') + `<div class="art" style="background-image:url(${api.coverUrl(t.id)})"></div>`
-          + `<div class="c-title" title="${escapeHtml(t.title)}">${sw}${t.missing ? '<span class="lc-miss">⚠</span>' : t.unreadable ? '<span class="lc-miss lc-unreadable" title="Unreadable: the file could not be decoded">⚠</span>' : ''}${escapeHtml(t.title)}</div><div title="${escapeHtml(t.artist)}">${escapeHtml(t.artist)}</div>`
-          + `<div class="num ${bpmClose ? 'match' : ''}">${Number(t.bpm) > 0 ? Number(t.bpm).toFixed(Number(t.bpm) % 1 ? 1 : 0) : ''}</div>`
-          + `<div class="key ${cam ? `cam-${cam.replace(/\D/g, '')}` : ''} ${comp ? 'match' : ''}">${escapeHtml(cam || t.key || '')}</div>`
-          + `<div class="num">${fmtDur(t.duration)}</div><div class="num">${escapeHtml(t.energy ?? '')}</div>`
-          + `<div>${escapeHtml(t.genre)}</div><div class="lc-tags">${(t.tags || []).map((x) => `<span class="tag-chip">${escapeHtml(x)}</span>`).join('')}</div><div>${escapeHtml(t.album)}</div>`
-          + `<div class="stars" data-rate>${[1, 2, 3, 4, 5].map((s) => `<span data-s="${s}" class="${s <= (t.rating || 0) ? 'on' : ''}">★</span>`).join('')}</div>`
-          + `<div class="src ${t.sourceType === 'remote' && !t.localPath ? 'stream' : ''}">${dl.has(t.id) ? '⬇ …' : escapeHtml(src)}</div>`
-          + `<div class="num">${when}</div>`,
-      });
-      frag.append(row);
+      if (map.has(i)) continue;
+      ctx ||= this.rowContext();
+      const row = this.buildRow(i, ctx, !scrolling && !force ? true : !scrolling);
+      map.set(i, row); frag.append(row);
     }
-    this.rowsEl.replaceChildren(frag);
+    if (frag.childNodes.length) this.rowsEl.append(frag);
+    // cover art once the list stops moving
+    clearTimeout(this._artT);
+    this._artT = setTimeout(() => { for (const row of this._rowMap.values()) if (row._art) { row.firstArt.style.backgroundImage = row._art; row._art = null; } }, scrolling ? 160 : 0);
     if (!this._wired) this.wireRows();
+  }
+
+  rowContext() {
+    const master = this.app.engine.masterDeck();
+    return {
+      mCam: master?.camelot, mBpm: master?.effectiveBpm,
+      loaded: new Set(this.app.engine.decks.map((d) => d.track?.id).filter(Boolean)),
+      dl: new Set([...this.downloads.queued, ...this.downloads.active].map((x) => x.trackId)),
+    };
+  }
+
+  buildRow(i, { mCam, mBpm, loaded, dl }) {
+    const t = this.rows[i];
+    const cam = toCamelot(t.key);
+    const comp = mCam && cam && camelotCompatible(mCam, cam);
+    const bpmClose = mBpm && t.bpm && Math.abs(t.bpm / mBpm - 1) < 0.04;
+    const src = t.sourceType === 'remote' ? (SOURCE_ICONS[t.sourceKind] || 'Server') : 'Local';
+    const dup = this.view.kind === 'duplicates' ? ` dup-${this.dupIndex.get(t.id) % 2 ? 'b' : 'a'} ${this.dupGroups[this.dupIndex.get(t.id)]?.ids[0] === t.id ? 'dup-keep' : ''}` : '';
+    const sw = t.color ? `<i class="lc-sw" style="background:${escapeHtml(t.color)}" title="${escapeHtml(colorName(t.color) || t.color)}"></i>` : '';
+    const when = this.view.kind === 'session' ? (t._playedAt ? new Date(t._playedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') : (t.addedAt ? new Date(t.addedAt).toLocaleDateString() : '');
+    const row = el('div', {
+      class: `lr ${i % 2 ? 'alt' : ''} ${this.selected.has(t.id) ? 'sel' : ''} ${i === this.cursor ? 'cursor' : ''} ${loaded.has(t.id) ? 'loaded' : ''} ${t.playCount ? 'played' : ''} ${t.missing ? 'missing' : ''} ${t.unreadable ? 'unreadable' : ''}${dup}`,
+      title: t.missing ? `File missing: ${t.path}` : t.unreadable ? `Could not decode this file: ${t.path || t.title}` : null,
+      style: { transform: `translateY(${i * ROW_H}px)` },
+      draggable: 'true', 'data-i': i,
+      html: (this.showOrder ? `<div class="num ord">${(this.orderOf?.get(t) ?? i) + 1}</div>` : '') + '<div class="art"></div>'
+        + `<div class="c-title" title="${escapeHtml(t.title)}">${sw}${t.missing ? `<span class="lc-miss" title="File missing">${iconHtml('warn')}</span>` : t.unreadable ? `<span class="lc-miss lc-unreadable" title="Unreadable: the file could not be decoded">${iconHtml('warn')}</span>` : ''}${escapeHtml(t.title)}</div><div title="${escapeHtml(t.artist)}">${escapeHtml(t.artist)}</div>`
+        + `<div class="num ${bpmClose ? 'match' : ''}">${Number(t.bpm) > 0 ? Number(t.bpm).toFixed(Number(t.bpm) % 1 ? 1 : 0) : ''}</div>`
+        + `<div class="key ${cam ? `cam-${cam.replace(/\D/g, '')}` : ''} ${comp ? 'match' : ''}">${escapeHtml(cam || t.key || '')}</div>`
+        + `<div class="num">${fmtDur(t.duration)}</div><div class="num">${escapeHtml(t.energy ?? '')}</div>`
+        + `<div>${escapeHtml(t.genre)}</div><div class="lc-tags">${(t.tags || []).map((x) => `<span class="tag-chip">${escapeHtml(x)}</span>`).join('')}</div><div>${escapeHtml(t.album)}</div>`
+        + `<div class="stars" data-rate>${[1, 2, 3, 4, 5].map((s) => `<span data-s="${s}" class="${s <= (t.rating || 0) ? 'on' : ''}">★</span>`).join('')}</div>`
+        + `<div class="src ${t.sourceType === 'remote' && !t.localPath ? 'stream' : ''}">${dl.has(t.id) ? `${iconHtml('download')} …` : escapeHtml(src)}${t.sourceType === 'remote' && t.localPath ? ` <span title="Downloaded for offline use">${iconHtml('check', 'lc-offline')}</span>` : ''}</div>`
+        + `<div class="num">${when}</div>`,
+    });
+    row.firstArt = row.querySelector('.art');
+    row._art = `url(${api.coverUrl(t.id)})`;
+    return row;
   }
 
   wireRows() {
