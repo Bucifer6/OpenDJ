@@ -41,8 +41,10 @@ export class Channel extends Emitter {
     // (parked just inside the range: the special-case formulas at exactly Nyquist / 0 Hz would click on the way out)
     this.lpf = [bq('lowpass', this.parkLp, -5.33), bq('lowpass', this.parkLp, 2.32)];
     this.hpf = [bq('highpass', 3, -5.33), bq('highpass', 3, 2.32)];
-    this.fx = new FxUnit(ctx);
+    this.fx = new FxUnit(ctx, { postFader: engine.settings.fxPostFader !== false });
     this.fader = ctx.createGain(); this.xf = ctx.createGain();
+    // post-fader FX feed: mirrors of the channel fader and crossfader gains (set together in apply() / setXfGain())
+    this.postFader = ctx.createGain(); this.postXf = ctx.createGain();
     this.cueSend = ctx.createGain(); this.cueSend.gain.value = 0;
     this.meter = ctx.createAnalyser(); this.meter.fftSize = 512;
     this.meterBuf = new Float32Array(this.meter.fftSize);
@@ -72,12 +74,16 @@ export class Channel extends Emitter {
     // Color FX: a sound-colour effect whose amount follows the filter knob (rekordbox-style)
     this.colorIn = ctx.createGain(); this.colorDry = ctx.createGain(); this.colorSend = ctx.createGain(); this.colorWet = ctx.createGain();
     this.colorSend.gain.value = 0; this.colorWet.gain.value = 0;
-    this.colorIn.connect(this.colorDry); this.colorDry.connect(this.fx.input); this.colorIn.connect(this.colorSend); this.colorWet.connect(this.fx.input);
+    this.colorOut = ctx.createGain();
+    this.colorIn.connect(this.colorDry); this.colorDry.connect(this.colorOut); this.colorIn.connect(this.colorSend); this.colorWet.connect(this.colorOut);
+    this.colorOut.connect(this.fx.input); this.colorOut.connect(this.postFader); this.postFader.connect(this.postXf); this.postXf.connect(this.fx.postIn);
     this.colorType = 'filter'; this.colorFx = null; this.colorFade = null;
     this.trimNode.connect(this.stemIn); this.stemOut.connect(this.eqIn);
     chain(this.eqOut, this.hpf[0], this.hpf[1], this.lpf[0], this.lpf[1], this.colorIn);
     this.fx.output.connect(this.fader); this.fx.output.connect(this.cueSend); this.fx.output.connect(this.meter);
     this.fader.connect(this.xf); this.xf.connect(engine.musicBus); this.cueSend.connect(engine.cueBus);
+    // post-fader FX tails: the wet signal is summed after the faders (silent in pre-fader mode)
+    this.fx.wetOut.connect(engine.musicBus); this.fx.wetOut.connect(this.cueSend); this.fx.wetOut.connect(this.meter);
     this.state = { trim: 0, autoGain: 0, eqHigh: 0, eqMid: 0, eqLow: 0, filter: 0, volume: 0.8, cue: false, xfAssign: index % 2 === 0 ? 'A' : 'B', fxOn: false, fxType: 'echo', fxMix: 0.5, fxParam: 0.5, fxParam2: 0.5, fxBeats: 0.5, vocal: 1, inst: 1, colorFx: engine.settings.colorFx || 'filter' };
     this.setColorFx(this.state.colorFx);
     this.apply();
@@ -122,6 +128,10 @@ export class Channel extends Emitter {
   setBeatSec(s) { this.beatSec = s; this.fx.setBeatSec(s); this.colorFx?.setTempo?.(s); }
   setClock(beat, at, beatSec) { this.fx.setClock(beat, at, beatSec); this.colorFx?.setClock?.(beat, at, beatSec); }
   setAutoGain(db) { this.state.autoGain = db; this.apply(); }
+  /** Crossfader gain of this channel (engine.applyCrossfader), mirrored on the post-fader FX feed. */
+  setXfGain(g) { const t = this.ctx.currentTime; this.xf.gain.setTargetAtTime(g, t, 0.004); this.postXf.gain.setTargetAtTime(g, t, 0.004); }
+  /** Beat FX tails after the channel fader (default) or the whole FX unit before it. */
+  setFxPostFader(on) { this.fx.setPostFader(on); }
   /** AI stems loaded on this channel's deck: VOC / INST then drive the stems and the DSP quick-stems chain is bypassed. */
   setAiStems(on) { if (this.aiStems === !!on) return; this.aiStems = !!on; this.apply(); this.emit('change', 'aiStems', this.aiStems); }
   apply() {
@@ -150,6 +160,7 @@ export class Channel extends Emitter {
     } else { this.colorDry.gain.setTargetAtTime(1, t, k); this.colorWet.gain.setTargetAtTime(0, t, k); this.colorSend.gain.setTargetAtTime(0, t, k); }
     this.applyFilter(x * (cfx ? cfx.dryFilter : 1), side, t);
     this.fader.gain.setTargetAtTime(s.volume * s.volume, t, 0.005);
+    this.postFader.gain.setTargetAtTime(s.volume * s.volume, t, 0.005);
     this.cueSend.gain.setTargetAtTime(s.cue ? 1 : 0, t, 0.005);
   }
   /** One-knob filter: amount x (0..1, dead zone removed), side -1 = low-pass, +1 = high-pass. */
@@ -306,6 +317,8 @@ export class Engine extends Emitter {
   // ---------- master / outputs ----------
   /** The limiter stays in the signal path (constant latency); off = unity gain, so toggling never clicks. */
   setLimiter(on) { this.limiter.setEnabled(on); }
+  /** Post-fader beat FX tails (settings.fxPostFader, default on) for every channel. */
+  setFxPostFader(on) { for (const ch of this.channels) ch.setFxPostFader(on); }
   setMasterVolume(v) { v = clamp(Number(v) || 0, 0, 1); this.masterVolume = v; this.masterGain.gain.setTargetAtTime(v * v * 1.25, this.ctx.currentTime, 0.01); this.emit('master', 'volume', v); }
   setCueMix(v) { v = clamp(Number(v) || 0, 0, 1); this.cueMix = v; this.hpCue.gain.value = Math.cos(v * Math.PI / 2); this.hpMaster.gain.value = Math.sin(v * Math.PI / 2); this.emit('master', 'cueMix', v); }
   setHeadphoneVolume(v) { v = clamp(Number(v) || 0, 0, 1); this.hpVolume = v; this.hpOut.gain.setTargetAtTime(v * v * 1.25, this.ctx.currentTime, 0.01); this.emit('master', 'hpVolume', v); }
@@ -371,7 +384,7 @@ export class Engine extends Emitter {
     };
     for (const ch of this.channels) {
       const a = ch.state.xfAssign;
-      ch.xf.gain.setTargetAtTime(a === 'THRU' ? 1 : gainFor(a), this.ctx.currentTime, 0.004);
+      ch.setXfGain(a === 'THRU' ? 1 : gainFor(a));
     }
   }
 

@@ -29,6 +29,7 @@ export class Visualizer {
     this.analyser = eng.ctx.createAnalyser();
     this.analyser.fftSize = 512; this.analyser.smoothingTimeConstant = 0.6;
     ch.fx.output.connect(this.analyser); // fan-out tap: does not change the audio path
+    ch.fx.wetOut?.connect(this.analyser); // post-fader FX tails (silent in pre-fader mode)
     this.bins = new Uint8Array(this.analyser.frequencyBinCount);
   }
 
@@ -106,6 +107,7 @@ export class Visualizer {
   dispose() {
     window.removeEventListener('opendj-theme', this._onTheme);
     try { this.app.engine.channels[this.index].fx.output.disconnect(this.analyser); } catch { /* already gone */ }
+    try { this.app.engine.channels[this.index].fx.wetOut?.disconnect(this.analyser); } catch { /* already gone */ }
     this.analyser = null;
   }
 }

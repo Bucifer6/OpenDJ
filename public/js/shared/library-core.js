@@ -33,6 +33,7 @@ export const DEFAULT_SETTINGS = {
   talkoverDb: -12,
   midiClockOutput: '',
   colorFx: 'filter',
+  fxPostFader: true,          // beat FX tails ring out after the channel fader / crossfader closes (false = pre-fader FX)
   autoCues: true,
   autoAnalyse: true,          // analyse new tracks (BPM, key, waveform, cues) in the background, in the browser
   sequencer: null,            // object; replaced wholesale on update (not merged)

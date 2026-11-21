@@ -290,6 +290,7 @@ export class Dialogs {
       field('Audio latency', sel(s.latencyHint || 'interactive', [['interactive', 'Lowest (interactive)'], ['10', '10 ms'], ['20', '20 ms'], ['balanced', 'Balanced'], ['playback', 'Safe (high latency, no dropouts)']], (v) => { set('latencyHint', v); this.app.toast('Restart OpenDJ to apply the new latency'); }),
         'Raise this if you hear crackles; lower it for tighter scratching and cueing.'),
       el('label', { class: 'check' }, chk(s.limiter, (v) => { set('limiter', v); app.engine.setLimiter(v); }), ' Master limiter (prevents clipping)'),
+      el('label', { class: 'check', title: 'On: echo and reverb tails keep ringing when you pull the channel fader down or crossfade away (echo-outs), like a club mixer. Off: the beat FX sit before the fader, so the fader cuts the tail too.' }, chk(s.fxPostFader !== false, (v) => { set('fxPostFader', v); app.engine.setFxPostFader(v); }), ' Beat FX tails ring out after the channel fader closes (post-fader FX)'),
       el('label', { class: 'check' }, chk(s.highPrecisionAudio, (v) => { set('highPrecisionAudio', v); this.app.toast('Applies to tracks loaded from now on'); }), ' High-precision deck audio (32-bit float; uses twice the memory per loaded track)'),
       el('label', { class: 'check' }, chk(s.autoGain, (v) => set('autoGain', v)), ' Auto gain (level-match tracks on load)'),
       el('p', { class: 'hint' }, `Sample rate ${app.engine.ctx.sampleRate} Hz · output latency ≈ ${Math.round(((app.engine.ctx.outputLatency || 0) + (app.engine.ctx.baseLatency || 0)) * 1000)} ms`),

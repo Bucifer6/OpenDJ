@@ -60,6 +60,52 @@ try {
     save(`tail-${type}`, r);
   }
 
+  // ---------------------------------------------------------------- post-fader FX tails (echo-outs)
+  {
+    // a whole mixer channel playing drums with an echo / reverb on; at 2.0 s the channel fader (or the crossfader)
+    // closes while the music keeps playing. Post-fader (default): the dry signal is gone at once, the tail rings on
+    // and decays. Pre-fader (setting off): the fader cuts the tail too.
+    const fxInit = (type) => [{ call: 'setBeatSec', args: [0.5] }, { call: 'set', args: ['fxType', type] }, { call: 'set', args: ['fxMix', 0.7] }, { call: 'set', args: ['fxParam', 0.6] }, { call: 'set', args: ['fxBeats', 0.75] }, { call: 'set', args: ['fxOn', true] }];
+    const close = { fader: { t: 2, call: 'set', args: ['volume', 0] }, crossfader: { t: 2, call: 'setXfGain', args: [0] } };
+    const dryRef = await lab.render({ chain: 'channel', signal: 'drums', secs: 4, events: [close.fader] });
+    const dry0 = rms(dryRef.L, dryRef.sr, 0.3, 1.9), dryAfter = rms(dryRef.L, dryRef.sr, 2.1, 4);
+    check(db(dryAfter / dry0) < -80, `fader down without FX: the channel is silent (${f(db(dryAfter / dry0))} dB)`);
+    for (const type of ['echo', 'reverb']) for (const how of ['fader', 'crossfader']) {
+      const r = await lab.render({ chain: 'channel', signal: 'drums', secs: 10, init: fxInit(type), events: [close[how]] });
+      const ref = rms(r.L, r.sr, 0.3, 1.9);
+      const w = [[2.05, 2.55], [3.5, 4], [5.5, 6], [9.4, 9.9]].map(([a, b]) => db(rms(r.L, r.sr, a, b) / ref));
+      const decays = w[0] > -24 && w[1] < w[0] && w[2] < w[1] && w[3] < -60;
+      // the track keeps playing into the closed fader: if any dry signal got through, the last window would stay near 0 dB
+      check(decays, `post-fader ${type}, ${how} closed during the effect: tail present and decaying (${w.map((x) => f(x, 1)).join(' → ')} dB), dry signal gone`);
+      if (how === 'fader') save(`postfader-${type}`, r);
+    }
+    // pre-fader setting: the fader cuts the tail as before
+    const pre = await lab.render({ chain: 'channel', settings: { fxPostFader: false }, signal: 'drums', secs: 4, init: fxInit('echo'), events: [close.fader] });
+    const preTail = db(rms(pre.L, pre.sr, 2.1, 4) / rms(pre.L, pre.sr, 0.3, 1.9));
+    check(preTail < -80, `pre-fader setting: the fader cuts the echo tail (${f(preTail)} dB)`);
+    // (offline renders of the worklet effects differ run to run by ~4e-4 peak, -60 dB: compare with that margin)
+    const same = (a, b) => { let d = 0, e = 0, r0 = 0; for (let i = 0; i < a.L.length; i++) { const x = a.L[i] - b.L[i]; d = Math.max(d, Math.abs(x)); e += x * x; r0 += a.L[i] * a.L[i]; } return { d, rel: db(Math.sqrt(e / (r0 || 1))) }; };
+    // nothing doubles, neutral levels unchanged: with the fader up, post- and pre-fader renders are the same signal
+    for (const type of ['echo', 'reverb', 'flanger', 'distortion']) {
+      const init = [...fxInit(type), { call: 'set', args: ['volume', 1] }];
+      const a = await lab.render({ chain: 'channel', signal: 'drums', secs: 3, init });
+      const b = await lab.render({ chain: 'channel', settings: { fxPostFader: false }, signal: 'drums', secs: 3, init });
+      const { d, rel } = same(a, b);
+      const lv = db(rms(a.L, a.sr, 0.5, 3) / rms(b.L, b.sr, 0.5, 3));
+      check(d < 3e-3 && rel < -50 && Math.abs(lv) < 0.05, `${type} with the fader open: post-fader and pre-fader routing give the same signal (difference ${f(rel, 0)} dB, level ${f(lv, 3)} dB)`);
+    }
+    {
+      const off = await lab.render({ chain: 'channel', signal: 'drums', secs: 3 });
+      const offPre = await lab.render({ chain: 'channel', settings: { fxPostFader: false }, signal: 'drums', secs: 3 });
+      const { rel } = same(off, offPre), lv = db(rms(off.L, off.sr, 0.5, 1.9) / rms(dryRef.L, dryRef.sr, 0.5, 1.9));
+      check(rel < -50 && Math.abs(lv) < 0.05, `FX off: the channel output is unchanged by the routing (difference ${f(rel, 0)} dB, level ${f(lv, 3)} dB)`);
+    }
+    // switching the setting while an echo rings: no click, no level jump
+    const sw = await lab.render({ chain: 'channel', ...SINE, secs: 3, init: fxInit('echo'), events: [{ t: 1, call: 'setFxPostFader', args: [false] }, { t: 2, call: 'setFxPostFader', args: [true] }] });
+    const swRef = maxJump(sw.L, sw.sr, 0.4, 0.95);
+    check(maxJump(sw.L, sw.sr, 0.95, 2.3) <= swRef * 1.3 + 1e-3, `switching pre-/post-fader while the echo rings is click-free (max step ${f(maxJump(sw.L, sw.sr, 0.95, 2.3) * 1e3)} vs ${f(swRef * 1e3)} ×1e-3)`);
+  }
+
   // ---------------------------------------------------------------- beat-locked LFO (Trans) follows the grid
   {
     const init = [{ call: 'setBeatSec', args: [0.5] }, { call: 'setType', args: ['trans'] }, { call: 'setMix', args: [1] }, { call: 'setParam', args: [1] }, { call: 'setParam2', args: [0.5] }, { call: 'setBeats', args: [0.5] }, { call: 'setClock', args: [0, 0, 0.5] }, { call: 'setOn', args: [true] }];

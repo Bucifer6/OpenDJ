@@ -636,16 +636,20 @@ export class AutoMix extends Emitter {
       if (now >= tr.dropWall - 10) this.dropIn(tr, chO, chI);
       return;
     }
-    // tail after the drop (echo / reverb ring out on the outgoing fader)
+    // tail after the drop: echo / reverb ring out on the outgoing fader (pre-fader FX), or on their own after the
+    // fader cut (post-fader FX tails: the tail decays naturally, nothing to fade)
     const p = tr.postWall > 0 ? clamp01((now - tr.dropAt) / tr.postWall) : 1;
-    if (tr.postWall > 0) chO.set('volume', 0.8 * Math.sqrt(1 - ease(p)));
+    if (tr.postWall > 0 && !tr.tailPost) chO.set('volume', 0.8 * Math.sqrt(1 - ease(p)));
     if (p >= 1) this.finishTransition();
   }
 
   dropIn(tr, chO, chI) {
     tr.phase = 'post'; tr.dropAt = performance.now();
     const { out, inn } = tr;
-    if (tr.style === 'echo' || tr.style === 'reverb') { chO.set('eqLow', -1); chO.set('eqMid', -1); chO.set('eqHigh', -1); } // dry signal gone, the tail rings on
+    tr.tailPost = (tr.style === 'echo' || tr.style === 'reverb') && this.engine.settings?.fxPostFader !== false;
+    // echo out / reverb wash: with post-fader FX tails the fader cuts the dry signal and the tail rings out on its own
+    // (a real echo-out); with pre-fader FX the EQ kills the dry signal and the fader fades the tail afterwards
+    if (tr.style === 'echo' || tr.style === 'reverb') { if (tr.tailPost) chO.set('volume', 0); else { chO.set('eqLow', -1); chO.set('eqMid', -1); chO.set('eqHigh', -1); } }
     else chO.set('volume', 0);
     for (const k of ['eqLow', 'eqMid', 'eqHigh', 'filter']) chI.set(k, 0);
     chI.set('volume', 0.8);
@@ -663,7 +667,11 @@ export class AutoMix extends Emitter {
     if (out.loop?.active) out.exitLoop();
     out.loop = null;
     chO.set('fxOn', false);
-    for (const [k, v] of Object.entries(tr.fxSaved || {})) if (k !== 'fxOn') chO.set(k, v);
+    const restoreFx = () => { for (const [k, v] of Object.entries(tr.fxSaved || {})) if (k !== 'fxOn') chO.set(k, v); };
+    // post-fader tail still ringing: changing the effect type / mix now would cut it, so restore the user's FX
+    // settings once it has died away (unless the FX unit has been switched on again meanwhile)
+    if (tr.tailPost && !aborted) setTimeout(() => { if (!chO.state.fxOn) restoreFx(); }, 8000);
+    else restoreFx();
     for (const ch of [chO, chI]) { ch.set('eqLow', 0); ch.set('eqMid', 0); ch.set('eqHigh', 0); ch.set('filter', 0); }
     if (aborted) {
       // stopping mid-transition: finish the move to the incoming deck so the mixer isn't left half-mixed

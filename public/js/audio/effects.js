@@ -424,18 +424,39 @@ export const BEAT_DIVISIONS = [1 / 8, 1 / 4, 1 / 2, 3 / 4, 1, 2, 4, 8];
 
 const FADE = 0.012; // on/off and type-change cross-fade time constant (s)
 
-/** One FX unit per channel: input -> dry -> output; input -> send -> effect -> fade -> wet -> output */
+/**
+ * One FX unit per channel. Dry: input -> dry -> output. Effect: send -> effect -> fade -> wet, then
+ *  - pre-fader (classic):   input  -> preTap  -> send ... wet -> preRet  -> output   (output goes through the faders)
+ *  - post-fader tails:      postIn -> postTap -> send ... wet -> postRet -> wetOut   (wetOut is summed after the faders)
+ * In post-fader mode the channel feeds `postIn` with the signal scaled by its channel fader and crossfader (a mirror
+ * of their gains), and sums `wetOut` straight into the music bus: closing a fader stops new signal from entering the
+ * echo / reverb but lets what is already in it ring out, while the dry signal is cut. Exactly one tap and one return
+ * are open at a time (switching cross-fades them), so nothing is doubled; with the faders open both modes are identical.
+ */
 export class FxUnit {
-  constructor(ctx) {
+  constructor(ctx, { postFader = false } = {}) {
     this.ctx = ctx;
     this.input = ctx.createGain(); this.output = ctx.createGain();
+    this.postIn = ctx.createGain(); this.wetOut = ctx.createGain();
     this.dry = ctx.createGain(); this.send = ctx.createGain(); this.wet = ctx.createGain();
+    this.preTap = ctx.createGain(); this.postTap = ctx.createGain(); this.preRet = ctx.createGain(); this.postRet = ctx.createGain();
     this.send.gain.value = 0; this.wet.gain.value = 0;
     this.input.connect(this.dry); this.dry.connect(this.output);
-    this.input.connect(this.send); this.wet.connect(this.output);
+    this.input.connect(this.preTap); this.postIn.connect(this.postTap); this.preTap.connect(this.send); this.postTap.connect(this.send);
+    this.wet.connect(this.preRet); this.wet.connect(this.postRet); this.preRet.connect(this.output); this.postRet.connect(this.wetOut);
+    this.postFader = !!postFader;
+    for (const [n, on] of [[this.preTap, !this.postFader], [this.preRet, !this.postFader], [this.postTap, this.postFader], [this.postRet, this.postFader]]) n.gain.value = on ? 1 : 0;
     this.type = null; this.on = false; this.mix = 0.5; this.param = 0.5; this.param2 = 0.5; this.beats = 1 / 2; this.beatSec = 0.5;
     this.clock = null; this.fx = null; this.fade = null;
     this.setType('echo');
+  }
+  /** Post-fader FX tails on / off (off = the whole FX unit sits before the channel fader, as before). */
+  setPostFader(on) {
+    on = !!on; if (on === this.postFader) return;
+    this.postFader = on;
+    const c = this.ctx;
+    smooth(this.preTap.gain, on ? 0 : 1, c, FADE); smooth(this.preRet.gain, on ? 0 : 1, c, FADE);
+    smooth(this.postTap.gain, on ? 1 : 0, c, FADE); smooth(this.postRet.gain, on ? 1 : 0, c, FADE);
   }
   setType(type) {
     if (!FX[type] || type === this.type) return;

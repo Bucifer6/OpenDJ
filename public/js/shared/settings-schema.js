@@ -37,7 +37,7 @@ const SCHEMA = {
   cueMode: oneOf('device', 'split', 'channels34'),
   crossfaderCurve: oneOf('smooth', 'sharp', 'constant'),
   tempoRange: oneOf(6, 8, 10, 16, 25, 50, 100),
-  keyLockDefault: bool(), quantize: bool(), autoGain: bool(), limiter: bool(), autoCues: bool(), stemsAutoLoad: bool(), highPrecisionAudio: bool(),
+  keyLockDefault: bool(), quantize: bool(), autoGain: bool(), limiter: bool(), fxPostFader: bool(), autoCues: bool(), stemsAutoLoad: bool(), highPrecisionAudio: bool(),
   syncMode: oneOf('beat', 'tempo'),
   waveformZoom: num(1, 120),
   waveformColors: oneOf('rgb', 'blue', 'mono'),
