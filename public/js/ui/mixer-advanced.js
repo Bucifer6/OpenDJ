@@ -216,7 +216,7 @@ export function buildDrawer(app, mixerRoot) {
     raf = requestAnimationFrame(frame);
   };
   const api = {
-    el: drawer,
+    el: drawer, panes: pane,
     get open() { return !drawer.hidden; },
     toggle(on = drawer.hidden, toTab) {
       drawer.hidden = !on;

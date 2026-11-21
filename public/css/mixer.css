@@ -103,3 +103,12 @@
 .mixer-chip[hidden] { display: none; }
 .mixer-chip .chip-apply { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :root.compact .mixer-master { min-width: 84px; }
+/* the mic box (MIC, level, TALK, MC) wraps instead of widening MASTER */
+.mixer .mixer-master > .mic-box { width: 0; min-width: 100%; flex-wrap: wrap; justify-content: center; gap: 3px; }
+.mixer-master > .mic-box .btn { padding: 2px 4px; min-width: 0; }
+.mixer-master > .mic-box .knob-wrap .knob-label { display: none; }
+:root:not(.compact) body:not(.four-decks) .mixer-master { min-width: 118px; }
+.adv-row .mixer-eq-preset { flex: 0 1 auto; width: auto; max-width: 62%; }
+.mixer-tools-pair .mixer-color { flex: 1 1 0; } .mixer-tools-pair .mixer-curve { flex: 1 1 0; }
+.mixer-tools-pair .mixer-eq-model { flex: 1 1 auto; min-width: 0; }
+.mixer-tools .sel.tiny { padding-left: 3px; padding-right: 0; font-size: 10px; }

@@ -175,7 +175,7 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     ...EQ_MODEL_LIST.map((p) => el('option', { value: p.id }, `EQ: ${p.label}`)));
   eqModel.value = eng.mx.eqType;
   eqModel.addEventListener('change', () => updateMixer(app, { eqType: eqModel.value }));
-  const tools = el('div', { class: 'mixer-tools' }, eqModel, el('div', { class: 'mixer-tools-pair' }, eqPreset, colorSel), el('div', { class: 'mixer-tools-pair' }, curveSel, revBtn, advBtn));
+  const tools = el('div', { class: 'mixer-tools' }, el('div', { class: 'mixer-tools-pair' }, eqModel, advBtn), el('div', { class: 'mixer-tools-pair' }, colorSel, curveSel, revBtn));
   // club booth faceplate sections (shown only with the Club Booth skin)
   const club = buildClubSections(app, R);
   master.querySelector('.mic-box').before(club.masterExtra);
@@ -192,6 +192,8 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   // advanced drawer (closed by default) and the personality suggestion chip
   const drawer = buildDrawer(app, root);
   root.append(drawer.el);
+  // the tone presets (EQ knob starting points for all decks) live in the drawer's Channel tab
+  drawer.panes.channel.querySelector('.adv-sec').append(el('label', { class: 'adv-row' }, el('span', { class: 'adv-lbl' }, 'Tone (EQ knobs, all decks)'), eqPreset));
   root.toggleDrawer = (on, tab) => drawer.toggle(on, tab);
   const chip = el('div', { class: 'mixer-chip', hidden: true, role: 'status' });
   root.append(chip);
