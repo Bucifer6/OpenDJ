@@ -134,6 +134,22 @@ export function incomingStart(t) {
  * Beats to offset the incoming start so its bars line up with the outgoing track.
  * pos: outgoing position; start: planned transition start (a phrase boundary) or null for an immediate mix.
  */
+/** Choose a phrase-aware opening for smart sets: use a saved mix-in point, or skip a detected intro to the first main phrase. */
+export function smartStartPoint(t) {
+  const duration = Number(t?.duration) || 0;
+  const end = Number(t?.endTime) || duration || Infinity;
+  const floor = Number(t?.startTime) || 0;
+  const limit = Math.min(end, duration ? duration * 0.4 : Infinity);
+  const valid = (p) => Number.isFinite(Number(p)) && Number(p) > floor + 0.5 && Number(p) <= limit && Number(p) < end - 4;
+  if (valid(t?.mixIn)) return Number(t.mixIn);
+  const main = new Set(['buildup', 'verse', 'drop', 'chorus']);
+  const phrases = Array.isArray(t?.phrases) ? t.phrases : [];
+  if (phrases[0]?.type === 'intro') {
+    const entry = phrases.find((p) => main.has(p.type) && valid(p.start));
+    if (entry) return Number(entry.start);
+  }
+  return incomingStart(t || {});
+}
 export function barOffsetBeats(t, pos, start = null) {
   if (!t.bpm) return 0;
   const beat = 60 / t.bpm;
@@ -360,6 +376,10 @@ export class AutoMix extends Emitter {
       }
       if (!loaded) { this.enabled = false; this.emit('state'); throw new Error('None of the tracks in the queue could be loaded'); }
       this.prepare(a);
+      const firstTrack = this.queue[Math.max(0, this.idx - 1)] || a.track;
+      const smartMode = ['smart', 'live', 'legacy-smart'].includes(this.mode);
+      const startAt = smartMode && this.opts.smartStart !== false ? smartStartPoint(firstTrack) : 0;
+      if (startAt > 0.5) a.seek(startAt);
       a.play();
     }
     this.current = playing || a;

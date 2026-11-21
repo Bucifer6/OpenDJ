@@ -122,7 +122,11 @@ export function scoreTransition(cur, cand, ctx = {}) {
   else if (cand.lastPlayed && (ctx.now ?? Date.now()) - cand.lastPlayed < (W.recentHours ?? 4) * 3600e3) v -= 1;
   if (cur && cand.album && cur.album === cand.album && artistKey(cur) === ak) v -= 0.3;
   parts.variety = v;
-  parts.phrase = introValue(cand);
+  // Prefer tracks with analysed entry/exit points so the transition planner can land on musical phrases.
+  parts.phrase = introValue(cand)
+    + (Number.isFinite(+cand.mixIn) ? 0.45 : 0)
+    + (cur && Number.isFinite(+cur.mixOut) ? 0.35 : 0)
+    + (Array.isArray(cand.phrases) && cand.phrases.some((p) => ['buildup', 'verse', 'drop', 'chorus'].includes(p.type)) ? 0.2 : 0);
   const score = W.harmonic * parts.harmonic + W.bpm * parts.bpm + W.energy * parts.energy + W.genre * parts.genre + W.variety * parts.variety + W.phrase * parts.phrase;
   return { score, parts };
 }
@@ -132,6 +136,8 @@ const fmtBpm = (b) => (Number(b) % 1 ? Number(b).toFixed(1) : String(Math.round(
 export function explain(cur, cand) {
   if (!cur) return [cand.key ? toCamelot(cand.key) : null, num(cand.bpm) ? `${fmtBpm(cand.bpm)} BPM` : null, num(cand.energy) ? `energy ${cand.energy}` : null].filter(Boolean).join(', ') || 'opening track';
   const bits = [];
+  if (Number.isFinite(+cand.mixIn)) bits.push('analysed mix-in');
+  if (Number.isFinite(+cur.mixOut)) bits.push('analysed outro');
   const h = camelotRelation(cur.key, cand.key);
   if (h.kind !== 'unknown') bits.push(`${h.from} → ${h.to}${h.kind === 'clash' ? ' (key clash)' : h.kind === 'relative' ? ' (relative)' : h.kind === 'boost' ? ' (energy boost)' : ''}`);
   else bits.push('key ?');

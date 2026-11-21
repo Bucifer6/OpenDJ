@@ -6,7 +6,7 @@
 //   sanitizeSetting(key, value) -> { ok: true, value } | { ok: false }
 //   sanitizeSettings(obj, defaults) -> a copy with every known key valid (invalid ones replaced by the default)
 
-export const THEME_IDS = ['midnight', 'graphite', 'club', 'neon', 'ocean', 'gold', 'forest', 'light', 'contrast'];
+export const THEME_IDS = ['midnight', 'graphite', 'club', 'neon', 'ocean', 'gold', 'forest', 'light', 'contrast', 'cdj', 'vinyl', 'performance', 'studio'];
 
 const bool = () => (v) => (typeof v === 'boolean' ? v : v === 'true' ? true : v === 'false' ? false : undefined);
 const str = (max = 4096) => (v) => (typeof v === 'string' ? v.slice(0, max) : v == null ? '' : undefined);
@@ -43,7 +43,7 @@ const SCHEMA = {
   waveformColors: oneOf('rgb', 'blue', 'mono'),
   downloadDir: str(), uploadDir: str(),
   automix: shape({
-    transitionBeats: num(1, 256),
+    transitionBeats: num(1, 256), smartStart: bool(), profile: oneOf('club', 'harmonic', 'peak', 'open', 'quick', 'custom'),
     style: oneOf('auto', 'blend', 'bassswap', 'crossfade', 'filter', 'echo', 'cut', 'backspin', 'brake', 'loop', 'reverb', 'phrase', 'eqswap'),
     keepSync: bool(), skipSilence: bool(), shuffle: bool(), keySync: bool(), order: oneOf('harmonic', 'build', 'peak', 'wave'),
     varyStyles: bool(), onAirLoad: oneOf('ask', 'queue', 'stop'), shape: oneOf('warmup', 'rising', 'steady', 'peak', 'wave'),

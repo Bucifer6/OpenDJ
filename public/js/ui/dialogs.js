@@ -14,6 +14,13 @@ export const AUTOMIX_MODES = [
   ['smart', 'Smart mix (order by how well tracks go together)'],
   ['live', 'Smart mix live (pick each next track while playing)'],
 ];
+const MIX_PROFILES = [
+  { id: 'club', label: 'Club flow', priority: 'balanced', shape: 'warmup', style: 'phrase', bars: 8, vary: true, keySync: true },
+  { id: 'harmonic', label: 'Harmonic journey', priority: 'harmonic', shape: 'steady', style: 'blend', bars: 16, vary: false, keySync: true },
+  { id: 'peak', label: 'Peak-time', priority: 'energy', shape: 'peak', style: 'bassswap', bars: 8, vary: true, keySync: true },
+  { id: 'open', label: 'Open format', priority: 'variety', shape: 'rising', style: 'crossfade', bars: 8, vary: true, keySync: false },
+  { id: 'quick', label: 'Quick cuts', priority: 'variety', shape: 'steady', style: 'cut', bars: 4, vary: false, keySync: false },
+];
 const BAR_CHOICES = [4, 8, 16, 32];
 const styleValue = (s) => (s === 'auto' ? 'auto' : normStyle(s));
 let modalSeq = 0;
@@ -24,16 +31,22 @@ function smartControls(am, onChange) {
   const preset = el('select', { class: 'sel', 'data-smart': 'preset' }, ...[['balanced', 'Balanced'], ['harmonic', 'Harmonic first'], ['energy', 'Energy flow first'], ['variety', 'Variety first'], ['custom', 'Custom']].map(([v, l]) => el('option', { value: v }, l)));
   preset.value = am.preset || 'balanced';
   const inputs = {};
+  const applyPreset = (name) => {
+    const p = PRESETS[name]; if (!p) return;
+    preset.value = name;
+    for (const k of Object.keys(p)) { sliders[k] = p[k]; inputs[k].value = p[k]; }
+    onChange?.();
+  };
   const row = (k, label) => {
     const i = el('input', { type: 'range', min: 0, max: 1, step: 0.05, value: sliders[k], 'data-smart': k });
     i.addEventListener('input', () => { sliders[k] = Number(i.value); preset.value = 'custom'; onChange?.(); });
     inputs[k] = i;
     return el('label', { class: 'field' }, el('span', {}, label), i);
   };
-  preset.addEventListener('change', () => { const p = PRESETS[preset.value]; if (p) for (const k of Object.keys(p)) { sliders[k] = p[k]; inputs[k].value = p[k]; } onChange?.(); });
-  const node = el('div', { class: 'form' }, el('label', { class: 'field' }, el('span', {}, 'Smart mix priorities'), preset),
-    row('harmonic', 'Harmonic (key compatibility)'), row('energy', 'Energy flow (follow the set shape)'), row('variety', 'Variety (no repeated artists / genres)'));
-  return { el: node, value: () => ({ preset: preset.value, sliders: { ...sliders } }) };
+  preset.addEventListener('change', () => applyPreset(preset.value));
+  const node = el('div', { class: 'form' }, el('label', { class: 'field' }, el('span', {}, 'Track selector priorities'), preset),
+    row('harmonic', 'Harmonic compatibility'), row('energy', 'Set energy flow'), row('variety', 'Artist and genre variety'));
+  return { el: node, value: () => ({ preset: preset.value, sliders: { ...sliders } }), setPreset: applyPreset };
 }
 
 export class Dialogs {
@@ -227,27 +240,47 @@ export class Dialogs {
     shape.value = o.shape || 'warmup';
     const keySync = el('input', { type: 'checkbox', checked: !!o.keySync });
     const vary = el('input', { type: 'checkbox', checked: !!o.varyStyles, 'data-am': 'vary' });
+    const smartStart = el('input', { type: 'checkbox', checked: o.smartStart !== false });
     const bars = el('select', { class: 'sel', 'data-am': 'bars' }, ...BAR_CHOICES.map((b) => el('option', { value: b }, `${b} bars`)));
     bars.value = String(BAR_CHOICES.reduce((a, b) => (Math.abs(b * 4 - o.transitionBeats) < Math.abs(a * 4 - o.transitionBeats) ? b : a), 8));
     const big = tracks.length > 200;
     const limit = el('input', { class: 'inp', type: 'number', min: 2, max: tracks.length, value: big ? 40 : tracks.length, 'data-am': 'limit' });
     const smartBox = smartControls(o);
-    const smartPart = el('div', { class: 'form' }, el('label', { class: 'field' }, el('span', {}, 'Set shape (energy)'), shape),
+    const profile = el('select', { class: 'sel', 'data-am': 'profile' },
+      el('option', { value: 'custom' }, 'Custom settings'), ...MIX_PROFILES.map((p) => el('option', { value: p.id }, p.label)));
+    profile.value = MIX_PROFILES.some((p) => p.id === o.profile) ? o.profile : 'custom';
+    let applyingProfile = false;
+    const markCustom = () => { if (!applyingProfile) profile.value = 'custom'; };
+    for (const control of [modeSel, style, shape, keySync, vary, smartStart, bars]) control.addEventListener('change', markCustom);
+    const applyProfile = (id) => {
+      const p = MIX_PROFILES.find((x) => x.id === id);
+      if (!p) return;
+      applyingProfile = true;
+      modeSel.value = 'smart'; shape.value = p.shape; style.value = p.style; bars.value = String(p.bars);
+      vary.checked = p.vary; keySync.checked = p.keySync; smartStart.checked = true; smartBox.setPreset(p.priority);
+      profile.value = p.id; applyingProfile = false;
+    };
+    profile.addEventListener('change', () => applyProfile(profile.value));
+    const smartPart = el('div', { class: 'form' }, el('label', { class: 'field' }, el('span', {}, 'Set shape'), shape),
       el('label', { class: 'field' }, el('span', {}, 'Tracks in the set'), limit), smartBox.el);
     const showSmart = () => { smartPart.hidden = !['smart', 'live'].includes(modeSel.value); };
     modeSel.addEventListener('change', showSmart); showSmart();
     const body = el('div', { class: 'form' },
       el('p', {}, `Auto-mix ${tracks.length} tracks${title ? ` from "${title}"` : ''} on decks 1 & 2 with beat-matched transitions.`),
+      el('label', { class: 'field' }, el('span', {}, 'Mix profile'), profile),
       el('label', { class: 'field' }, el('span', {}, 'Order'), modeSel),
       smartPart,
       el('label', { class: 'field' }, el('span', {}, 'Transition style'), style),
       el('label', { class: 'field' }, el('span', {}, 'Transition length'), bars),
-      el('label', { class: 'check' }, vary, ' Vary styles'),
+      el('label', { class: 'check' }, smartStart, ' Start at the best analysed phrase'),
+      el('label', { class: 'check' }, vary, ' Vary transition styles'),
       el('label', { class: 'check' }, keySync, ' Fix key clashes with Key Sync'));
     const r = await this.modal('Automix', body, [{ label: 'Cancel', value: null }, { label: 'Start automix', primary: true, value: true }]);
     if (!r) return;
     const sm = smartBox.value();
-    await this.app.setSetting('automix', { ...o, style: style.value, transitionBeats: Number(bars.value) * 4, keySync: keySync.checked, varyStyles: vary.checked, shape: shape.value, preset: sm.preset, sliders: sm.sliders, shuffle: modeSel.value === 'shuffle' });
+    await this.app.setSetting('automix', { ...o, style: style.value, transitionBeats: Number(bars.value) * 4, keySync: keySync.checked,
+      varyStyles: vary.checked, shape: shape.value, preset: sm.preset, sliders: sm.sliders,
+      shuffle: modeSel.value === 'shuffle', smartStart: smartStart.checked, profile: profile.value });
     return this.app.startAutomix(tracks, { mode: modeSel.value, shape: shape.value, sliders: sm.sliders, limit: Number(limit.value) || undefined });
   }
 
