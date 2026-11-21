@@ -2,6 +2,7 @@
 import { el, clamp, uiZoom } from '../util.js';
 import { cssVar } from './themes.js';
 import { smoothTime } from './clock.js';
+import { paintJogFace, paintJogOverlay } from './jog-art.js';
 
 /** Rotary knob. Drag vertically, wheel to fine-tune, double-click to reset. */
 export function knob({ label, min = -1, max = 1, def = 0, get, set, size = 'md', bipolar = min < 0, title, format }) {
@@ -174,10 +175,18 @@ export function jogWheel(deck) {
   let roW = 0; // platter size from the observer entry (no layout read in the draw)
   const ro = new ResizeObserver((es) => { roW = es.at(-1).contentRect.width * uiZoom(); size = 0; });
   ro.observe(canvas);
-  window.addEventListener('opendj-theme', () => { body = null; deckColor = null; sig = ''; });
+  let style = document.documentElement.dataset.jogStyle || 'classic';
+  window.addEventListener('opendj-theme', () => {
+    style = document.documentElement.dataset.jogStyle || 'classic';
+    body = null; deckColor = null; sig = '';
+  });
   const renderBody = (W) => {
     const off = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(W, W) : Object.assign(document.createElement('canvas'), { width: W, height: W });
     const b = off.getContext('2d'), c = W / 2, R = c - W * 0.012;
+    if (style !== 'classic') {
+      paintJogFace(b, W, style);
+      return off;
+    }
     // outer rim (brushed metal)
     const rim = b.createLinearGradient(0, 0, 0, W);
     rim.addColorStop(0, cssVar('--platter-rim-1')); rim.addColorStop(1, cssVar('--platter-rim-2'));
@@ -222,12 +231,17 @@ export function jogWheel(deck) {
     deckColor ||= getComputedStyle(root).getPropertyValue('--deck-color').trim() || '#3ea6ff';
     g.clearRect(0, 0, W, W);
     g.drawImage(body, 0, 0);
+    const signal = blink ? cssVar('--red') : warn ? cssVar('--amber') : deckColor;
+    if (style !== 'classic') {
+      paintJogOverlay(g, W, style, { angle: ang, progress: k, colour: deckColor, signal, bpm, playing: deck.playing, touched });
+      return;
+    }
     // position ring (track progress)
     const rr = R * 0.895, lw = R * 0.05;
     g.lineCap = 'round'; g.lineWidth = lw;
     g.strokeStyle = 'rgba(255,255,255,0.06)'; g.beginPath(); g.arc(c, c, rr, 0, 2 * Math.PI); g.stroke();
     if (deck.track && k > 0) {
-      g.strokeStyle = blink ? cssVar('--red') : warn ? cssVar('--amber') : deckColor;
+      g.strokeStyle = signal;
       g.beginPath(); g.arc(c, c, rr, -Math.PI / 2, -Math.PI / 2 + Math.max(0.01, k) * 2 * Math.PI); g.stroke();
     }
     // rotating marker: a bright notch on the vinyl and a dot on the label
