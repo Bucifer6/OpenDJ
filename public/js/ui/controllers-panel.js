@@ -189,6 +189,7 @@ export function controllersPanel(app) {
     const actions = d.kind === 'midi-out' ? [] : [
       el('button', { class: 'btn primary', onclick: () => startWizard() }, 'Guided setup'),
       isMidi ? el('button', { class: 'btn', onclick: () => { search = { query: d.name }; runSearch(d.name); } }, 'Find Mixxx mapping') : null,
+      isMidi ? el('button', { class: 'btn', title: 'Check or fix every control, see if the community has a mapping for this controller, and share yours', onclick: () => midi.openMapper(d.key) }, 'Controller Mapper') : null,
       el('button', { class: 'btn', onclick: () => fileIn.click() }, isMidi ? 'Import mapping file…' : 'Import…'),
       el('button', { class: 'btn', disabled: !map?.entries?.length, onclick: () => { const blob = new Blob([midi.exportMapping(d.key)], { type: 'application/json' }); const a = el('a', { href: URL.createObjectURL(blob), download: `${d.name.replace(/[^\w.-]+/g, '_')}.opendj-midi.json` }); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); } }, 'Export'),
       isMidi ? presetSel : null,
@@ -202,6 +203,7 @@ export function controllersPanel(app) {
       isMidi && app.deckCount === 4 ? deckLayers() : null,
       renderSearch(),
       importSummary(map),
+      isMidi ? el('p', { class: 'hint' }, 'Something not working right? Open the Controller Mapper to test each control, fix it, apply the fix here and send it to the OpenDJ community collection so it works for everyone.') : null,
       d.kind === 'midi-out' ? el('p', { class: 'hint' }, 'This port only receives. Choose it below to send MIDI clock, or connect the matching input to map its controls.') : null,
       d.kind === 'hid' ? el('p', { class: 'hint' }, 'HID: click Learn and move one control at a time. Buttons, faders, knobs and jog wheels are detected from the raw reports. LED feedback is not available for HID devices.') : null,
       d.kind === 'gamepad' ? el('p', { class: 'hint' }, 'Gamepad: map buttons to buttons, sticks or triggers to faders (absolute) or to the jog / browser (they move while you hold the stick over).') : null,

@@ -27,7 +27,7 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 **Turntables and decks** (docs/MIXER_AND_TURNTABLES_PLAN.md §6). Every new option defaults to the old behaviour.
 - **Vinyl feel:** each deck's new *Vinyl* panel sets motor start and stop times (play, pause, reverse and the spin-up after you let go of the platter), jog weight, platter coast (a thrown record on a stopped deck), slip-mat, brake time, spin-back length and throw speed, 33 / 45 / 78 rpm (the scratch scale) and quartz lock. *Settings → Decks* has motor presets from instant (CDJ) to low torque.
 - **Scratching that follows your hand:** touch and mouse scratching drive the record by position, using each input event's own time (and the extra samples browsers collect between frames), so the record stays where your hand puts it. A second finger on the platter holds the record still. Optional *flick to spin back*.
-- **Platter styles** (*Settings → Decks*): Minimal (as before, the default), Vinyl (a spinning record with the cover art on its label, strobe dots that stand still at the right speed, a tonearm showing progress that you drag to drop the needle) and Player (a jog display: artwork, position ring, slip ghost, loop arc, hot-cue ticks, time left).
+- **Platter styles** (*Settings → Decks*): Minimal (as before, the default, drawn in the skin's jog wheel style from 0.4.3), Vinyl (a spinning record with the cover art on its label, strobe dots that stand still at the right speed, a tonearm showing progress that you drag to drop the needle) and Player (a jog display: artwork, position ring, slip ghost, loop arc, hot-cue ticks, time left).
 - **Waveform styles** *Player Blue* and *Player RGB*.
 - **Scratch view** for phones and tablets: a big platter, a crossfader strip on your thumb side, a CUT button for transforms, scratch samples, the touch-to-sound latency, and haptic feedback (Off / Subtle / Full).
 - **Scratch samples:** a SCR pad mode swaps the deck to a short sound and back (8 built-in OpenDJ-made sounds, CC0 vinyl one-shots to download, or drop your own file).
@@ -65,6 +65,12 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **The controller's own sound card**: OpenDJ offers once to send the master to its outputs 1-2 and the headphone cue to 3-4 (or suggests split cue when the interface only has 2 channels).
 - **Controller test** (Settings → Controllers): every incoming message live, which function it hits, a checklist of mapped controls, an LED check, and a capture recorder that saves a JSON file to attach to a bug report.
 - **Deck select for 2-deck controllers**: in 4-deck mode, switch the left or right side of a controller to deck 3 or 4 (Settings → Controllers, or map a button to "Deck select").
+
+### New in 0.4.3
+
+- Added Silverline and Walnut Hi-Fi and refreshed Club Decks, Vinyl Booth and Pad Performance.
+- Choose Brushed Metal, Digital Jog, Vinyl Turntable or OpenDJ Classic in Settings → Appearance. Each skin remembers its own jog wheel style.
+- Vinyl Turntable adds a grooved record, spindle, strobe dots and a tonearm that moves during playback.
 
 ### New in 0.4.2
 - MIX NOW on the active deck and wider crossfader travel.

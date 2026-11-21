@@ -918,6 +918,8 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       // HTML pages: the page's own <meta> CSP is also sent as a header (one source of truth: the meta tag, read once
       // per file version), plus frame-ancestors, which only works as a header
       if (path.extname(file) === '.html') headers['Content-Security-Policy'] = await htmlCsp(file, st.mtimeMs);
+      // the Controller Mapper is shown inside Settings: only this app may frame it
+      if (rel === 'controller-mapper.html') headers['Content-Security-Policy'] = headers['Content-Security-Policy'].replace("frame-ancestors 'none'", "frame-ancestors 'self'");
       res.writeHead(200, headers);
       if (req.method === 'HEAD') return res.end();
       await pipeQuiet(fs.createReadStream(file), res);

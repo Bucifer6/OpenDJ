@@ -62,12 +62,46 @@ const tokens = (s) => String(s).toLowerCase().replace(/\.midi\.xml$/, '')
 const compact = (s) => String(s).toLowerCase().replace(/\.midi\.xml$/, '').replace(/[^a-z0-9]+/g, '');
 
 /**
+ * A MIDI port name without OS decoration: "DDJ-400 MIDI 1" → "DDJ-400", "2- DDJ-FLX4" → "DDJ-FLX4",
+ * "MIDIIN2 (Mixtrack Pro FX)" → "Mixtrack Pro FX". A trailing number is only dropped after "MIDI" (the port index),
+ * so model numbers such as "Inpulse 200" survive.
+ */
+export function cleanPortName(deviceName) {
+  let s = String(deviceName || '');
+  if (/\bMIDI(IN|OUT)?\d*\b/i.test(s)) s = s.replace(/\bMIDI(IN|OUT)?\d*\b/gi, ' ').replace(/\s+\d{1,2}\s*$/, '');
+  return s.replace(/^\s*\d+\s*-\s*/, '').replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// Brand words a port name may include that the mapping file name doesn't (or the other way round)
+const BRANDS = new Set(['pioneer', 'numark', 'hercules', 'denon', 'reloop', 'akai', 'novation', 'native', 'instruments', 'ni', 'behringer', 'roland', 'vestax', 'gemini', 'stanton', 'korg', 'allen', 'heath', 'rane', 'american']);
+
+/**
+ * The one Mixxx mapping that is certainly for this device, or null. Stricter than matchMappings: every distinctive
+ * word of the port name (model numbers included) must be in the file name, and exactly one file may qualify.
+ * Used to apply a proven mapping automatically; weaker matches are only suggested.
+ */
+export function confidentMatch(deviceName, items) {
+  const words = [...new Set(tokens(cleanPortName(deviceName)))].filter((t) => !BRANDS.has(t));
+  if (!words.length || !words.some((t) => /\d/.test(t) || t.length >= 4)) return null;
+  const hits = (items || []).filter((it) => {
+    const ft = new Set(tokens(it.file)), fc = compact(it.file);
+    return words.every((t) => ft.has(t) || (t.length >= 3 && !/^\d+$/.test(t) && fc.includes(t)));
+  });
+  if (!hits.length) return null;
+  if (hits.length === 1) return hits[0];
+  // several files contain all the words ("Mixtrack Pro" ⊂ "Mixtrack Pro FX"): only the one with nothing extra counts
+  const extra = (it) => tokens(it.file).filter((t) => !words.includes(t) && !BRANDS.has(t)).length;
+  const ranked = hits.map((it) => ({ it, n: extra(it) })).sort((a, b) => a.n - b.n);
+  return ranked[0].n < ranked[1].n ? ranked[0].it : null;
+}
+
+/**
  * Rank mapping files for a device name. Exact token matches (brand, model, model number) count most; a token found
  * inside the file name counts less. Returns [{ file, name, score }] best first, only plausible matches.
  */
 export function matchMappings(deviceName, items, limit = 8) {
   // ALSA/Windows decorate port names: "DDJ-400 MIDI 1", "2- DDJ-FLX4", "MIDIIN2 (Mixtrack Pro FX)"
-  const clean = String(deviceName).replace(/\bMIDI(IN|OUT)?\d*\b/gi, ' ').replace(/^\s*\d+\s*-\s*/, '').replace(/\s+\d+$/, '');
+  const clean = cleanPortName(deviceName);
   const dt = [...new Set(tokens(clean))].filter((t) => !/^\d$/.test(t));
   const dc = compact(clean);
   if (!dt.length) return [];

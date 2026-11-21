@@ -93,7 +93,7 @@ test('server: OPENDJ_UPDATE_URL is only honoured for loopback URLs (tests); prod
 
 // ---------------------------------------------------------------- release notes
 test('release notes: only the "New in" sections newer than the running version, not the download table', () => {
-  const body = NOTES.replace(/### New in 0\.(?:5|4\.2)\n[\s\S]*?(?=### New in 0\.4\n)/, '').replace('### New in 0.4', '### New in 0.5\n**Big**\n- one\n\n#### Detail\n- two\n\n### New in 0.4.1\n- fix\n\n### New in 0.4');
+  const body = NOTES.replace(/### New in [^\n]+\n[\s\S]*?(?=### New in 0\.4\n)/, '').replace('### New in 0.4', '### New in 0.5\n**Big**\n- one\n\n#### Detail\n- two\n\n### New in 0.4.1\n- fix\n\n### New in 0.4');
   const secs = notesSections(body);
   assert.deepEqual(secs.map((s) => s.version), ['0.5', '0.4.1', '0.4', '0.3', '0.2']);
   assert.ok(!secs.some((s) => /Windows 10\/11|SHA256SUMS/.test(s.markdown)), 'the download table is not a section');
@@ -262,7 +262,7 @@ const res = (status, body, headers = {}) => new Response(status === 304 ? null :
 test('checker: headers, ETag revalidation, caching, rate-limit back-off, offline', async () => {
   let t = 1_000_000;
   const calls = [];
-  let reply = () => res(200, ghRelease('0.5.0'), { ETag: '"e1"' });
+  let reply = () => res(200, ghRelease('0.5.0', { body: '### New in 0.4.2\n- Added samples\n\n### New in 0.4.1\n- Added skin updates\n\n### New in 0.4\n- Added mobile preview' }), { ETag: '"e1"' });
   const fetch = async (url, init) => { calls.push({ url, init }); return reply(); };
   const c = new UpdateChecker({ fetch, version: '0.4.0', now: () => t });
   const r1 = await c.check();

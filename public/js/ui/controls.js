@@ -4,6 +4,7 @@ import { cssVar } from './themes.js';
 import { smoothTime } from './clock.js';
 import { makeSkin, coverBitmap, STROBE_DOTS } from './platter-skins.js';
 import { strobeRate, STROBE_ROWS } from '../audio/vinyl.js';
+import { paintJogFace, paintJogOverlay } from './jog-art.js';
 
 /** Rotary knob. Drag vertically, wheel to fine-tune, double-click to reset. */
 export function knob({ label, min = -1, max = 1, def = 0, get, set, size = 'md', bipolar = min < 0, title, format }) {
@@ -150,6 +151,23 @@ export function button(label, { cls = '', title, down, up, click, active, disabl
  *  - on the Vinyl skin the tonearm head can be dragged: the needle drops where it is let go (T6).
  * opts: { skin: () => skin id, haptics, onTouch(bool) }.
  */
+/** A skin's jog style from jog-art.js, behind the platter-skin interface (body / sig / draw). */
+class JogArtSkin {
+  constructor(style) { this.style = style; this.id = 'minimal'; }
+  sig(st) { return `${st.ang.toFixed(3)}|${Math.round(st.k * 720)}|${st.blink}|${st.warn}|${st.bpm}|${st.playing}|${st.touched}|${st.deckColor}`; }
+  body(W) {
+    const off = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(W, W) : Object.assign(document.createElement('canvas'), { width: W, height: W });
+    paintJogFace(off.getContext('2d'), W, this.style);
+    return off;
+  }
+  draw(g, W, st, body) {
+    g.clearRect(0, 0, W, W);
+    g.drawImage(body, 0, 0);
+    const signal = st.blink ? cssVar('--red') : st.warn ? cssVar('--amber') : st.deckColor;
+    paintJogOverlay(g, W, this.style, { angle: st.ang, progress: st.k, colour: st.deckColor, signal, bpm: st.bpm, playing: st.playing, touched: st.touched });
+  }
+}
+
 export function jogWheel(deck, opts = {}) {
   const canvas = el('canvas', { class: 'jog-canvas', width: 360, height: 360, 'aria-label': `Deck ${deck.index + 1} platter` });
   const root = el('div', { class: 'jog' }, canvas);
@@ -249,10 +267,14 @@ export function jogWheel(deck, opts = {}) {
   const frameState = { ang: 0, k: 0, strobe, cues: [] };
   const ro = new ResizeObserver((es) => { roW = es.at(-1).contentRect.width * uiZoom(); size = 0; });
   ro.observe(canvas);
-  window.addEventListener('opendj-theme', () => { body = null; deckColor = null; sig = ''; });
+  // The deck's platter style (Settings → Decks) wins; with Minimal, the skin's own jog style (Brushed / Digital / Vinyl,
+  // Settings → Appearance) is drawn by jog-art.js, and 'classic' is the Minimal platter.
+  let jogStyle = document.documentElement.dataset.jogStyle || 'classic';
+  window.addEventListener('opendj-theme', () => { jogStyle = document.documentElement.dataset.jogStyle || 'classic'; body = null; deckColor = null; sig = ''; });
   const pickSkin = () => {
-    const id = opts.skin?.() || 'minimal';
-    if (id !== skinId) { skinId = id; skin = makeSkin(id); body = null; sig = ''; root.dataset.skin = id; }
+    const chosen = opts.skin?.() || 'minimal';
+    const id = chosen === 'minimal' && jogStyle !== 'classic' ? `jog:${jogStyle}` : chosen;
+    if (id !== skinId) { skinId = id; skin = id.startsWith('jog:') ? new JogArtSkin(jogStyle) : makeSkin(id); body = null; sig = ''; root.dataset.skin = id.startsWith('jog:') ? 'minimal' : id; }
   };
   root.draw = (now = performance.now()) => {
     pickSkin();
@@ -265,14 +287,14 @@ export function jogWheel(deck, opts = {}) {
     const dt = lastNow ? Math.min(0.1, (now - lastNow) / 1000) : 0; lastNow = now;
     const t = deck.track;
     // cover art for the skins that show it (decoded once per track, off the frame path)
-    if (skinId !== 'minimal' && (t?.id ?? null) !== artFor) {
+    if (skinId !== 'minimal' && !skinId.startsWith('jog:') && (t?.id ?? null) !== artFor) {
       artFor = t?.id ?? null; art = null; artKey = `${artFor}|none`;
       if (t && !t.scratchSample) { const want = artFor; coverBitmap(want).then((b) => { if (artFor === want) { art = b; artKey = `${want}|${b ? 'art' : 'none'}`; sig = ''; } }); }
     }
     const pos = deck.positionAt(smoothTime(deck.ctx, now));
     const spr = deck.secPerRev || 1.8;
     const reduced = !!reducedQ?.matches;
-    const ang = reduced && skinId !== 'minimal' ? 0 : (pos / spr) * 2 * Math.PI;
+    const ang = reduced && skinId !== 'minimal' && !skinId.startsWith('jog:') ? 0 : (pos / spr) * 2 * Math.PI;
     const k = deck.duration ? pos / deck.duration : 0;
     const warn = deck.duration > 0 && deck.remaining < 30 && deck.playing;
     const blink = warn && Math.floor(now / 400) % 2 === 1;

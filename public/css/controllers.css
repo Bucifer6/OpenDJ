@@ -92,3 +92,12 @@
 .ctltest-item.seen .ctltest-badge { background: color-mix(in srgb, #37d46e 22%, transparent); color: #37d46e; }
 .ctltest-unmapped { display: flex; flex-wrap: wrap; gap: 6px; }
 @media (max-width: 760px) { .ctltest-cols { grid-template-columns: minmax(0, 1fr); } }
+
+/* Settings → Controller Mapper (public/controller-mapper.html in a frame, themed with the app's tokens) */
+.modal.mapper-wide { width: min(1320px, calc(100vw - 32px)); }
+.mapper-pane { gap: 10px; }
+.mapper-intro { align-items: flex-start; justify-content: space-between; gap: 16px; }
+.mapper-intro .hint { flex: 1; min-width: 0; }
+.mapper-intro .check { white-space: nowrap; }
+.mapper-frame { display: block; width: 100%; height: calc(100vh - 310px); min-height: 400px; border: 0; background: transparent; color-scheme: normal; }
+.toast.ctl-offer.ctl-unsupported { border-left: 3px solid var(--amber); }

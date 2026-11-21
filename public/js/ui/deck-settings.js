@@ -16,7 +16,7 @@ export function deckSettingsFields(app, { field, sel, chk }) {
   const motorNow = MOTOR.find(([, , [a, b]]) => a === v.start && b === v.stop)?.[0] || 'custom';
   return [
     el('h3', {}, 'Platter'),
-    field('Platter style', sel(o.platterSkin, PLATTER_SKINS, (x) => setOpt({ platterSkin: x })), 'Vinyl: a spinning record with the cover art, strobe dots and a tonearm you can drag to drop the needle. Player: a jog display with artwork, position ring, loop and slip markers.'),
+    field('Platter style', sel(o.platterSkin, PLATTER_SKINS, (x) => setOpt({ platterSkin: x })), 'Minimal follows the skin\'s jog wheel style (Settings → Appearance). Vinyl: a spinning record with the cover art, strobe dots and a tonearm you can drag to drop the needle. Player: a jog display with artwork, position ring, loop and slip markers.'),
     field('Motor (every deck)', sel(motorNow, [...MOTOR.map(([id, l]) => [id, l]), ...(motorNow === 'custom' ? [['custom', 'Custom (set in the decks\' Vinyl panels)']] : [])], (x) => { const m = MOTOR.find(([id]) => id === x); if (m) { setVinyl({ start: m[2][0], stop: m[2][1] }); app.setSetting('vinylDecks', (app.settings.vinylDecks || []).map((d) => (d ? (({ start, stop, ...rest }) => rest)(d) : d))); for (const d of app.engine.decks) d.applyVinyl(vinylFor(app.settings, d.index)); } }),
       'Start and stop times of play / pause and of the platter after you let go. Each deck\'s Vinyl panel has the full set (weight, slip-mat, coast, spin-back, 33 / 45 / 78).'),
     field('Haptic feedback', sel(o.haptics, [['auto', platform.native ? 'Subtle on phones' : 'Automatic (phones only)'], ['off', 'Off'], ['subtle', 'Subtle'], ['full', 'Full (beats and fader cuts too)']], (x) => setOpt({ haptics: x }))),
