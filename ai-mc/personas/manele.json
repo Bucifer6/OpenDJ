@@ -1,6 +1,7 @@
 {
   "id": "manele",
   "name": "Prințul Dedicațiilor (cântăreț de manele)",
+  "mode": "party",
   "voice": "manele",
   "edgeVoice": "ro-RO-EmilNeural",
   "edgeRate": "+10%",

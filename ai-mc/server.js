@@ -12,9 +12,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { ROOT, DATA, loadConfig, saveConfig, listPersonas, savePersona, loadMemory, saveMemory } from './lib/store.js';
-import { generate, listModels, buildMessages, TASK_TYPES, direct, SOUNDS } from './lib/llm.js';
+import { generate, listModels, buildMessages, TASK_TYPES, direct, SOUNDS, modeOf, radioTalk } from './lib/llm.js';
 import { speak, ttsStatus, cleanupAudio, xttsHealth, makeReference, makeSfx } from './lib/tts.js';
 import { findTracks, label } from './lib/match.js';
+import { wikiSearch, weatherNow, headlines } from './lib/facts.js';
 import { musicMatch, describe as describeMusic, genresOf, languageOf } from '../public/js/ai-mc-music.js';
 
 const LANGS = ['ro', 'en', 'es', 'other'];
@@ -52,7 +53,7 @@ const state = {
   current: null, next: null, automix: false, bridgeAt: 0,
   trackChanges: 0, lastNextId: null,
   jobs: [], busy: false, lastError: '',
-  ann: new Map(), toQueue: [], pending: [], outputs: [], plans: [], directed: new Set(),
+  ann: new Map(), toQueue: [], pending: [], outputs: [], plans: [], directed: new Set(), radioRecent: [],
   tracks: { at: 0, list: [] },
 };
 const HORN_TASKS = new Set(['dedicatie', 'versuri', 'cerere']);
@@ -81,7 +82,7 @@ async function libraryTracks() {
   if (now() - state.tracks.at < 60000 && state.tracks.list.length) return state.tracks.list;
   try {
     const r = await fetch(config.opendjUrl.replace(/\/+$/, '') + '/api/tracks', { signal: AbortSignal.timeout(8000) });
-    if (r.ok) state.tracks = { at: now(), list: (await r.json()).map((t) => ({ id: t.id, title: t.title, artist: t.artist, genre: t.genre, album: t.album, path: t.path || t.localPath || t.fileName, bpm: t.bpm, missing: t.missing, unreadable: t.unreadable })) };
+    if (r.ok) state.tracks = { at: now(), list: (await r.json()).map((t) => ({ id: t.id, title: t.title, artist: t.artist, genre: t.genre, album: t.album, year: t.year, path: t.path || t.localPath || t.fileName, bpm: t.bpm, missing: t.missing, unreadable: t.unreadable })) };
   } catch { /* OpenDJ not running */ }
   return state.tracks.list;
 }
@@ -102,6 +103,7 @@ async function work() {
   try {
     const p = persona();
     if (job.task === 'director') { await runDirector(p, job.vars); return; }
+    if (job.task === 'radio') { await runRadio(p, job); return; }
     const text = await generate(config, p, job.task, job.vars);
     if (!text) throw new Error('Modelul nu a răspuns nimic');
     state.lastError = '';
@@ -126,16 +128,73 @@ async function work() {
 
 // ------------------------------------------------------------------ DJ director (Gemma picks the next track, the transition and the FX)
 const directorOn = () => config.auto.director !== false;
+// How much the DJ shows off. Enforced here, not only asked for in the prompt (models overdo effects and tricks).
+const INTENSITY = {
+  subtle: { fxGap: 4, fxMax: 1, shoutGap: 3, trickGap: 5 },
+  normal: { fxGap: 2, fxMax: 2, shoutGap: 2, trickGap: 3 },
+  hype: { fxGap: 0, fxMax: 2, shoutGap: 0, trickGap: 0 },
+};
+const TRICKS = new Set(['backspin', 'brake', 'cut', 'loop']);
+const djCount = { n: 0, lastFx: -99, lastShout: -99, lastTrick: -99 };
+function tame(plan, locked, persona) {
+  const radio = modeOf(persona) === 'radio';
+  const base = INTENSITY[config.auto.djIntensity] || INTENSITY.subtle;
+  // a radio host: no tricks, no sound effects, talks only every few tracks
+  const L = radio ? { ...base, fxGap: Infinity, trickGap: Infinity, shoutGap: Math.max(3, base.shoutGap) } : base;
+  // 'Anunță fiecare a N-a piesă' in the panel is also how often the DJ may talk (0 = never)
+  const every = Number(config.auto.introEvery);
+  const shoutGap = every === 0 ? Infinity : Math.max(L.shoutGap, every || 0);
+  const n = ++djCount.n;
+  if (TRICKS.has(plan.style)) {
+    if (n - djCount.lastTrick < L.trickGap) plan.style = 'blend'; else djCount.lastTrick = n;
+  }
+  if (plan.fx.length) {
+    if (n - djCount.lastFx < L.fxGap) plan.fx = []; else { plan.fx = plan.fx.slice(0, L.fxMax); djCount.lastFx = n; }
+  }
+  // a requested track already gets its own spoken announcement: no second voice on top of it
+  if (radio) {
+    // a radio host doesn't shout over transitions: every few tracks it researches and talks over the next intro
+    plan.shout = '';
+    plan.talk = !locked && n - djCount.lastShout >= shoutGap;
+    if (plan.talk) djCount.lastShout = n;
+  } else if (plan.shout && (locked || n - djCount.lastShout < shoutGap)) plan.shout = ''; else if (plan.shout) djCount.lastShout = n;
+  return plan;
+}
+
+// ------------------------------------------------------------------ radio host segments (research, then talk)
+function enqueueRadio(trackId, prevLabel) {
+  if (!trackId || state.jobs.some((j) => j.task === 'radio' && j.vars.trackId === trackId)) return;
+  enqueue({ task: 'radio', vars: { trackId, prev: prevLabel || '' }, onAir: true, trigger: { type: 'track', trackId } });
+}
+async function runRadio(p, job) {
+  const t0 = now();
+  const t = (await libraryTracks()).find((x) => x.id === job.vars.trackId);
+  if (!t) return;
+  const info = { label: label(t), artist: t.artist, title: t.title, year: t.year, album: t.album, genre: t.genre };
+  const { text, searched } = await radioTalk(config, p, info, { prev: job.vars.prev, recent: state.radioRecent.slice(-6), topics: config.auto.radioTopics !== false },
+    { search: wikiSearch, weather: () => weatherNow(config.city), news: headlines });
+  console.log(`[ai-mc] Radio (${((now() - t0) / 1000).toFixed(0)}s${searched.length ? ', a căutat: ' + searched.join(' | ') : ''}): ${text || '(tace)'}`);
+  state.outputs.unshift({ id: uid(), at: now(), persona: p.id, type: 'radio', text: text ? `${text}${searched.length ? `\n(a căutat: ${searched.join(' | ')})` : ''}` : `(a ales să nu spună nimic la ${info.label})`, prompt: info });
+  if (!text) return;
+  state.radioRecent.push(text); if (state.radioRecent.length > 12) state.radioRecent.shift();
+  let audio = null;
+  try { audio = await speak(config, text, p.voice, p); } catch (e) { state.lastError = 'TTS: ' + e.message; }
+  const id = uid();
+  state.ann.set(id, { id, text, audioId: audio?.id || null, trigger: job.trigger, at: now(), status: 'ready', task: 'radio', fx: null });
+  postChat('ai', p.name, text, { onAir: true });
+}
 async function runDirector(p, d) {
   const t0 = now();
   const plan = await direct(config, p, d, state.chat.filter((m) => m.kind === 'user').slice(-6), sfxAvailable());
   if (!plan.nextId) throw new Error('DJ: nicio piesă aleasă');
+  tame(plan, d.locked, p);
   state.lastError = '';
   const fxTxt = plan.fx.map((f) => `${SOUNDS[f.sound]} la ${f.when === 'start' ? 'început' : 'drop'}`).join(', ');
   console.log(`[ai-mc] DJ (${((now() - t0) / 1000).toFixed(0)}s): ${plan.next?.label} · ${plan.style}${fxTxt ? ' · ' + fxTxt : ''} · ${plan.why}`);
   state.outputs.unshift({ id: uid(), at: now(), persona: p.id, type: 'dj', text: `Urmează: ${plan.next?.label}\nTrecere: ${plan.style}${fxTxt ? ' + ' + fxTxt : ''}\nDe ce: ${plan.why}${plan.shout ? '\nStrigă: ' + plan.shout : ''}`, prompt: {} });
   state.plans.push({ forTrack: d.forTrack, nextId: plan.nextId, style: plan.style, fx: plan.fx, locked: !!d.locked, label: plan.next?.label });
   if (!d.locked) postChat('system', 'DJ', `🎛️ Urmează ${plan.next?.label}${plan.why ? ' – ' + plan.why : ''}`);
+  if (plan.talk) enqueueRadio(plan.nextId, d.current?.label);
   if (plan.shout) {
     let audio = null;
     try { audio = await speak(config, plan.shout, p.voice, p); } catch (e) { state.lastError = 'TTS: ' + e.message; }
@@ -205,7 +264,8 @@ function onBridgeState(b) {
     const n = Number(config.auto.introEvery) || 0;
     const requested = [...state.ann.values(), ...state.jobs].some((a) => (a.trigger?.trackId) === nxt.id);
     if (n && !directorOn() && (state.trackChanges + 1) % n === 0 && !requested) {
-      enqueue({ task: 'intro', vars: { song: label(nxt), prev: cur ? label(cur) : '' }, onAir: true, trigger: { type: 'track', trackId: nxt.id } });
+      if (modeOf(persona()) === 'radio') enqueueRadio(nxt.id, cur ? label(cur) : '');
+      else enqueue({ task: 'intro', vars: { song: label(nxt), prev: cur ? label(cur) : '' }, onAir: true, trigger: { type: 'track', trackId: nxt.id } });
     }
   }
   if (!nxt) state.lastNextId = null;
@@ -424,10 +484,10 @@ const server = http.createServer(async (req, res) => {
       if (a === 'config' && req.method === 'GET') { const { adminPassword, ...c } = config; return send(res, 200, c); }
       if (a === 'config' && req.method === 'PUT') {
         const b = await body(req);
-        const pick = ['stationName', 'ollamaUrl', 'model', 'temperature', 'persona', 'opendjUrl'];
+        const pick = ['stationName', 'ollamaUrl', 'model', 'temperature', 'persona', 'opendjUrl', 'city'];
         for (const k of pick) if (b[k] !== undefined) config[k] = typeof config[k] === 'number' ? Number(b[k]) : str(b[k], 300);
         if (b.music) config.music = cleanMusic(b.music);
-        if (b.auto) config.auto = { ...config.auto, introEvery: Math.max(0, Number(b.auto.introEvery) || 0), speakChat: !!b.auto.speakChat, horn: b.auto.horn !== false, director: b.auto.director !== false, moderation: b.auto.moderation === 'manual' ? 'manual' : 'auto' };
+        if (b.auto) config.auto = { ...config.auto, introEvery: Math.max(0, Number(b.auto.introEvery) || 0), speakChat: !!b.auto.speakChat, horn: b.auto.horn !== false, radioTopics: b.auto.radioTopics !== false, director: b.auto.director !== false, djIntensity: ['subtle', 'normal', 'hype'].includes(b.auto.djIntensity) ? b.auto.djIntensity : (config.auto.djIntensity || 'subtle'), moderation: b.auto.moderation === 'manual' ? 'manual' : 'auto' };
         if (b.tts) config.tts = { ...config.tts, ...Object.fromEntries(['engine', 'piperPath', 'voice', 'edgeVoice', 'edgeRate', 'edgePitch', 'python', 'xttsUrl', 'xttsVoice', 'xttsSpeed'].filter((k) => b.tts[k] !== undefined).map((k) => [k, str(b.tts[k], 400)])), lengthScale: Number(b.tts.lengthScale) || config.tts.lengthScale };
         saveConfig(config); pushState();
         const { adminPassword, ...c } = config; return send(res, 200, c);
@@ -435,7 +495,7 @@ const server = http.createServer(async (req, res) => {
       if (a === 'personas' && req.method === 'GET') return send(res, 200, listPersonas());
       if (a === 'personas' && req.method === 'PUT') {
         const b = await body(req, 256 * 1024);
-        const saved = savePersona({ id: b.id, name: str(b.name, 80), voice: str(b.voice, 20) || 'radio', edgeVoice: /^ro-RO-\w+Neural$/.test(b.edgeVoice) ? b.edgeVoice : 'ro-RO-EmilNeural', edgeRate: /^[+-]\d{1,2}%$/.test(b.edgeRate) ? b.edgeRate : '+10%', edgePitch: /^[+-]\d{1,2}Hz$/.test(b.edgePitch) ? b.edgePitch : '+0Hz', description: str(b.description, 300), system: String(b.system || '').slice(0, 6000),
+        const saved = savePersona({ id: b.id, name: str(b.name, 80), voice: str(b.voice, 20) || 'radio', mode: b.mode === 'radio' ? 'radio' : 'party', edgeVoice: /^ro-RO-\w+Neural$/.test(b.edgeVoice) ? b.edgeVoice : 'ro-RO-EmilNeural', edgeRate: /^[+-]\d{1,2}%$/.test(b.edgeRate) ? b.edgeRate : '+10%', edgePitch: /^[+-]\d{1,2}Hz$/.test(b.edgePitch) ? b.edgePitch : '+0Hz', description: str(b.description, 300), system: String(b.system || '').slice(0, 6000),
           examples: (Array.isArray(b.examples) ? b.examples : []).slice(0, 200).map((e) => ({ type: TASK_TYPES.includes(e.type) ? e.type : '', text: String(e.text || '').slice(0, 1500) })).filter((e) => e.text) });
         return send(res, 200, saved);
       }

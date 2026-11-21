@@ -58,6 +58,9 @@
       <label>Anunță fiecare a N-a piesă (0 = niciodată)<input id="introEvery" type="number" min="0" max="20"></label>
       <label>Cereri<select id="moderation"><option value="auto">intră direct</option><option value="manual">le aprob eu</option></select></label>
     </div>
+    <div class="row"><label>Orașul tău (pentru vremea spusă la radio)<input id="city" placeholder="ex: București"></label></div>
+    <label class="chk"><input id="radioTopics" type="checkbox"> 📻 DJ-ul de radio poate vorbi și despre vreme și sport (rar, scurt)</label>
+    <label>Cât de activ e DJ-ul AI (efecte, trucuri, cât strigă)<select id="djIntensity"><option value="subtle">Discret – mixaj lin, rar efecte</option><option value="normal">Normal</option><option value="hype">Petrecere nebună – fără limite</option></select></label>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input id="director" type="checkbox" style="width:auto"> 🎛️ DJ AI: alege el piesele, trecerile și efectele (cererile prietenilor au prioritate)</label>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input id="speakChat" type="checkbox" style="width:auto"> Răspunde și la chat cu voce (altfel doar în scris)</label>
     <div class="row"><label>Viteză voce (1 = normal, mai mare = mai rar)<input id="lengthScale" type="number" min="0.5" max="2" step="0.05"></label></div>
@@ -140,6 +143,7 @@
     <div class="row">
       <label>Editează personajul<select id="pSel"></select></label>
       <label>Id (pentru unul nou)<input id="pId" placeholder="ex: lautar2"></label>
+      <label>Mod<select id="pMode"><option value="radio">📻 DJ de radio (vorbește rar, povestește)</option><option value="party">🎉 MC de petrecere (energie, efecte)</option></select></label>
       <label>Stil voce<select id="pVoice"><option value="radio">radio (curat)</option><option value="mc">MC (compresat, ecou scurt)</option><option value="lautar">lăutar (ecou de sală)</option><option value="manele">manele (chorus + ecou)</option></select></label>
     </div>
     <div class="row"><label>Voce Microsoft<select id="pEdge"><option value="ro-RO-EmilNeural">Emil (bărbat)</option><option value="ro-RO-AlinaNeural">Alina (femeie)</option></select></label><label>Viteză vorbire (ex: +15%)<input id="pRate" placeholder="+12%"></label><label>Ton (ex: +5Hz)<input id="pPitch" placeholder="+5Hz"></label></div>
@@ -220,7 +224,7 @@ function exRow(e = { type: '', text: '' }) {
 }
 function showPersona(id) {
   const p = personas[id] || { id: '', name: '', voice: 'radio', system: '', examples: [] };
-  $('pId').value = p.id; $('pName').value = p.name; $('pVoice').value = p.voice || 'radio'; $('pEdge').value = p.edgeVoice || 'ro-RO-EmilNeural'; $('pRate').value = p.edgeRate || '+12%'; $('pPitch').value = p.edgePitch || '+5Hz'; $('pSystem').value = p.system || '';
+  $('pId').value = p.id; $('pName').value = p.name; $('pVoice').value = p.voice || 'radio'; $('pMode').value = p.mode || (p.id === 'radio' ? 'radio' : 'party'); $('pEdge').value = p.edgeVoice || 'ro-RO-EmilNeural'; $('pRate').value = p.edgeRate || '+12%'; $('pPitch').value = p.edgePitch || '+5Hz'; $('pSystem').value = p.system || '';
   $('pEx').textContent = ''; (p.examples || []).forEach(exRow);
 }
 async function loadPersonas() {
@@ -234,7 +238,7 @@ $('pSel').onchange = () => showPersona($('pSel').value === '__new' ? '' : $('pSe
 $('addEx').onclick = () => exRow();
 $('saveP').onclick = async () => {
   const examples = [...$('pEx').children].map((r) => ({ type: r.children[0].value, text: r.children[1].value.trim() })).filter((e) => e.text);
-  const p = await api('personas', { method: 'PUT', body: { id: $('pId').value, name: $('pName').value, voice: $('pVoice').value, edgeVoice: $('pEdge').value, edgeRate: $('pRate').value.trim(), edgePitch: $('pPitch').value.trim(), system: $('pSystem').value, examples } });
+  const p = await api('personas', { method: 'PUT', body: { id: $('pId').value, name: $('pName').value, voice: $('pVoice').value, mode: $('pMode').value, edgeVoice: $('pEdge').value, edgeRate: $('pRate').value.trim(), edgePitch: $('pPitch').value.trim(), system: $('pSystem').value, examples } });
   await loadPersonas(); $('pSel').value = p.id; alert('Salvat: ' + p.name);
 };
 const download = (name, text) => { const a = el('a', { href: URL.createObjectURL(new Blob([text])), download: name }); a.click(); };
@@ -244,12 +248,12 @@ $('tj').onclick = async () => download('antrenare-dj.jsonl', await api('training
 async function loadConfig() {
   cfg = await api('config');
   for (const k of ['stationName', 'ollamaUrl', 'temperature']) $(k).value = cfg[k];
-  $('introEvery').value = cfg.auto.introEvery; $('moderation').value = cfg.auto.moderation; $('speakChat').checked = cfg.auto.speakChat; $('director').checked = cfg.auto.director !== false;
+  $('introEvery').value = cfg.auto.introEvery; $('moderation').value = cfg.auto.moderation; $('speakChat').checked = cfg.auto.speakChat; $('director').checked = cfg.auto.director !== false; $('djIntensity').value = cfg.auto.djIntensity || 'subtle'; $('city').value = cfg.city || ''; $('radioTopics').checked = cfg.auto.radioTopics !== false;
   $('lengthScale').value = cfg.tts.lengthScale;
 }
 $('saveCfg').onclick = async () => {
-  cfg = await api('config', { method: 'PUT', body: { stationName: $('stationName').value, ollamaUrl: $('ollamaUrl').value, model: $('model').value, temperature: $('temperature').value, persona: $('persona').value,
-    auto: { introEvery: $('introEvery').value, moderation: $('moderation').value, speakChat: $('speakChat').checked, director: $('director').checked }, tts: { lengthScale: $('lengthScale').value } } });
+  cfg = await api('config', { method: 'PUT', body: { stationName: $('stationName').value, ollamaUrl: $('ollamaUrl').value, model: $('model').value, temperature: $('temperature').value, persona: $('persona').value, city: $('city').value,
+    auto: { introEvery: $('introEvery').value, moderation: $('moderation').value, speakChat: $('speakChat').checked, director: $('director').checked, djIntensity: $('djIntensity').value, radioTopics: $('radioTopics').checked }, tts: { lengthScale: $('lengthScale').value } } });
   await loadStatus();
 };
 async function test(onAir) {

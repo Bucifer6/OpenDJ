@@ -1,6 +1,7 @@
 {
   "id": "mc",
   "name": "MC Hype",
+  "mode": "party",
   "voice": "mc",
   "edgeVoice": "ro-RO-EmilNeural",
   "edgeRate": "+18%",

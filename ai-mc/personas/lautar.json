@@ -1,6 +1,7 @@
 {
   "id": "lautar",
   "name": "Nea Fane Lăutarul",
+  "mode": "party",
   "voice": "lautar",
   "edgeVoice": "ro-RO-EmilNeural",
   "edgeRate": "+8%",

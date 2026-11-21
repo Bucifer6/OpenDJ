@@ -26,7 +26,9 @@
     "moderation": "auto",
     "maxQueue": 20,
     "horn": true,
-    "director": true
+    "director": true,
+    "djIntensity": "subtle",
+    "radioTopics": true
   },
   "trustedProxies": [],
   "music": {
@@ -39,5 +41,6 @@
     ],
     "include": "",
     "exclude": ""
-  }
+  },
+  "city": ""
 }

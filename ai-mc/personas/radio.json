@@ -1,6 +1,7 @@
 {
   "id": "radio",
   "name": "DJ-ul de radio",
+  "mode": "radio",
   "voice": "radio",
   "edgeVoice": "ro-RO-EmilNeural",
   "edgeRate": "+6%",
