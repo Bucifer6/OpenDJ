@@ -16,6 +16,7 @@ export const AUTOMIX_MODES = [
 ];
 const BAR_CHOICES = [4, 8, 16, 32];
 const styleValue = (s) => (s === 'auto' ? 'auto' : normStyle(s));
+let modalSeq = 0;
 
 /** Smart-mix weight controls: preset select + harmonic / energy / variety sliders. Returns { el, value() }. */
 function smartControls(am, onChange) {
@@ -38,7 +39,11 @@ function smartControls(am, onChange) {
 export class Dialogs {
   constructor(app) { this.app = app; }
 
-  modal(title, body, buttons = [], { wide = false } = {}) {
+  /**
+   * A dialog. buttons: [{ label, value, primary, danger, cls, action }] (action returning false keeps it open).
+   * opts.cls: extra class on the box; opts.footStart: a node at the start of the footer; opts.onOpen({ close, box }).
+   */
+  modal(title, body, buttons = [], { wide = false, cls = '', footStart = null, onOpen = null } = {}) {
     return new Promise((resolve) => {
       const close = (v) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
       // only the top-most dialog reacts to Escape
@@ -52,13 +57,15 @@ export class Dialogs {
           if (e.shiftKey && (i <= 0)) { e.preventDefault(); f.at(-1).focus(); } else if (!e.shiftKey && (i === -1 || i === f.length - 1)) { e.preventDefault(); f[0].focus(); }
         }
       };
-      const foot = el('div', { class: 'modal-foot' }, ...buttons.map((b) => el('button', { class: `btn ${b.primary ? 'primary' : ''} ${b.danger ? 'danger' : ''}`, onclick: async () => { if (b.action) { const r = await b.action(); if (r === false) return; close(r ?? b.value); } else close(b.value); } }, b.label)));
-      const box = el('div', { class: `modal ${wide ? 'wide' : ''}`, role: 'dialog', 'aria-label': title },
-        el('div', { class: 'modal-head' }, el('h2', {}, title), el('button', { class: 'modal-x', onclick: () => close(null), 'aria-label': 'Close', title: 'Close' }, icon('x'))),
+      const foot = el('div', { class: 'modal-foot' }, footStart, ...buttons.map((b) => el('button', { class: `btn ${b.primary ? 'primary' : ''} ${b.danger ? 'danger' : ''} ${b.cls || ''}`, onclick: async () => { if (b.action) { const r = await b.action(); if (r === false) return; close(r ?? b.value); } else close(b.value); } }, b.label)));
+      const titleId = `modal-title-${++modalSeq}`;
+      const box = el('div', { class: `modal ${wide ? 'wide' : ''} ${cls}`, role: 'dialog', 'aria-modal': 'true', 'aria-label': title, 'aria-labelledby': titleId },
+        el('div', { class: 'modal-head' }, el('h2', { id: titleId }, title), el('button', { class: 'modal-x', onclick: () => close(null), 'aria-label': 'Close', title: 'Close' }, icon('x'))),
         el('div', { class: 'modal-body' }, body), buttons.length ? foot : null);
       const overlay = el('div', { class: 'overlay', onmousedown: (e) => { if (e.target === overlay) close(null); } }, box);
       document.body.append(overlay);
       document.addEventListener('keydown', onKey);
+      onOpen?.({ close, box });
       setTimeout(() => (box.querySelector('.modal-body input:not([type=checkbox]):not([type=color]), .modal-body select, .modal-body textarea') || box.querySelector('.modal-foot .btn.primary') || box.querySelector('.modal-x'))?.focus(), 30);
     });
   }
@@ -376,9 +383,10 @@ export class Dialogs {
       field('Waveform colours', sel(s.waveformColors, [['rgb', '3-band RGB'], ['blue', 'Blue'], ['mono', 'Monochrome']], (v) => set('waveformColors', v))),
     );
     const dvsTab = el('div', { class: 'form' }, el('p', { class: 'hint' }, 'Control decks with Serato or Traktor timecode vinyl / CDs through your audio interface inputs.'), el('button', { class: 'btn', onclick: () => import('../dvs/dvs-ui.js').then((m) => m.openDvsPanel(app)) }, 'Open DVS setup…'));
+    const about = this.aboutPane(chk);
     const tabs = platform.local
-      ? { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], mobile: ['Mobile', this.mobileInfo()] }
-      : { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], dvs: ['DVS', dvsTab], keys: ['Shortcuts', shortcuts] };
+      ? { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], mobile: ['Mobile', this.mobileInfo()], about: ['About', about] }
+      : { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], dvs: ['DVS', dvsTab], keys: ['Shortcuts', shortcuts], about: ['About', about] };
     if (!tabs[tab]) tab = 'audio';
     const tabBar = el('div', { class: 'tabs' });
     const pane = el('div', { class: 'tab-pane' });
@@ -409,6 +417,28 @@ export class Dialogs {
         el('button', { class: 'btn sm', onclick: () => app.library.dlg.backup() }, 'Back up library')),
       el('p', { class: 'hint' }, platform.native ? 'Exports open the share sheet: save to Files, send to your computer or a cloud drive.' : 'Exports are downloaded.'),
       storage);
+  }
+
+  /** Settings → About: version, automatic update checks and "Check now". */
+  aboutPane(chk) {
+    const app = this.app;
+    const status = el('span', { class: 'hint upd-check-status', role: 'status', 'aria-live': 'polite' });
+    const btn = el('button', { class: 'btn sm upd-check-now', onclick: async () => {
+      btn.disabled = true; status.textContent = 'Checking…';
+      const r = await app.updates?.check({ manual: true });
+      btn.disabled = false;
+      if (!r || r.error) status.textContent = r?.error === 'rate-limited' ? 'GitHub is limiting requests right now. Try again later.' : 'Couldn’t check for updates. Check your internet connection and try again.';
+      else if (r.available && r.latest) status.textContent = `OpenDJ ${r.latest.version} is available.`;
+      else status.textContent = `You’re up to date (${r.current || APP_VERSION}).`;
+    } }, icon('refresh'), 'Check now');
+    const who = platform.local ? 'OpenDJ' : 'The OpenDJ server';
+    return el('div', { class: 'form about-pane' },
+      el('div', { class: 'about-head' }, el('b', {}, 'OpenDJ'), el('span', { class: 'about-ver' }, APP_VERSION)),
+      el('p', { class: 'hint' }, 'Free, open-source DJ software.'),
+      el('h3', {}, 'Updates'),
+      el('label', { class: 'check' }, chk(app.settings.updateCheck !== false, (v) => { app.setSetting('updateCheck', v); app.updates?.setAuto(v); }), ' Check for updates automatically'),
+      el('div', { class: 'row upd-check-row' }, btn, status),
+      el('p', { class: 'hint' }, `${who} asks GitHub (api.github.com) for the latest OpenDJ release at startup and every 12 hours. The request only says “OpenDJ/${APP_VERSION}”: nothing about you, your music or your settings is sent. Nothing is installed without your OK.`));
   }
 
   /** Settings → Mobile: what the mobile app does differently, and why some features are hidden. */

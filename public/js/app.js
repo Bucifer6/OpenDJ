@@ -24,6 +24,7 @@ import { dvsButton } from './dvs/dvs-ui.js';
 import { BackgroundAnalyser } from './audio/background-analysis.js';
 import { isUndecodable } from './audio/analysis-queue.js';
 import { platform, unavailable } from './platform.js';
+import { setupUpdates } from './ui/update.js';
 
 /** The OpenDJ mark: a platter with a tone arm, drawn in the accent colour. */
 function logoMark() {
@@ -76,6 +77,7 @@ class App {
     const frame = (now) => { this.frame(now); requestAnimationFrame(frame); };
     requestAnimationFrame(frame);
     document.getElementById('boot')?.remove();
+    this.updates = setupUpdates(this); // "a new version is available" (checks after a short delay, never during a set)
     this.ready = true;
   }
 
@@ -203,7 +205,7 @@ class App {
   /** Phones and windows ≤ 1400 effective px: the secondary top bar buttons (hidden by CSS there) are offered in one menu. */
   topbarMore(anchor) {
     document.querySelector('body > .ctx-menu.tb-menu')?.remove();
-    const items = [...document.querySelectorAll('.topbar .live-btn, .topbar .link-btn, .topbar .dvs-btn, .topbar .video-btn, .topbar .light-btn, .topbar .rec-more, .topbar .signout-btn')]
+    const items = [...document.querySelectorAll('.topbar .live-btn, .topbar .link-btn, .topbar .dvs-btn, .topbar .video-btn, .topbar .light-btn, .topbar .rec-more, .topbar .signout-btn, .topbar .update-badge')]
       .filter((b) => !b.hidden && !b.closest('[hidden]') && b.offsetParent === null) // hidden by the phone layout
       .filter((b) => !(document.documentElement.classList.contains('odj-local') && /dvs-btn|light-btn|video-btn|live-btn|signout-btn/.test(b.className))); // not in the mobile app
     if (!items.length) return;

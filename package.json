@@ -13,7 +13,7 @@
     "start": "electron .",
     "web": "node server/cli.js",
     "test": "node --test test/*.test.js",
-    "test:e2e": "node scripts/e2e-smoke.mjs && node scripts/e2e-fx.mjs && node scripts/e2e-performance.mjs && node scripts/e2e-regressions.mjs && node scripts/e2e-controllers.mjs && node scripts/e2e-lighting.mjs && node scripts/e2e-video.mjs && node scripts/e2e-webapp.mjs && node scripts/e2e-dvs.mjs && node scripts/e2e-link-lyrics.mjs && node scripts/e2e-recording.mjs && node scripts/e2e-stems.mjs && node scripts/e2e-analysis.mjs && node scripts/e2e-mobile.mjs && node scripts/e2e-sampler.mjs && node scripts/e2e-automix.mjs && node scripts/e2e-ui-sweep.mjs",
+    "test:e2e": "node scripts/e2e-smoke.mjs && node scripts/e2e-fx.mjs && node scripts/e2e-performance.mjs && node scripts/e2e-regressions.mjs && node scripts/e2e-controllers.mjs && node scripts/e2e-lighting.mjs && node scripts/e2e-video.mjs && node scripts/e2e-webapp.mjs && node scripts/e2e-dvs.mjs && node scripts/e2e-link-lyrics.mjs && node scripts/e2e-recording.mjs && node scripts/e2e-stems.mjs && node scripts/e2e-analysis.mjs && node scripts/e2e-mobile.mjs && node scripts/e2e-sampler.mjs && node scripts/e2e-automix.mjs && node scripts/e2e-ui-sweep.mjs && node scripts/e2e-update.mjs",
     "dist": "electron-builder --publish never",
     "dist:win": "electron-builder --win --publish never",
     "dist:mac": "electron-builder --mac --publish never",

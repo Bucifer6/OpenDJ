@@ -1,0 +1,72 @@
+/* ================= update prompt (ui/update.js) + Settings → About ================= */
+.modal.update-modal { width: min(500px, calc(100vw - 32px)); }
+.update-modal .modal-body { padding: 16px 20px 14px; display: flex; flex-direction: column; }
+.upd-body { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.upd-hero { display: flex; align-items: center; gap: 12px; }
+.upd-icon { width: 40px; height: 40px; flex: 0 0 auto; border-radius: 12px; display: grid; place-items: center; font-size: 20px; color: var(--on-accent);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 100%, #fff 18%), color-mix(in srgb, var(--accent) 82%, #000));
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent), inset 0 1px 0 rgba(255,255,255,.3); }
+.upd-hero-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.upd-sub { font-size: var(--fs-lg); font-weight: 600; color: var(--text); }
+.upd-date { font-size: var(--fs-sm); color: var(--text-3); }
+.upd-summary { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+.upd-toggle { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; padding: 4px 6px 4px 2px; margin: -2px 0; border-radius: var(--radius);
+  color: var(--accent); font: 650 13px var(--font); cursor: pointer; transition: background-color var(--dur) var(--ease); }
+.upd-toggle:hover { background: var(--hover); }
+.upd-toggle:focus-visible, .upd-skip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.upd-chev { transition: transform 160ms var(--ease); }
+.upd-toggle.open .upd-chev { transform: rotate(90deg); }
+.upd-notes { max-height: min(42vh, 360px); overflow: auto; scrollbar-width: thin; background: var(--inset); border: 1px solid var(--line); border-radius: var(--r-lg);
+  padding: 4px 14px 12px; box-shadow: inset 0 1px 2px rgba(0,0,0,.25); font-size: 12.5px; line-height: 1.5; color: var(--text); user-select: text; -webkit-user-select: text; }
+.upd-notes[hidden] { display: none; }
+.upd-section + .upd-section { border-top: 1px solid var(--line); margin-top: 8px; }
+.upd-section > h3 { margin: 12px 0 4px; font-size: var(--fs-xs); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.upd-notes .md p { margin: 8px 0 2px; }
+.upd-notes .md h4, .upd-notes .md h5, .upd-notes .md h6 { margin: 10px 0 2px; font-size: 12.5px; font-weight: 700; }
+.upd-notes .md ul, .upd-notes .md ol { margin: 2px 0 4px; padding-left: 18px; }
+.upd-notes .md li { margin: 2px 0; }
+.upd-notes .md li.d1 { margin-left: 14px; } .upd-notes .md li.d2 { margin-left: 28px; } .upd-notes .md li.d3 { margin-left: 42px; }
+.upd-notes .md li::marker { color: var(--text-3); }
+.upd-notes .md strong { font-weight: 700; color: var(--text); }
+.upd-notes code, .upd-code code { font: 500 11.5px var(--mono); background: color-mix(in srgb, var(--panel-3) 70%, transparent); border: 1px solid var(--line); border-radius: var(--r-xs); padding: 0 4px; }
+.upd-notes pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.upd-notes a, .upd-full { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
+.upd-notes a:hover, .upd-full:hover { text-decoration: underline; }
+.upd-notes hr { border: 0; border-top: 1px solid var(--line); }
+.upd-full { display: inline-block; margin-top: 10px; font-size: var(--fs-md); font-weight: 600; }
+.upd-status { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-md); color: var(--text-2); }
+.upd-status[hidden] { display: none; }
+.upd-status.warn { color: var(--amber); }
+.upd-bar { height: 6px; border-radius: 3px; background: var(--inset); border: 1px solid var(--line); overflow: hidden; }
+.upd-bar[hidden] { display: none; }
+.upd-bar > span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 80%, #fff), var(--accent)); border-radius: 3px; transition: width 200ms linear; }
+.upd-extra:empty { display: none; }
+.upd-extra p { margin: 4px 0; font-size: var(--fs-md); color: var(--text-2); }
+.upd-instructions { display: flex; flex-direction: column; gap: 6px; }
+.upd-label { font-size: var(--fs-xs); font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-3); margin-top: 4px; }
+.upd-code { display: flex; align-items: center; gap: 6px; background: var(--inset); border: 1px solid var(--line); border-radius: var(--radius); padding: 5px 5px 5px 10px; min-width: 0; }
+.upd-code code { flex: 1; min-width: 0; background: none; border: 0; padding: 0; overflow-x: auto; white-space: nowrap; user-select: all; -webkit-user-select: all; scrollbar-width: none; }
+.upd-how { margin: 0; font-size: var(--fs-sm); }
+.upd-how:empty { display: none; }
+.update-modal .modal-foot { align-items: center; flex-wrap: wrap; }
+.upd-skip { margin-right: auto; background: none; border: 0; padding: 4px 2px; color: var(--text-3); font: 500 var(--fs-sm) var(--font); cursor: pointer; border-radius: var(--r-sm); }
+.upd-skip:hover { color: var(--text-2); text-decoration: underline; }
+.update-modal .btn.upd-now { min-width: 112px; }
+
+/* top bar badge: shown instead of the prompt during a set (and after "Later") */
+.topbar .btn.update-badge:not(.primary) { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); position: relative; }
+.topbar .btn.update-badge:not(.primary):hover { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.update-badge::after { content: ''; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--topbar-1); }
+/* the top bar is full between ~1400 and 1600 px: icon only, and the clock makes room while the badge shows */
+@media (max-width: 1600px) {
+  .update-badge .lbl { display: none; }
+  .topbar:has(.update-badge:not([hidden])) .clock { display: none; }
+}
+
+/* Settings → About */
+.about-head { display: flex; align-items: baseline; gap: 8px; font-size: 18px; }
+.about-head b { font-weight: 750; letter-spacing: -.01em; }
+.about-ver { font: 600 12px var(--mono); color: var(--text-2); background: var(--inset); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 1px 6px; }
+.upd-check-row { align-items: center; gap: 10px; flex-wrap: wrap; }
+.upd-check-status { flex: 1; min-width: 160px; }
+@media (prefers-reduced-motion: reduce) { .upd-chev, .upd-bar > span { transition: none; } }

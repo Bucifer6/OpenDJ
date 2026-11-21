@@ -76,6 +76,9 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - Load progress is shown for long tracks.
 - Many smaller layout and touch fixes.
 
+**Update prompt**
+- OpenDJ tells you when a newer version is out, with *What's new* and **Update now** / **Later** (Later waits 3 days; never during a set). Windows and Linux AppImage download, verify (SHA-256) and install after "Restart to update"; macOS opens the verified disk image; phones, packages and servers get the right download or instructions. Settings → About: turn automatic checks off or *Check now*.
+
 ### New in 0.3
 This release follows a full security audit, an in-depth QA pass and end-to-end testing with six kinds of users.
 

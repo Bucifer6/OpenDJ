@@ -161,6 +161,8 @@ Get the latest version from **[GitHub Releases](https://github.com/Bucifer6/Open
 
 Each release has a `SHA256SUMS.txt` so you can check a download wasn't tampered with (`sha256sum -c SHA256SUMS.txt --ignore-missing`). To report a security problem privately, see [SECURITY.md](SECURITY.md).
 
+**Updates:** OpenDJ checks GitHub for a newer release at startup and every 12 hours and offers it with *What's new*, **Update now** and **Later** (never while you're playing, recording or automixing). *Update now* downloads and verifies the installer (Windows, Linux AppImage) or disk image (macOS) against `SHA256SUMS.txt`, opens the matching package for `.deb` / `.rpm` / `.tar.gz` installs and the APK on Android, and shows the Docker commands on a self-hosted server. Turn the check off or run it by hand in *Settings → About*. Privacy: the only request goes to `api.github.com` with the User-Agent `OpenDJ/<version>` (made by the OpenDJ server on the desktop and web app, by the app itself on phones); nothing about you or your library is sent.
+
 Installers are built by GitHub Actions ([`build.yml`](.github/workflows/build.yml)) on Windows, macOS and Linux; pushing a tag like `v0.2.0` publishes a release, and every branch build has the installers under the run's *Artifacts*.
 
 ## Quick start
@@ -352,7 +354,7 @@ npm test            # unit tests: analysis, media-server clients against mock se
 npm run test:e2e    # end-to-end checks in headless Chromium (smoke, performance, controllers, lighting, video, web app, DVS, Link/lyrics, recording, stems, analysis, sampler, automix)
 ```
 
-The smoke test covers scan → load → analyse → play → sync → FX → record → automix; `scripts/e2e-automix.mjs` checks every mixing style on the master output (dropouts, level, clipping, clicks), smart mix, loading tracks while automix runs and media-server playlists; `scripts/e2e-sampler.mjs [outDir]` renders the sampler bank, measures loudness / spectrum and writes WAVs plus spectrogram PNGs; `node scripts/e2e-performance.mjs` measures pitch for key shift and key lock and checks key sync, quantized cues, saved loops, slicer, instant doubles, stems, Color FX, mic/talkover and the sequencer.
+The smoke test covers scan → load → analyse → play → sync → FX → record → automix; `scripts/e2e-automix.mjs` checks every mixing style on the master output (dropouts, level, clipping, clicks), smart mix, loading tracks while automix runs and media-server playlists; `scripts/e2e-sampler.mjs [outDir]` renders the sampler bank, measures loudness / spectrum and writes WAVs plus spectrogram PNGs; `node scripts/e2e-performance.mjs` measures pitch for key shift and key lock and checks key sync, quantized cues, saved loops, slicer, instant doubles, stems, Color FX, mic/talkover and the sequencer. `scripts/e2e-update.mjs [shotsDir]` runs the update prompt against a fake GitHub API (`OPENDJ_UPDATE_URL`, tests only, loopback URLs only): newer / same / older versions, *What's new*, Later / Skip, deferral during playback, desktop (mocked IPC and real Electron), hosted and phone modes.
 
 README screenshots are reproducible: `node scripts/demo/make-demo-library.mjs` synthesises the fictional demo library and `node scripts/demo/screenshots.mjs` captures everything in `docs/images/`.
 

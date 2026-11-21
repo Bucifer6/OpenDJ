@@ -1,9 +1,13 @@
 // Electron shell: starts the local library/stream server and opens the UI.
 import { app, BrowserWindow, dialog, ipcMain, session, shell, Menu } from 'electron';
 import path from 'node:path';
+import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 import { start, LAUNCH_COOKIE } from '../server/index.js';
+import { installKind, normArch, updatePlan, installHint, downloadVerified, downloadDir, replaceAppImage, sha256File } from './updater.js';
+import { selectAsset, isNewer, isReleaseDownloadUrl, isReleasePageUrl } from '../public/js/shared/update-core.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 let server;
@@ -115,6 +119,75 @@ ipcMain.handle('pick-files', async (e, filters) => {
   return r.canceled ? [] : r.filePaths;
 });
 ipcMain.handle('reveal', (e, p) => { if (trusted(e) && typeof p === 'string') shell.showItemInFolder(p); });
+
+// ---- updates (see updater.js) ----
+// The page only asks: info / download / install / cancel. Which file, from where, and what runs is decided here from
+// the server's last GitHub check (validated release data), never from anything the page sends.
+const upd = { kind: installKind({ packaged: app.isPackaged }), arch: normArch(), ctrl: null, file: null, sha256: null, version: null };
+async function latestRelease() {
+  if (!server?.updates) return null;
+  if (!server.updates.latest()) await server.updates.check();
+  const r = server.updates.latest();
+  return r && isNewer(r.version, app.getVersion()) ? r : null;
+}
+const openRelease = (url) => { if (isReleaseDownloadUrl(url) || isReleasePageUrl(url)) shell.openExternal(url); };
+ipcMain.handle('update-info', async (e) => {
+  if (!trusted(e)) return null;
+  const r = await latestRelease();
+  const plan = updatePlan(r, upd);
+  return { ...plan, version: r?.version || null, current: app.getVersion(), downloading: !!upd.ctrl, ready: !!(upd.file && upd.version === r?.version), hint: installHint(upd.kind, plan.asset?.name || plan.expected) };
+});
+ipcMain.handle('update-download', async (e) => {
+  if (!trusted(e)) return { ok: false, error: 'Refused' };
+  const r = await latestRelease();
+  if (!r) return { ok: false, error: 'No newer version found' };
+  const plan = updatePlan(r, upd);
+  const asset = selectAsset(r, upd);
+  if (plan.action === 'open' || !asset) {
+    // packages (deb / rpm / tar.gz) and source checkouts: the browser downloads, the user installs
+    const url = plan.action === 'open' && asset ? asset.url : r.url;
+    openRelease(url);
+    return { ok: true, action: 'opened', url, name: asset?.name || null, hint: installHint(upd.kind, asset?.name) };
+  }
+  if (upd.ctrl) return { ok: false, error: 'The download is already running' };
+  upd.ctrl = new AbortController();
+  let last = 0;
+  try {
+    const dir = downloadDir(upd.kind, { downloads: app.getPath('downloads'), temp: app.getPath('temp') });
+    const { file, sha256 } = await downloadVerified({
+      release: r, assetName: asset.name, dir, signal: upd.ctrl.signal, userAgent: `OpenDJ/${app.getVersion()}`,
+      onProgress: (p) => { const now = Date.now(); if (now - last > 150 || p.received === p.total) { last = now; if (!e.sender.isDestroyed()) e.sender.send('update-progress', p); } },
+    });
+    Object.assign(upd, { file, sha256, version: r.version });
+    if (upd.kind === 'dmg') { await shell.openPath(file); return { ok: true, action: 'opened-dmg', name: asset.name }; }
+    const besideAppImage = upd.kind === 'appimage' && path.dirname(file) === path.dirname(process.env.APPIMAGE || '');
+    if (upd.kind === 'portable' || (upd.kind === 'appimage' && !besideAppImage)) {
+      if (upd.kind === 'appimage') await fs.promises.chmod(file, 0o755).catch(() => {});
+      shell.showItemInFolder(file);
+      return { ok: true, action: 'revealed', name: asset.name };
+    }
+    return { ok: true, action: 'ready', name: asset.name };
+  } catch (err) {
+    return { ok: false, error: upd.ctrl?.signal.aborted ? 'Download cancelled' : err.message };
+  } finally { upd.ctrl = null; }
+});
+ipcMain.handle('update-cancel', (e) => { if (trusted(e)) upd.ctrl?.abort(); });
+ipcMain.handle('update-install', async (e) => {
+  if (!trusted(e)) return { ok: false, error: 'Refused' };
+  if (!upd.file || !['nsis', 'appimage'].includes(upd.kind)) return { ok: false, error: 'Nothing to install' };
+  if (upd.kind === 'appimage' && path.dirname(upd.file) !== path.dirname(process.env.APPIMAGE || '')) return { ok: false, error: 'Nothing to install' };
+  // verified when downloaded; checked again so a file swapped in the meantime is never started
+  if (await sha256File(upd.file).catch(() => '') !== upd.sha256) { upd.file = null; return { ok: false, error: 'The downloaded file changed since it was verified: download it again' }; }
+  if (upd.kind === 'nsis') {
+    spawn(upd.file, [], { detached: true, stdio: 'ignore' }).unref();
+  } else {
+    const target = process.env.APPIMAGE;
+    await replaceAppImage(upd.file, target);
+    app.relaunch({ execPath: target, args: process.argv.slice(1).filter((a) => !a.startsWith('--appimage')) });
+  }
+  setTimeout(() => app.quit(), 300);
+  return { ok: true };
+});
 
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => { server?.shutdown(); app.quit(); });

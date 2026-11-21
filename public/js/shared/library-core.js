@@ -36,6 +36,8 @@ export const DEFAULT_SETTINGS = {
   fxPostFader: true,          // beat FX tails ring out after the channel fader / crossfader closes (false = pre-fader FX)
   autoCues: true,
   autoAnalyse: true,          // analyse new tracks (BPM, key, waveform, cues) in the background, in the browser
+  updateCheck: true,          // check GitHub for a newer OpenDJ release at startup and every 12 hours
+  updateSnooze: null,         // { version, until } after "Later", { version, skip: true } after "Skip this version"
   sequencer: null,            // object; replaced wholesale on update (not merged)
   sampler: null,              // { pads: [{ sound, volume, sync }] } built-in sound / volume / sync-to-beat per pad; replaced wholesale
   link: { enabled: false, quantum: 4, startStopSync: false },
@@ -53,7 +55,7 @@ export const DEFAULT_SETTINGS = {
   youtubeApiKey: '',          // YouTube Data API key for search (never written to backups)         // hosted mode: folders the web UI may browse/add/export to (OPENDJ_MUSIC_ROOTS wins)
 };
 // Object-valued settings that are replaced on update instead of shallow-merged.
-export const REPLACE_SETTINGS = new Set(['midiMappings', 'sequencer', 'lighting', 'sampler']);
+export const REPLACE_SETTINGS = new Set(['midiMappings', 'sequencer', 'lighting', 'sampler', 'updateSnooze']);
 
 /** Short stable id (first 16 hex chars of SHA-1). */
 export const hashId = (s) => sha1Hex(String(s)).slice(0, 16);

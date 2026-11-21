@@ -22,6 +22,7 @@ import { aiffToWav, isAiff } from '../shared/aiff.js';
 import { LYRICS_DEFAULTS, empty, has, lyricsFromMetadata, remoteLyricsFrom, lrclibLookupWith } from '../shared/lyrics-core.js';
 import { parseLrc, normalizeLyrics } from '../lyrics/lrc.js';
 import { mergeImportedCues } from '../shared/cues.js';
+import { UpdateChecker } from '../shared/update-core.js';
 
 const VIDEO_MIME = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/mp4', webm: 'video/webm' };
 const UNAVAILABLE = (what) => new HttpError(501, `${what} is not available in the mobile app`, 'unavailable');
@@ -378,6 +379,17 @@ export async function createLocalBackend(o) {
   });
   route('GET', '/api/jobs', () => [...jobs.keys()]);
 
+  // ---------------- update check (same as the server's GET /api/update/check) ----------------
+  // In the app CapacitorHttp makes the request (native networking: our own User-Agent / If-None-Match); in a plain
+  // browser (?local=1) window.fetch does, without extra headers (no CORS preflight; the HTTP cache revalidates the ETag).
+  const updates = new UpdateChecker({ fetch: http, version, conditional: !!platform.native, userAgent: !!platform.native });
+  route('GET', '/api/update/check', async ({ query }) => {
+    const force = query.get('force') === '1';
+    const base = { hosted: false, auto: library.settings.updateCheck !== false };
+    if (!force && library.settings.updateCheck === false) return { ...base, ok: true, disabled: true, current: updates.version, available: false, latest: null };
+    return { ...base, ...(await updates.check({ force })) };
+  });
+
   // ---------------- lyrics ----------------
   const lyricsCfg = () => ({ ...LYRICS_DEFAULTS, ...(library.settings.lyrics || {}), writeLrc: false });
   const lrcCache = { get: (k) => kv.get(`lrclib:${k}`), set: (k, v) => kv.set(`lrclib:${k}`, v) };
@@ -502,7 +514,7 @@ export async function createLocalBackend(o) {
   }, 1500);
 
   return {
-    router, hub, library, history, sources, importer, fs, kv,
+    router, hub, library, history, sources, importer, fs, kv, updates,
     handle: (method, url, init) => router.handle(method, url, init),
     subscribe: (fn) => hub.subscribe(fn),
     urlForSync, urlFor, importPicked, warmCovers,

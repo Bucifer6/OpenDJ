@@ -34,6 +34,7 @@ import { registerBroadcastRoutes } from './broadcast.js';
 import { registerCdjRoutes } from './cdj/routes.js';
 import { findIdenticalTrack } from './upload-dedupe.js';
 import { registerStemRoutes } from './stems.js';
+import { registerUpdateRoutes } from './update.js';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const MIME = {
@@ -805,6 +806,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   const recording = registerRecordingRoutes({ route, library, emit, pathAllowed, allowedRoots });
   const broadcast = registerBroadcastRoutes({ route, library, emit, pathAllowed: readable, log });
   registerCdjRoutes({ route, library, emit, allowPath, readable });
+  const updates = registerUpdateRoutes({ route, library, version: VERSION, hosted: restricted });
 
   route('GET', '/api/events', ({ req, res }) => {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -924,7 +926,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     downloads.queue = [];
     for (const j of downloads.active.values()) j.ctrl.abort();
   };
-  return { server, library, history, downloads, transcoder, auth, lighting, link, stems, recording, broadcast, ffmpegReady: ffReady, shutdown, newId };
+  return { server, library, history, downloads, transcoder, auth, lighting, link, stems, recording, broadcast, updates, ffmpegReady: ffReady, shutdown, newId };
 }
 
 /**

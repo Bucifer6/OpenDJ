@@ -74,6 +74,12 @@ const SCHEMA = {
   uploadMaxMB: num(0.001, 1024 * 1024),
   allowedRoots: (v) => (v === null || (Array.isArray(v) && v.every((x) => typeof x === 'string')) ? v : undefined),
   youtubeApiKey: str(512),
+  updateCheck: bool(),
+  updateSnooze: (v) => {
+    if (v === null) return null;
+    if (!v || typeof v !== 'object' || typeof v.version !== 'string' || !/^\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(v.version)) return undefined;
+    return v.skip === true ? { version: v.version, skip: true } : Number.isFinite(Number(v.until)) ? { version: v.version, until: Number(v.until) } : undefined;
+  },
 };
 
 /** Validate one setting. Keys without a schema are accepted unchanged. */
