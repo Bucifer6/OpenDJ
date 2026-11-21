@@ -3,6 +3,7 @@
 // JSON spec so the Node side can script parameter moves at exact times.
 const effects = await import('/js/audio/effects.js');
 const engine = await import('/js/audio/engine.js');
+const personalities = await import('/js/audio/personalities.js');
 
 // ---------------------------------------------------------------- test signals (deterministic)
 function rng(seed = 1) { let s = seed >>> 0; return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296 * 2 - 1; }; }
@@ -79,6 +80,7 @@ async function signal(ctx, spec, n) {
   }
   if (o.gain) for (const c of ch) for (let i = 0; i < c.length; i++) c[i] *= o.gain;
   if (o.until) for (const c of ch) c.fill(0, Math.round(o.until * sr));
+  if (o.from) for (const c of ch) c.fill(0, 0, Math.round(o.from * sr));
   return ch;
 }
 
@@ -135,6 +137,33 @@ async function build(ctx, spec, src) {
       pre.connect(lim.input); lim.output.connect(ctx.destination);
       return { target: lim };
     }
+    case 'engine': { // the whole mixer engine (no decks): channels, master chain, mic / voice, booth, record, outputs
+      const settings = { colorFx: 'filter', fxPostFader: true, limiter: true, ...(spec.settings || {}) };
+      const e = new engine.Engine(settings);
+      e.ctx = ctx; e.buildGraph({ decks: false });
+      e.setMixer = (patch) => { e.settings.mixer = { ...(e.settings.mixer || {}), ...patch }; e.applyMixerConfig(); };
+      e.setSetting = (k, v) => { e.settings[k] = v; };
+      e.applyPersonality = (id) => personalities.applyPersonality(e, id, { save: (m) => { e.settings.mixer = m; } });
+      for (const [i, s] of src.entries()) {
+        const to = s.to || 'ch0';
+        if (/^ch\d$/.test(to)) s.node.connect(e.channels[+to[2]].trimNode);
+        else if (to === 'mic') s.node.connect(e.ensureMic().input);
+        else if (to === 'voice') s.node.connect(e.voiceInput());
+        else if (to === 'sampler') s.node.connect(e.sampler.pre || e.sampler.out);
+        else if (to === 'program') s.node.connect(e.programBus);
+        else if (to === 'booth') s.node.connect(e.ensureBooth().in);
+        void i;
+      }
+      const tap = spec.tap || 'master';
+      if (tap === 'outputs') await e.applyOutputs();
+      else {
+        if (tap === 'booth') e.ensureBooth();
+        if (tap === 'hp2') e.ensureHp2();
+        const node = { master: e.masterOut, booth: e.booth?.out, hp: e.hpOut, hp2: e.hp2?.out, rec: e.recTap, music: e.musicBus, program: e.programOut, cue: e.cueBus }[tap];
+        node.connect(ctx.destination);
+      }
+      return { target: e };
+    }
     case 'deck': { // the deck worklet playing the signal as a track
       await ctx.audioWorklet.addModule('/js/audio/worklets.js');
       const node = new AudioWorkletNode(ctx, 'deck-processor', { numberOfInputs: 0, numberOfOutputs: 2, outputChannelCount: [2, 2] });
@@ -148,6 +177,7 @@ async function build(ctx, spec, src) {
 function resolve(target, path) { let o = target; for (const k of (path || '').split('.').filter(Boolean)) o = o[k]; return o; }
 async function doOp(target, op) {
   if (op.msg) { target.port.postMessage(op.msg); return; }
+  if (op.probe) { target._probe ||= {}; const v = resolve(target, op.probe); target._probe[op.as || op.probe] = Array.isArray(v) ? [...v] : v; return; }
   const obj = resolve(target, op.on);
   if (typeof obj?.[op.call] !== "function") { if (op.optional) return; throw new Error(`no method ${op.call}`); }
   return obj[op.call](...(op.args || []));
@@ -167,7 +197,7 @@ function deckSync(node) {
 
 async function run(spec) {
   const sr = spec.sr || 48000, n = Math.round(spec.secs * sr);
-  const ctx = new OfflineAudioContext(2, n, sr);
+  const ctx = new OfflineAudioContext(spec.channels || 2, n, sr);
   if (spec.fxWorklets !== false && effects.loadEffectWorklets) await effects.loadEffectWorklets(ctx);
   const [L, R] = await signal(ctx, spec, n);
   let b;
@@ -175,6 +205,17 @@ async function run(spec) {
     b = await build(ctx, spec, null);
     b.target.port.postMessage({ type: 'load', left: L, right: R, sampleRate: sr, scale: 1 });
     for (const op of spec.init || []) await doOp(b.target, op);
+  } else if (spec.chain === 'engine') {
+    const defs = spec.sources || [{ signal: spec.signal, signalOpts: spec.signalOpts, to: 'ch0' }];
+    const srcs = [];
+    for (const d of defs) {
+      const [l, r] = d === defs[0] && !spec.sources ? [L, R] : await signal(ctx, d, n);
+      const buf = ctx.createBuffer(2, n, sr); buf.copyToChannel(l, 0); buf.copyToChannel(r, 1);
+      const node = ctx.createBufferSource(); node.buffer = buf; srcs.push({ node, to: d.to });
+    }
+    b = await build(ctx, spec, srcs);
+    for (const op of spec.init || []) await doOp(b.target, op);
+    for (const s of srcs) s.node.start(0);
   } else {
     const buf = ctx.createBuffer(2, n, sr); buf.copyToChannel(L, 0); buf.copyToChannel(R, 1);
     const src = ctx.createBufferSource(); src.buffer = buf;
@@ -197,7 +238,8 @@ async function run(spec) {
   const out = await ctx.startRendering();
   const ms = performance.now() - t0;
   const enc = (f) => { const u = new Uint8Array(f.buffer, f.byteOffset, f.byteLength); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); };
-  return { sr, L: enc(out.getChannelData(0)), R: enc(out.getChannelData(1)), ms, dry: spec.returnDry ? [enc(L), enc(R)] : null };
+  const all = out.numberOfChannels > 2 ? Array.from({ length: out.numberOfChannels }, (_, c) => enc(out.getChannelData(c))) : null;
+  return { sr, L: enc(out.getChannelData(0)), R: enc(out.getChannelData(1)), ms, dry: spec.returnDry ? [enc(L), enc(R)] : null, all, probe: b.target?._probe || null };
 }
 
-window.fxlab = { run, effects: effects.EFFECTS, ready: true };
+window.fxlab = { run, effects: effects.EFFECTS, colorFx: effects.COLOR_FX, ready: true };

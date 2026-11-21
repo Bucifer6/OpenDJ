@@ -79,16 +79,18 @@ const disconnectAll = (...nodes) => { for (const n of nodes) { try { n.disconnec
  * frames), so the loop delay is shortened by that much: echoes land exactly on the beat division.
  *   in -> first(D) -> sum -> HP -> LP -> softclip = taps -> loop(D·k - 128f) -> fb -> sum
  */
-function feedbackDelay(ctx, { loopFactor = 1 } = {}) {
-  const q = 128 / ctx.sampleRate;
+function feedbackDelay(ctx, { loopFactor = 1, insert = null, extraLatency = 0 } = {}) {
+  const q = 128 / ctx.sampleRate + extraLatency;
   const first = ctx.createDelay(4.1), sum = ctx.createGain(), loop = ctx.createDelay(8.2), fb = ctx.createGain();
   const hp = biquad(ctx, 'highpass', 150, BUTTER_Q), lp = biquad(ctx, 'lowpass', 5000, BUTTER_Q), sat = softClip(ctx);
-  first.connect(sum); sum.connect(hp); hp.connect(lp); lp.connect(sat); sat.connect(loop); loop.connect(fb); fb.connect(sum);
+  first.connect(sum); sum.connect(hp); hp.connect(lp); lp.connect(sat);
+  if (insert) { sat.connect(insert); insert.connect(loop); } else sat.connect(loop);
+  loop.connect(fb); fb.connect(sum);
   let d = 0;
   return {
     input: first, taps: sat, fb, hp, lp,
     setTime(sec, glide = true) {
-      sec = Math.min(4, Math.max(q * 1.5, sec));
+      sec = Math.min(4, Math.max(128 / ctx.sampleRate * 1.5, sec));
       if (Math.abs(sec - d) < 1e-6) return;
       const t = ctx.currentTime, loopT = Math.max(q * 0.5, sec * loopFactor - q);
       if (!glide || !d) { first.delayTime.cancelScheduledValues(t); loop.delayTime.cancelScheduledValues(t); first.delayTime.setValueAtTime(sec, t); loop.delayTime.setValueAtTime(loopT, t); }
@@ -198,22 +200,11 @@ const FX = {
   },
   autofilter: {
     label: 'Auto Filter', kind: 'insert', params: ['Resonance', 'Depth'], cycle: 2,
-    create(ctx) {
-      const input = ctx.createGain(), output = ctx.createGain();
-      const f1 = biquad(ctx, 'lowpass', 220, 6), f2 = biquad(ctx, 'lowpass', 220, BUTTER_Q);
-      const lfo = beatLfo(ctx, { beats: 1, shape: 0 });
-      const depth = lfo.connect(f1.detune, 0, 6000), d2 = lfo.connect(f2.detune, 0, 6000);
-      const makeup = ctx.createGain(); makeup.gain.value = 1.05;
-      input.connect(f1); f1.connect(f2); f2.connect(makeup); makeup.connect(output);
-      return {
-        input, output,
-        setParam: (p) => smooth(f1.Q, 1 + p * 13, ctx, 0.05),
-        setParam2: (p) => { const c = 2400 + p * 4800; smooth(depth.gain, c, ctx, 0.05); smooth(d2.gain, c, ctx, 0.05); smooth(makeup.gain, 0.92 + (1 - p) * 0.26, ctx, 0.05); }, // was +3-5 dB over dry at full mix (QA p3)
-        setTempo: (beatSec, beats) => smooth(lfo.p('beats'), beats * 2, ctx, 0.01),
-        setClock: (b, at, s) => lfo.clock(b, at, s),
-        dispose: () => { lfo.dispose(); disconnectAll(input, output, f1, f2, makeup, depth, d2); },
-      };
-    },
+    create(ctx) { return autoFilter(ctx, 2); },
+  },
+  tripletFilter: {
+    label: 'Triplet Filter', kind: 'insert', params: ['Resonance', 'Depth'], cycle: 2 / 3,
+    create(ctx) { return autoFilter(ctx, 2 / 3); },
   },
   trans: {
     label: 'Trans', kind: 'insert', params: ['Depth', 'Gate'], cycle: 1,
@@ -284,7 +275,102 @@ const FX = {
       };
     },
   },
+  spiral: {
+    label: 'Spiral', kind: 'send', params: ['Feedback', 'Pitch'],
+    create(ctx) {
+      // an echo whose repeats climb in pitch: the pitch shifter sits in the feedback loop (its average latency, half
+      // its window, is taken off the loop delay so the repeats stay near the beat division)
+      const input = ctx.createGain(), output = ctx.createGain();
+      const ps = worklet(ctx, 'opendj-pitch', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] }, { ratio: 1.12 });
+      const d = feedbackDelay(ctx, { insert: ps, extraLatency: 0.026 });
+      input.connect(d.input); d.taps.connect(output);
+      return {
+        input, output,
+        setParam: (p) => smooth(d.fb.gain, 0.3 + 0.6 * p, ctx),
+        setParam2: (p) => smooth(ps.parameters.get('ratio'), Math.pow(2, (0.5 + 6.5 * p) / 12), ctx, 0.05),
+        setTempo: (beatSec, beats) => d.setTime(beatSec * beats),
+        dispose: () => disconnectAll(input, output, ps, ...d.nodes),
+      };
+    },
+  },
+  helix: {
+    label: 'Helix', kind: 'send', params: ['Sustain', 'Tone'],
+    create(ctx) {
+      // captures one beat division into a loop and keeps repeating it (input closed after the capture); switching
+      // off lets the loop decay
+      const input = ctx.createGain(), output = ctx.createGain(), gate = ctx.createGain();
+      const d = feedbackDelay(ctx); gate.gain.value = 0;
+      input.connect(gate); gate.connect(d.input); d.taps.connect(output); output.gain.value = 0.75;
+      let sec = 0.25, sustain = 0.96, on = false;
+      const hold = () => smooth(d.fb.gain, on ? sustain : 0.45, ctx, on ? 0.02 : 0.15);
+      return {
+        input, output,
+        setParam: (p) => { sustain = 0.85 + 0.13 * p; hold(); },
+        setParam2: (p) => d.setTone(p),
+        setTempo: (beatSec, beats) => { sec = Math.min(4, beatSec * beats); d.setTime(sec); },
+        setActive: (a) => {
+          on = !!a; const t = ctx.currentTime;
+          gate.gain.cancelScheduledValues(t); gate.gain.setTargetAtTime(on ? 1 : 0, t, 0.004);
+          if (on) gate.gain.setTargetAtTime(0, t + sec, 0.004); // capture one division, then freeze
+          hold();
+        },
+        dispose: () => disconnectAll(input, output, gate, ...d.nodes),
+      };
+    },
+  },
+  lowCutEcho: {
+    label: 'Low-Cut Echo', kind: 'send', params: ['Feedback', 'Low cut'],
+    create(ctx) {
+      const input = ctx.createGain(), output = ctx.createGain();
+      const d = feedbackDelay(ctx); d.setTone(0.7);
+      input.connect(d.input); d.taps.connect(output);
+      return {
+        input, output,
+        setParam: (p) => smooth(d.fb.gain, 0.2 + 0.7 * p, ctx),
+        setParam2: (p) => smooth(d.hp.frequency, lerpExp(250, 2500, p), ctx, 0.03), // each repeat thinner
+        setTempo: (beatSec, beats) => d.setTime(beatSec * beats),
+        dispose: () => disconnectAll(input, output, ...d.nodes),
+      };
+    },
+  },
+  shimmer: {
+    label: 'Shimmer', kind: 'send', params: ['Decay', 'Shimmer'],
+    create(ctx) {
+      // reverb fed by the dry send plus an octave-up copy: a bright, rising halo
+      const input = ctx.createGain(), output = ctx.createGain(), oct = ctx.createGain();
+      const hp = biquad(ctx, 'highpass', 250, BUTTER_Q);
+      const ps = worklet(ctx, 'opendj-pitch', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] }, { ratio: 2 });
+      const rv = worklet(ctx, 'opendj-reverb', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] }, { decay: 4, damping: 9000, predelay: 0.03, early: 0.3 });
+      input.connect(hp); hp.connect(rv); hp.connect(ps); ps.connect(oct); oct.connect(rv); rv.connect(output);
+      output.gain.value = 1.3; oct.gain.value = 0.6;
+      const P = (k) => rv.parameters.get(k);
+      return {
+        input, output,
+        setParam: (p) => smooth(P('decay'), lerpExp(1.5, 12, p), ctx, 0.05),
+        setParam2: (p) => smooth(oct.gain, 1.2 * p, ctx, 0.05),
+        dispose: () => disconnectAll(input, output, oct, hp, ps, rv),
+      };
+    },
+  },
 };
+
+/** Auto filter: resonant low-pass swept by a beat-locked LFO, `mult` LFO cycles per beat division. */
+function autoFilter(ctx, mult) {
+  const input = ctx.createGain(), output = ctx.createGain();
+  const f1 = biquad(ctx, 'lowpass', 220, 6), f2 = biquad(ctx, 'lowpass', 220, BUTTER_Q);
+  const lfo = beatLfo(ctx, { beats: 1, shape: 0 });
+  const depth = lfo.connect(f1.detune, 0, 6000), d2 = lfo.connect(f2.detune, 0, 6000);
+  const makeup = ctx.createGain(); makeup.gain.value = 1.05;
+  input.connect(f1); f1.connect(f2); f2.connect(makeup); makeup.connect(output);
+  return {
+    input, output,
+    setParam: (p) => smooth(f1.Q, 1 + p * 13, ctx, 0.05),
+    setParam2: (p) => { const c = 2400 + p * 4800; smooth(depth.gain, c, ctx, 0.05); smooth(d2.gain, c, ctx, 0.05); smooth(makeup.gain, 0.92 + (1 - p) * 0.26, ctx, 0.05); }, // was +3-5 dB over dry at full mix (QA p3)
+    setTempo: (beatSec, beats) => smooth(lfo.p('beats'), beats * mult, ctx, 0.01),
+    setClock: (b, at, s) => lfo.clock(b, at, s),
+    dispose: () => { lfo.dispose(); disconnectAll(input, output, f1, f2, makeup, depth, d2); },
+  };
+}
 
 /**
  * Modulated delay (flanger / chorus / jet) in the opendj-moddelay worklet: stereo, beat-locked LFO, sample-accurate
@@ -406,7 +492,116 @@ const COLOR = {
       };
     },
   },
+  sweep: { // a band that narrows with the knob: left towards the bass, right towards the treble
+    kind: 'insert', dryFilter: 0,
+    create(ctx) {
+      const input = ctx.createGain(), output = ctx.createGain();
+      const hp = [biquad(ctx, 'highpass', 20, BUTTER_Q), biquad(ctx, 'highpass', 20, BUTTER_Q)];
+      const lp = [biquad(ctx, 'lowpass', 20000, BUTTER_Q), biquad(ctx, 'lowpass', 20000, BUTTER_Q)];
+      const pk = biquad(ctx, 'peaking', 1000, 1.2, 0);
+      input.connect(hp[0]); hp[0].connect(hp[1]); hp[1].connect(lp[0]); lp[0].connect(lp[1]); lp[1].connect(pk); pk.connect(output);
+      return {
+        input, output,
+        wetAmount: (x) => smoothstep(0, 0.1, x),
+        setColor(x, side) {
+          const lo = side < 0;
+          const hpF = lo ? lerpExp(20, 70, x) : lerpExp(20, 3500, x), lpF = lo ? lerpExp(20000, 380, x) : lerpExp(20000, 11000, x);
+          for (const f of hp) smooth(f.frequency, hpF, ctx, 0.03);
+          for (const f of lp) smooth(f.frequency, lpF, ctx, 0.03);
+          smooth(pk.frequency, lo ? lerpExp(1000, 160, x) : lerpExp(1000, 6000, x), ctx, 0.03);
+          smooth(pk.gain, 7 * smoothstep(0, 0.6, x), ctx, 0.03); // a resonant edge, then level-matched below
+          smooth(output.gain, lo ? 1 + 0.8 * x : 1 + 0.9 * x, ctx, 0.03);
+        },
+        dispose: () => disconnectAll(input, output, ...hp, ...lp, pk),
+      };
+    },
+  },
+  crunch: { // controlled harmonic distortion (tanh drive, 2x oversampled) before the channel filter
+    kind: 'insert', dryFilter: 0.6,
+    create(ctx) {
+      const input = ctx.createGain(), output = ctx.createGain(), pre = ctx.createGain(), post = ctx.createGain();
+      const shaper = ctx.createWaveShaper(); shaper.oversample = '2x';
+      const n = 2049, c = new Float32Array(n); for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(2.5 * x) / Math.tanh(2.5); } shaper.curve = c;
+      const tone = biquad(ctx, 'lowpass', 12000, BUTTER_Q);
+      input.connect(pre); pre.connect(shaper); shaper.connect(tone); tone.connect(post); post.connect(output);
+      return {
+        input, output,
+        wetAmount: (x) => smoothstep(0, 0.15, x),
+        setColor(x, side) {
+          const g = lerpExp(0.6, 9, x); smooth(pre.gain, g, ctx, 0.03); smooth(post.gain, 1.25 / (0.55 + 1.05 * g), ctx, 0.03);
+          smooth(tone.frequency, side < 0 ? lerpExp(12000, 3000, x) : 12000, ctx, 0.03);
+        },
+        dispose: () => disconnectAll(input, output, pre, post, shaper, tone),
+      };
+    },
+  },
+  pitchshift: { // real pitch shift: up to an octave down (left) / up (right)
+    kind: 'insert', dryFilter: 0,
+    create(ctx) {
+      const input = ctx.createGain(), output = ctx.createGain();
+      const ps = worklet(ctx, 'opendj-pitch', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] }, { ratio: 1 });
+      input.connect(ps); ps.connect(output);
+      return {
+        input, output,
+        wetAmount: (x) => smoothstep(0, 0.08, x),
+        setColor(x, side) { smooth(ps.parameters.get('ratio'), Math.pow(2, side * x), ctx, 0.02); },
+        dispose: () => disconnectAll(input, output, ps),
+      };
+    },
+  },
 };
+
+/** Color FX menu (id, label). `pitch` keeps its stored id but is labelled Jet. */
+export const COLOR_FX = [['filter', 'Filter'], ['space', 'Space'], ['dubecho', 'Dub Echo'], ['noise', 'Noise'], ['crush', 'Crush'], ['pitch', 'Jet'], ['sweep', 'Sweep'], ['crunch', 'Crunch'], ['pitchshift', 'Pitch']];
+
+// ---------------------------------------------------------------- mic FX (mixer M8)
+// kind 'send': parallel to the dry voice (no added latency); kind 'insert': the mic cross-fades dry -> wet.
+const MIC_FX = {
+  echo: { label: 'Echo', kind: 'send', create(ctx) {
+    const input = ctx.createGain(), output = ctx.createGain(), d = feedbackDelay(ctx); d.setTone(0.55);
+    smooth(d.fb.gain, 0.42, ctx); input.connect(d.input); d.taps.connect(output);
+    return { input, output, setTempo: (beatSec) => d.setTime(Math.min(1.2, beatSec * 0.75)), dispose: () => disconnectAll(input, output, ...d.nodes) };
+  } },
+  reverb: { label: 'Reverb', kind: 'send', create(ctx) {
+    const input = ctx.createGain(), output = ctx.createGain(), hp = biquad(ctx, 'highpass', 200, BUTTER_Q);
+    const rv = worklet(ctx, 'opendj-reverb', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] }, { decay: 1.8, damping: 7000, predelay: 0.02, early: 0.5 });
+    input.connect(hp); hp.connect(rv); rv.connect(output); output.gain.value = 1.2;
+    return { input, output, dispose: () => disconnectAll(input, output, hp, rv) };
+  } },
+  megaphone: { label: 'Megaphone', kind: 'insert', create(ctx) {
+    const input = ctx.createGain(), output = ctx.createGain(), pre = ctx.createGain();
+    const hp = biquad(ctx, 'highpass', 500, 1), lp = biquad(ctx, 'lowpass', 3000, 1), sh = ctx.createWaveShaper();
+    const n = 1025, c = new Float32Array(n); for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(4 * x) / Math.tanh(4); } sh.curve = c;
+    pre.gain.value = 2.5; output.gain.value = 0.55;
+    input.connect(hp); hp.connect(lp); lp.connect(pre); pre.connect(sh); sh.connect(output);
+    return { input, output, dispose: () => disconnectAll(input, output, pre, hp, lp, sh) };
+  } },
+  pitch: { label: 'Pitch', kind: 'insert', create(ctx) {
+    const input = ctx.createGain(), output = ctx.createGain();
+    const ps = worklet(ctx, 'opendj-pitch', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] }, { ratio: Math.pow(2, 5 / 12) });
+    input.connect(ps); ps.connect(output);
+    return { input, output, setParam: (p) => smooth(ps.parameters.get('ratio'), Math.pow(2, (p * 24 - 12) / 12), ctx, 0.03), dispose: () => disconnectAll(input, output, ps) };
+  } },
+};
+export const MIC_FX_LIST = Object.entries(MIC_FX).map(([id, f]) => ({ id, label: f.label, kind: f.kind }));
+export function createMicFx(ctx, id) { const f = MIC_FX[id]; if (!f) return null; const e = f.create(ctx); e.kind = f.kind; return e; }
+
+// ---------------------------------------------------------------- send / return FX (mixer M10)
+export const SEND_FX = [
+  { id: 'shortDelay', label: 'Short Delay', fx: 'echo', beats: 1 / 4, param: 0.25, param2: 0.6 },
+  { id: 'longDelay', label: 'Long Delay', fx: 'echo', beats: 1, param: 0.45, param2: 0.5 },
+  { id: 'dubEcho', label: 'Dub Echo', fx: 'echo', beats: 3 / 4, param: 0.7, param2: 0.2 },
+  { id: 'reverb', label: 'Reverb', fx: 'reverb', beats: 1, param: 0.55, param2: 0.55 },
+];
+/** A built-in send effect (wet only): { input, output, setTempo(beatSec), dispose }. */
+export function createSendFx(ctx, id) {
+  const def = SEND_FX.find((f) => f.id === id) || SEND_FX[3];
+  const e = createEffect(ctx, def.fx);
+  e.setParam?.(def.param); e.setParam2?.(def.param2);
+  const setTempo = (beatSec) => e.setTempo?.(beatSec, def.beats);
+  setTempo(0.5);
+  return { ...e, id: def.id, setTempo };
+}
 
 /** Create a standalone Beat FX instance. */
 export function createEffect(ctx, id) { const f = FX[id]; if (!f) return null; const e = f.create(ctx); e.kind = f.kind; return e; }
@@ -474,7 +669,8 @@ export class FxUnit {
     if (this.clock) this.fx.setClock?.(...this.clock);
     this.apply();
   }
-  setOn(on) { this.on = !!on; this.apply(); }
+  /** FX on / off, optionally at audio time `when` (quantised starts land exactly on the beat division). */
+  setOn(on, when) { this.on = !!on; this.at = when || 0; this.apply(); }
   setMix(m) { this.mix = m; this.apply(); }
   setParam(p) { this.param = p; this.fx?.setParam?.(p); }
   setParam2(p) { this.param2 = p; this.fx?.setParam2?.(p); }
@@ -484,15 +680,17 @@ export class FxUnit {
   setClock(beat, at, beatSec) { this.clock = [beat, at, beatSec]; this.fx?.setClock?.(beat, at, beatSec); }
   apply() {
     const c = this.ctx, kind = this.fx.kind, on = this.on, m = this.mix;
-    this.fx.setActive?.(on);
+    const t0 = Math.max(c.currentTime, this.at || 0), sm = (param, v, tc) => param.setTargetAtTime(v, t0, tc);
+    if (t0 > c.currentTime + 0.003) setTimeout(() => this.fx?.setActive?.(this.on), (t0 - c.currentTime) * 1000); else this.fx.setActive?.(on);
     if (kind === 'insert') {
-      smooth(this.send.gain, 1, c, FADE); // keep inserts fed so switching on never starts from an empty delay line
-      smooth(this.dry.gain, on ? 1 - m : 1, c, FADE); smooth(this.wet.gain, on ? m : 0, c, FADE);
+      sm(this.send.gain, 1, FADE); // keep inserts fed so switching on never starts from an empty delay line
+      sm(this.dry.gain, on ? 1 - m : 1, FADE); sm(this.wet.gain, on ? m : 0, FADE);
     } else {
       // send / generator: dry stays (slight duck at high mix for even loudness), wet level is the mix knob, so a
       // switched-off echo or reverb keeps ringing out
-      smooth(this.send.gain, on && kind === 'send' ? 1 : 0, c, 0.004);
-      smooth(this.dry.gain, on ? 1 - 0.15 * m : 1, c, FADE * 2); smooth(this.wet.gain, m, c, FADE);
+      sm(this.send.gain, on && kind === 'send' ? 1 : 0, 0.004);
+      sm(this.dry.gain, on ? 1 - 0.15 * m : 1, FADE * 2); sm(this.wet.gain, m, FADE);
     }
+    this.at = 0;
   }
 }

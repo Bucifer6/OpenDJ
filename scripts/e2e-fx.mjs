@@ -19,7 +19,7 @@ let cpuMs = 0, cpuSec = 0;
 
 try {
   // ---------------------------------------------------------------- beat FX: clicks, zipper, level
-  const NOISY = new Set(['bitcrush', 'noise', 'distortion']); // these make steps / noise by design: compare to their own steady state
+  const NOISY = new Set(['bitcrush', 'noise', 'distortion', 'spiral']); // spiral: repeats climb in pitch (higher frequencies by design) // these make steps / noise by design: compare to their own steady state
   for (const { id, label, kind } of lab.effects) {
     const init = [{ call: 'setBeatSec', args: [0.5] }, { call: 'setType', args: [id] }, { call: 'setMix', args: [0.5] }, { call: 'setParam', args: [0.5] }, { call: 'setParam2', args: [0.5] }, { call: 'setBeats', args: [0.5] }, { call: 'setClock', args: [0, 0, 0.5] }];
     const s = await lab.render({ chain: 'fx', ...SINE, secs: 3, init, events: [{ t: 1, call: 'setOn', args: [true] }, { t: 2, call: 'setOn', args: [false] }] });
