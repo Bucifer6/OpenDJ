@@ -277,7 +277,10 @@ export class Deck extends Emitter {
   rollOn(beats) {
     if (!this.track || !this.playing) return;
     this._rollPrevSlip = this.slip; this.setSlip(true);
-    const start = this.floorBeat(this.position);
+    // quantised to the roll size's own grid (1/8 beat roll -> 1/8 beat grid), so the play head is already inside the
+    // loop: no jump on press, the repeat starts on the grid, the worklet cross-fades each wrap
+    const pos = this.position, g = Math.min(beats, 1) * this.beatLen;
+    const start = this.bpm ? this.gridOffset + Math.floor((pos - this.gridOffset) / g + 1e-6) * g : pos;
     this.setLoop(start, start + beats * this.beatLen);
     this.rolling = true;
   }
@@ -463,15 +466,10 @@ export class Deck extends Emitter {
 
   // ---------- performance effects ----------
   brake(seconds = 1.2) { if (!this.playing) return; this.post('brake', { value: 1 / (seconds * this.ctx.sampleRate) }); }
-  backspin(seconds = 1.0) {
+  /** Backspin: the record is thrown backwards and spins down (worklet-timed, sample accurate), then the deck stops. */
+  backspin(seconds = 1.0, speed = 4.5) {
     if (!this.track) return;
-    let v = -6; const t0 = performance.now();
-    this.post('scratch', { value: { velocity: v } });
-    const iv = setInterval(() => {
-      const k = (performance.now() - t0) / 1000 / seconds;
-      if (k >= 1) { clearInterval(iv); this.post('scratch', { value: null }); this.pause(); return; }
-      this.post('scratch', { value: { velocity: v * (1 - k) } });
-    }, 20);
+    this.post('backspin', { seconds, speed });
   }
   censorOn() { this._censorSlip = this.slip; this.setSlip(true); this.setReverse(true); }
   censorOff() { this.setReverse(false); this.setSlip(this._censorSlip); }

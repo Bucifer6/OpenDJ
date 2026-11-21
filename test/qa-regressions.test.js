@@ -40,7 +40,7 @@ test('M3: 16-bit deck audio above 0 dBFS is peak-normalised instead of clipped',
   msg({ type: 'load', left: i16, right: i16, sampleRate: 44100, scale: peak });
   msg({ type: 'play', value: true });
   const out = render(p, 2048);
-  let err = 0; for (let i = 10; i < 2000; i++) err = Math.max(err, Math.abs(out.L[i] - src[i]));
+  let err = 0; for (let i = 200; i < 2000; i++) err = Math.max(err, Math.abs(out.L[i] - src[i])); // after the 4 ms de-click fade-in
   assert.ok(err < 0.002, `worklet output matches source (max err ${err})`);
   // unscaled (old behaviour) would have clipped most of the waveform
   let old = 0; for (const v of deckChannel(src)) if (v === 32767 || v === -32768) old++;

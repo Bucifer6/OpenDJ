@@ -3,6 +3,8 @@
 import { readStemMix, stemCoefficients, smoothGains, isUnity, isSilent } from '../stems/stem-mix.js';
 
 const GRAIN = 2048; // key-lock grain size (source frames)
+const SPIN_FLICK = 0.06; // backspin: time for the hand to throw the record from play speed to full reverse (s)
+const VEL_KNEE = 0.3; // below this speed (resampled playback) the level follows the platter speed, like a cartridge
 
 class DeckProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -22,6 +24,11 @@ class DeckProcessor extends AudioWorkletProcessor {
     this.loop = null;         // { start, end } in frames
     this.scratch = null;      // { velocity } when the jog is touched
     this.brake = 0;           // brake deceleration per frame (0 = off)
+    this.bA = 0; this.bB = 0; // brake model dv/dt = -(bA + bB * v): friction + drag, stops in the requested time
+    this.spin = null;         // backspin in progress { t, T, v0, from }
+    this.FADE = Math.max(32, Math.round(0.004 * sampleRate)); // 4 ms de-click cross-fade
+    this.ghost = { n: 0, p: 0, v: 0 }; // the old play head, fading out after a jump / stop
+    this.fin = 1;             // fade-in of the main play head after a jump / start
     this.grains = [{ p: 0, age: 0 }, { p: 0, age: GRAIN / 2 }];
     this.counter = 0;
     // AI stems: original + vocals/drums/bass (Int16), "other" = residual (see stems/stem-mix.js)
@@ -44,10 +51,11 @@ class DeckProcessor extends AudioWorkletProcessor {
         this.scaleCoef(stemCoefficients(this.stemCur, this.stemCoef));
         this.scaleCoef(stemCoefficients(this.sendCur, this.sendCoef));
         this.step = m.sampleRate / sampleRate;
-        this.pos = this.shadow = 0; this.playing = false; this.curRate = 0; this.loop = null; this.brake = 0;
-        this.scratch = null; this.dir = 1; this.slip = false; this.endedSent = false; this.stems = null;
+        this.pos = this.shadow = 0; this.playing = false; this.curRate = 0; this.loop = null; this.brake = 0; this.spin = null;
+        this.scratch = null; this.dir = 1; this.slip = false; this.endedSent = false; this.stems = null; this.ghost.n = 0; this.fin = 1;
         break;
-      case 'unload': this.L = this.R = null; this.len = 0; this.playing = false; this.scratch = null; this.dir = 1; this.slip = false; this.stems = null; break;
+      case 'unload': this.L = this.R = null; this.len = 0; this.playing = false; this.scratch = null; this.dir = 1; this.slip = false; this.stems = null; this.spin = null; this.ghost.n = 0; break;
+      case 'ping': this.port.postMessage({ type: 'pong', id: m.id }); break; // sync point for tests
       case 'stems': // [{ L, R }] Int16 vocals, drums, bass with exactly the original's length (else ignored: stale load)
         this.stems = Array.isArray(m.value) && m.value.length && m.value.every((x) => x.L.length === this.len && x.R.length === this.len) ? m.value : null;
         this.port.postMessage({ type: 'stems', loaded: !!this.stems, rejected: !!m.value && !this.stems, seq: m.seq });
@@ -55,13 +63,15 @@ class DeckProcessor extends AudioWorkletProcessor {
       case 'ext-port': m.port.onmessage = (e) => this.onMessage(e.data); break; // DVS decoder -> deck, audio thread to audio thread
       case 'stemGains': this.stemTarget.set(m.value); break;
       case 'stemSend': this.sendTarget.set(m.value); break;
-      case 'play': this.playing = m.value; if (m.value) this.brake = 0; break;
+      case 'play': this.playing = m.value; if (m.value) { this.brake = 0; this.spin = null; } break;
       case 'rate': this.rate = m.value; break;
       case 'seek': {
         // m.at = audio-clock time the target was computed for; advance by the time that passed since then
         let f = m.frame;
         if (m.at != null && this.playing && !this.scratch) f += Math.max(0, currentTime - m.at) * sampleRate * this.rate * this.dir * this.step;
-        this.pos = Math.max(0, Math.min(Math.max(0, this.len - 1), f)); if (!this.slip) this.shadow = this.pos; this.resetGrains(); break;
+        f = Math.max(0, Math.min(Math.max(0, this.len - 1), f));
+        if (Math.abs(f - this.pos) > 1) this.startGhost();
+        this.pos = f; if (!this.slip) this.shadow = this.pos; this.resetGrains(); break;
       }
       case 'keylock': this.keyLock = m.value; this.resetGrains(); break;
       case 'pitch': this.pitch = m.value; this.resetGrains(); break;
@@ -69,7 +79,13 @@ class DeckProcessor extends AudioWorkletProcessor {
       case 'slip': this.slip = m.value; if (m.value) this.shadow = this.pos; else this.endSlip(true); break;
       case 'loop': this.loop = m.value; if (!m.value && this.slip) this.endSlip(); break;
       case 'scratch': this.scratch = m.value; if (!m.value && this.slip) this.endSlip(); break;
-      case 'brake': this.brake = m.value; break;
+      case 'brake': // m.value = 1 / (stop time * sampleRate), as before
+        this.brake = m.value > 0 ? m.value : 0;
+        if (this.brake) { const T = 1 / (this.brake * sampleRate); this.bB = Math.log(3) / T; this.bA = this.bB / 2; } // v(T) = 0
+        break;
+      case 'backspin': // throw the record backwards, then let it spin down and stop
+        if (this.L) { this.spin = { t: 0, T: Math.max(0.2, m.seconds || 1), v0: Math.abs(m.speed || 4.5), from: this.curRate }; this.brake = 0; }
+        break;
       case 'motor': this.startTime = m.value; break;
     }
   }
@@ -77,7 +93,12 @@ class DeckProcessor extends AudioWorkletProcessor {
   /** Apply the sample scales to stem-mix coefficients: [0] the original (this.k), [1..3] the Int16 stems (same peak scale). */
   scaleCoef(c) { c[0] *= this.k; c[1] *= this.scale; c[2] *= this.scale; c[3] *= this.scale; return c; }
 
-  endSlip(force) { if (this.slip || force) { this.pos = this.shadow; this.resetGrains(); } }
+  endSlip(force) { if (this.slip || force) { if (Math.abs(this.shadow - this.pos) > 1) this.startGhost(); this.pos = this.shadow; this.resetGrains(); } }
+  /** Keep the current play head sounding for a few ms, fading out, while the new one fades in (no click on jumps). */
+  startGhost(speed = this.curRate * this.step) {
+    if (!this.L || speed === 0) return;
+    this.ghost.p = this.pos; this.ghost.v = speed; this.ghost.n = this.FADE; this.fin = 0;
+  }
   /** WSOLA: start the new grain near the play head, at the offset whose waveform best continues the other grain. */
   wsolaSeed(other, speed) {
     const target = this.pos, L = this.L, R = this.R, n = this.len;
@@ -120,20 +141,31 @@ class DeckProcessor extends AudioWorkletProcessor {
     for (let n = 0; n < frames; n++) {
       // --- determine the instantaneous speed ---
       let target;
+      const prevRate = this.curRate;
       if (this.scratch) target = this.scratch.velocity;
-      else if (this.brake > 0) { target = 0; }
+      else if (this.brake > 0 || this.spin) { target = 0; }
       else target = this.playing ? this.rate * this.dir : 0;
 
-      if (this.brake > 0 && !this.scratch) {
-        const s = Math.sign(this.curRate);
-        this.curRate -= s * this.brake;
-        if (Math.sign(this.curRate) !== s || Math.abs(this.curRate) < 0.001) { this.curRate = 0; this.brake = 0; this.playing = false; this.port.postMessage({ type: 'stopped' }); }
+      if (this.spin && !this.scratch) {
+        const sp = this.spin; sp.t += 1 / sampleRate;
+        if (sp.t < SPIN_FLICK) { const k = 0.5 - 0.5 * Math.cos(Math.PI * sp.t / SPIN_FLICK); this.curRate = sp.from + (-sp.v0 - sp.from) * k; }
+        else { // friction spin-down (same model as the brake), reaches 0 after sp.T
+          const b = Math.log(3) / sp.T, v = -this.curRate - (b / 2 + b * -this.curRate / sp.v0) * sp.v0 / sampleRate;
+          if (v <= 0.001) { this.curRate = 0; this.spin = null; this.playing = false; this.port.postMessage({ type: 'stopped' }); }
+          else this.curRate = -v;
+        }
+      } else if (this.brake > 0 && !this.scratch) {
+        const s = Math.sign(this.curRate), v = Math.abs(this.curRate) - (this.bA + this.bB * Math.abs(this.curRate)) / sampleRate;
+        if (v <= 0.001 || s === 0) { this.curRate = 0; this.brake = 0; this.playing = false; this.port.postMessage({ type: 'stopped' }); }
+        else this.curRate = s * v;
       } else if (this.scratch) {
         this.curRate += (target - this.curRate) * 0.02; // smooth hand movement
       } else if (this.startTime > 0) {
         const k = 1 / (this.startTime * sampleRate);
         this.curRate += Math.max(-k, Math.min(k, target - this.curRate)) * 4;
       } else this.curRate = target;
+      // instant speed jumps (play, pause, censor reverse): cross-fade instead of stepping the waveform
+      if (!this.scratch && Math.abs(this.curRate - prevRate) > 0.2) { if (this.ghost.n < this.FADE) this.startGhost(prevRate * this.step); this.fin = 0; }
 
       // stem gains: per-sample smoothing; the plain original path is used whenever every stem is at unity
       let useMix = false, useSend = false;
@@ -166,13 +198,27 @@ class DeckProcessor extends AudioWorkletProcessor {
           this.grains[0].p = this.grains[1].p = this.pos;
         }
       }
+      // resampled playback below VEL_KNEE: level follows the platter speed (brakes / spin-downs / slow scratches fade
+      // to silence instead of ending on a DC step)
+      const av = Math.abs(this.curRate);
+      if (av < VEL_KNEE && !(this.keyLock && !this.scratch && this.brake === 0 && !this.spin && this.curRate > 0)) { const g = av / VEL_KNEE; l *= g; r *= g; sl *= g; sr *= g; }
+      if (this.fin < 1) { const g = 0.5 - 0.5 * Math.cos(Math.PI * this.fin); l *= g; r *= g; sl *= g; sr *= g; this.fin = Math.min(1, this.fin + 1 / this.FADE); }
+      const gh = this.ghost;
+      if (gh.n > 0) {
+        const g = 0.5 - 0.5 * Math.cos(Math.PI * gh.n / this.FADE); // raised-cosine fade-out
+        if (gh.p >= 0 && gh.p < this.len) {
+          if (useMix) { readStemMix(this.L, this.R, stems, this.stemCoef, gh.p, this.len, mo); l += mo[0] * g; r += mo[1] * g; }
+          else { l += this.sample(this.L, gh.p) * g; r += this.sample(this.R, gh.p) * g; }
+        }
+        gh.p += gh.v; gh.n--;
+      }
       oL[n] = l; if (oR !== oL) oR[n] = r;
       if (useSend) { fL[n] = sl; if (fR !== fL) fR[n] = sr; }
 
       this.pos += speed;
       if (this.slip) this.shadow += this.playing ? this.rate * this.step : 0;
-      if (this.loop && speed > 0 && this.pos >= this.loop.end) { this.pos -= (this.loop.end - this.loop.start); this.resetGrains(); }
-      else if (this.loop && speed < 0 && this.pos < this.loop.start) { this.pos += (this.loop.end - this.loop.start); this.resetGrains(); } // reverse wraps too
+      if (this.loop && speed > 0 && this.pos >= this.loop.end) { this.startGhost(speed); this.pos -= (this.loop.end - this.loop.start); this.resetGrains(); }
+      else if (this.loop && speed < 0 && this.pos < this.loop.start) { this.startGhost(speed); this.pos += (this.loop.end - this.loop.start); this.resetGrains(); } // reverse wraps too
       if (this.pos < 0) { this.pos = 0; if (!this.scratch) this.curRate = 0; }
       if (this.pos >= this.len) {
         this.pos = this.len - 1; this.curRate = 0;
