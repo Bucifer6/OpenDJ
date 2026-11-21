@@ -8,6 +8,7 @@ import { updateMixer } from './mixer-state.js';
 import { buildDrawer, setPersonality } from './mixer-advanced.js';
 import { centerLock } from '../audio/curves.js';
 import { suggestPersonality, PERSONALITIES } from '../audio/personalities.js';
+import { setSmartFader, smartAutoTransition } from '../midi/controller-extras.js';
 
 /**
  * Segmented LED meter. Meter ballistics like hardware: instant attack, ~24 dB/s release, a peak-hold segment that
@@ -143,6 +144,9 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   for (const ev of ['pointerup', 'pointercancel']) xfader.addEventListener(ev, () => { eng.xfTouched = false; });
   const revBtn = el('button', { class: 'btn xs xf-rev mxv v-rev', title: 'Crossfader reverse (hamster)', 'aria-pressed': 'false', onclick: () => updateMixer(app, { xfReverse: !eng.mx.xfReverse }) }, 'REV');
   revBtn.render = () => { revBtn.classList.toggle('active', !!eng.mx.xfReverse); revBtn.setAttribute('aria-pressed', String(!!eng.mx.xfReverse)); };
+  // Smart Fader (midi/controller-extras.js): the crossfader alone blends BPM, bass and levels; Shift-click: 16-beat auto transition
+  const smartXf = R(button('SMART', { cls: 'xs smart-xf', click: (e) => (e.shiftKey || app.shift ? smartAutoTransition(app) : setSmartFader(app, !app.ctl?.smartFader)), active: () => !!(app.ctl?.smartFader || app.ctl?.auto), title: 'Smart Fader: the crossfader alone blends the two decks (BPM morph and bass swap). Shift-click: automatic beat-synced 16-beat transition' }));
+  window.addEventListener('opendj-ctl', () => smartXf.render());
   let applyingEqPreset = false;
   const eqPreset = el('select', { class: 'sel tiny mixer-eq-preset', title: 'Tone: set the EQ knobs of all decks to a starting point', 'aria-label': 'EQ knob tone preset (all decks)' },
     ...EQ_PRESETS.map((p) => el('option', { value: p.id }, p.label)));
@@ -173,7 +177,7 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   eqModel.value = eng.mx.eqType;
   eqModel.addEventListener('change', () => updateMixer(app, { eqType: eqModel.value }));
   const advBtn = el('button', { class: 'btn xs mixer-adv-btn', title: 'Mixer setup: EQ preset, Color FX, curves, booth, mic, FX units, loudness', 'aria-label': 'Mixer setup', 'aria-expanded': 'false', onclick: () => root.toggleDrawer?.() }, '⚙');
-  master.querySelector('.m-setup').append(revBtn, advBtn);
+  master.querySelector('.m-setup').append(revBtn, smartXf, advBtn);
   // rotary personality: master isolator and warmth in a row at the bottom (where the crossfader it hides would be)
   const bar2 = el('div', { class: 'mixer-bar mixer-bar2 mxv v-iso' },
     R(knob({ label: 'ISO LO', size: 'xs', title: 'Master isolator low', get: () => eng.iso.low, set: (x) => eng.setMasterIso('low', x) })),

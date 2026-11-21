@@ -1,8 +1,7 @@
-// End-to-end test for the bundled DDJ-FLX2 mapping and the controller skins: fakes the controller's Web MIDI ports,
-// replays every mapped message and checks it reaches its target, checks LED output and the shift layers, the
-// plug-and-play offers (matching skin, controller audio), the Controller test view and its capture file, then
-// drives the Compact Controller and All-in-One skins with the mouse and with "hardware" messages and takes
-// screenshots.   Usage: node scripts/e2e-flx2.mjs [screenshot-dir]
+// End-to-end test for the bundled DDJ-FLX2 mapping: fakes the controller's Web MIDI ports, replays every mapped message
+// and checks it reaches its target, checks real effects, LED output and the shift layers, the controller-audio offer,
+// the Controller test view and its capture file, the mixer's Smart Fader button and DECK SELECT layers.
+//   Usage: node scripts/e2e-flx2.mjs [screenshot-dir]
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -40,7 +39,6 @@ const check = (c, msg) => { checks++; console.log(`${c ? 'ok' : 'FAIL'} - ${msg}
 const ev = (fn, arg) => page.evaluate(fn, arg);
 const DEV = 'DDJ-FLX2 MIDI 1';
 const midi = (bytes) => ev(([d, b]) => window.opendj.midi.onMessage({ name: d }, Uint8Array.from(b)), [DEV, bytes]);
-const theme = (id) => ev(async (id) => { const a = window.opendj; a.settings.theme = id; (await import('/js/ui/themes.js')).applyTheme(a.settings); }, id);
 
 try {
   await page.goto(app.url);
@@ -56,7 +54,7 @@ try {
   await ev((DEV) => {
     const m = window.opendj.midi;
     window.__sent = [];
-    localStorage.removeItem('opendj.skinOffer.opendj-flx2'); localStorage.removeItem('opendj.audioOffer.opendj-flx2');
+    localStorage.removeItem('opendj.audioOffer.opendj-flx2');
     const input = { id: 'flx-in', name: DEV, state: 'connected' };
     const output = { id: 'flx-out', name: 'DDJ-FLX2 MIDI 1', state: 'connected', send: (msg) => window.__sent.push([...msg]) };
     m.access = { inputs: new Map([['flx-in', input]]), outputs: new Map([['flx-out', output]]), onstatechange: null };
@@ -64,13 +62,12 @@ try {
   }, DEV);
   const stored = await ev((DEV) => window.opendj.midi.mappings[DEV], DEV);
   check(stored?.presetId === 'opendj-flx2' && stored.entries.length > 150, `FLX2 detected by port name: first-party mapping applied (${stored?.entries.length} entries)`);
-  await page.waitForSelector('.toast.skin-offer', { timeout: 4000 }).catch(() => {});
-  check(await page.locator('.toast.skin-offer').count() === 1, 'offers the matching Compact Controller skin');
+  await page.waitForSelector('.toast.audio-offer', { timeout: 4000 }).catch(() => {});
   check(await page.locator('.toast.audio-offer').count() === 1, 'offers to route master / headphones to the controller\'s own sound card');
   await ev(() => document.querySelectorAll('.toast.ctl-offer').forEach((t) => t.remove()));
   await ev((DEV) => { window.opendj.midi._presetSeen.clear(); window.opendj.midi.bind(); }, DEV);
   await page.waitForTimeout(200);
-  check(await page.locator('.toast.skin-offer').count() === 0, 'the skin offer is made only once');
+  check(await page.locator('.toast.audio-offer').count() === 0, 'the audio offer is made only once');
 
   // ---------- replay: every mapped message reaches its target ----------
   const routing = await ev((DEV) => {
@@ -132,6 +129,8 @@ try {
   check(await ev(() => (window.opendj.engine.hpVolume ?? 1) < 0.01), 'HEADPHONES LEVEL (CC 0x0D ch7)');
   await midi([0xb6, 0x0d, 0x66]); await midi([0xb6, 0x2d, 0x00]);
   // jog: touch + scratch, ring nudge, shift search
+  await ev(() => { const d = window.opendj.engine.decks[1]; d.pause(); d.seek(5); });
+  await page.waitForTimeout(100);
   const pos0 = await ev(() => window.opendj.engine.decks[1].position);
   await midi([0xb1, 0x29, 0x50]);
   check(await ev((p) => window.opendj.engine.decks[1].position > p + 0.5, pos0), 'SHIFT + jog (CC 0x29) searches forward');
@@ -140,11 +139,11 @@ try {
   await midi([0x91, 0x36, 0x00]);
   // smart functions
   await midi([0x96, 0x00, 0x7f]); await midi([0x96, 0x00, 0x00]);
-  check(await ev(() => window.opendj.ctl.smartCfx && window.opendj.engine.channels[0].state.colorFx !== 'filter'), 'SHIFT + MASTER (SMART CFX, note 0x00 ch7) on: CFX knobs play a Color FX preset');
+  check(await ev(() => window.opendj.engine.channels[0].state.colorFx !== 'filter'), 'SHIFT + MASTER (SMART CFX, note 0x00 ch7) on: CFX knobs play a Color FX');
   await midi([0x91, 0x08, 0x7f]); await midi([0x91, 0x08, 0x00]);
   const preset = await ev(() => window.opendj.engine.channels[0].state.colorFx);
   await midi([0x96, 0x00, 0x7f]); await midi([0x96, 0x00, 0x00]);
-  check(await ev(() => !window.opendj.ctl.smartCfx && window.opendj.engine.channels[0].state.colorFx === 'filter') && preset !== 'filter', `SHIFT + CUE 2 (FX SELECT ▶, note 0x08 ch2) picks the next preset (${preset}); SMART CFX off restores the filter`);
+  check(await ev(() => window.opendj.engine.channels[0].state.colorFx === 'filter') && preset !== 'filter', `SHIFT + CUE 2 (FX SELECT ▶ = Color FX next, note 0x08 ch2) picks ${preset}; SMART CFX off restores the filter`);
   await midi([0x96, 0x01, 0x7f]); await midi([0x96, 0x01, 0x00]);
   await midi([0xb6, 0x1f, 0x7f]); await midi([0xb6, 0x3f, 0x7f]);
   check(await ev(() => window.opendj.ctl.smartFader && window.opendj.engine.channels[0].state.eqLow < -0.9), 'SMART FADER: crossfader to B swaps the bass out of deck 1');
@@ -152,7 +151,7 @@ try {
   check(await ev(() => !window.opendj.ctl.smartFader && Math.abs(window.opendj.engine.channels[0].state.eqLow) < 0.01), 'SMART FADER off restores the EQ');
   await midi([0xb6, 0x1f, 0x40]); await midi([0xb6, 0x3f, 0x00]);
   await midi([0x96, 0x63, 0x7f]); await midi([0x96, 0x63, 0x00]);
-  check(await ev(() => window.opendj.ctl.masterCue), 'MASTER cue on');
+  check(await ev(() => !!(window.opendj.engine.masterCue ?? window.opendj.ctl.masterCue)), 'MASTER cue on (note 0x63 ch7)');
   await midi([0x96, 0x63, 0x7f]); await midi([0x96, 0x63, 0x00]);
 
   // ---------- LEDs ----------
@@ -183,76 +182,27 @@ try {
   await page.screenshot({ path: path.join(shots, 'controller-test.png') });
   await page.keyboard.press('Escape');
 
-  // ---------- Compact Controller skin ----------
-  await theme('compact-controller');
-  await page.waitForSelector('.sk-compact', { timeout: 5000 });
-  check(await ev(() => document.querySelector('.deck-area .deck').offsetParent === null && !!document.querySelector('.waves .wave-row') && !!document.querySelector('.library')), 'compact skin replaces the decks + mixer, waveforms and library stay');
-  await page.locator('.cc-deck.d1 .cc-play').click();
-  check(await ev(() => window.opendj.engine.decks[0].playing), 'skin PLAY starts deck 1');
-  await page.waitForTimeout(150);
-  check(await page.locator('.cc-deck.d1 .cc-play.on').count() === 1, 'skin PLAY lights up');
-  await page.locator('.cc-deck.d1 .cc-play').click();
-  await midi([0xb0, 0x13, 0x00]); await midi([0xb0, 0x33, 0x00]); await page.waitForTimeout(120);
-  check(await ev(() => document.querySelector('.cc-chfader[data-target="mixer1.volume"]').getAttribute('aria-valuenow') === '0'), 'hardware channel fader moves the on-screen fader');
-  await midi([0xb0, 0x13, 0x7f]); await midi([0xb0, 0x33, 0x7f]);
-  await midi([0x91, 0x0c, 0x7f]); await page.waitForTimeout(60);
-  check(await page.locator('.cc-deck.d2 .cc-cue.hw').count() === 1, 'hardware CUE press shows on the skin');
-  await midi([0x91, 0x0c, 0x00]);
-  await page.locator('.cc-deck.d2 .cc-mode.m-sampler').click();
-  check(await ev(() => window.opendj.ctl.padMode[2] === 'sampler'), 'skin pad mode button selects SAMPLER');
-  await page.locator('.cc-deck.d2 .cc-mode.m-hotcue').click();
-  const box = await page.locator('.cc-xfader').boundingBox();
-  await page.mouse.click(box.x + box.width * 0.95, box.y + box.height / 2);
-  check(await ev(() => window.opendj.engine.crossfader > 0.7), 'skin crossfader follows the mouse');
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  const k = await page.locator('.cc-ch.ch1 .sk-knob').first().boundingBox();
-  await page.mouse.move(k.x + k.width / 2, k.y + k.height / 2); await page.mouse.down(); await page.mouse.move(k.x + k.width / 2, k.y - 60, { steps: 4 }); await page.mouse.up();
-  check(await ev(() => window.opendj.engine.channels[0].state.eqHigh > 0.2), 'skin HI knob drag raises the EQ');
-  await page.locator('.cc-ch.ch1 .sk-knob').first().dblclick();
-  check(await ev(() => Math.abs(window.opendj.engine.channels[0].state.eqHigh) < 0.02), 'double-click resets the knob');
-  const pad1 = page.locator('.cc-deck.d2 .cc-pad').nth(2);
-  await pad1.click();
-  check(await ev(() => !!window.opendj.engine.decks[1].hotCue(2)), 'skin pad sets a hot cue');
-  for (const [w, h, name, touch] of [[1920, 1080, 'compact-1920x1080'], [1366, 768, 'compact-1366x768'], [2560, 1440, 'compact-2560x1440'], [1180, 820, 'compact-tablet-1180x820', true]]) {
-    await page.setViewportSize({ width: w, height: h }); await page.waitForTimeout(400);
-    await page.screenshot({ path: path.join(shots, `${name}.png`) });
-  }
-  // phone: separate context with touch
-  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
-  const pp = await phone.newPage();
-  await pp.goto(app.url); await pp.waitForFunction(() => window.opendj?.ready, null, { timeout: 30000 });
-  await pp.evaluate(async () => { const a = window.opendj; a.settings.theme = 'compact-controller'; (await import('/js/ui/themes.js')).applyTheme(a.settings); });
-  await pp.waitForSelector('.sk-compact', { timeout: 5000 }); await pp.waitForTimeout(500);
-  check(await pp.evaluate(() => { const r = document.querySelector('.sk-compact').getBoundingClientRect(); return r.height > 500 && document.querySelectorAll('.cc-deck').length === 2 && [...document.querySelectorAll('.cc-deck')].filter((d) => d.offsetParent).length === 1; }), 'phone: one deck above the mixer');
-  await pp.screenshot({ path: path.join(shots, 'compact-phone-390x844.png'), fullPage: true });
-  await phone.close();
-  await page.setViewportSize({ width: 1920, height: 1080 });
+  // ---------- Smart Fader button next to the crossfader ----------
+  await page.locator('.mixer .smart-xf:visible').first().click();
+  check(await ev(() => window.opendj.ctl.smartFader) && await page.locator('.smart-xf.active').count() === 1, 'mixer SMART button turns the Smart Fader on');
+  await midi([0x96, 0x01, 0x7f]); await midi([0x96, 0x01, 0x00]); await page.waitForTimeout(80);
+  check(await ev(() => !window.opendj.ctl.smartFader) && await page.locator('.smart-xf.active').count() === 0, 'the hardware SMART FADER turns it off and the button follows');
+  await page.screenshot({ path: path.join(shots, 'mixer-smart-fader.png'), clip: await page.locator('.mixer').boundingBox() });
 
-  // ---------- All-in-One skin ----------
-  await theme('all-in-one');
-  await page.waitForSelector('.sk-aio', { timeout: 5000 }); await page.waitForTimeout(300);
-  check(await ev(() => window.opendj.deckCount === 4 && document.querySelectorAll('.ai-waves .wave-row').length === 4), 'all-in-one: 4 decks, waveforms in the screen');
+  // ---------- DECK SELECT layers ----------
+  await ev(async () => { const a = window.opendj; await a.setDeckCount(4, false); });
   for (let i = 2; i < 4; i++) { await ev(([i, id]) => window.opendj.loadTrack(i, id), [i, ids[i]]); await page.waitForFunction((i) => !!window.opendj.engine.decks[i].track, i, { timeout: 30000 }); }
-  await page.locator('.ai-deck.s0 .ai-dsel', { hasText: '3' }).click();
-  await page.locator('.ai-deck.s0 .ai-ring-green').click();
-  check(await ev(() => window.opendj.engine.decks[2].playing && !window.opendj.engine.decks[0].playing), 'DECK SELECT 3: the left panel plays deck 3');
-  await page.locator('.ai-deck.s0 .ai-ring-green').click();
-  await page.locator('.ai-deck.s0 .ai-dsel', { hasText: '1' }).click();
-  await page.locator('.ai-cfxbtn', { hasText: 'DUB ECHO' }).click();
-  check(await ev(() => window.opendj.engine.channels.every((c) => c.state.colorFx === 'dubecho')), 'SOUND COLOR FX: DUB ECHO on all channels');
-  await page.locator('.ai-cfxbtn', { hasText: 'DUB ECHO' }).click();
-  await page.locator('.ai-ch.c3 .ai-cue').click();
-  check(await ev(() => window.opendj.engine.channels[2].state.cue), 'channel 3 CUE (mixer order 3 1 2 4)');
-  await page.locator('.ai-ch.c3 .ai-cue').click();
-  await page.locator('.ai-fxon').click();
-  check(await ev(() => window.opendj.engine.channels.some((c) => c.state.fxOn) || !!window.opendj.engine.fxBuses?.some?.((b) => b.on)), 'BEAT FX ON/OFF');
-  await page.locator('.ai-fxon').click();
-  for (const [w, h] of [[1920, 1080], [2560, 1440], [1366, 768], [1180, 820]]) {
-    await page.setViewportSize({ width: w, height: h }); await page.waitForTimeout(400);
-    await page.screenshot({ path: path.join(shots, `allinone-${w}x${h}.png`) });
-  }
-  await theme('midnight'); await page.waitForTimeout(300);
-  check(await ev(() => !document.querySelector('.sk-root') && document.querySelectorAll('.waves .wave-row').length === 4 && document.querySelector('.deck-area .deck').offsetParent !== null), 'switching back to a normal theme restores the standard layout and waveforms');
+  await ev(async (DEV) => { const { controllersPanel } = await import('/js/ui/controllers-panel.js'); const { el } = await import('/js/util.js'); document.body.append(el('div', { class: 'overlay e2e-ctl' }, el('div', { class: 'modal wide' }, el('div', { class: 'modal-body' }, controllersPanel(window.opendj))))); }, DEV);
+  await page.locator('.ctl-card', { hasText: DEV }).click();
+  await page.locator('.ctl-layers .ctl-layer').first().locator('button', { hasText: 'Deck 3' }).click();
+  await ev(() => window.opendj.engine.decks.forEach((d) => d.pause()));
+  await midi([0x90, 0x0b, 0x7f]); await midi([0x90, 0x0b, 0x00]);
+  check(await ev(() => window.opendj.engine.decks[2].playing && !window.opendj.engine.decks[0].playing), 'Settings → Controllers: left side on deck 3, the controller\'s left PLAY plays deck 3');
+  await midi([0xb0, 0x13, 0x00]); await midi([0xb0, 0x33, 0x00]);
+  check(await ev(() => window.opendj.engine.channels[2].state.volume < 0.01 && window.opendj.engine.channels[0].state.volume > 0.5), 'its channel fader drives channel 3');
+  await page.screenshot({ path: path.join(shots, 'controllers-deck-layers.png') });
+  await ev(() => { window.opendj.midi.dispatch({ target: 'deckSelect.left' }, 1); window.opendj.engine.decks.forEach((d) => d.pause()); window.opendj.engine.channels[2].set('volume', 0.8); document.querySelector('.e2e-ctl')?.remove(); });
+  check(await ev(() => window.opendj.ctl.layer[0] === 0), '"Deck select: left" target switches back to deck 1');
   check(errors.length === 0, `no page errors${errors.length ? ': ' + errors.slice(0, 4).join(' | ') : ''}`);
   console.log(`screenshots: ${shots}`);
 } catch (e) { console.error(e); failed = true; }

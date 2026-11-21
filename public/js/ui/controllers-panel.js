@@ -6,6 +6,7 @@ import { describeKey } from '../midi/midi.js';
 import { PRESETS } from '../midi/presets.js';
 import { listMixxxMappings, matchMappings, downloadMixxxMapping, mappingTitle } from '../midi/mixxx-online.js';
 import { wizardSteps, detectMidiControl, entryFor } from '../midi/wizard.js';
+import { ctlState, setDeckLayer } from '../midi/controller-extras.js';
 
 /** replaceChildren that skips null/false (optional sections). */
 const put = (node, ...kids) => node.replaceChildren(...kids.flat().filter((k) => k != null && k !== false));
@@ -71,6 +72,17 @@ export function controllersPanel(app) {
     root._wasConnected = true;
     const now = performance.now();
     for (const c of devList.querySelectorAll('.ctl-card[data-key]')) c.classList.toggle('busy', now - (midi.deviceActivity.get(c.dataset.key) || -1e9) < 140);
+  }
+
+  // DECK SELECT: which decks the two sides of a 2-deck controller drive in 4-deck mode (also MIDI-learnable:
+  // "Deck select: left / right")
+  function deckLayers() {
+    const st = ctlState(app);
+    const side = (i, label) => el('span', { class: 'seg ctl-layer' }, label, ...[i, i + 2].map((d) => el('button', {
+      class: `seg-btn ${st.layer[i] === d ? 'active' : ''}`, 'aria-pressed': String(st.layer[i] === d),
+      onclick: () => { setDeckLayer(app, i, d); renderDetail(); },
+    }, `Deck ${d + 1}`)));
+    return el('div', { class: 'row ctl-layers', title: 'A 2-deck controller drives decks 1 and 2; switch a side to deck 3 or 4 here or with a mapped "Deck select" button' }, side(0, 'Left side '), side(1, 'Right side '));
   }
 
   // ---------- selected device ----------
@@ -187,6 +199,7 @@ export function controllersPanel(app) {
     put(detail, 
       el('div', { class: 'ctl-head' }, el('h3', {}, d.name), headSub),
       actions.length ? el('div', { class: 'row ctl-actions' }, ...actions, fileIn) : null,
+      isMidi && app.deckCount === 4 ? deckLayers() : null,
       renderSearch(),
       importSummary(map),
       d.kind === 'midi-out' ? el('p', { class: 'hint' }, 'This port only receives. Choose it below to send MIDI clock, or connect the matching input to map its controls.') : null,

@@ -28,7 +28,6 @@ export function buildCapture({ device, mapping, events, startedAt, notes = '' })
 
 export function openControllerTest(app, device = null) {
   const midi = app.midi;
-  if (!document.querySelector('link[href="css/skins.css"]')) document.head.append(Object.assign(document.createElement('link'), { rel: 'stylesheet', href: 'css/skins.css' }));
   document.querySelector('.overlay.ctltest-overlay')?.remove();
   const names = () => midi.inputs().map((i) => i.name);
   let dev = device && names().includes(device) ? device : names().find((n) => midi.mappings[n]?.entries?.length) || names()[0] || null;
