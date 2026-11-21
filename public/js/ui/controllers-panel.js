@@ -180,6 +180,7 @@ export function controllersPanel(app) {
       el('button', { class: 'btn', onclick: () => fileIn.click() }, isMidi ? 'Import mapping file…' : 'Import…'),
       el('button', { class: 'btn', disabled: !map?.entries?.length, onclick: () => { const blob = new Blob([midi.exportMapping(d.key)], { type: 'application/json' }); const a = el('a', { href: URL.createObjectURL(blob), download: `${d.name.replace(/[^\w.-]+/g, '_')}.opendj-midi.json` }); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); } }, 'Export'),
       isMidi ? presetSel : null,
+      isMidi ? el('button', { class: 'btn ctl-test-btn', onclick: () => import('./controller-test.js').then((m) => m.openControllerTest(app, d.key)), title: 'See every message the controller sends, which are mapped, and record a capture to send back' }, 'Controller test') : null,
       el('button', { class: 'btn danger', disabled: !map?.entries?.length, onclick: async () => { if (await (app.dialogs?.confirm?.(`Remove the mapping for ${d.name}?`) ?? true)) { midi.clearMapping(d.key); renderDevices(); renderDetail(); } } }, 'Clear'),
       d.kind === 'hid' ? el('button', { class: 'btn', onclick: async () => { await midi.hid.disconnect(d.key); selected = null; renderDevices(); renderDetail(); } }, 'Disconnect') : null,
     ];

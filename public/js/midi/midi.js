@@ -14,6 +14,7 @@ import { PRESETS } from './presets.js';
 import { BEATLOOPS, BEATJUMPS, ROLLS, convertMixxx, toStoredMapping } from './mixxx.js';
 import { HidManager, describeHidKey } from './hid.js';
 import { GamepadManager, describeGamepadKey } from './gamepad.js';
+import { controllerTargets } from './controller-extras.js';
 
 const fmtBeats = (b) => (b < 1 ? `1/${Math.round(1 / b)}` : String(b));
 
@@ -125,6 +126,7 @@ export function buildTargets(app) {
   add('automix.toggle', 'Automix on/off', 'button', (down) => down && app.toggleAutomix(), () => app.automix.enabled);
   add('record.toggle', 'Record mix on/off', 'button', (down) => down && app.toggleRecord(), () => app.engine.recording);
   T.push(...linkMidiTargets(app), ...lyricsMidiTargets(app));
+  T.push(...controllerTargets(app, new Set(T.map((t) => t.id)))); // (skips ids another module already defines)
   return T;
 }
 
@@ -201,15 +203,30 @@ export class MidiManager extends Emitter {
   bind() {
     for (const inp of this.inputs()) {
       inp.onmidimessage = (e) => this.onMessage(inp, e.data);
+      // a bundled preset that was updated since it was stored (corrected chart values): refresh its entries
+      const old = this.mappings[inp.name], cur = old?.presetId && PRESETS.find((p) => p.id === old.presetId);
+      if (cur && (cur.version || 0) !== (old.presetVersion || 0)) { this.mappings[inp.name] = this.presetMapping(cur); this.resetRuntime(); this.save(); }
       if (this.hasMapping(inp.name)) continue;
       // auto-apply a preset the first time a known controller shows up
       const preset = PRESETS.find((p) => p.match.test(inp.name));
-      if (preset) { this.mappings[inp.name] = { name: preset.name, entries: structuredClone(preset.entries) }; this.save(); this.app.toast(`MIDI: loaded "${preset.name}" mapping for ${inp.name}`); }
+      if (preset) { this.mappings[inp.name] = this.presetMapping(preset); this.save(); this.app.toast(`MIDI: loaded "${preset.name}" mapping for ${inp.name}`); }
       else if (inp.state !== 'disconnected') this.offerMapping(inp.name);
+    }
+    // bundled first-party mappings: init messages and the "matching skin / audio" offers (see skins/skin-host.js)
+    for (const inp of this.inputs()) {
+      const preset = this.presetOf(inp.name);
+      if (!preset || inp.state === 'disconnected' || this._presetSeen?.has(inp.id)) continue;
+      (this._presetSeen ||= new Set()).add(inp.id);
+      for (const out of this.outputs()) if (portBase(out.name) === portBase(inp.name)) for (const msg of preset.init || []) { try { out.send(msg); } catch { /* port closed */ } }
+      this.emit('preset', { device: inp.name, preset });
     }
     this.emit('devices');
   }
   hasMapping(name) { return !!this.mappings[name]?.entries?.length; }
+  /** Stored form of a bundled preset: entries plus its id so the bundled extras (init, skin, audio) can be found. */
+  presetMapping(p) { return { name: p.name, entries: structuredClone(p.entries), ...(p.id ? { presetId: p.id, presetVersion: p.version || 0 } : {}) }; }
+  /** The bundled preset a device's current mapping came from (null for learned / imported mappings). */
+  presetOf(name) { const id = this.mappings[name]?.presetId; return id ? PRESETS.find((p) => p.id === id) || null : null; }
 
   /**
    * A controller without a mapping connected: offer to search the Mixxx library or run guided setup.
@@ -256,6 +273,7 @@ export class MidiManager extends Emitter {
   touch(deviceName) { const now = performance.now(); this.activity = now; this.deviceActivity.set(deviceName, now); }
 
   onMessage(input, data) {
+    if (this._l.has('raw')) this.emit('raw', { device: input.name, data: [...data], t: performance.now() }); // controller test / capture
     const [status, d1, d2 = 0] = data;
     const cmd = status & 0xf0, channel = status & 0x0f;
     let type, number = d1, value = d2;
@@ -300,8 +318,9 @@ export class MidiManager extends Emitter {
         if (mode === 'auto') { mode = this.autoRel.get(e); if (!mode) { mode = guessRel(value, range); this.autoRel.set(e, mode); } }
         const delta = relDelta(mode, value, this.lastVal.get(e), range);
         this.lastVal.set(e, value);
-        if (t.kind === 'rel') this.dispatch(e, delta);
-        else this.nudge(e, t, delta / (range / 2));
+        const scaled = delta * (e.scale || 1); // e.scale: per-device jog resolution (720 / ticks per revolution)
+        if (t.kind === 'rel') this.dispatch(e, scaled);
+        else this.nudge(e, t, scaled / (range / 2));
         continue;
       }
       if (type === 'pitch') { this.dispatch(e, value / 16383); continue; }
@@ -363,10 +382,17 @@ export class MidiManager extends Emitter {
       for (const e of map.entries) {
         const t = this.byId.get(e.target);
         if (!t?.led || e.noLed || e.key.includes('hid') || e.key.startsWith('gp:')) continue;
-        const [type, ch, num] = e.key.split(':').map((x, i) => (i ? +x : x));
+        const lk = e.ledKey || e.key; // ledKey: the LED answers on another note than the button sends
+        const [type, ch, num] = lk.split(':').map((x, i) => (i ? +x : x));
         if (type !== 'note' && type !== 'cc') continue;
         const on = !!t.led();
-        send(out.id + e.key, [(type === 'cc' ? 0xb0 : 0x90) | ch, num, on ? 127 : 0]);
+        send(out.id + lk, [(type === 'cc' ? 0xb0 : 0x90) | ch, num, on ? 127 : 0]);
+      }
+      // a bundled preset's output-only messages (track loaded, vinyl mode...): { state, status, midino, on, off }
+      const preset = map.presetId ? PRESETS.find((p) => p.id === map.presetId) : null;
+      for (const o of preset?.outputsExtra || []) {
+        const on = this.stateValue(o.state) > 0;
+        send(`${out.id}|x|${o.status}|${o.midino}`, [o.status & 0xff, o.midino & 0x7f, (on ? o.on : o.off) & 0x7f]);
       }
     }
   }
@@ -429,7 +455,8 @@ export class MidiManager extends Emitter {
   resetRuntime() { this.ledState.clear(); this.msb.clear(); this.autoRel = new WeakMap(); this.lastVal = new WeakMap(); this.absVal = new WeakMap(); }
   applyPreset(name, presetName) {
     const p = PRESETS.find((x) => x.name === presetName); if (!p) return;
-    this.mappings[name] = { name: p.name, entries: structuredClone(p.entries) }; this.resetRuntime(); this.save();
+    this.mappings[name] = this.presetMapping(p); this.resetRuntime(); this.save();
+    this._presetSeen?.clear(); this.bind();
   }
 
   /** Every connected controller across MIDI, HID and gamepads: [{ key, name, kind, hasOut, connected }]. */

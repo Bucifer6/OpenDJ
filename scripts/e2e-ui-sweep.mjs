@@ -2,7 +2,7 @@
 // unhandled rejection, on interactive controls that overlap each other, stick out of their panel (outside a scroll
 // area), are covered by something else where you would click them, or on fader caps outside their tracks.
 // Then clicks every deck / mixer / panel control, switches every panel and mode, opens the dialogs and presses the
-// keyboard shortcuts in each layout.   Usage: node scripts/e2e-ui-sweep.mjs [--quick]
+// keyboard shortcuts in each layout.   Usage: node scripts/e2e-ui-sweep.mjs [--quick] [--skins]
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,6 +12,7 @@ import { start } from '../server/index.js';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const QUICK = process.argv.includes('--quick');
+const SKINS_ONLY = process.argv.includes('--skins'); // only the controller skins (section 7)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'opendj-sweep-'));
 const music = path.join(tmp, 'Music'); fs.mkdirSync(music);
 function wav(file, seconds, bpm, f0) {
@@ -137,6 +138,7 @@ try {
   await page.waitForFunction(() => !window.opendj.analyser.running, null, { timeout: 60000 }).catch(() => {});
   await ev(() => window.opendj.engine.decks.forEach((d) => d.addMemoryCue?.()));
 
+  if (!SKINS_ONLY) { // --skins: only section 7
   // ---------- 1. geometry across the matrix ----------
   const layouts = ['classic', 'performance', 'waveform', 'four'];
   const themes = QUICK ? ['midnight'] : ['midnight', 'light', 'contrast'];
@@ -339,6 +341,77 @@ try {
       } finally { await ctx.close(); page = mainPage; }
     }
   }
+  } // !SKINS_ONLY
+
+  // ---------- 7. whole-layout controller skins (js/skins): geometry at every size, then click every control ----------
+  const skinAudit = () => ev(() => {
+    const root = document.querySelector('.sk-root'); if (!root) return { missing: true };
+    const rr = root.getBoundingClientRect();
+    const CONTROLS = '.sk-btn, .sk-knob, .sk-fader, .sk-jog, .sk-pad, .ai-xpad';
+    const vis = (e) => { const r = e.getBoundingClientRect(); return e.offsetParent && r.width > 1 && r.height > 1; };
+    const name = (e) => `${e.className.baseVal ?? e.className}`.split(' ').slice(0, 2).join('.') + (e.textContent?.trim() ? `"${e.textContent.trim().slice(0, 12)}"` : '') + (e.dataset.target ? `[${e.dataset.target}]` : '');
+    const els = [...root.querySelectorAll(CONTROLS)].filter(vis);
+    const out = { count: els.length, escape: [], overlap: [], covered: [], fader: [], small: [], clipped: [] };
+    const rects = els.map((e) => ({ e, r: e.getBoundingClientRect() }));
+    for (const { e, r } of rects) {
+      if (r.left < rr.left - 1 || r.right > rr.right + 1 || r.top < rr.top - 1 || r.bottom > rr.bottom + 1) out.escape.push(name(e));
+      const panel = e.closest('.cc-deck, .cc-mixer, .ai-strip, .ai-deck, .ai-mixer, .ai-browse, .ai-screen-wrap');
+      if (panel) { const p = panel.getBoundingClientRect(); if (r.left < p.left - 1 || r.right > p.right + 1 || r.top < p.top - 1 || r.bottom > p.bottom + 1) out.escape.push(`${name(e)} outside its panel`); }
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (hit && hit !== e && !e.contains(hit) && !hit.contains(e) && !hit.closest('.toast, .toasts')) out.covered.push(`${name(e)} under ${name(hit)}`);
+      if (Math.min(r.width, r.height) < 9) out.small.push(name(e));
+      const lbl = e.matches('.sk-btn') && e.querySelector('.sk-lbl'); if (lbl && lbl.scrollWidth > e.clientWidth + 2) out.clipped.push(name(e));
+    }
+    for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) {
+      const a = rects[i], b = rects[j]; if (a.e.contains(b.e) || b.e.contains(a.e)) continue;
+      const w = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left), h = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
+      if (w > 1.5 && h > 1.5) out.overlap.push(`${name(a.e)} x ${name(b.e)}`);
+    }
+    for (const f of root.querySelectorAll('.sk-fader')) {
+      if (!vis(f)) continue;
+      const t = f.getBoundingClientRect(), c = f.querySelector('.sk-fcap').getBoundingClientRect();
+      if (c.top < t.top - 1 || c.bottom > t.bottom + 1 || c.left < t.left - 1 || c.right > t.right + 1) out.fader.push(name(f));
+    }
+    return out;
+  });
+  const skinSummary = (a) => a.missing ? 'skin not shown' : ['escape', 'overlap', 'covered', 'fader', 'small', 'clipped'].filter((k) => a[k].length).map((k) => `${k} ${a[k].slice(0, 4).join('; ')}`).join(' | ');
+  for (const skin of ['compact-controller', 'all-in-one']) {
+    for (const [w, h] of [[1920, 1080], [1600, 960], [1440, 900], [1366, 768], [1280, 800], [2560, 1440], [1180, 820]]) {
+      await page.setViewportSize({ width: w, height: h });
+      await setUi({ layout: skin === 'all-in-one' ? 'four' : 'classic', theme: skin, zoom: 100 });
+      await page.waitForSelector('.sk-root', { timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(250);
+      // every fader to both ends and back: the caps stay in their tracks
+      await ev(() => { for (const f of document.querySelectorAll('.sk-root .sk-fader[data-target]')) { const t = f.dataset.target, m = window.opendj.midi; const v = m.byId.get(t)?.get?.() ?? 0.5; m.dispatch({ target: t }, 0); m.dispatch({ target: t }, 1); m.dispatch({ target: t }, v); } });
+      await page.waitForTimeout(60);
+      const a = await skinAudit();
+      check(a.count > (skin === 'all-in-one' ? 150 : 60) && !skinSummary(a), `${skin} ${w}x${h}: ${a.count} controls reachable, in bounds, none overlapping, covered or clipped${skinSummary(a) ? ' — ' + skinSummary(a) : ''}`);
+      const f = await fit([]);
+      check(!f.length, `${skin} ${w}x${h}: page fits the window${f.length ? ' — ' + f.slice(0, 3).join('; ') : ''}`);
+    }
+    // click every enabled button and pad (twice for toggles), drag every knob and fader a little
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await setUi({ layout: skin === 'all-in-one' ? 'four' : 'classic', theme: skin, zoom: 100 });
+    await page.waitForSelector('.sk-root'); await page.waitForTimeout(200);
+    const SKIN_SKIP = /MENU|MIXER|TAG LIST|USB STOP|INST\.|LOAD|⏮|⏭/;
+    const n = await ev(() => { const l = [...document.querySelectorAll('.sk-root .sk-btn:not(.sk-na), .sk-root .sk-pad')].filter((e) => e.offsetParent); l.forEach((e, i) => { e.dataset.sweep = `${i}`; }); return l.length; });
+    let clicked = 0;
+    for (let i = 0; i < n; i++) {
+      const loc = page.locator(`.sk-root [data-sweep="${i}"]`);
+      const txt = (await loc.textContent()) || '';
+      if (SKIN_SKIP.test(txt)) continue;
+      await loc.click({ timeout: 2000 }); await loc.click({ timeout: 2000 }); clicked++;
+      if (await page.locator('.overlay').count()) await page.keyboard.press('Escape');
+    }
+    for (const sel of ['.sk-root .sk-knob:not(.sk-na)', '.sk-root .sk-fader']) {
+      const m = await page.locator(sel).count();
+      for (let i = 0; i < m; i++) { const bb = await page.locator(sel).nth(i).boundingBox(); if (!bb) continue; await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2); await page.mouse.down(); await page.mouse.move(bb.x + bb.width / 2 + 3, bb.y + bb.height / 2 - 6, { steps: 2 }); await page.mouse.up(); }
+    }
+    await ev(() => { document.querySelectorAll('[data-sweep]').forEach((e) => delete e.dataset.sweep); const a = window.opendj; a.shift = false; a.engine.decks.forEach((d) => { d.pause(); d.exitLoop?.(); d.setKeyShift?.(0); }); });
+    check(clicked > (skin === 'all-in-one' ? 80 : 40) && errors.length === 0, `${skin}: clicked ${clicked} buttons and pads, dragged every knob and fader, no errors${errors.length ? ': ' + errors.slice(0, 3).join(' | ') : ''}`);
+  }
+  await setUi({ layout: 'classic', theme: 'midnight', zoom: 100 });
+  check(await ev(() => !document.querySelector('.sk-root') && document.querySelectorAll('.waves .wave-row').length === 4), 'back to a normal theme: standard layout and waveforms restored');
   check(errors.length === 0, `no page errors, console errors or unhandled rejections${errors.length ? ': ' + errors.slice(0, 5).join(' | ') : ''}`);
 } catch (e) { console.error(e); failed = true; }
 await browser.close(); app.server.close();
