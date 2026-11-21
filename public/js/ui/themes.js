@@ -17,6 +17,7 @@ const BUILT_IN_THEMES = [
 ];
 
 const THEME_CACHE_KEY = 'opendj-skin-catalog-v1';
+const MAX_CATALOG_BYTES = 256 * 1024;
 const SKIN_CATALOG_URL = 'https://raw.githubusercontent.com/Bucifer6/OpenDJ/main/public/skins/catalog.json';
 const THEME_VARS = new Set([
   '--bg', '--panel', '--panel-2', '--panel-3', '--line', '--line-2', '--text', '--text-2', '--text-3',
@@ -30,13 +31,23 @@ export const THEMES = [...BUILT_IN_THEMES];
 const skinVars = new Map();
 const appliedSkinVars = new Set();
 
-function validateSkin(s) {
+const lum = (hex) => {
+  let h = hex.slice(1); if (h.length <= 4) h = [...h.slice(0, 3)].map((c) => c + c).join('');
+  const [r, g, b] = [0, 2, 4].map((i) => { const v = parseInt(h.slice(i, i + 2), 16) / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+/** WCAG contrast ratio of two #rgb / #rrggbb colours. */
+export function contrast(a, b) { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+
+export function validateSkin(s) {
   if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
   const id = String(s.id || '');
   if (!(BUILT_IN_IDS.has(id) || /^remote-[a-z0-9]+(?:-[a-z0-9]+){0,5}$/.test(id))) return null;
   const vars = Object.fromEntries(Object.entries(s.vars || {}).filter(([k, v]) =>
     THEME_VARS.has(k) && typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v)));
   if (!Object.keys(vars).length) return null;
+  // an unreadable skin (text the colour of the background) could lock a user out of Settings: refuse it
+  for (const bg of ['--bg', '--panel']) if (vars['--text'] && vars[bg] && contrast(vars['--text'], vars[bg]) < 3) return null;
   const swatch = Array.isArray(s.swatch) ? s.swatch.filter((v) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v)).slice(0, 4) : [];
   return {
     id, name: String(s.name || id).slice(0, 40), desc: String(s.desc || 'Downloadable OpenDJ skin').slice(0, 100),
@@ -66,9 +77,13 @@ try {
 export async function refreshSkinCatalog() {
   const ctl = new AbortController(), timeout = setTimeout(() => ctl.abort(), 12000);
   try {
-    const res = await fetch(SKIN_CATALOG_URL, { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal: ctl.signal });
+    const res = await fetch(SKIN_CATALOG_URL, { cache: 'no-store', credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer', signal: ctl.signal });
     if (!res.ok) throw new Error(`Skin catalogue returned HTTP ${res.status}`);
-    const catalog = await res.json();
+    // colours only (validated below), and a size cap: a catalogue is a few KB
+    if (Number(res.headers.get('content-length')) > MAX_CATALOG_BYTES) throw new Error('Skin catalogue is too large');
+    const raw = await res.text();
+    if (raw.length > MAX_CATALOG_BYTES) throw new Error('Skin catalogue is too large');
+    let catalog; try { catalog = JSON.parse(raw); } catch { throw new Error('Skin catalogue is not valid JSON'); }
     if (catalog?.schema !== 1 || !Array.isArray(catalog.skins)) throw new Error('Skin catalogue format is not supported');
     const skins = catalog.skins.map(validateSkin).filter(Boolean).slice(0, 50);
     if (!skins.length) throw new Error('No valid skins were found in the catalogue');

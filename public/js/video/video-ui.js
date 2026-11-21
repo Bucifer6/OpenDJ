@@ -283,7 +283,7 @@ export function setupVideo(app) {
     function outputTab() { return renderOutputs(); }
 
     setDock(false);
-    return { root, stage, setDock, setCollapsed, startLive, stopLive, renderOutputs: () => { if (cur === 'output') renderOutputs(); }, show };
+    return { mixer, root, stage, setDock, setCollapsed, startLive, stopLive, renderOutputs: () => { if (cur === 'output') renderOutputs(); }, show };
   }
 
   const api = { openPanel, openOutputWindow, toggleMixer, closePanel, mixer, youtube, outputs };

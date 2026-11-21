@@ -3,6 +3,7 @@ import { el, uiZoom } from '../util.js';
 import { api } from '../api.js';
 import { THEMES, applyTheme, refreshSkinCatalog } from './themes.js';
 import { controllersPanel } from './controllers-panel.js';
+import { remoteSettingsPane } from './remote-settings.js';
 import { platform, MOBILE_UNAVAILABLE, APP_VERSION } from '../platform.js';
 import { STYLES, normStyle } from '../automix.js';
 import { SET_SHAPES, PRESETS } from '../smartmix.js';
@@ -276,31 +277,44 @@ export class Dialogs {
       el('label', { class: 'check' }, vary, ' Vary transition styles'),
       el('label', { class: 'check' }, keySync, ' Fix key clashes with Key Sync'));
     const native = window.opendjNative;
-    const model = el('input', { class: 'inp', placeholder: 'Installed Ollama model', value: localStorage.getItem('dj-model') || '' });
-    const voice = el('select', { class: 'sel' }, ...[['off','Off'],['en','English'],['ro','Romanian']].map(([value,label]) => el('option',{value},label)));
+    const savedModel = (() => { try { return localStorage.getItem('dj-model') || ''; } catch { return ''; } })();
+    const model = el('input', { class: 'inp', placeholder: 'Installed Ollama model, e.g. llama3.2', value: savedModel, list: 'odj-ollama-models', 'data-am': 'model', maxlength: 180 });
+    const modelList = el('datalist', { id: 'odj-ollama-models' });
+    const voice = el('select', { class: 'sel', 'data-am': 'voice' }, ...[['off', 'Off'], ['en', 'English'], ['ro', 'Romanian']].map(([value, label]) => el('option', { value }, label)));
+    const aiNote = el('p', { class: 'hint', 'data-am': 'ai-note' });
     if (native?.planSet) {
-      modeSel.append(el('option',{value:'local'},'Local AI (Ollama)'));
-      const settings = el('div',{class:'form'}, el('label',{class:'field'},'Model',model), el('label',{class:'field'},'Spoken introduction',voice));
+      modeSel.append(el('option', { value: 'local' }, 'Local AI (Ollama)'));
+      const settings = el('div', { class: 'form' }, el('label', { class: 'field' }, el('span', {}, 'Model'), model, modelList), el('label', { class: 'field' }, el('span', {}, 'Spoken introduction'), voice), aiNote);
       settings.hidden = true;
-      modeSel.addEventListener('change', () => { settings.hidden = modeSel.value !== 'local'; });
-      profile.addEventListener('change', () => { settings.hidden = modeSel.value !== 'local'; });
+      const showLocal = () => {
+        settings.hidden = modeSel.value !== 'local';
+        if (settings.hidden || settings.dataset.checked) return;
+        settings.dataset.checked = '1';
+        // installed models (Ollama on this computer only), so a typo is not the first thing the user finds out
+        native.planModels?.().then((r) => {
+          modelList.replaceChildren(...(r?.models || []).map((m) => el('option', { value: m })));
+          if (!r?.running) aiNote.textContent = 'Ollama is not running on this computer. Install it from ollama.com and start it, then choose a model.';
+          else if (!r.models.length) aiNote.textContent = 'Ollama is running but has no models. Install one, e.g. "ollama pull llama3.2".';
+          else { aiNote.textContent = `The first 60 tracks are ranked by ${r.models.length > 1 ? 'the chosen model' : r.models[0]} on this computer; nothing leaves it.`; if (!model.value) model.value = r.models[0]; }
+        }).catch(() => {});
+      };
+      modeSel.addEventListener('change', showLocal);
+      profile.addEventListener('change', showLocal);
       body.append(settings);
     }
-    const r = await this.modal('Automix', body, [{ label: 'Cancel', value: null }, { label: 'Start automix', primary: true, value: true }]);
+        const r = await this.modal('Automix', body, [{ label: 'Cancel', value: null }, { label: 'Start automix', primary: true, value: true }]);
     if (!r) return;
     if (modeSel.value === 'local') {
-      const candidates = tracks.slice(0,60);
+      const candidates = tracks.slice(0, 60);
       try {
-        localStorage.setItem('dj-model',model.value.trim());
+        try { localStorage.setItem('dj-model', model.value.trim()); } catch { /* storage optional */ }
         this.app.toast('Planning your set with Ollama…');
-        const plan = await native.planSet({model:model.value.trim(),language:voice.value,tracks:candidates.map(({title,artist,bpm,key,energy})=>({title,artist,bpm,key,energy}))});
-        tracks = [...plan.order.map(i=>candidates[i]), ...tracks.slice(60)];
+        const plan = await native.planSet({ model: model.value.trim(), language: voice.value === 'ro' ? 'ro' : 'en', tracks: candidates.map(({ title, artist, bpm, key, energy }) => ({ title, artist, bpm, key, energy })) });
+        // the main process already validated the order; re-check here anyway (indices into `candidates`)
+        const order = (plan.order || []).filter((i) => Number.isInteger(i) && i >= 0 && i < candidates.length);
+        tracks = [...new Set([...order.map((i) => candidates[i]), ...candidates])].concat(tracks.slice(60));
         modeSel.value = 'order';
-        if (voice.value !== 'off' && window.speechSynthesis && plan.intro) {
-          const line = new SpeechSynthesisUtterance(plan.intro);
-          line.lang = voice.value === 'ro' ? 'ro-RO' : 'en-GB';
-          window.speechSynthesis.speak(line);
-        }
+        if (voice.value !== 'off' && plan.intro) this.app.announce?.(plan.intro, { lang: voice.value });
       } catch (error) { this.app.toast('Local DJ: ' + error.message); return; }
     }
     const sm = smartBox.value();
@@ -417,7 +431,7 @@ export class Dialogs {
       ['Space', 'Play/pause deck 1'], ['Z / X / C', 'Deck 1 cue / play / sync'], ['M / , / .', 'Deck 2 cue / play / sync'],
       ['1 – 4', 'Deck 1 hot cues A–D (Shift = delete)'], ['7 – 0', 'Deck 2 hot cues A–D'], ['Q / W', 'Deck 1 loop 4 / exit'], ['O / P', 'Deck 2 loop 4 / exit'],
       ['← / →', 'Crossfader'], ['↑ / ↓', 'Browser selection'], ['Shift + ← / →', 'Load selected track to deck 1 / 2'],
-      ['Ctrl + F', 'Search library'], ['R', 'Start / stop recording'], ['A', 'Automix on/off'], ['Shift (hold)', 'Shift layer (delete cues, set master…)'],
+      ['Ctrl + F', 'Search library'], ['R', 'Start / stop recording'], ['A', 'Automix: start (smart mix of the queue or view) / stop'], ['Shift (hold)', 'Shift layer (delete cues, set master…)'],
     ].map(([k, d]) => el('tr', {}, el('td', {}, el('kbd', {}, k)), el('td', {}, d)))));
 
     // ---- appearance ----
@@ -463,7 +477,7 @@ export class Dialogs {
     const about = this.aboutPane(chk);
     const tabs = platform.local
       ? { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], mobile: ['Mobile', this.mobileInfo()], about: ['About', about] }
-      : { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], dvs: ['DVS', dvsTab], keys: ['Shortcuts', shortcuts], about: ['About', about] };
+      : { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], dvs: ['DVS', dvsTab], remote: ['Remote control', remoteSettingsPane(app)], keys: ['Shortcuts', shortcuts], about: ['About', about] };
     if (!tabs[tab]) tab = 'audio';
     const tabBar = el('div', { class: 'tabs' });
     const pane = el('div', { class: 'tab-pane' });

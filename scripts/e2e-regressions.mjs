@@ -322,6 +322,41 @@ try {
   }, ids.Long);
   check(['Loading', 'Decoding', 'Analysing'].every((p) => prog2.phases.includes(p)) && prog2.pcts >= 2 && prog2.after === '', `deck load shows its progress (${JSON.stringify(prog2)})`);
 
+  // ---- AI assistant remote control (MCP) driving the live page: off by default, then token + scopes ----
+  const MCP_PORT = 7915;
+  const before = await page.evaluate(async () => (await fetch('/api/mcp/config')).json());
+  check(!before.enabled && before.host === '127.0.0.1', 'remote control is off by default, loopback when on');
+  const on = await page.evaluate(async (port) => (await fetch('/api/mcp/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true, port, scopes: ['read', 'playback'] }) })).json(), MCP_PORT);
+  let sid = null, rid = 0;
+  const rpc = async (method, params) => {
+    const r = await fetch(`http://127.0.0.1:${MCP_PORT}/mcp`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${on.token}`, ...(sid ? { 'Mcp-Session-Id': sid } : {}) }, body: JSON.stringify({ jsonrpc: '2.0', id: ++rid, method, params }) });
+    sid = r.headers.get('mcp-session-id') || sid;
+    return r.json();
+  };
+  const tool = async (name, args = {}) => { const r = await rpc('tools/call', { name, arguments: args }); return r.result?.isError ? { error: r.result.content[0].text } : r.result?.structuredContent ?? r.error; };
+  await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'e2e' } });
+  await page.evaluate(() => { const E = window.opendj.engine; E.decks.forEach((d) => d.pause()); });
+  const found = await tool('search_library', { query: 'third' });
+  check(found.total === 1 && found.tracks[0].title === 'Third' && !JSON.stringify(found).includes(music), `search_library finds metadata only (${JSON.stringify(found.tracks[0])})`);
+  const loaded = await tool('load_track', { deck: 1, track_id: found.tracks[0].id });
+  check(loaded.title === 'Third' && (await page.evaluate(() => window.opendj.engine.decks[0].track?.title)) === 'Third', 'load_track loads deck 1 in the open window');
+  await tool('play', { deck: 1 }); await tool('set_crossfader', { position: -0.5 });
+  const mst = await tool('get_status');
+  check(mst.decks[0].playing && mst.decks[0].title === 'Third' && mst.crossfader === -0.5 && mst.broadcast && Array.isArray(mst.sampler), `play / set_crossfader / get_status (${JSON.stringify(mst.decks[0])})`);
+  const sample = await tool('trigger_sample', { pad: 1 });
+  check(sample.name === 'Air Horn', 'trigger_sample fires pad 1');
+  const ded = await tool('queue_dedication', { text: 'For Ana and Mihai', language: 'en', show_on_screen: true, stream_metadata: false });
+  check(ded.queued && (await page.evaluate(() => window.opendj.dedications.queue.length)) >= 1, 'queue_dedication queues it in the window');
+  await page.evaluate(() => window.opendj.dedications.clear());
+  const deny = await tool('broadcast_start', { target_id: 'abc' });
+  check(deny?.code === -32602, 'broadcast tools refused without the broadcast permission');
+  const notice = await page.evaluate(() => [...document.querySelectorAll('.toast')].map((t) => t.textContent).join(' | '));
+  check(/AI assistant: play/.test(notice), `the window shows a notice for each action (${notice.slice(0, 120)})`);
+  await tool('pause', { deck: 1 });
+  const audit = await page.evaluate(async () => (await fetch('/api/mcp/audit')).json());
+  check(audit.entries.some((e) => e.tool === 'load_track' && e.ok) && audit.entries.some((e) => e.tool === 'broadcast_start' && !e.ok), `audit log lists the actions (${audit.entries.length} entries)`);
+  await page.evaluate(() => fetch('/api/mcp/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false }) }));
+
   check(errors.length === 0, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
 } catch (e) { console.error(e); failed = true; }
 await browser.close(); app.server.close();

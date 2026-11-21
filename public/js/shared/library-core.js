@@ -31,6 +31,7 @@ export const DEFAULT_SETTINGS = {
   latencyHint: 'interactive',
   micDeviceId: '',
   talkoverDb: -12,
+  voiceDuckDb: -14, voiceVolume: 1, dedicationLang: 'en', // MC voice / dedications (audio/voice.js, dedications.js)
   midiClockOutput: '',
   colorFx: 'filter',
   mixer: {},                  // mixer v2 config (audio/mixer-config.js fills defaults; crossfaderCurve migrates into it)

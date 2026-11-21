@@ -31,12 +31,20 @@ export class Broadcaster extends Emitter {
   }
   /** Metadata follows the loudest audible deck once it has been on air for a few seconds. */
   _nowPlaying() {
+    if (this._holdUntil && Date.now() < this._holdUntil) return; // a dedication is on air
+    if (this._holdUntil) { this._holdUntil = 0; this.song = ''; } // resend the track's title afterwards
     const np = TracklistTracker.nowPlaying(deckSnapshot(this.engine));
     const song = np ? [np.artist, np.title].filter(Boolean).join(' - ') : '';
     if (!song) { this._pending = null; return; }
     if (song === this.song) { this._pending = null; return; }
     if (!this._pending || this._pending.song !== song) { this._pending = { song, since: Date.now(), np }; return; }
     if (Date.now() - this._pending.since >= (this.metadataDelayMs ?? 3000)) { this.song = song; this.setMetadata(this._pending.np); this._pending = null; }
+  }
+  /** Show this as "now playing" for `ms` (a dedication), then go back to the track's title. */
+  holdMetadata({ artist = '', title = '' }, ms = 10000) {
+    if (!this.session) return Promise.resolve(null);
+    this._holdUntil = Date.now() + Math.max(1000, Math.min(120000, ms)); this._pending = null;
+    return this.setMetadata({ artist, title });
   }
   setMetadata({ artist = '', title = '' }) {
     if (!this.session) return Promise.resolve(null);

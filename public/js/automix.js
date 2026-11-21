@@ -364,6 +364,7 @@ export class AutoMix extends Emitter {
     }
     this.mode = mode;
     this.queue = list; this.idx = 0; this.enabled = true; this.transition = null; this.forceTransitionRequested = false;
+    const runId = this._runId = (this._runId || 0) + 1;
     const [a, b] = this.engine.decks;
     await this.engine.resume();
     const playing = [a, b].find((d) => d.playing);
@@ -374,6 +375,8 @@ export class AutoMix extends Emitter {
         try { await this.app.loadTrack(0, this.queue[this.idx].id, { automix: true }); loaded = true; this.idx++; break; }
         catch (e) { this.app.toast?.(`Automix: skipping "${this.queue[this.idx].title}" (${e.message})`); this.idx++; }
       }
+      // stopped while the first track was loading: don't start playing it afterwards (and it's not a load error)
+      if (!this.enabled || runId !== this._runId) { this.emit('state'); return; }
       if (!loaded) { this.enabled = false; this.emit('state'); throw new Error('None of the tracks in the queue could be loaded'); }
       this.prepare(a);
       const firstTrack = this.queue[Math.max(0, this.idx - 1)] || a.track;
@@ -382,6 +385,7 @@ export class AutoMix extends Emitter {
       if (startAt > 0.5) a.seek(startAt);
       a.play();
     }
+    if (!this.enabled || runId !== this._runId) return;
     this.current = playing || a;
     this.fillLive();
     this.preloadNext();
@@ -513,10 +517,15 @@ export class AutoMix extends Emitter {
     if (this._loading || deck.track?.id === t.id || deck.loading) return;
     this._loading = true;
     try { await this.app.loadTrack(deck.index, t.id, { automix: true }); } catch (e) {
+      this._loading = false;
+      if (!this.enabled) return; // stopped meanwhile: nothing to skip
       this.app.toast(`Automix: skipping "${t.title}" (${e.message})`);
-      this.queue.splice(this.idx, 1); this._loading = false; this.emit('state'); return this.preloadNext();
+      const at = this.queue.indexOf(t); // the queue may have been edited while it loaded
+      if (at >= this.idx) this.queue.splice(at, 1);
+      this.emit('state'); return this.preloadNext();
     }
     this._loading = false;
+    if (!this.enabled) return; // stopped while loading: leave the deck's fader to the DJ
     const ch = this.engine.channels[deck.index];
     ch.set('xfAssign', 'THRU'); ch.set('volume', 0);
     this.upcoming = null;

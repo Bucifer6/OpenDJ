@@ -43,6 +43,7 @@ export function buildClubSections(app, R) {
       R(knob({ label: 'LOW', size: 'sm', title: 'Mic EQ low', get: () => eng.micEq.low, set: (v) => eng.setMicEq('low', v) }))),
     el('div', { class: 'club-btns club-mic' },
       R(button('FX', { cls: 'xs', title: 'Mic FX on/off', click: () => eng.setMicFx(!eng.micFxOn), active: () => eng.micFxOn })),
+      R(button('MC', { cls: 'xs mc-btn', title: 'Dedication / MC voice over the mix', click: () => app.dedications?.open(), active: () => !!app.dedications?.current })),
       R(button('AUTO', { cls: 'xs', title: 'Voice-activated talkover', click: () => updateMixer(app, { talkoverMode: eng.mx.talkoverMode === 'manual' ? 'auto' : 'manual' }), active: () => eng.mx.talkoverMode !== 'manual' }))),
   );
   // ---------- right: master extras + beat FX unit ----------

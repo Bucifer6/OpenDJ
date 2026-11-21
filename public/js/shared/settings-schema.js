@@ -55,6 +55,7 @@ const SCHEMA = {
   // AudioContext latencyHint: a category or a number of milliseconds (the UI stores '10' / '20')
   latencyHint: (v) => (['interactive', 'balanced', 'playback'].includes(v) ? v : num(1, 1000)(v) !== undefined ? String(Number(v)) : undefined),
   talkoverDb: num(-60, 0),
+  voiceDuckDb: num(-40, 0), voiceVolume: num(0, 2), dedicationLang: oneOf('en', 'ro'),
   colorFx: oneOf('filter', 'space', 'dubecho', 'noise', 'crush', 'pitch', 'sweep', 'crunch', 'pitchshift'),
   // mixer v2 configuration (public/js/audio/mixer-config.js has the defaults; knob positions are not stored)
   mixer: shape({
