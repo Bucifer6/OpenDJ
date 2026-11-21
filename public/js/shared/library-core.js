@@ -216,7 +216,7 @@ export class LibraryCore {
 
   // ---------- remote sources ----------
   publicSource(s) {
-    const { password, token, ...rest } = s; // never send secrets to the UI
+    const { password, token, accountToken, ...rest } = s; // never send secrets to the UI
     return { ...rest, hasPassword: !!password, hasToken: !!token };
   }
   getSource(sid) { return okId(sid) ? this.data.sources.find((s) => s.id === sid) : undefined; }

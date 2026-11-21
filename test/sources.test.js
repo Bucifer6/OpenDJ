@@ -253,7 +253,7 @@ test('plex: sign-in, sections, container paging, part key in remotePath, stream/
   const c = new PlexClient({ type: 'plex', url: srv.url, username: 'me', password: 'pw' }, { signInUrl: srv.url + '/users/sign_in.json' });
   const info = await c.connect();
   assert.deepEqual(info, { ok: true, serverName: 'Plexy', version: '1.40' });
-  assert.deepEqual(c.persistable(), { token: 'PLEXTOK' });
+  assert.deepEqual(c.persistable(), { token: 'PLEXTOK', accountToken: 'PLEXTOK' });
   assert.deepEqual(await c.listLibraries(), [{ id: '3', name: 'Music' }]);
 
   const tracks = await c.listTracks();

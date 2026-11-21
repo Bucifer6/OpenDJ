@@ -68,6 +68,8 @@ export const api = {
   /** Open a media-server playlist: { playlist (library mirror), tracks (remote library tracks, in order) } */
   sourcePlaylist: (id, pid, name) => req('GET', `/api/sources/${enc(id)}/playlists/${enc(pid)}${name ? `?name=${encodeURIComponent(name)}` : ''}`),
   removeSource: (id) => req('DELETE', `/api/sources/${enc(id)}`),
+  plexUsers: (id) => req('GET', `/api/sources/${enc(id)}/users`),
+  switchPlexUser: (id, userId, pin) => req('POST', `/api/sources/${enc(id)}/user`, { userId, ...(pin ? { pin } : {}) }),
   downloads: () => req('GET', '/api/downloads'),
   download: (trackIds) => req('POST', '/api/downloads', { trackIds }),
   cancelDownload: (trackId) => req('POST', '/api/downloads/cancel', { trackId }),

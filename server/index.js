@@ -14,7 +14,7 @@ import { Library, newId } from './library.js';
 import { scanFolder, addFile, walk, AUDIO_EXT, isMediaPath } from './scanner.js';
 import { listDrives, browseDir } from './drives.js';
 import { aiffToWav } from './aiff.js';
-import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clientFor, isInside, uniqueName, safe, sourcePlaylists, openSourcePlaylist, remoteError } from './remote.js';
+import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clientFor, isInside, uniqueName, safe, sourcePlaylists, openSourcePlaylist, remoteError, plexUsers, switchPlexUser } from './remote.js';
 import { findFfmpeg, needsTranscode, remoteBrowserDecodable, browserPlayableVideo, formatList, DSD_EXT, VIDEO_MIME, extOf, probe, isVideoByName, BROWSER_VIDEO_EXT } from './media.js';
 import { Transcoder } from './transcode.js';
 import { Auth, parseCookies, parseTrustProxy } from './auth.js';
@@ -778,6 +778,18 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     if (!library.getSource(params.id)) throw new HttpError(404, 'No source');
     if (!params.pid || params.pid.length > 256) throw new HttpError(400, 'Bad playlist id');
     try { return await openSourcePlaylist(library, params.id, params.pid, { name: query.get('name') || undefined }); } catch (e) { throw remoteFail(e); }
+  });
+  // Plex Home: list users and switch the connection to one (then re-sync: each user sees their own libraries)
+  route('GET', '/api/sources/:id/users', async ({ params }) => {
+    if (!library.getSource(params.id)) throw new HttpError(404, 'No source');
+    try { return await plexUsers(library, params.id); } catch (e) { throw remoteFail(e); }
+  });
+  route('POST', '/api/sources/:id/user', async ({ params, body }) => {
+    if (!library.getSource(params.id)) throw new HttpError(404, 'No source');
+    let r;
+    try { r = await switchPlexUser(library, params.id, body?.userId, body?.pin); } catch (e) { throw remoteFail(e); }
+    runJob('sync:' + params.id, () => syncSource(library, params.id, { onProgress: (p) => emit('sync', p) }));
+    return r;
   });
   route('DELETE', '/api/sources/:id', async ({ params }) => { library.removeSource(params.id); return { ok: true }; });
 

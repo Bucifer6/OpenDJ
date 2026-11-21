@@ -658,9 +658,10 @@ export class LibraryUI {
         el('span', { class: 'ti-icon' }, glyphIcon(d.kind === 'network' ? '🖧' : d.kind === 'home' ? '⌂' : '⛁')), el('span', { class: 'ti-label' }, `${d.name}`), el('span', { class: 'ti-count' }, d.kind === 'network' ? 'NAS +' : d.kind === 'home' ? '+' : 'USB +'))),
       head('MEDIA SERVERS', el('button', { class: 'ti-act', title: 'Add media server', onclick: () => this.app.dialogs.addSource() }, '+')),
       ...this.sources.flatMap((s) => [
-        item(s.name || s.serverName || s.type, { kind: 'source', id: s.id }, {
+        item((s.name || s.serverName || s.type) + (s.type === 'plex' && s.plexUser?.title ? ` · ${s.plexUser.title}` : ''), { kind: 'source', id: s.id }, {
           icon: '☁', count: s.trackCount,
           actions: [{ icon: '⬇', title: 'Download all tracks for offline use', fn: () => this.download([...this.tracks.values()].filter((t) => t.sourceId === s.id && !t.localPath).map((t) => t.id)) },
+            ...(s.type === 'plex' ? [{ icon: '👥', title: 'Switch Plex user', fn: () => this.app.dialogs.switchPlexUser(s) }] : []),
             { icon: '⟳', title: 'Sync library and reload its playlists', fn: () => { api.syncSource(s.id).catch((e) => this.app.toast(e.message)); this.loadRemoteLists(s.id); } },
             { icon: '✎', title: 'Edit connection', fn: () => this.app.dialogs.addSource(s) },
             { icon: '✕', title: 'Remove server', fn: async () => { if (await this.app.dialogs.confirm(`Disconnect ${s.name}? Downloaded tracks are kept.`)) { await api.removeSource(s.id); this.refresh(); } } }],

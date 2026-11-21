@@ -87,7 +87,7 @@ export function mergeDuplicates(library, groups) {
 
 // ---------------------------------------------------------------- backup / restore
 
-const SECRET_KEYS = ['password', 'token'];
+const SECRET_KEYS = ['password', 'token', 'accountToken'];
 /** Settings that describe this machine/server, not the user's library (never taken from a backup). */
 const LOCAL_ONLY_SETTINGS = new Set(['allowedRoots', 'uploadDir', 'downloadDir', 'youtubeApiKey']);
 export const REDACTED = '••••••';
@@ -152,9 +152,10 @@ export function restoreBackup(library, history, backup, { pathAllowed = () => tr
     version: 1, tracks, playlists, folders,
     sources: (Array.isArray(lib.sources) ? lib.sources : []).filter((s) => isObj(s) && validId(s.id)).map((s) => {
       const old = oldSources.get(s.id);
-      if (!old || sourceEndpoint(old) !== sourceEndpoint(s)) return s; // secrets stay bound to their endpoint
-      const keep = Object.fromEntries(SECRET_KEYS.filter((k) => old[k]).map((k) => [k, old[k]]));
-      return { ...s, ...keep };
+      const { plexUser, ...rest } = s; // the Plex Home user goes with the token it was switched to (kept below)
+      if (!old || sourceEndpoint(old) !== sourceEndpoint(s)) return rest; // secrets stay bound to their endpoint
+      const keep = Object.fromEntries([...SECRET_KEYS, 'plexUser'].filter((k) => old[k]).map((k) => [k, old[k]]));
+      return { ...rest, ...keep };
     }),
     ...(isObj(lib.pathAlias) ? { pathAlias: Object.fromEntries(Object.entries(lib.pathAlias).filter(([k, v]) => validId(v) && okPath(k))) } : {}),
   };

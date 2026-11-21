@@ -176,7 +176,7 @@ Installers are built by GitHub Actions ([`build.yml`](.github/workflows/build.ym
 Install from the [download table](#download), start OpenDJ, then add music (the empty library shows the same options):
 
 - **Folders, USB and NAS**: in the browser's left panel, click a detected drive or use **+ Folder**. NAS shares must be mounted by your OS first (Windows: map a network drive or use `\\nas\music`; macOS: Finder → Go → Connect to Server; Linux: an SMB/NFS mount).
-- **Media servers**: click **+ Media server** and pick the type. Plex: server URL plus an X-Plex-Token, or your plex.tv login. Jellyfin, Emby, Subsonic: URL, username and password. MediaMax: URL plus username and password, or an API key (`mmk_…`). Passwords are exchanged for a token where the server supports it.
+- **Media servers**: click **+ Media server** and pick the type. Plex: server URL plus an X-Plex-Token, or your plex.tv login; with Plex Home, the 👥 button next to the server switches to another home user (PIN if they have one). Jellyfin, Emby, Subsonic: URL, username and password. MediaMax: URL plus username and password, or an API key (`mmk_…`). Passwords are exchanged for a token where the server supports it.
 - **rekordbox users**: in rekordbox use *File → Export Collection in xml format*, then *Settings → Library → Import rekordbox XML* in OpenDJ. Traktor, Serato (crates only, see [Library](#library--media-servers)) and VirtualDJ libraries import from the same tab.
 
 The desktop app keeps its library in `OpenDJ/library` inside the OS app-data folder: `%APPDATA%\OpenDJ\library` (Windows), `~/Library/Application Support/OpenDJ/library` (macOS), `~/.config/OpenDJ/library` (Linux). Set `OPENDJ_DATA` to use another folder (for example a portable library on a USB stick).

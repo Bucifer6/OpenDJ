@@ -77,10 +77,10 @@ export function createClient(config, opts = {}) {
 export const USER_TOKEN_TYPES = new Set(['plex', 'mediamax']);
 const SUBSONIC_TYPES = new Set(['subsonic', 'navidrome', 'airsonic']);
 /** Fields that only the server sets (from connect()/sync): never taken from a request body. */
-export const SERVER_SOURCE_FIELDS = ['token', 'userId', 'legacyAuth', 'pathPrefix', 'deviceId', 'serverName', 'lastSync', 'trackCount', 'addedAt', 'hasPassword', 'hasToken'];
-export const SOURCE_SECRETS = ['password', 'token'];
+export const SERVER_SOURCE_FIELDS = ['token', 'accountToken', 'plexUser', 'userId', 'legacyAuth', 'pathPrefix', 'deviceId', 'serverName', 'lastSync', 'trackCount', 'addedAt', 'hasPassword', 'hasToken'];
+export const SOURCE_SECRETS = ['password', 'token', 'accountToken'];
 /** Server state tied to one endpoint / account (dropped with the secrets when the endpoint changes). */
-const ENDPOINT_STATE = ['token', 'userId', 'pathPrefix'];
+const ENDPOINT_STATE = ['token', 'userId', 'pathPrefix', 'plexUser'];
 
 const normUrl = (u) => {
   const v = String(u || '').trim();

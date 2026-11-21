@@ -205,6 +205,59 @@ export class Dialogs {
     if (r) { this.app.toast(`Connected to ${r.info?.serverName || r.source.name}. Syncing library…`); this.app.library.refresh(); }
   }
 
+  /** Plex Home: pick who the connection browses and streams as (their libraries, playlists and restrictions). */
+  async switchPlexUser(source) {
+    const status = el('div', { class: 'hint', role: 'status' }, 'Loading Plex Home users…');
+    const list = el('div', { class: 'plex-users', role: 'list' });
+    const pinIn = el('input', { class: 'inp', type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: 4, pattern: '[0-9]*', placeholder: '4-digit PIN', 'aria-label': 'Plex PIN' });
+    const pinRow = el('label', { class: 'field', hidden: true }, el('span', {}, 'PIN'), pinIn);
+    let chosen = null;
+    let users = [];
+    const pick = (u) => {
+      chosen = u;
+      for (const b of list.children) b.setAttribute('aria-pressed', String(b.dataset.id === u.id));
+      pinRow.hidden = !(u.protected && !u.admin);
+      pinIn.value = '';
+      if (!pinRow.hidden) setTimeout(() => pinIn.focus(), 0);
+    };
+    const body = el('div', { class: 'form' },
+      el('p', { class: 'hint' }, 'Browse and stream as another member of your Plex Home. Each user sees their own libraries and playlists, so the library syncs again after switching. Cues, analysis and downloads stay in OpenDJ.'),
+      list, pinRow, status);
+    const go = async () => {
+      if (!chosen) { status.textContent = 'Choose a user'; return false; }
+      if (chosen.current) return null;
+      const pin = pinIn.value.trim();
+      if (!pinRow.hidden && !/^\d{4}$/.test(pin)) { status.textContent = 'Enter the 4-digit PIN'; pinIn.focus(); return false; }
+      status.textContent = 'Switching…';
+      try { return await api.switchPlexUser(source.id, chosen.id, pinRow.hidden ? undefined : pin); } catch (e) {
+        status.textContent = `✕ ${e.message}`;
+        if (/PIN/.test(e.message)) { pinRow.hidden = false; pinIn.value = ''; pinIn.focus(); }
+        return false;
+      }
+    };
+    pinIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); [...document.querySelectorAll('.overlay')].at(-1)?.querySelector('.modal-foot .btn.primary')?.click(); } });
+    const shown = this.modal(`Plex users · ${source.name || 'Plex'}`, body, [{ label: 'Cancel', value: null }, { label: 'Switch', primary: true, action: go }]);
+    try {
+      ({ users } = await api.plexUsers(source.id));
+      if (!users.length) status.textContent = 'This Plex account has no Plex Home users. Add them at plex.tv (Settings → Plex Home).';
+      else status.textContent = '';
+      list.replaceChildren(...users.map((u) => {
+        const b = el('button', { type: 'button', class: 'btn plex-user', role: 'listitem', 'aria-pressed': 'false', onclick: () => pick(u) },
+          el('span', { class: 'pu-name' }, u.title),
+          el('small', { class: 'hint' }, [u.admin ? 'owner' : u.restricted ? 'managed' : 'member', u.protected && !u.admin ? 'PIN' : '', u.current ? 'current' : ''].filter(Boolean).join(' · ')));
+        b.dataset.id = u.id;
+        return b;
+      }));
+      const cur = users.find((u) => u.current);
+      if (cur) pick(cur);
+    } catch (e) { status.textContent = `✕ ${e.message}`; }
+    const r = await shown;
+    if (r?.source) {
+      this.app.toast(`Plex: now browsing as ${r.user?.title || r.source.plexUser?.title || 'the owner'}. Syncing library…`);
+      this.app.library.refresh();
+    }
+  }
+
   async exportUsb(playlistIds) {
     const pls = this.app.library.playlists;
     const checks = pls.map((p) => { const c = el('input', { type: 'checkbox', checked: playlistIds.includes(p.id) }); c.dataset.id = p.id; return el('label', { class: 'check' }, c, ` ${p.name} (${p.trackIds.length})`); });
