@@ -303,6 +303,8 @@ export class MidiManager extends Emitter {
     if (ev.origin !== location.origin || !this._mapperWin || ev.source !== this._mapperWin) return;
     const d = ev.data || {};
     if (typeof d.device !== 'string' || !d.device || d.device.length > 200) return;
+    // device names become keys of this.mappings: never let one reach Object.prototype
+    if (d.device === '__proto__' || d.device === 'constructor' || d.device === 'prototype') return;
     if (d.type === 'opendj-mapper:hello') {
       // while the Mapper listens to a controller, its buttons don't also play decks
       if (this.suppress === this._mapperDevice) this.suppress = null;

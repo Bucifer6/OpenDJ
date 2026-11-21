@@ -463,3 +463,16 @@ test('community: recognition falls back to the Mixxx library and reports offline
   const fail = async () => { throw new Error('offline'); };
   assert.deepEqual(await m.recognise('Nothing MIDI 1', { fetchFn: fail }), { community: null, mixxx: null, online: false });
 });
+
+test('community: Controller Mapper messages can\'t pollute Object.prototype', () => {
+  const { m } = manager();
+  const win = { postMessage() {} };
+  m._mapperWin = win;
+  globalThis.location ??= { origin: 'http://x' };
+  for (const device of ['__proto__', 'constructor', 'prototype']) {
+    m.onMapperMessage({ origin: location.origin, source: win, data: { type: 'opendj-mapper:apply', device, mapping: { entries: [{ key: 'note:0:1', target: 'deck1.play' }] }, community: { file: 'x' } } });
+  }
+  assert.equal(({}).source, undefined);
+  assert.equal(({}).entries, undefined);
+  assert.ok(!Object.hasOwn(m.mappings, 'constructor'));
+});
