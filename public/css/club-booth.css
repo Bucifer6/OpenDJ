@@ -78,3 +78,7 @@ body.skin-club-booth .mixer.mx-booth-short .club-title { margin-top: 1px; }
 body.skin-club-booth .mixer.mx-booth-short .club-master-extra .knob-xs { width: 18px; height: 18px; }
 body.skin-club-booth .mixer.mx-booth-short .club-bootheq { display: none; } /* (booth EQ stays in the drawer) */
 :root body.skin-club-booth .mixer-top, :root body.skin-club-booth .mixer-strips { gap: 2px; } /* one faceplate: dividers instead of gutters */
+:root body.skin-club-booth .mixer .mixer-master { min-width: 132px; }
+:root body.skin-club-booth .mixer.mx-w2:not(.mx-short) .strip .knob-sm { width: 34px; height: 34px; }
+:root body.skin-club-booth .mixer.mx-w2:not(.mx-short) .strip .knob-md { width: 44px; height: 44px; }
+:root body.skin-club-booth .mixer.mx-w2 .club-col .knob-sm { width: 32px; height: 32px; }
