@@ -55,7 +55,7 @@ const SCHEMA = {
   waveformColors: oneOf('rgb', 'blue', 'mono', 'player-blue', 'player-rgb'),
   downloadDir: str(), uploadDir: str(),
   automix: shape({
-    transitionBeats: num(1, 256), smartStart: bool(), profile: oneOf('club', 'harmonic', 'peak', 'open', 'quick', 'custom'),
+    transitionBeats: num(1, 256), lengthMode: oneOf('fixed', 'auto'), smartStart: bool(), profile: oneOf('club', 'harmonic', 'peak', 'open', 'quick', 'custom'),
     style: oneOf('auto', 'blend', 'bassswap', 'crossfade', 'filter', 'echo', 'cut', 'backspin', 'brake', 'loop', 'reverb', 'phrase', 'eqswap'),
     keepSync: bool(), skipSilence: bool(), shuffle: bool(), keySync: bool(), order: oneOf('harmonic', 'build', 'peak', 'wave'),
     varyStyles: bool(), onAirLoad: oneOf('ask', 'queue', 'stop'), shape: oneOf('warmup', 'rising', 'steady', 'peak', 'wave'),

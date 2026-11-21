@@ -186,3 +186,77 @@ test('N3: after a transition the incoming deck eases back to its original tempo 
     app.settings.automix.restoreTempo = false; deck.tempo = 2; am.startTempoRamp(deck); assert.equal(am.tempoRamp, null);
   } finally { performance.now = realNow; }
 });
+
+// ---------------------------------------------------------------- automatic transition length (lengthMode 'auto')
+test('autoTransitionLength: picked from the outro / intro phrases, whole phrases, 4..32 bars', async () => {
+  const { autoTransitionLength, outroBars, introBars } = await import('../public/js/automix.js');
+  const out = (bars, over = {}) => { const end = 0.1 + 160 * BAR; const s = end - bars * BAR; return { bpm: BPM, duration: end + 1, endTime: end, mixOut: s, phrases: [{ start: 0.1, end: s, type: 'drop' }, { start: s, end, type: 'outro' }], ...over }; };
+  const inn = (bars, over = {}) => ({ bpm: BPM, mixIn: 0.1, duration: 300, phrases: [...(bars ? [{ start: 0.1, end: 0.1 + bars * BAR, type: 'intro' }] : []), { start: 0.1 + bars * BAR, end: 200, type: 'drop' }], ...over });
+  assert.equal(outroBars(out(16)), 16); assert.equal(introBars(inn(32)), 32); assert.equal(introBars(inn(0)), 0);
+  assert.equal(outroBars({ bpm: BPM, duration: 100 }), null); assert.equal(introBars({ bpm: BPM }), null);
+  let r = autoTransitionLength(out(16), inn(32), 'blend');
+  assert.equal(r.bars, 16); assert.equal(r.beats, 64); assert.match(r.why, /16-bar outro/); assert.match(r.why, /32-bar intro/);
+  assert.equal(autoTransitionLength(out(32), inn(32), 'blend').bars, 32, 'long outro + long intro: long blend');
+  assert.equal(autoTransitionLength(out(64), inn(64), 'blend').bars, 32, 'never more than 32 bars');
+  r = autoTransitionLength(out(32), inn(32), 'crossfade');
+  assert.equal(r.bars, 16); assert.match(r.why, /max 16 bars/);
+  assert.equal(autoTransitionLength(out(24), inn(32), 'blend').bars, 24, 'multiple of 8');
+  assert.equal(autoTransitionLength(out(12), inn(32), 'blend').bars, 8, 'rounded down to a phrase');
+  assert.equal(autoTransitionLength(out(6), inn(32), 'blend').bars, 4, 'at least 4 bars');
+  r = autoTransitionLength(out(32), inn(0), 'blend');
+  assert.equal(r.bars, 8); assert.match(r.why, /without an intro/);
+  // no structure: the usual length of the style
+  assert.equal(autoTransitionLength({ bpm: BPM }, { bpm: BPM }, 'blend').bars, 16);
+  assert.equal(autoTransitionLength({ bpm: BPM }, { bpm: BPM }, 'crossfade').bars, 8);
+  assert.match(autoTransitionLength({ bpm: BPM }, { bpm: BPM }, 'blend').why, /no phrase analysis/);
+  // BPM gap, energy jump, key clash shorten it
+  r = autoTransitionLength(out(32), inn(32, { bpm: BPM * 1.05 }), 'blend');
+  assert.equal(r.bars, 8); assert.match(r.why, /5 % BPM gap/);
+  assert.equal(autoTransitionLength(out(32), inn(32, { bpm: BPM * 1.03 }), 'blend').bars, 16);
+  r = autoTransitionLength(out(32, { energy: 4 }), inn(32, { energy: 8 }), 'blend');
+  assert.equal(r.bars, 8); assert.match(r.why, /energy jump 4 → 8/);
+  assert.equal(autoTransitionLength(out(32, { energy: 5 }), inn(32, { energy: 7 }), 'blend').bars, 16);
+  r = autoTransitionLength(out(32, { key: '8A' }), inn(32, { key: '2B' }), 'blend');
+  assert.equal(r.bars, 8); assert.match(r.why, /key clash/);
+  assert.equal(autoTransitionLength(out(32, { key: '8A' }), inn(32, { key: '2B' }), 'blend', { keySync: true }).bars, 32, 'Key Sync fixes the clash');
+  // drop styles: the drop lands at the end of the outro (the intro is not overlapped)
+  assert.equal(autoTransitionLength(out(16), inn(0), 'echo').bars, 16);
+  assert.equal(autoTransitionLength(out(32), inn(32), 'bassswap').bars, 4, 'bass swap stays quick');
+  for (const ob of [1, 3, 5, 8, 13, 20, 33, 47, 70]) for (const ib of [0, 2, 9, 17, 40]) for (const st of ['blend', 'filter', 'crossfade', 'bassswap', 'echo', 'loop']) {
+    const b = autoTransitionLength(out(ob), inn(ib), st).bars;
+    assert.ok(b >= 4 && b <= 32 && (b === 4 || b % 8 === 0), `${ob}/${ib}/${st}: ${b}`);
+  }
+});
+
+test('automix uses the auto length for the plan and reports it; fixed mode keeps transitionBeats', () => {
+  const app = fakeApp(); app.settings.automix.style = 'blend';
+  const end = 0.1 + 160 * BAR, mo = end - 32 * BAR;
+  const a = { id: 'a', bpm: BPM, duration: end + 1, endTime: end, mixOut: mo, downbeat: 0.1, phrases: [{ start: 0.1, end: mo, type: 'drop' }, { start: mo, end, type: 'outro' }] };
+  const b = { id: 'b', bpm: BPM, duration: 300, endTime: 299, mixIn: 0.1, mixOut: 250, downbeat: 0.1, phrases: [{ start: 0.1, end: 0.1 + 16 * BAR, type: 'intro' }, { start: 0.1 + 16 * BAR, end: 299, type: 'drop' }] };
+  const [d0, d1] = app.engine.decks;
+  Object.assign(d0, { track: a, bpm: BPM, gridOffset: 0.1, duration: a.duration, position: 10, rate: 1, playing: true });
+  Object.assign(d1, { track: b, bpm: BPM, gridOffset: 0.1, duration: b.duration, position: 0, rate: 1, loading: false });
+  const am = new AutoMix(app);
+  am.enabled = true; am.queue = [a, b]; am.idx = 1; am.current = d0;
+  let nt = am.nextTransition();
+  assert.equal(nt.length.auto, false); assert.equal(nt.length.bars, 8);
+  assert.ok(Math.abs(am.upcoming.plan.len - 8 * BAR) < 1e-6);
+  app.settings.automix.lengthMode = 'auto';
+  nt = am.nextTransition();
+  assert.equal(nt.length.auto, true); assert.equal(nt.length.bars, 16, '32-bar outro, 16-bar intro');
+  assert.match(nt.length.why, /16-bar intro/);
+  assert.ok(Math.abs(am.upcoming.plan.len - 16 * BAR) < 1e-6, `plan len ${am.upcoming.plan.len / BAR} bars`);
+  assert.ok(Math.abs(nt.begin - (mo + 16 * BAR)) < 1e-6, 'starts on the 8-bar boundary that leaves 16 bars');
+  // queue panel helper: same answer for the next entry
+  assert.equal(am.lengthForQueue(1, 'blend').bars, 16);
+});
+
+test('settings schema: automix.lengthMode', async () => {
+  const { sanitizeSetting } = await import('../public/js/shared/settings-schema.js');
+  const { DEFAULT_SETTINGS } = await import('../public/js/shared/library-core.js');
+  assert.equal(DEFAULT_SETTINGS.automix.lengthMode, 'fixed');
+  const ok = sanitizeSetting('automix', { lengthMode: 'auto', transitionBeats: 32 });
+  assert.equal(ok.ok, true); assert.equal(ok.value.lengthMode, 'auto');
+  const bad = sanitizeSetting('automix', { lengthMode: 'sometimes', transitionBeats: 32 });
+  assert.notEqual(bad.value?.lengthMode, 'sometimes');
+});
