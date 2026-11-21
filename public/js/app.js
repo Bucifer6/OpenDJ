@@ -316,8 +316,8 @@ class App {
         if (!selected) { this.toast('Choose a sound first'); return false; }
         try {
           this.toast('Downloading ' + selected.name + '…');
-          await sampler.loadCatalogSample(i, selected); save(); this.engine.resume(); sampler.trigger(i);
-          this.toast(selected.name + ' loaded to pad ' + (i + 1));
+          const r = await sampler.loadCatalogSample(i, selected); save(); this.engine.resume(); sampler.trigger(i);
+          this.toast(selected.name + ' loaded to pad ' + (i + 1) + (r?.saved === false && !r.superseded ? ' (for this session only: the browser did not allow saving it)' : ''));
         } catch (e) { this.toast('Could not download sample: ' + e.message); return false; }
       } },
     ], { wide: true, cls: 'sample-catalog-modal' });
