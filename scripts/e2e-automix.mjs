@@ -180,6 +180,31 @@ try {
   check(auto.style !== 'auto' && auto.why, `auto style: "${auto.style}" (${auto.why})`);
   await page.evaluate(() => window.opendj.automix.stop());
 
+  // big tempo gaps are never beat-matched (QA M3): a forced blend style falls back to echo out / cut (and says so),
+  // drop styles start the incoming track at its own tempo, and there is no tempo glide afterwards
+  for (const [style, from, to] of [['crossfade', 'Saturday Satellite', 'Iron Meridian'], ['cut', 'Midnight Transit', 'Pressure Index']]) {
+    await page.evaluate(async ({ style, from, to }) => {
+      const a = window.opendj;
+      for (const d of a.engine.decks.slice(0, 2)) if (d.playing) d.pause();
+      await a.setSetting('automix', { ...a.settings.automix, style, transitionBeats: 8, varyStyles: false });
+      const all = [...a.library.tracks.values()], t = (x) => all.find((y) => y.title === x);
+      await a.automix.start([t(from), t(to), t(from)], { mode: 'order' });
+    }, { style, from, to });
+    await waitNextLoaded();
+    const nt = await page.evaluate(() => {
+      const a = window.opendj.automix, nt = a.nextTransition();
+      const off = a.on('transition', () => { const tr = a.transition; window.__amStart = { style: tr.style, why: tr.why, inTempo: tr.inn.tempo, inSync: tr.inn.syncOn }; off(); });
+      a.current.seek(Math.max(0, nt.begin - 2)); return nt;
+    });
+    await page.waitForFunction(() => !!window.__amStart, null, { timeout: 15000 });
+    const during = await page.evaluate(() => { const r = window.__amStart; window.__amStart = null; return r; });
+    await page.waitForFunction(() => !window.opendj.automix.transition, null, { timeout: 40000 });
+    const after = await page.evaluate(() => { const a = window.opendj.automix; return { tempo: a.current.tempo, ramp: !!a.tempoRamp }; });
+    if (style === 'crossfade') check(['echo', 'cut'].includes(nt.style) && /too far to beat-match/.test(nt.why) && during.style === nt.style, `118 → 130 BPM with Crossfade chosen: ${nt.style} instead ("${nt.why}")`);
+    check(Math.abs(during.inTempo) < 0.01 && !during.inSync && Math.abs(after.tempo) < 0.01 && !after.ramp, `${style === 'crossfade' ? '118 → 130 BPM' : 'cut 124 → 126 BPM'}: incoming track at its own tempo (${during.inTempo.toFixed(2)} %), no tempo glide afterwards`);
+    await page.evaluate(() => window.opendj.automix.stop());
+  }
+
   // ================= C) loading tracks while automix runs =================
   const ids = await page.evaluate(() => [...window.opendj.library.tracks.values()].map((t) => t.id));
   const startAm = () => page.evaluate(async () => {

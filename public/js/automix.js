@@ -441,7 +441,15 @@ export class AutoMix extends Emitter {
     }
     let style = normStyle(def);
     if (!ov && this.opts.varyStyles) { const alts = VARIANTS[style]; style = alts[hashIdx(`${prev?.id}>${t.id}`, alts.length)]; }
-    return { style, why: ov ? 'chosen for this transition' : this.opts.varyStyles && style !== normStyle(def) ? 'varied' : 'default style', override: !!ov };
+    let why = ov ? 'chosen for this transition' : this.opts.varyStyles && style !== normStyle(def) ? 'varied' : 'default style';
+    // blend styles can't bridge a big tempo gap (they would beat-match far off the incoming track's tempo)
+    const pa = fresh(prev), pb = fresh(t), ba = Number(pa?.bpm) || 0, bb = Number(pb?.bpm) || 0;
+    if (ba && bb && !DROP_STYLES.has(style) && tempoDistance(ba, bb) > LOG_BPM_JUMP) {
+      const was = STYLE_LABEL[style] || style, de = (Number(pb.energy) || 0) - (Number(pa.energy) || 0);
+      style = de >= 2 ? 'cut' : 'echo';
+      why = `${why}; ${Math.round(ba)} → ${Math.round(bb)} BPM is too far to beat-match: ${STYLE_LABEL[style]} instead of ${was}`;
+    }
+    return { style, why, override: !!ov };
   }
 
   /** Structure info for the track on a deck: analysed fields, else derived from the deck's waveform (older analyses). */
@@ -550,11 +558,22 @@ export class AutoMix extends Emitter {
     let { style, why } = this.styleFor(this.idx, this.app.library?.track?.(out.track.id) || out.track) || { style: 'blend' };
     if (!out.playing) style = 'cut'; // the outgoing track already ended: just start the next one
     if (DROP_STYLES.has(style) && (!out.bpm || !inn.bpm) && style !== 'echo' && style !== 'cut') style = 'echo';
+    // a big tempo gap (> 8 %, half / double time allowed) is never beat-matched: a blend would play the incoming track
+    // far off its own tempo (122 -> 96 BPM at +27 %) and then glide back. Blend styles fall back to echo out / cut,
+    // as the Auto style does, and every drop style starts the incoming track at its own tempo on the bar line.
+    const outBpm = out.effectiveBpm || out.bpm, bigJump = !!(outBpm && inn.bpm) && tempoDistance(outBpm, inn.bpm) > LOG_BPM_JUMP;
+    if (bigJump && !DROP_STYLES.has(style)) {
+      const de = (Number(inn.track?.energy) || 0) - (Number(out.track?.energy) || 0);
+      const was = STYLE_LABEL[style] || style;
+      style = de >= 2 ? 'cut' : 'echo';
+      why = `${why ? why + '; ' : ''}${Math.round(outBpm)} → ${Math.round(inn.bpm)} BPM is too far to beat-match: ${STYLE_LABEL[style]} instead of ${was}`;
+    }
     const plan = planTransition(oi, style, this.opts, { pos, immediate: immediate || !out.playing });
     this.prepare(inn);
     const chI = this.engine.channels[inn.index], chO = this.engine.channels[out.index];
     chI.set('volume', 0);
-    if (this.opts.keepSync && out.bpm && inn.bpm) { out.setMaster(); inn.syncOn = true; inn.matchTempo(); }
+    if (this.opts.keepSync && out.bpm && inn.bpm && !bigJump && !DROP_STYLES.has(style)) { out.setMaster(); inn.syncOn = true; inn.matchTempo(); }
+    else { inn.syncOn = false; if (Math.abs(inn.tempo || 0) > 0.01) inn.setTempo(0); } // its own tempo: nothing to ramp back afterwards
     // key clash → shift the incoming track's key to a compatible one (if the deck supports it)
     if (this.opts.keySync && typeof inn.keySyncTo === 'function') {
       const outKey = out.playingCamelot || out.camelot || out.track?.key;
