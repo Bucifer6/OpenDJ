@@ -160,6 +160,19 @@ export function mediaServerError(url, { status, err, timeout, name } = {}) {
   return `${who} answered HTTP ${status}`;
 }
 
+const cspCache = new Map();
+/** The Content-Security-Policy header for a public HTML page: its <meta http-equiv> policy + frame-ancestors 'none'. */
+export async function htmlCsp(file, mtime = 0) {
+  const hit = cspCache.get(file);
+  if (hit && hit.mtime === mtime) return hit.csp;
+  const html = await fs.promises.readFile(file, 'utf8').catch(() => '');
+  const m = /<meta\s+http-equiv=["']Content-Security-Policy["']\s+content=(["'])(.*?)\1/i.exec(html);
+  const meta = m ? m[2].trim().replace(/;\s*$/, '') : '';
+  const csp = meta ? `${meta}; frame-ancestors 'none'` : "frame-ancestors 'none'";
+  cspCache.set(file, { mtime, csp });
+  return csp;
+}
+
 async function proxy(req, res, { url, headers = {}, name }, { connectTimeout = 15000, kind = 'audio' } = {}) {
   const h = { ...headers };
   if (req.headers.range) h.Range = req.headers.range;
@@ -883,8 +896,9 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       if (!st?.isFile()) throw new HttpError(404, 'Not found');
       const headers = { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' };
       if (rel === 'sw.js') headers['Service-Worker-Allowed'] = '/';
-      // frame-ancestors only works as a header (the pages' own CSP is a <meta> tag); both policies apply
-      if (path.extname(file) === '.html') headers['Content-Security-Policy'] = "frame-ancestors 'none'";
+      // HTML pages: the page's own <meta> CSP is also sent as a header (one source of truth: the meta tag, read once
+      // per file version), plus frame-ancestors, which only works as a header
+      if (path.extname(file) === '.html') headers['Content-Security-Policy'] = await htmlCsp(file, st.mtimeMs);
       res.writeHead(200, headers);
       if (req.method === 'HEAD') return res.end();
       await pipeQuiet(fs.createReadStream(file), res);
