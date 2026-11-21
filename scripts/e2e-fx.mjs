@@ -60,6 +60,14 @@ try {
     save(`tail-${type}`, r);
   }
 
+  // ---------------------------------------------------------------- full-mix loudness of insert effects (QA p3)
+  for (const id of ['autofilter', 'flanger', 'phaser']) {
+    const init = [{ call: 'setBeatSec', args: [0.5] }, { call: 'setType', args: [id] }, { call: 'setMix', args: [1] }, { call: 'setParam', args: [0.5] }, { call: 'setParam2', args: [0.5] }];
+    const m = await lab.render({ chain: 'fx', signal: 'drums', secs: 4, init, events: [{ t: 2, call: 'setOn', args: [true] }] });
+    const dLvl = db(rms(m.L, m.sr, 2.3, 4) / rms(m.L, m.sr, 0.3, 2));
+    check(Math.abs(dLvl) <= 2, `${id} at full mix: level within ±2 dB of dry on music (${f(dLvl)} dB)`);
+  }
+
   // ---------------------------------------------------------------- post-fader FX tails (echo-outs)
   {
     // a whole mixer channel playing drums with an echo / reverb on; at 2.0 s the channel fader (or the crossfader)

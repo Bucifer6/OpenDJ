@@ -203,12 +203,12 @@ const FX = {
       const f1 = biquad(ctx, 'lowpass', 220, 6), f2 = biquad(ctx, 'lowpass', 220, BUTTER_Q);
       const lfo = beatLfo(ctx, { beats: 1, shape: 0 });
       const depth = lfo.connect(f1.detune, 0, 6000), d2 = lfo.connect(f2.detune, 0, 6000);
-      const makeup = ctx.createGain(); makeup.gain.value = 1.35;
+      const makeup = ctx.createGain(); makeup.gain.value = 1.05;
       input.connect(f1); f1.connect(f2); f2.connect(makeup); makeup.connect(output);
       return {
         input, output,
         setParam: (p) => smooth(f1.Q, 1 + p * 13, ctx, 0.05),
-        setParam2: (p) => { const c = 2400 + p * 4800; smooth(depth.gain, c, ctx, 0.05); smooth(d2.gain, c, ctx, 0.05); smooth(makeup.gain, 1.2 + (1 - p) * 0.35, ctx, 0.05); },
+        setParam2: (p) => { const c = 2400 + p * 4800; smooth(depth.gain, c, ctx, 0.05); smooth(d2.gain, c, ctx, 0.05); smooth(makeup.gain, 0.92 + (1 - p) * 0.26, ctx, 0.05); }, // was +3-5 dB over dry at full mix (QA p3)
         setTempo: (beatSec, beats) => smooth(lfo.p('beats'), beats * 2, ctx, 0.01),
         setClock: (b, at, s) => lfo.clock(b, at, s),
         dispose: () => { lfo.dispose(); disconnectAll(input, output, f1, f2, makeup, depth, d2); },
