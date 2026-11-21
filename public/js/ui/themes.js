@@ -24,15 +24,20 @@ export function applyTheme(settings) {
   root.dataset.theme = theme;
   // optional custom accent colour on top of any theme
   if (settings.accentColor) root.style.setProperty('--accent', settings.accentColor); else root.style.removeProperty('--accent');
-  // never scale beyond what keeps a usable 1100x700 effective window
+  // never scale beyond what keeps a usable 1100x700 effective window. Phones and small tablets (the compact
+  // layouts in css/mobile.css) are laid out at their real size instead of being shrunk to fit the desktop layout.
   const want = (settings.uiScale || 100) / 100;
-  const z = Math.max(0.5, Math.min(want, innerWidth / 1100, innerHeight / 700, want));
+  const compact = innerWidth < 900 || innerHeight < 560;
+  const z = compact ? Math.max(0.5, Math.min(want, 1.5)) : Math.max(0.5, Math.min(want, innerWidth / 1100, innerHeight / 700, want));
+  root.classList.toggle('compact', compact);
+  root.classList.toggle('touch', !!globalThis.matchMedia?.('(pointer: coarse)').matches);
   root.style.zoom = String(z);
   root.style.setProperty('--ui-zoom', String(z)); // layout heights divide by this so the page still fits the window
   root.classList.toggle('zoom-large', z > 1.05);
-  const effH = innerHeight / z;
+  // short / narrow desktop windows squeeze the desktop layout (css/performance.css); compact screens have their own
+  const effH = compact ? Infinity : innerHeight / z;
   root.classList.toggle('h920', effH <= 920); root.classList.toggle('h860', effH <= 860); root.classList.toggle('h800', effH <= 800);
-  const effW = innerWidth / z;
+  const effW = compact ? Infinity : innerWidth / z;
   root.classList.toggle('w1300', effW <= 1300); root.classList.toggle('w1200', effW <= 1200);
   if (!applyTheme._resize) { applyTheme._resize = true; let t; addEventListener('resize', () => { clearTimeout(t); t = setTimeout(() => applyTheme(applyTheme._last), 150); }); }
   applyTheme._last = settings;

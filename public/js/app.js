@@ -22,6 +22,7 @@ import { setupLyrics } from './lyrics/lyrics.js';
 import { dvsButton } from './dvs/dvs-ui.js';
 import { BackgroundAnalyser } from './audio/background-analysis.js';
 import { isUndecodable } from './audio/analysis-queue.js';
+import { platform, unavailable } from './platform.js';
 
 /** The OpenDJ mark: a platter with a tone arm, drawn in the accent colour. */
 function logoMark() {
@@ -45,7 +46,8 @@ class App {
     this.library = new LibraryUI(this);
     this.analyser = new BackgroundAnalyser(this);
     this.upload = setupUpload(this);
-    if ('serviceWorker' in navigator && !/Electron/.test(navigator.userAgent)) navigator.serviceWorker.register('/sw.js').catch(() => {});
+    // (not in the mobile app: its files are inside the app already)
+    if ('serviceWorker' in navigator && !/Electron/.test(navigator.userAgent) && !platform.native) navigator.serviceWorker.register('/sw.js').catch(() => {});
     this.automix = new AutoMix(this);
     this.midi = new MidiManager(this);
     this.sequencer = new Sequencer(this.engine);
@@ -53,19 +55,19 @@ class App {
     setupStems(this);
     this.recording = setupRecording(this); this.engine.attachRecorder(this.recording.recorder);
     this.wireEvents(); // subscribe to server events before loading the library so no change is missed
-    setupLink(this);
+    if (!unavailable('link')) setupLink(this); // Ableton Link: UDP multicast through the server
     setupLyrics(this);
     await this.midi.init();
     if (this.settings.midiClockOutput) this.midi.setClockOutput(this.settings.midiClockOutput);
     this.lighting = new Lighting(this);
-    try { await this.lighting.init(); } catch (e) { console.warn('lighting init failed', e); }
+    if (!unavailable('lighting')) { try { await this.lighting.init(); } catch (e) { console.warn('lighting init failed', e); } }
     await this.library.refresh();
     this.analyser.autoQueue(); // tracks added earlier (or by another device) that were never analysed
     api.capabilities().then((c) => { this.hosted = !!c.hosted; this.auth = !!c.auth; this.library.renderEmpty(); this.updateHostedUi?.(); }).catch(() => {});
     this.library.refreshDrives();
     setInterval(() => this.library.refreshDrives(), 15000); // notice USB sticks being plugged in
     this.setDeckCount(this.deckCount, false);
-    this.dvs.init().catch((e) => console.warn('DVS init failed', e));
+    if (!unavailable('dvs')) this.dvs.init().catch((e) => console.warn('DVS init failed', e));
     this.engine.setMasterVolume(0.8); this.engine.setHeadphoneVolume(0.8);
     if (this.engine.ctx.state !== 'running') this.showStartOverlay();
     const frame = (now) => { this.frame(now); requestAnimationFrame(frame); };
@@ -94,7 +96,7 @@ class App {
       if (t.unreadable) api.updateTrack(t.id, { unreadable: false }).then((x) => this.library.updateTrack(x)).catch(() => {});
       this.library.renderRows(true);
     } catch (e) {
-      const file = String(t.path || t.localPath || '').split(/[\\/]/).pop();
+      const file = String(t.fileName || t.path || t.localPath || '').split(/[\\/]/).pop();
       const bad = isUndecodable(e);
       this.toast(`⚠ Could not load "${t.title}"${file && file !== t.title ? ` (${file})` : ''}: ${bad ? 'the file could not be decoded (corrupt, empty or unsupported)' : e.message}`);
       if (bad && !t.unreadable) api.updateTrack(t.id, { unreadable: true }).then((x) => this.library.updateTrack(x)).catch(() => {});

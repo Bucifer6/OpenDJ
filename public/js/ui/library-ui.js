@@ -6,8 +6,10 @@ import { api } from '../api.js';
 import { toCamelot, camelotCompatible } from '../audio/analysis-core.js';
 import { LibraryDialogs, TRACK_COLORS, colorName, flipSubmenus } from './library-dialogs.js';
 import { icon as uiIcon, iconLabel, glyphIcon } from './icons.js';
+import { platform, unavailable } from '../platform.js';
 
-const ROW_H = 26;
+// rows are taller on touch screens (phones, tablets) so a finger can pick one
+const ROW_H = globalThis.matchMedia?.('(pointer: coarse)').matches ? 40 : 26;
 const COLS = [
   { id: '#', label: '#', w: 34, ordered: true }, // position in a playlist / set / history view (only shown there)
   { id: 'art', label: '', w: 30, sort: null },
@@ -145,7 +147,16 @@ export class LibraryUI {
     const an = this.app.analyser?.status?.();
     const needsAnalysis = /bpm:|key:/.test(this.query) || ['matching'].includes(this.view.kind)
       || (this.view.kind === 'playlist' && this.playlists.find((p) => p.id === this.view.id)?.smart);
-    if (!this.tracks.size && this.view.kind === 'all' && !this.query.trim()) {
+    if (!this.tracks.size && this.view.kind === 'all' && !this.query.trim() && platform.local) {
+      e.replaceChildren(
+        el('h3', {}, 'Your library is empty'),
+        el('p', {}, 'OpenDJ keeps its own copy of the music you import, so it works offline and needs no computer or server.'),
+        el('ul', {},
+          el('li', {}, el('button', { class: 'btn sm', onclick: () => this.app.upload?.pick?.() }, '＋ Import music'), platform.native && platform.os === 'ios' ? ' from the Files app (iCloud Drive, On My iPhone, USB drives, cloud storage)' : ' from your files (Downloads, Music, a USB stick or a cloud drive)'),
+          el('li', {}, el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addSource() }, '+ Media server'), ' stream from Plex, Jellyfin, Emby, Subsonic / Navidrome and download for offline use'),
+          el('li', {}, 'bring cues and playlists from rekordbox: ', el('button', { class: 'btn sm', onclick: (ev) => { const r = ev.currentTarget.getBoundingClientRect(); this.dlg.libraryMenu(r.left, r.bottom + 4); } }, '⋯ Library → Import'), ' (after importing the music)')),
+        el('p', { class: 'hint' }, 'MP3, AAC / M4A, WAV, AIFF and FLAC play everywhere; Ogg / Opus where the phone supports it. New tracks are analysed in the background (BPM, key, waveform, cues).'));
+    } else if (!this.tracks.size && this.view.kind === 'all' && !this.query.trim()) {
       const hosted = !!this.app.hosted;
       e.replaceChildren(
         el('h3', {}, 'Your library is empty'),
@@ -202,7 +213,7 @@ export class LibraryUI {
     this.viewActions = el('span', { class: 'lib-view-actions' });
     const tools = el('div', { class: 'lib-tools' },
       this.viewTitle, this.countEl, this.viewActions, this.search,
-      el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addFolder(), title: 'Add a folder, USB drive or NAS share' }, iconLabel('folder-plus', 'Folder')),
+      platform.local ? null : el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addFolder(), title: 'Add a folder, USB drive or NAS share' }, iconLabel('folder-plus', 'Folder')),
       uploadButton(this.app),
       el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addSource(), title: 'Connect Plex, Jellyfin, Emby, Subsonic/Navidrome or MediaMax' }, iconLabel('server', 'Media server')),
       el('button', { class: 'btn sm', onclick: () => this.app.dialogs.automixQueue(this.rows), title: 'Auto-mix the tracks in this view' }, iconLabel('automix', 'Automix view')),
@@ -394,12 +405,12 @@ export class LibraryUI {
     const unanalysed = tracks.filter((t) => !t.analyzed);
     if (unanalysed.length) items.push({ label: `Analyse ${unanalysed.length > 1 ? `${unanalysed.length} tracks` : 'now'} (BPM, key, waveform)`, action: () => { const n = this.app.analyser.request(unanalysed); this.app.toast(n ? `Analysing ${n} track(s) in the background` : 'Nothing to analyse (locked BPM / imported grid)'); } });
     else items.push({ label: 'Re-analyse (BPM, key, waveform)', action: async () => { const ok = tracks.filter((t) => !t.bpmLocked); for (const t of ok) { await api.updateTrack(t.id, { analyzed: false, gridLocked: false }); t.analyzed = false; t.gridLocked = false; } const n = this.app.analyser.request(ok); this.app.toast(`Re-analysing ${n} track(s) in the background${ok.length < tracks.length ? ' (locked BPMs kept)' : ''}`); } });
-    items.push(...stemsMenuItems(this.app, tracks));
+    if (!unavailable('stems')) items.push(...stemsMenuItems(this.app, tracks));
     if (window.opendjNative && tracks[0] && (tracks[0].localPath || tracks[0].path)) items.push({ label: 'Show in folder', action: () => window.opendjNative.reveal(tracks[0].localPath || tracks[0].path) });
     items.push('-');
     const curPl = this.view.kind === 'playlist' && this.playlists.find((p) => p.id === this.view.id);
     if (curPl && !curPl.sourceId && !curPl.smart) items.push({ label: 'Remove from playlist', action: () => this.removeFromPlaylist() });
-    items.push({ label: 'Remove from library', danger: true, action: async () => { if (await this.app.dialogs.confirm(`Remove ${ids.length} track(s) from the library? Files are not deleted.`)) { await api.deleteTracks(ids); this.selected.clear(); this.refresh(); } } });
+    items.push({ label: 'Remove from library', danger: true, action: async () => { if (await this.app.dialogs.confirm(platform.local ? `Remove ${ids.length} track(s) from OpenDJ? The copies imported into the app are deleted from this device (your original files are not touched).` : `Remove ${ids.length} track(s) from the library? Files are not deleted.`)) { await api.deleteTracks(ids); this.selected.clear(); this.refresh(); } } });
     this.app.dialogs.menu(x, y, items);
     flipSubmenus();
     // Colour dots for the colour sub-menu (menu() renders plain labels).
@@ -503,12 +514,12 @@ export class LibraryUI {
       ...(!this.sessions.length ? [el('div', { class: 'tree-empty' }, 'Sets you play are recorded here')] : []),
       head('PLAYLISTS', el('button', { class: 'ti-act', title: 'New playlist', onclick: async () => { const n = await this.app.dialogs.prompt('New playlist', 'Playlist name'); if (n) { await api.createPlaylist(n); this.refresh(); } } }, '+')),
       ...plNodes,
-      head('FOLDERS · USB · NAS', el('button', { class: 'ti-act', title: 'Add folder', onclick: () => this.app.dialogs.addFolder() }, '+')),
+      ...(platform.local ? [] : [head('FOLDERS · USB · NAS', el('button', { class: 'ti-act', title: 'Add folder', onclick: () => this.app.dialogs.addFolder() }, '+'))]),
       ...this.folders.map((f) => item(f.name, { kind: 'folder', id: f.id }, {
         icon: f.online ? '🗀' : '⚠', count: f.trackCount, cls: f.online ? '' : 'offline',
         actions: [{ icon: '⟳', title: 'Rescan', fn: () => api.rescanFolder(f.id).catch((e) => this.app.toast(e.message)) }, { icon: '✕', title: 'Remove folder from library', fn: async () => { if (await this.app.dialogs.confirm(`Remove "${f.name}" from the library? (Files stay on disk.)`)) { await api.removeFolder(f.id); this.refresh(); } } }],
       })),
-      ...this.drives.filter((d) => !this.folders.some((f) => f.path === d.path)).map((d) => el('div', { class: 'tree-item drive', title: `${d.path} — click to add to library`, onclick: async () => { await api.addFolder(d.path, d.name); this.refresh(); this.app.toast(`Scanning ${d.name}…`); } },
+      ...(platform.local ? [] : this.drives).filter((d) => !this.folders.some((f) => f.path === d.path)).map((d) => el('div', { class: 'tree-item drive', title: `${d.path} — click to add to library`, onclick: async () => { await api.addFolder(d.path, d.name); this.refresh(); this.app.toast(`Scanning ${d.name}…`); } },
         el('span', { class: 'ti-icon' }, glyphIcon(d.kind === 'network' ? '🖧' : d.kind === 'home' ? '⌂' : '⛁')), el('span', { class: 'ti-label' }, `${d.name}`), el('span', { class: 'ti-count' }, d.kind === 'network' ? 'NAS +' : d.kind === 'home' ? '+' : 'USB +'))),
       head('MEDIA SERVERS', el('button', { class: 'ti-act', title: 'Add media server', onclick: () => this.app.dialogs.addSource() }, '+')),
       ...this.sources.flatMap((s) => [
@@ -532,9 +543,9 @@ export class LibraryUI {
       { label: 'Automix this playlist', action: () => this.app.dialogs.automixQueue(p.trackIds.map((i) => this.tracks.get(i)).filter(Boolean)) },
       { label: 'Download all for offline use', action: () => this.download(p.trackIds.filter((i) => { const t = this.tracks.get(i); return t?.sourceType === 'remote' && !t.localPath; })) },
       { label: 'Export as M3U8', action: () => { const a = el('a', { href: api.m3uUrl(p.id), download: '' }); document.body.append(a); a.click(); a.remove(); } }, // no navigation: beforeunload would ask while decks play
-      { label: 'Export to USB / folder…', action: () => this.app.dialogs.exportUsb([p.id]) },
-      { label: 'Export to CDJ USB (rekordbox)…', action: () => openCdjExport(this.app, [p.id]) },
-      { label: 'Prepare AI stems for playlist', action: () => this.app.stems?.enqueue(p.trackIds).catch((e) => this.app.toast(e.message)) },
+      ...(unavailable('usbExport') ? [] : [{ label: 'Export to USB / folder…', action: () => this.app.dialogs.exportUsb([p.id]) }]),
+      ...(unavailable('cdj') ? [] : [{ label: 'Export to CDJ USB (rekordbox)…', action: () => openCdjExport(this.app, [p.id]) }]),
+      ...(unavailable('stems') ? [] : [{ label: 'Prepare AI stems for playlist', action: () => this.app.stems?.enqueue(p.trackIds).catch((e) => this.app.toast(e.message)) }]),
     ];
     if (p.smart) {
       items.push('-',

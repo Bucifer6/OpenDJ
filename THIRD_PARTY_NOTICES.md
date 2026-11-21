@@ -28,6 +28,15 @@ include the following third-party software.
 - [Electron](https://github.com/electron/electron) — MIT (includes Chromium, whose licences are listed in the app's
   `LICENSES.chromium.html`)
 
+## Mobile app (iOS / Android)
+
+- [Capacitor](https://github.com/ionic-team/capacitor) (`@capacitor/core`, `cli`, `android`, `ios`) — MIT
+- Capacitor plugins: `@capacitor/filesystem`, `@capacitor/share`, `@capacitor/app`, `@capacitor/file-transfer` — MIT;
+  [`@capawesome/capacitor-file-picker`](https://github.com/capawesome-team/capacitor-plugins) — MIT;
+  [`@capacitor-community/keep-awake`](https://github.com/capacitor-community/keep-awake) — MIT
+- `public/vendor/opendj-vendor.js` bundles music-metadata (and its dependencies), fast-xml-parser and
+  `@capacitor/core` (all MIT) for the browser.
+
 ## ONNX Runtime Web (onnxruntime-web)
 Used to run the AI stem-separation model in the app. MIT License, © Microsoft Corporation. https://github.com/microsoft/onnxruntime
 

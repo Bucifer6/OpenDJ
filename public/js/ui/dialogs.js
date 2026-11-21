@@ -3,6 +3,7 @@ import { el, uiZoom } from '../util.js';
 import { api } from '../api.js';
 import { THEMES, applyTheme } from './themes.js';
 import { controllersPanel } from './controllers-panel.js';
+import { platform, MOBILE_UNAVAILABLE, APP_VERSION } from '../platform.js';
 
 export class Dialogs {
   constructor(app) { this.app = app; }
@@ -92,6 +93,7 @@ export class Dialogs {
   }
 
   async addFolder() {
+    if (platform.local) { this.app.toast(MOBILE_UNAVAILABLE.folders); return this.app.upload?.pick?.(); } // phones: import instead
     const drives = await api.drives().catch(() => []);
     const pathIn = el('input', { class: 'inp', placeholder: '/media/usb  ·  /Volumes/NAS/Music  ·  \\\\nas\\music  ·  D:\\Music' });
     const nameIn = el('input', { class: 'inp', placeholder: 'Display name (optional)' });
@@ -229,12 +231,15 @@ export class Dialogs {
     const outputs = await app.engine.listOutputs();
     const inputs = await navigator.mediaDevices?.enumerateDevices?.().then((ds) => ds.filter((d) => d.kind === 'audioinput' && d.deviceId !== 'default').map((d) => ({ id: d.deviceId, label: d.label || `Input ${d.deviceId.slice(0, 6)}` }))).catch(() => []) || [];
     const outOpts = [['default', 'System default'], ...outputs.filter((o) => o.id !== 'default').map((o) => [o.id, o.label])];
+    // phones / tablets: no output device choice in the WebView (the system routes to speaker, headphones, Bluetooth, USB)
+    const sinks = !platform.native && ('setSinkId' in (window.AudioContext?.prototype || {}) || 'setSinkId' in HTMLMediaElement.prototype);
     const audio = el('div', { class: 'form' },
-      field('Master output', sel(s.masterDeviceId || 'default', outOpts, async (v) => { await set('masterDeviceId', v); app.engine.applyOutputs(); })),
+      sinks ? null : el('p', { class: 'hint' }, 'Audio plays through the output the system uses (speaker, headphones, Bluetooth or a USB audio interface). For a headphone cue on one jack, use "Split cue" with a Y splitter cable.'),
+      !sinks ? null : field('Master output', sel(s.masterDeviceId || 'default', outOpts, async (v) => { await set('masterDeviceId', v); app.engine.applyOutputs(); })),
       field('Headphone (cue) routing', sel(s.cueMode, [['device', 'Separate sound card / output'], ['channels34', 'Same interface, channels 3-4 (DJ controller sound card)'], ['split', 'Split cue: master mono left, cue mono right (single stereo jack)']], async (v) => { await set('cueMode', v); app.engine.applyOutputs(); }),
         'Most DJ controllers with a built-in sound card expose 4 channels: choose "channels 3-4" and select the controller as master output.'),
-      field('Headphone output (separate device mode)', sel(s.cueDeviceId || '', [['', '— none —'], ...outOpts.filter(([v]) => v !== 'default')], async (v) => { await set('cueDeviceId', v); app.engine.applyOutputs(); })),
-      el('button', { class: 'btn sm', onclick: async () => { try { const st = await navigator.mediaDevices.getUserMedia({ audio: true }); st.getTracks().forEach((t) => t.stop()); this.app.toast('Device names unlocked — reopen settings'); } catch (e) { this.app.toast(e.message); } } }, 'Show device names (asks for permission)'),
+      !sinks ? null : field('Headphone output (separate device mode)', sel(s.cueDeviceId || '', [['', '— none —'], ...outOpts.filter(([v]) => v !== 'default')], async (v) => { await set('cueDeviceId', v); app.engine.applyOutputs(); })),
+      !sinks ? null : el('button', { class: 'btn sm', onclick: async () => { try { const st = await navigator.mediaDevices.getUserMedia({ audio: true }); st.getTracks().forEach((t) => t.stop()); this.app.toast('Device names unlocked — reopen settings'); } catch (e) { this.app.toast(e.message); } } }, 'Show device names (asks for permission)'),
       field('Microphone / aux input', sel(s.micDeviceId || '', [['', 'System default input'], ...inputs.map((d) => [d.id, d.label])], async (v) => { await set('micDeviceId', v); if (app.engine.micOn) { await app.engine.setMic(false); await app.engine.setMic(true); } })),
       field('Talkover ducking', sel(s.talkoverDb ?? -12, [[-6, '−6 dB'], [-12, '−12 dB'], [-18, '−18 dB'], [-24, '−24 dB']], (v) => set('talkoverDb', Number(v)))),
       field('Audio latency', sel(s.latencyHint || 'interactive', [['interactive', 'Lowest (interactive)'], ['10', '10 ms'], ['20', '20 ms'], ['balanced', 'Balanced'], ['playback', 'Safe (high latency, no dropouts)']], (v) => { set('latencyHint', v); this.app.toast('Restart OpenDJ to apply the new latency'); }),
@@ -266,7 +271,7 @@ export class Dialogs {
     dlIn.addEventListener('change', () => set('downloadDir', dlIn.value));
     const rbIn = el('input', { class: 'inp', placeholder: 'Path to rekordbox.xml (File → Export Collection in xml format)' });
     const m3uIn = el('input', { class: 'inp', placeholder: 'Path to .m3u / .m3u8 playlist' });
-    const library = el('div', { class: 'form' },
+    const library = platform.local ? this.localLibrarySettings(chk) : el('div', { class: 'form' },
       field('Download folder (for tracks from media servers)', el('div', { class: 'row' }, dlIn, el('button', { class: 'btn', onclick: async () => { const p = await this.pickFolder('Download folder'); if (p) { dlIn.value = p; set('downloadDir', p); } } }, 'Browse…'))),
       el('label', { class: 'check' }, chk(s.autoAnalyse !== false, (v) => { set('autoAnalyse', v); if (v) app.analyser?.autoQueue({ afterScan: true }); else app.analyser?.cancel(); }), ' Analyse new tracks in the background (BPM, key, waveform, cues)'),
       (() => { // hosted web app: sign out
@@ -288,7 +293,7 @@ export class Dialogs {
         el('button', { class: 'btn', onclick: () => this.exportUsb([]) }, 'Export playlists to USB…')),
       el('p', { class: 'hint' }, 'The rekordbox XML export (cues, loops, beat grids, playlists) can be imported into rekordbox, Serato (via plugins), Traktor or Mixxx.'),
     );
-    const controllers = controllersPanel(app);
+    const controllers = platform.local ? null : controllersPanel(app);
     const shortcuts = el('div', { class: 'form shortcuts' }, el('table', {}, ...[
       ['Space', 'Play/pause deck 1'], ['Z / X / C', 'Deck 1 cue / play / sync'], ['M / , / .', 'Deck 2 cue / play / sync'],
       ['1 – 4', 'Deck 1 hot cues A–D (Shift = delete)'], ['7 – 0', 'Deck 2 hot cues A–D'], ['Q / W', 'Deck 1 loop 4 / exit'], ['O / P', 'Deck 2 loop 4 / exit'],
@@ -318,7 +323,10 @@ export class Dialogs {
       field('Waveform colours', sel(s.waveformColors, [['rgb', '3-band RGB'], ['blue', 'Blue'], ['mono', 'Monochrome']], (v) => set('waveformColors', v))),
     );
     const dvsTab = el('div', { class: 'form' }, el('p', { class: 'hint' }, 'Control decks with Serato or Traktor timecode vinyl / CDs through your audio interface inputs.'), el('button', { class: 'btn', onclick: () => import('../dvs/dvs-ui.js').then((m) => m.openDvsPanel(app)) }, 'Open DVS setup…'));
-    const tabs = { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], dvs: ['DVS', dvsTab], keys: ['Shortcuts', shortcuts] };
+    const tabs = platform.local
+      ? { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], mobile: ['Mobile', this.mobileInfo()] }
+      : { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], dvs: ['DVS', dvsTab], keys: ['Shortcuts', shortcuts] };
+    if (!tabs[tab]) tab = 'audio';
     const tabBar = el('div', { class: 'tabs' });
     const pane = el('div', { class: 'tab-pane' });
     const show = (k) => { pane.replaceChildren(tabs[k][1]); for (const b of tabBar.children) b.classList.toggle('active', b.dataset.k === k); };
@@ -326,7 +334,38 @@ export class Dialogs {
     show(tab);
     await this.modal('Settings', el('div', {}, tabBar, pane), [{ label: 'Close', primary: true, value: true }], { wide: true });
     app.midi.cancelLearn();
-    controllers.destroy?.();
+    controllers?.destroy?.();
+  }
+
+  /** Settings → Library in the mobile app (no folders: import, rekordbox / M3U, exports through the share sheet). */
+  localLibrarySettings(chk) {
+    const app = this.app, s = app.settings;
+    const storage = el('p', { class: 'hint' });
+    api.capabilities().then((c) => { const st = c.storage; if (st?.used != null) storage.textContent = `App storage: ${(st.used / 1048576).toFixed(0)} MB used${st.quota ? ` of ${(st.quota / 1073741824).toFixed(1)} GB available to OpenDJ` : ''}.`; }).catch(() => {});
+    return el('div', { class: 'form' },
+      el('label', { class: 'check' }, chk(s.autoAnalyse !== false, (v) => { app.setSetting('autoAnalyse', v); if (v) app.analyser?.autoQueue({ afterScan: true }); else app.analyser?.cancel(); }), ' Analyse new tracks in the background (BPM, key, waveform, cues)'),
+      el('h3', {}, 'Import'),
+      el('p', { class: 'hint' }, 'Import copies music into OpenDJ, so it plays offline. The originals stay where they are.'),
+      el('div', { class: 'row' },
+        el('button', { class: 'btn sm', onclick: () => app.upload?.pick?.() }, '＋ Import music…'),
+        el('button', { class: 'btn sm', onclick: () => app.library.dlg.importFrom('rekordbox') }, 'Import rekordbox XML…'),
+        el('button', { class: 'btn sm', onclick: () => app.library.dlg.importFrom('m3u') }, 'Import M3U…')),
+      el('h3', {}, 'Export'),
+      el('div', { class: 'row' },
+        el('a', { class: 'btn sm', href: api.rekordboxExportUrl(), download: 'opendj-rekordbox.xml' }, 'Collection as rekordbox XML'),
+        el('button', { class: 'btn sm', onclick: () => app.library.dlg.backup() }, 'Back up library')),
+      el('p', { class: 'hint' }, platform.native ? 'Exports open the share sheet: save to Files, send to your computer or a cloud drive.' : 'Exports are downloaded.'),
+      storage);
+  }
+
+  /** Settings → Mobile: what the mobile app does differently, and why some features are hidden. */
+  mobileInfo() {
+    const names = { folders: 'Library folders', midi: 'MIDI controllers', dvs: 'DVS (timecode vinyl)', lighting: 'Lighting (DMX / Art-Net / sACN / OSC)', link: 'Ableton Link', broadcast: 'Live streaming', cdj: 'CDJ USB export', stems: 'AI stems', video: 'Video mixer', otherImports: 'Traktor / Serato / VirtualDJ import' };
+    return el('div', { class: 'form mobile-info' },
+      el('p', {}, 'OpenDJ runs completely on this device: your library, analysis, mixing, playlists and recordings need no computer or server.'),
+      el('h3', {}, 'Not available in the mobile app yet'),
+      el('ul', { class: 'unavail-list' }, ...Object.entries(names).map(([k, n]) => el('li', {}, el('b', {}, n), ' — ', MOBILE_UNAVAILABLE[k]))),
+      el('p', { class: 'hint' }, `OpenDJ ${APP_VERSION}${platform.native ? ` (${platform.os})` : ' (browser, on-device mode)'}`));
   }
 
 
