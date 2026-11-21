@@ -36,6 +36,20 @@ export function statusType(status) {
 }
 
 const deckOf = (group) => { const m = /^\[Channel(\d+)\]$/i.exec(group || ''); return m ? +m[1] : null; };
+/** "[EqualizerRack1_[Channel2]_Effect1]", "[QuickEffectRack1_[Channel1]]" → the deck inside a nested group. */
+const deckInGroup = (group) => { const m = /\[Channel(\d+)\]/i.exec(group || ''); return m ? +m[1] : null; };
+/** The deck named in a Components path: deck[0] / decks[1] (0-based), deckA / deckB, leftDeck / rightDeck, deck1. */
+function deckInPath(segs) {
+  for (const s of segs) {
+    let m;
+    if ((m = /^decks?\[(\d)\]$/i.exec(s))) return +m[1] + 1;
+    if ((m = /^deck([A-D])$/.exec(s))) return m[1].charCodeAt(0) - 64;
+    if ((m = /^deck(\d)$/i.exec(s))) return +m[1];
+    if (/^left(Deck)?$/i.test(s)) return 1;
+    if (/^right(Deck)?$/i.test(s)) return 2;
+  }
+  return null;
+}
 const T = (target, kind, extra) => ({ target, kind, ...extra });
 
 /** Translate a (non-scripted) Mixxx [group] key pair to an OpenDJ target. Returns { target, kind } or null. */
@@ -202,11 +216,18 @@ export function mixxxState(group, key) {
  * `indexed` targets get their pad number from the control's position among siblings sharing group+function.
  */
 export function scriptTarget(group, fn, desc, type, channel) {
-  const raw = String(fn || '').split('.').pop();
-  const k = words(raw); // "PioneerDDJ400.tempoSliderMSB" → "tempo slider msb"
+  const segs = String(fn || '').split('.');
+  let raw = segs.pop() || '';
+  // Mixxx "Components" mappings (components.js) bind a component's method: "DJCi500.deckA.playButton.input",
+  // "MixtrackProFX.deck[0].pitch.inputMSB", "DJ2GO2Touch.leftDeck.hotcueButtons[1].input". The component name says
+  // what the control is, the method says how (MSB/LSB half, wheel turn or touch).
+  let method = '';
+  if (/^input\w*$/i.test(raw) && segs.length > 1) { method = words(raw.slice(5)); raw = segs.pop(); }
+  raw = raw.replace(/\[(\d+)\]/g, ' $1'); // hotcueButtons[1] → "hotcue buttons 1"
+  const k = `${words(raw)} ${method}`.trim(); // "PioneerDDJ400.tempoSliderMSB" → "tempo slider msb"
   const d = String(desc || '').toLowerCase();
   const w = `${k} ${d}`;
-  let deck = deckOf(group);
+  let deck = deckOf(group) ?? deckInGroup(group) ?? deckInPath(segs);
   const samplerGroup = /^\[Sampler(\d+)\]$/i.exec(group || '');
   if (!deck && !samplerGroup && channel != null && channel < 4 && !/^\[(Master|Main|Mixer|Library|Playlist|Headphone|EffectRack|Microphone|AutoDJ|Recording)/i.test(group || '')) deck = channel + 1;
   if (deck > 4) return null;
@@ -241,6 +262,10 @@ export function scriptTarget(group, fn, desc, type, channel) {
   }
   if (samplerGroup && has(/\b(play|pads?|trigger|press(ed)?|sampler)\b/)) return T(`deck1.sampler${(+samplerGroup[1] - 1) % 8 + 1}`, 'button');
   if (!P) return null;
+  // the Quick Effect knob ("super1", "filter") of a channel is OpenDJ's channel filter
+  if (isCtl && /^\[QuickEffectRack1_\[Channel\d\]/i.test(group || '')) return T(`${M}.filter`, 'abs', { part });
+  if (isCtl && has(/^seek$/)) return T(`${P}.jogSearch`, 'rel', { rel: 'auto' });
+  if (!isCtl && has(/^touch$/)) return T(`${P}.jogTouch`, 'button');
   if (has(/\bload\b/)) return T(`${P}.load`, 'button');
   if (has(/\bhot ?cues?\d*\b/)) { const n = numIn(k); return n && n <= 8 ? T(`${P}.hotcue${n}`, 'button') : T(`${P}.hotcue`, 'button', { indexed: true }); }
   if (has(/\bsampler\b/) && has(/\b(pads?|press(ed)?)\b/)) return T(`${P}.sampler`, 'button', { indexed: true });
@@ -254,8 +279,8 @@ export function scriptTarget(group, fn, desc, type, channel) {
   if (has(/\bcue\b/) && !has(/\b(loop|call|point|mem|memory)\b/)) return T(`${P}.cue`, 'button');
   if (has(/\b(keylock|key lock|master tempo)\b/)) return T(`${P}.keylock`, 'button');
   if (has(/\bslip\b/)) return T(`${P}.slip`, 'button');
-  if (has(/\bquantize\b/)) return T(`${P}.quantize`, 'button');
-  if (has(/\b(reloop|loop exit|loop toggle)\b/)) return T(`${P}.reloop`, 'button');
+  if (has(/\bquanti(ze|se)?\b|\bquant\b/)) return T(`${P}.quantize`, 'button');
+  if (has(/\b(re ?loop|loop exit|loop toggle)\b/)) return T(`${P}.reloop`, 'button');
   if (has(/\bloop in\b/)) return T(`${P}.loopIn`, 'button');
   if (has(/\bloop out\b/)) return T(`${P}.loopOut`, 'button');
   if (has(/\bloop\b/) && has(/\b(halve|half)\b/)) return T(`${P}.loopHalve`, 'button');

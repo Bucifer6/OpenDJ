@@ -476,3 +476,56 @@ test('community: Controller Mapper messages can\'t pollute Object.prototype', ()
   assert.equal(({}).entries, undefined);
   assert.ok(!Object.hasOwn(m.mappings, 'constructor'));
 });
+
+// ---------- proven Mixxx mappings: certain matches are applied automatically ----------
+test('Mixxx: confidentMatch only accepts the file that is certainly this controller', async () => {
+  const { confidentMatch, cleanPortName } = await import('../public/js/midi/mixxx-online.js');
+  const items = ['Pioneer-DDJ-400.midi.xml', 'Pioneer-DDJ-400-Pro.midi.xml', 'Vestax VCI-400.midi.xml', 'Pioneer-DDJ-FLX4.midi.xml', 'Numark Mixtrack Pro.midi.xml',
+    'Numark Mixtrack Pro FX.midi.xml', 'Numark Mixtrack Platinum FX.midi.xml', 'Hercules_DJControl_Inpulse_200.midi.xml', 'Hercules_DJControl_Inpulse_300.midi.xml',
+    'Hercules_DJControl_Inpulse_500.midi.xml', 'Traktor Kontrol X1.midi.xml', 'Reloop-Mixage.midi.xml', 'Numark-Party-Mix.midi.xml'].map((file) => ({ file }));
+  const pick = (n) => confidentMatch(n, items)?.file || null;
+  assert.equal(cleanPortName('DDJ-400 MIDI 1'), 'DDJ-400');
+  assert.equal(cleanPortName('DJControl Inpulse 200'), 'DJControl Inpulse 200'); // a model number is not a port index
+  assert.equal(cleanPortName('MIDIIN2 (Mixtrack Pro FX)'), 'Mixtrack Pro FX');
+  assert.equal(pick('DDJ-400 MIDI 1'), 'Pioneer-DDJ-400.midi.xml');
+  assert.equal(pick('DDJ-FLX4'), 'Pioneer-DDJ-FLX4.midi.xml');
+  assert.equal(pick('Mixtrack Pro FX'), 'Numark Mixtrack Pro FX.midi.xml');
+  assert.equal(pick('Numark Mixtrack Pro'), 'Numark Mixtrack Pro.midi.xml'); // not "Pro FX": nothing extra wins
+  assert.equal(pick('DJControl Inpulse 200'), 'Hercules_DJControl_Inpulse_200.midi.xml');
+  assert.equal(pick('DJControl Inpulse 500 MIDI 1'), 'Hercules_DJControl_Inpulse_500.midi.xml');
+  for (const n of ['Traktor Kontrol S2 MK3', 'Reloop Mixon 4', 'Party Mix MKII', 'USB MIDI Device', 'Akai APC40']) assert.equal(pick(n), null, n);
+});
+
+test('Mixxx: Components-style script bindings are converted', async () => {
+  const { scriptTarget } = await import('../public/js/midi/mixxx.js');
+  const t = (g, fn, type = 'note') => scriptTarget(g, fn, '', type, 0);
+  assert.equal(t('[Channel1]', 'DJCi500.deckA.playButton.input').target, 'deck1.play');
+  assert.equal(t('[Channel2]', 'DJCi500.deckB.cueButton.input').target, 'deck2.cue');
+  assert.equal(t('[Channel1]', 'DJCi500.deckA.pflButton.input').target, 'mixer1.cue');
+  assert.equal(t('[EqualizerRack1_[Channel2]_Effect1]', 'MixtrackProFX.deck[1].treble.input', 'cc').target, 'mixer2.eqHigh');
+  assert.equal(t('[EqualizerRack1_[Channel1]_Effect1]', 'MixtrackProFX.deck[0].bass.input', 'cc').target, 'mixer1.eqLow');
+  const tempo = t('[Channel1]', 'MixtrackProFX.deck[0].pitch.inputMSB', 'cc');
+  assert.equal(tempo.target, 'deck1.tempo'); assert.equal(tempo.part, 'msb');
+  assert.equal(t('[Channel1]', 'DJ2GO2Touch.leftDeck.hotcueButtons[2].input').target, 'deck1.hotcue2');
+  assert.equal(t('[Channel1]', 'DJ2GO2Touch.leftDeck.reLoopStop.input').target, 'deck1.reloop');
+  assert.equal(t('[QuickEffectRack1_[Channel2]]', 'DDJ200.super1', 'cc').target, 'mixer2.filter');
+  // the deck can come from the path when the group doesn't say
+  assert.equal(scriptTarget('[Master]', 'X.deckB.syncButton.input', '', 'note', 9).target, 'deck2.sync');
+});
+
+test('Mixxx: an automatic proven mapping is only applied when usable, and can be undone', async () => {
+  const { m } = manager();
+  const xml = (controls) => `<?xml version="1.0"?><MixxxControllerPreset><info><name>T</name></info><controller id="t"><controls>${controls}</controls></controller></MixxxControllerPreset>`;
+  const ctl = (key, n) => `<control><group>[Channel1]</group><key>${key}</key><status>0x90</status><midino>${n}</midino></control>`;
+  const rich = xml(['play', 'cue_default', 'sync_enabled', 'keylock', 'pfl', 'quantize', 'slip_enabled', 'reverse', 'beatloop_4_activate'].map((k, i) => ctl(k, i + 1)).join(''));
+  const poor = xml(ctl('keylock', 1));
+  const fetchFn = (body) => async () => ({ ok: true, status: 200, text: async () => body });
+  m.mappings['Dev'] = { name: 'Mine', entries: [{ key: 'note:0:99', target: 'deck1.play' }] };
+  assert.equal(await m.useMixxxMapping('Dev', 'Poor.midi.xml', { fetchFn: fetchFn(poor), requireUsable: true }), null);
+  assert.equal(m.mappings['Dev'].name, 'Mine');
+  const applied = await m.useMixxxMapping('Dev', 'Rich.midi.xml', { fetchFn: fetchFn(rich), requireUsable: true });
+  assert.ok(applied.entries.length >= 8);
+  assert.equal(m.mappings['Dev'].source, 'mixxx');
+  assert.equal(m.undoMapping('Dev'), true);
+  assert.equal(m.mappings['Dev'].name, 'Mine');
+});

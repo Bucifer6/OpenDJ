@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-kalOupjauiGO1SYQbYG2VRXG1TLLLNDAFVymM1Bod9k=' 'sha256-4Dd6om3S7GaSASh8v4Yr0thAULUVPFBi/UyVuZsuS1s='; style-src 'unsafe-inline'; font-src 'self'; img-src data:; connect-src 'self' https://raw.githubusercontent.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-kalOupjauiGO1SYQbYG2VRXG1TLLLNDAFVymM1Bod9k=' 'sha256-FS1/O1dYaanq61rBuZkHYBc6s7YC8o4AvUX9e+o68DA='; style-src 'unsafe-inline'; font-src 'self'; img-src data:; connect-src 'self' https://raw.githubusercontent.com; base-uri 'none'; form-action 'none'">
 <title>OpenDJ Controller Mapper</title>
 <style>
 :root {
@@ -241,7 +241,7 @@ html.embed #monitor { height: calc(100vh - 160px); }
   <div class="row">
     <input type="search" id="listSearch" placeholder="Search brand or model" aria-label="Search controllers" style="flex:1">
     <select id="listFilter" aria-label="Filter by status">
-      <option value="">All</option><option value="wanted">Needs a mapping</option><option value="needs-verification">Needs verification</option><option value="verified">Verified</option>
+      <option value="">All</option><option value="wanted">Needs a mapping</option><option value="needs-verification">Needs verification</option><option value="verified">Verified</option><option value="mixxx">Proven (Mixxx library)</option>
     </select>
   </div>
   <div id="listWrap"><table><thead><tr><th>Controller</th><th>Status</th><th><span class="sr">Actions</span></th></tr></thead><tbody id="listRows"></tbody></table></div>
@@ -1012,20 +1012,51 @@ function submitChange(kind) {
     : 'Your mapping is too big to fill in automatically: drag the .opendj-midi.json file (just saved) into the Mapping box of the GitHub form.', 'ok');
 }
 
+// The Mixxx library's proven mappings, listed by the app (inside OpenDJ only: converting them needs the app's code)
+let mixxx = null; // { items: [{ file, name }], suggested, likely: [file] } | { error } | 'loading'
 function renderList() {
   if (!$('listDlg').open) return;
   const q = norm($('listSearch').value), f = $('listFilter').value;
-  const rows = index.controllers.filter((c) => (!q || norm(fullName(c)).includes(q)) && (!f || c.status === f));
-  $('listRows').innerHTML = rows.map((c) => {
+  const rows = f === 'mixxx' ? [] : index.controllers.filter((c) => (!q || norm(fullName(c)).includes(q)) && (!f || c.status === f));
+  const html = rows.map((c) => {
     const i = index.controllers.indexOf(c);
     return `<tr><td><b>${esc(c.brand)}</b> ${esc(c.model)}${c.controls ? ` <span class="tiny">${c.controls} controls</span>` : ''}${c.note ? `<div class="tiny">${esc(c.note)}</div>` : ''}</td><td>${badge(c.status)}</td>
       <td style="white-space:nowrap">${deviceName ? `<button class="small" data-pick="${i}">This is mine</button>` : ''}</td></tr>`;
-  }).join('') || '<tr><td colspan="3" class="muted">No controllers match. Add it below.</td></tr>';
+  });
+  if (!f || f === 'mixxx') {
+    let mx = '';
+    if (!host) mx = '<tr><td colspan="3" class="tiny">Hundreds of proven mappings from the Mixxx library are listed here when the Mapper is opened inside OpenDJ (Settings → Controller Mapper).</td></tr>';
+    else if (mixxx === 'loading') mx = '<tr><td colspan="3" class="tiny">Loading the Mixxx library…</td></tr>';
+    else if (mixxx?.error) mx = `<tr><td colspan="3" class="tiny">Couldn't load the Mixxx library: ${esc(mixxx.error)}</td></tr>`;
+    else if (mixxx?.items) {
+      const likely = new Set(mixxx.likely || []);
+      const list = mixxx.items.filter((i) => (q ? norm(i.name).includes(q) : likely.has(i.file)))
+        .sort((a, b) => (b.file === mixxx.suggested) - (a.file === mixxx.suggested) || (likely.has(b.file) - likely.has(a.file)) || a.name.localeCompare(b.name)).slice(0, 60);
+      mx = list.map((i) => `<tr><td><b>${esc(i.name)}</b>${i.file === mixxx.suggested ? ' <span class="tiny">best match for your controller</span>' : likely.has(i.file) ? ' <span class="tiny">possible match</span>' : ''}</td>
+        <td><span class="badge verified" title="Maintained by the Mixxx community and tested on the real controller">Proven · Mixxx</span></td>
+        <td style="white-space:nowrap">${deviceName ? `<button class="small" data-mixxx="${esc(i.file)}">Use this</button>` : ''}</td></tr>`).join('')
+        || `<tr><td colspan="3" class="tiny">${q ? 'No Mixxx mapping matches.' : 'Type your controller\'s name to search all ' + mixxx.items.length + ' Mixxx mappings.'}</td></tr>`;
+    }
+    html.push(`<tr><td colspan="3" style="padding-top:12px"><b>Proven mappings from the Mixxx library</b> <span class="tiny">downloaded and converted when you choose one; check what works, then fix and share the rest</span></td></tr>`, mx);
+  }
+  $('listRows').innerHTML = html.join('') || '<tr><td colspan="3" class="muted">No controllers match. Add it below.</td></tr>';
 }
-function openList() { $('listDlg').showModal(); renderList(); $('listSearch').focus(); }
+function openList() {
+  $('listDlg').showModal(); renderList(); $('listSearch').focus();
+  if (host && deviceName && (!mixxx || mixxx.error)) { mixxx = 'loading'; renderList(); host.postMessage({ type: 'opendj-mapper:mixxx-list', device: deviceName }, location.origin); }
+}
 $('btnList').onclick = openList;
 $('listSearch').oninput = renderList; $('listFilter').onchange = renderList;
 $('listRows').addEventListener('click', (ev) => {
+  const mxb = ev.target.closest('button[data-mixxx]');
+  if (mxb) {
+    if (mapping.entries.length && !saved() && !confirm('Replace the controls you mapped here with this Mixxx mapping?')) return;
+    stopGuided(false); stopLearn();
+    $('listDlg').close();
+    setResult(`Downloading "${mxb.closest('tr').querySelector('b').textContent}" from the Mixxx library…`);
+    host.postMessage({ type: 'opendj-mapper:use-mixxx', device: deviceName, file: mxb.dataset.mixxx }, location.origin);
+    return;
+  }
   const b = ev.target.closest('button[data-pick]'); if (!b) return;
   const c = index.controllers[+b.dataset.pick];
   store.set('opendj-mapper:pick:' + deviceName, { brand: c.brand, model: c.model });
@@ -1089,16 +1120,22 @@ if (host) {
   $('helpUse').open = false;
   $('helpUse').querySelector('summary').textContent = 'Using the mapping in OpenDJ (or on another computer)';
   addEventListener('message', (ev) => {
-    if (ev.origin !== location.origin || ev.source !== host || ev.data?.type !== 'opendj-mapper:mapping') return;
-    const { device, mapping: m } = ev.data;
-    if (!device || device !== deviceName || !Array.isArray(m?.entries)) return;
-    if (!m.entries.length) return;
+    if (ev.origin !== location.origin || ev.source !== host || ev.data?.device !== deviceName) return;
+    const t = ev.data.type;
+    if (t === 'opendj-mapper:mixxx-list') { mixxx = ev.data.error ? { error: ev.data.error } : ev.data; renderList(); return; }
+    if (t === 'opendj-mapper:mixxx-error') { setResult(`Couldn't download the Mixxx mapping: ${ev.data.error}`, 'err'); return; }
+    if (t !== 'opendj-mapper:mapping') return;
+    const { device, mapping: m, mixxx: mx } = ev.data;
+    if (!Array.isArray(m?.entries) || !m.entries.length) return;
     stopGuided(false); stopLearn();
     mapping = { name: m.name || device, entries: structuredClone(m.entries) };
     $('mapName').value = mapping.name;
     lastSaved = JSON.stringify(mapping.entries);
     changed();
-    toast(`Loaded your current OpenDJ mapping (${m.entries.length} controls)`);
+    if (mx) {
+      const st = mx.stats || {};
+      setResult(`Loaded and applied the proven Mixxx mapping: ${m.entries.length} controls${st.unmapped ? `; ${st.unmapped} of its controls use features OpenDJ doesn't have yet` : ''}. Move each control to test it (its row lights up), Re-learn anything that's wrong, then Apply to OpenDJ.`, 'ok');
+    } else toast(`Loaded your current OpenDJ mapping (${m.entries.length} controls)`);
   });
 }
 const askHost = () => host && deviceName && host.postMessage({ type: 'opendj-mapper:hello', device: deviceName }, location.origin);
