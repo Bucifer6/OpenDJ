@@ -61,7 +61,6 @@
       "THIRD_PARTY_NOTICES.md",
       "!**/*.map",
       "!node_modules/onnxruntime-web/dist/*.map",
-      "!node_modules/onnxruntime-web/dist/*.js",
       "!node_modules/onnxruntime-web/lib/**"
     ],
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
