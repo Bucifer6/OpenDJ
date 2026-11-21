@@ -13,6 +13,8 @@ import { lyricsMidiTargets } from '../lyrics/lyrics.js';
 import { PRESETS } from './presets.js';
 import { BEATLOOPS, BEATJUMPS, ROLLS, convertMixxx, toStoredMapping } from './mixxx.js';
 import { HidManager, describeHidKey } from './hid.js';
+import { listMixxxMappings, matchMappings, downloadMixxxMapping, mappingTitle } from './mixxx-online.js';
+import { fetchControllerIndex, findController, controllerName, fetchCommunityMapping, hashEntries } from './community.js';
 import { GamepadManager, describeGamepadKey } from './gamepad.js';
 
 const fmtBeats = (b) => (b < 1 ? `1/${Math.round(1 / b)}` : String(b));
@@ -194,6 +196,9 @@ export class MidiManager extends Emitter {
       this.access = await navigator.requestMIDIAccess({ sysex: false });
       this.access.onstatechange = () => this.bind();
       this.bind();
+      // community mappings in use: fetch newer versions from GitHub (now, then every 6 hours)
+      setTimeout(() => this.checkCommunityUpdates().catch(() => {}), 4000);
+      setInterval(() => this.checkCommunityUpdates().catch(() => {}), 6 * 3600 * 1000);
     } catch (e) { this.error = e.message; }
   }
   inputs() { return this.access ? [...this.access.inputs.values()] : []; }
@@ -203,9 +208,12 @@ export class MidiManager extends Emitter {
       inp.onmidimessage = (e) => this.onMessage(inp, e.data);
       if (this.hasMapping(inp.name)) continue;
       // auto-apply a preset the first time a known controller shows up
+      // (a community mapping built into the app replaces it once the bundle has loaded: see applyBundled)
       const preset = PRESETS.find((p) => p.match.test(inp.name));
-      if (preset) { this.mappings[inp.name] = { name: preset.name, entries: structuredClone(preset.entries) }; this.save(); this.app.toast(`MIDI: loaded "${preset.name}" mapping for ${inp.name}`); }
-      else if (inp.state !== 'disconnected') this.offerMapping(inp.name);
+      if (preset) {
+        this.mappings[inp.name] = { name: preset.name, entries: structuredClone(preset.entries), source: 'preset' }; this.save();
+        this.applyBundled(inp.name).then((ok) => { if (!ok) this.app.toast(`MIDI: loaded "${preset.name}" mapping for ${inp.name}`); });
+      } else if (inp.state !== 'disconnected') this.applyBundled(inp.name).then((ok) => { if (!ok) this.offerMapping(inp.name); });
     }
     this.emit('devices');
   }
@@ -229,13 +237,178 @@ export class MidiManager extends Emitter {
     if (!host || typeof document === 'undefined') { this.app.toast?.(`New controller "${name}": open Settings → Controllers to find a mapping`); return; }
     const mk = (tag, cls, text, onclick) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; if (onclick) e.addEventListener('click', onclick); return e; };
     const box = mk('div', 'toast ctl-offer');
-    box.append(mk('div', 'ctl-offer-title', `New controller: ${name}`), mk('div', 'ctl-offer-text', 'Find a ready-made mapping (from the Mixxx community library) or set it up step by step.'));
+    box.append(mk('div', 'ctl-offer-title', `New controller: ${name}`), mk('div', 'ctl-offer-text', 'Find a ready-made mapping (from the Mixxx community library), set it up step by step, or map it in the Controller Mapper and share it with everyone.'));
     const row = mk('div', 'ctl-offer-actions');
-    row.append(mk('button', 'btn sm primary', 'Find mapping', () => open('search')), mk('button', 'btn sm', 'Guided setup', () => open('wizard')), mk('button', 'btn sm', "Don't ask again", dismiss));
+    row.append(mk('button', 'btn sm primary', 'Find mapping', () => open('search')), mk('button', 'btn sm', 'Guided setup', () => open('wizard')),
+      mk('button', 'btn sm', 'Controller Mapper', () => { close(); this.openMapper(name); }), mk('button', 'btn sm', "Don't ask again", dismiss));
     box.append(row);
     const close = () => { box.classList.add('out'); setTimeout(() => box.remove(), 400); };
     host.append(box);
-    setTimeout(close, 20000);
+    let timer = setTimeout(close, 20000);
+    // automatic recognition: replace the generic offer with what the community has for this controller
+    this.recognise(name).then(({ community, mixxx, online }) => {
+      if (!box.isConnected || this.hasMapping(name) || (!online && !community)) return;
+      clearTimeout(timer); timer = setTimeout(close, 30000);
+      const unsupported = !community?.file && !mixxx;
+      const title = unsupported ? `Not supported yet: ${community ? controllerName(community) : name}` : community ? `Recognised: ${controllerName(community)}` : `New controller: ${name}`;
+      const apply = async (fn, label) => {
+        try { const m = await fn(); this.app.toast?.(`${label}: ${m.entries.length} controls mapped for ${name}. Something wrong? Fix it in Settings → Controller Mapper.`); }
+        catch (e) { this.app.toast?.(`Couldn't download the mapping: ${e.message}`); }
+        close(); this.emit('devices');
+      };
+      const btns = [];
+      let text;
+      if (community?.file) {
+        text = community.status === 'verified' ? `OpenDJ has a community mapping for it, verified by ${community.verifiedBy?.length || 1} owner${community.verifiedBy?.length > 1 ? 's' : ''}.`
+          : 'OpenDJ has a community mapping for it. Nobody else has verified it yet: if it works, please verify it in the Controller Mapper.';
+        btns.push(mk('button', 'btn sm primary', 'Use it', () => apply(() => this.useCommunityMapping(name, community), 'Community mapping')));
+      } else if (unsupported) {
+        text = community
+          ? 'Nobody has shared a mapping for it yet, so it needs to be mapped by hand. It takes a few minutes: press each control when the Controller Mapper asks. Then share it so it works for the next person.'
+          : "OpenDJ couldn't recognise it. If it's in the community list under another name, choose it there and its mapping is downloaded. Otherwise map it by hand: press each control when the Controller Mapper asks, then share it.";
+        btns.push(mk('button', 'btn sm primary', 'Map it now', () => { close(); this.openMapper(name); }));
+        if (!community) btns.push(mk('button', 'btn sm', 'Choose my controller', () => { close(); this.openMapper(name, { pick: true }); }));
+        btns.push(mk('button', 'btn sm', "Don't ask again", dismiss));
+      } else {
+        text = `${community ? 'No OpenDJ community mapping yet. ' : ''}${mixxx ? `The Mixxx library has "${mixxx.name}".` : ''} You can also map it yourself and share it.`;
+        if (mixxx) btns.push(mk('button', 'btn sm primary', 'Use Mixxx mapping', () => apply(async () => this.applyMixxx(name, await downloadMixxxMapping(mixxx.file), mixxx.file), 'Mixxx mapping')));
+      }
+      if (!unsupported) btns.push(mk('button', 'btn sm', 'Controller Mapper', () => { close(); this.openMapper(name); }), mk('button', 'btn sm', 'Not now', close));
+      box.classList.toggle('ctl-unsupported', unsupported);
+      box.replaceChildren(mk('div', 'ctl-offer-title', title), mk('div', 'ctl-offer-text', text));
+      const r2 = mk('div', 'ctl-offer-actions'); r2.append(...btns); box.append(r2);
+    }).catch(() => {});
+  }
+
+  /**
+   * Show the Controller Mapper (Settings → Controller Mapper; public/controller-mapper.html, built from
+   * tools/controller-mapper/) for one device. The open Settings dialog switches to it ('open-mapper' event), otherwise
+   * Settings opens on that tab. The page talks to the app with postMessage: it asks for the device's mapping
+   * (opendj-mapper:hello) and sends edits back (opendj-mapper:apply).
+   */
+  openMapper(device = '', { pick = false } = {}) {
+    this.mapperDevice = device;
+    this.mapperPick = pick; // open the community controller list straight away ("Choose my controller")
+    if (this._l.get('open-mapper')?.size) this.emit('open-mapper', device);
+    else this.app.dialogs?.settings?.('mapper');
+  }
+  /** The window of the Mapper page that may talk to the app (the Settings iframe), or null when it is closed. */
+  attachMapper(win) {
+    this._mapperWin = win || null;
+    if (!win && this.suppress && this.suppress === this._mapperDevice) this.suppress = null;
+    if (!win) this._mapperDevice = null;
+    if (!this._onMapperMsg && typeof window !== 'undefined') { this._onMapperMsg = (ev) => this.onMapperMessage(ev); window.addEventListener('message', this._onMapperMsg); }
+  }
+  onMapperMessage(ev) {
+    if (ev.origin !== location.origin || !this._mapperWin || ev.source !== this._mapperWin) return;
+    const d = ev.data || {};
+    if (typeof d.device !== 'string' || !d.device || d.device.length > 200) return;
+    // device names become keys of this.mappings: never let one reach Object.prototype
+    if (d.device === '__proto__' || d.device === 'constructor' || d.device === 'prototype') return;
+    if (d.type === 'opendj-mapper:hello') {
+      // while the Mapper listens to a controller, its buttons don't also play decks
+      if (this.suppress === this._mapperDevice) this.suppress = null;
+      this._mapperDevice = d.device; this.suppress = d.device;
+      const m = this.mappings[d.device];
+      ev.source.postMessage({ type: 'opendj-mapper:mapping', device: d.device, mapping: { name: m?.name || d.device, entries: m?.entries || [] } }, location.origin);
+    } else if (d.type === 'opendj-mapper:apply' && Array.isArray(d.mapping?.entries)) {
+      const entries = d.mapping.entries.filter((e) => e && typeof e.key === 'string' && typeof e.target === 'string');
+      const stored = this.importMapping(d.device, JSON.stringify({ name: String(d.mapping.name || d.device).slice(0, 120), entries }));
+      if (typeof d.community?.file === 'string' && d.community.file.length < 300) {
+        Object.assign(stored, { source: 'community', communityFile: d.community.file, communityHash: hashEntries(entries) }); this.save();
+      }
+      this.app.toast?.(`Controller Mapper: ${entries.length} control${entries.length === 1 ? '' : 's'} applied to ${d.device}`);
+    }
+  }
+
+  /** The community mappings built into the app (public/community-mappings.json), or null. Loaded once. */
+  loadBundle() {
+    if (!this._bundleP) {
+      this._bundleP = (typeof fetch === 'function' && typeof location !== 'undefined' && /^https?:$/.test(location.protocol)
+        ? fetch('community-mappings.json').then((r) => (r.ok ? r.json() : null)).then((b) => (b?.opendjCommunityBundle === 1 ? b : null)).catch(() => null)
+        : Promise.resolve(null));
+    }
+    return this._bundleP;
+  }
+  /** Store a community mapping for a device, remembering which version it came from (for updates). */
+  storeCommunity(device, entry, m) {
+    this.mappings[device] = { name: m.name || controllerName(entry), entries: structuredClone(m.entries), source: 'community', communityFile: entry.file, communityHash: hashEntries(m.entries) };
+    this.resetRuntime(); this.save();
+    return this.mappings[device];
+  }
+  /**
+   * A controller without a mapping (or with only a built-in preset) was plugged in: if a community mapping for it is
+   * built into the app, use it straight away. Returns true when one was applied.
+   */
+  async applyBundled(device) {
+    const b = await this.loadBundle();
+    const entry = b && findController(b.index.controllers, device);
+    const m = entry?.file && b.mappings[entry.file];
+    const cur = this.mappings[device];
+    if (!m || (cur?.entries?.length && cur.source !== 'preset')) return false;
+    this.storeCommunity(device, entry, m);
+    this.checkCommunityUpdates().catch(() => {}); // a newer version may be on GitHub already
+    this.app.toast?.(`MIDI: recognised ${controllerName(entry)} and loaded its community mapping (${m.entries.length} controls${entry.status === 'verified' ? ', verified' : ', not verified yet'}). Something wrong? Settings → Controller Mapper.`);
+    this.emit('devices');
+    return true;
+  }
+  /**
+   * Community mappings in use: when GitHub has a newer version, update it, unless the user changed the mapping
+   * since (then they are told an update is available instead). Needs "Recognise new controllers online".
+   */
+  async checkCommunityUpdates({ fetchFn = globalThis.fetch } = {}) {
+    if (this.app.settings?.controllerLookup === false || typeof fetchFn !== 'function') return [];
+    const used = Object.entries(this.mappings).filter(([, m]) => m?.source === 'community' && m.communityFile);
+    if (!used.length) return [];
+    const idx = this._index = await fetchControllerIndex(fetchFn, 8000);
+    const done = [];
+    for (const [device, m] of used) {
+      const entry = idx.controllers.find((c) => c.file === m.communityFile);
+      if (!entry?.hash || entry.hash === m.communityHash) continue;
+      if (hashEntries(m.entries) !== m.communityHash) {
+        if (!m.updateNoticed) { m.updateNoticed = entry.hash; this.save(); this.app.toast?.(`An updated community mapping for ${controllerName(entry)} is available. You changed yours, so it was kept: load the new one in Settings → Controller Mapper.`); }
+        continue;
+      }
+      try {
+        const fresh = await fetchCommunityMapping(entry.file, fetchFn);
+        this.storeCommunity(device, entry, fresh);
+        done.push(device);
+        this.app.toast?.(`MIDI: updated the community mapping for ${controllerName(entry)} (${fresh.entries.length} controls).`);
+      } catch { /* try again next time */ }
+    }
+    if (done.length) this.emit('devices');
+    return done;
+  }
+
+  /**
+   * Recognise a controller from its MIDI name: the OpenDJ community list first, then the Mixxx mapping library.
+   * Returns { community: entry|null, mixxx: { file, name }|null, online } (online: false when neither list could be
+   * reached, so "not supported" can't be told apart from "offline"). Contacts GitHub (only when the
+   * "Recognise new controllers online" setting is on); results are cached per device for this session.
+   */
+  async recognise(name, { fetchFn = globalThis.fetch } = {}) {
+    if (this.app.settings?.controllerLookup === false || typeof fetchFn !== 'function') return { community: null, mixxx: null, online: false };
+    this._recognised ||= new Map();
+    if (this._recognised.has(name)) return this._recognised.get(name);
+    const job = (async () => {
+      let community = null, mixxx = null, online = false;
+      const b = await this.loadBundle();
+      if (b) community = findController(b.index.controllers, name);
+      try { this._index ||= await fetchControllerIndex(fetchFn, 6000); community = findController(this._index.controllers, name) || community; online = true; } catch { /* offline */ }
+      if (!community?.file) {
+        try { const best = matchMappings(name, await listMixxxMappings({ fetchFn }), 1)[0]; online = true; if (best) mixxx = { file: best.file, name: best.name || mappingTitle(best.file) }; } catch { /* offline or rate-limited */ }
+      }
+      return { community, mixxx, online };
+    })();
+    this._recognised.set(name, job);
+    return job;
+  }
+  /** Download and apply the community mapping for a recognised controller. */
+  async useCommunityMapping(device, entry) {
+    const b = await this.loadBundle();
+    const local = b?.mappings[entry.file];
+    const m = local && hashEntries(local.entries) === (entry.hash || hashEntries(local.entries)) ? local : await fetchCommunityMapping(entry.file);
+    return this.storeCommunity(device, entry, m);
   }
 
   mappingFor(name) { if (!this.mappings[name]) this.mappings[name] = { name: 'Custom', entries: [] }; return this.mappings[name]; }

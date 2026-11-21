@@ -1,0 +1,129 @@
+{
+  "opendjControllerIndex": 1,
+  "controllers": [
+    {
+      "brand": "Denon DJ",
+      "model": "MC7000",
+      "status": "wanted",
+      "midiNames": [
+        "MC7000"
+      ]
+    },
+    {
+      "brand": "Hercules",
+      "model": "DJControl Inpulse 200",
+      "status": "wanted",
+      "midiNames": [
+        "Inpulse 200"
+      ]
+    },
+    {
+      "brand": "Hercules",
+      "model": "DJControl Inpulse 300",
+      "status": "wanted",
+      "midiNames": [
+        "Inpulse 300"
+      ]
+    },
+    {
+      "brand": "Hercules",
+      "model": "DJControl Inpulse 500",
+      "status": "wanted",
+      "midiNames": [
+        "Inpulse 500"
+      ]
+    },
+    {
+      "brand": "Hercules",
+      "model": "DJControl Mix",
+      "status": "wanted",
+      "midiNames": [
+        "DJControl Mix"
+      ]
+    },
+    {
+      "brand": "Native Instruments",
+      "model": "Traktor Kontrol S2 MK3",
+      "status": "wanted",
+      "midiNames": [
+        "Traktor Kontrol S2 MK3"
+      ],
+      "note": "Uses HID, not MIDI: map it in OpenDJ (Settings → Controllers → Learn)."
+    },
+    {
+      "brand": "Numark",
+      "model": "Mixtrack Platinum FX",
+      "status": "wanted",
+      "midiNames": [
+        "Mixtrack Platinum FX"
+      ]
+    },
+    {
+      "brand": "Numark",
+      "model": "Mixtrack Pro FX",
+      "status": "wanted",
+      "midiNames": [
+        "Mixtrack Pro FX"
+      ]
+    },
+    {
+      "brand": "Numark",
+      "model": "Party Mix",
+      "status": "wanted",
+      "midiNames": [
+        "Party Mix"
+      ]
+    },
+    {
+      "brand": "Pioneer DJ",
+      "model": "DDJ-200",
+      "status": "wanted",
+      "midiNames": [
+        "DDJ-200"
+      ]
+    },
+    {
+      "brand": "Pioneer DJ",
+      "model": "DDJ-400",
+      "status": "needs-verification",
+      "midiNames": [
+        "DDJ-400"
+      ],
+      "note": "A best-effort preset is built into OpenDJ. Test it and send fixes."
+    },
+    {
+      "brand": "Pioneer DJ",
+      "model": "DDJ-FLX2",
+      "status": "wanted",
+      "midiNames": [
+        "DDJ-FLX2"
+      ]
+    },
+    {
+      "brand": "Pioneer DJ",
+      "model": "DDJ-FLX4",
+      "status": "needs-verification",
+      "midiNames": [
+        "DDJ-FLX4"
+      ],
+      "note": "A best-effort preset is built into OpenDJ. Test it and send fixes."
+    },
+    {
+      "brand": "Pioneer DJ",
+      "model": "DDJ-FLX6",
+      "status": "wanted",
+      "midiNames": [
+        "DDJ-FLX6"
+      ]
+    },
+    {
+      "brand": "Reloop",
+      "model": "Mixon 4",
+      "status": "wanted",
+      "midiNames": [
+        "Mixon 4",
+        "Mixon4"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+name: Verify a controller mapping
+description: You own the controller and tested OpenDJ's mapping for it. Confirm that it works
+title: "Verified mapping: "
+labels: ["controller-verification"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        New and changed mappings are marked *needs verification* until someone other than their author confirms
+        them. Thanks for testing! Found a problem instead? Use **Fix or problem with a controller mapping**.
+  - type: input
+    id: brand
+    attributes: { label: Brand }
+    validations: { required: true }
+  - type: input
+    id: model
+    attributes: { label: Model }
+    validations: { required: true }
+  - type: input
+    id: tested-on
+    attributes: { label: Tested on, placeholder: "Windows 11, OpenDJ 0.4.2" }
+    validations: { required: true }
+  - type: textarea
+    id: notes
+    attributes: { label: Notes, description: "Anything worth knowing (firmware version, controls you didn't test)." }

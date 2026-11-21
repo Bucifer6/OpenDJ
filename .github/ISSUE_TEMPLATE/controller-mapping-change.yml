@@ -1,0 +1,44 @@
+name: Fix or problem with a controller mapping
+description: A control is wrong or missing in a mapping OpenDJ already has. Send a fix, or report the problem
+title: "Mapping problem: "
+labels: ["controller-change", "needs-verification"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Changes to existing mappings are checked by someone else with the same controller before they are merged.
+        **Fixed it yourself?** In the Controller Mapper load the mapping, correct the controls and click *Submit my
+        changes for review*: it fills in the Mapping box below. **Only reporting?** Leave the Mapping box empty.
+  - type: input
+    id: brand
+    attributes: { label: Brand }
+    validations: { required: true }
+  - type: input
+    id: model
+    attributes: { label: Model }
+    validations: { required: true }
+  - type: input
+    id: tested-on
+    attributes: { label: Tested on, placeholder: "Windows 11, OpenDJ 0.4.2" }
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's wrong
+      description: Which controls don't work or do the wrong thing.
+  - type: textarea
+    id: changes
+    attributes:
+      label: Changes
+      description: Filled in by the Mapper (+ added, ~ changed, - removed).
+  - type: textarea
+    id: mapping
+    attributes:
+      label: Mapping
+      description: The corrected mapping JSON (or drag the .opendj-midi.json file here). Leave empty for a problem report.
+      render: json
+  - type: checkboxes
+    id: license
+    attributes:
+      label: Licence
+      options:
+        - label: My changes are released under CC0 1.0 (public domain). (Needed only when sending a fix.)
