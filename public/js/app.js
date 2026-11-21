@@ -149,6 +149,7 @@ class App {
       dvsButton(this),
       el('button', { class: 'btn sm video-btn', title: 'Video mixer, visuals, YouTube & projector output', onclick: () => (this.videoUi ||= setupVideo(this)).toggleMixer() }, iconLabel('video', 'VIDEO')),
       el('button', { class: 'btn sm light-btn', title: 'Lighting (DMX, Art-Net, sACN, WLED, Hue, OSC)', onclick: () => this.lighting?.openPanel() }, iconLabel('lights', 'LIGHTS')),
+      el('button', { class: 'btn icon tb-more', title: 'More', 'aria-label': 'More', 'aria-haspopup': 'menu', onclick: (e) => this.topbarMore(e.currentTarget) }, icon('more')),
       el('button', { class: 'btn icon', title: 'Settings', 'aria-label': 'Settings', onclick: () => this.dialogs.settings() }, icon('settings')),
       this.signOutBtn = el('button', { class: 'btn sm signout-btn', hidden: true, title: 'Sign out of this OpenDJ server', onclick: async () => { if (this.engine.decks.some((d) => d.playing) && !(await this.dialogs.confirm('Music is playing. Sign out anyway?'))) return; await api.logout(); } }, iconLabel('logout', 'Sign out')),
       el('button', { class: 'btn icon', title: 'Full screen', 'aria-label': 'Full screen', onclick: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()) }, icon('fullscreen')),
@@ -185,6 +186,22 @@ class App {
       const h = Math.max(120, Math.min(Math.max(120, room), startH - (e.clientY - startY))); document.documentElement.style.setProperty('--browser-h', `${h}px`); });
     for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) handle.addEventListener(ev, () => { startY = null; });
     root.replaceChildren(topbar, this.waveArea, this.deckArea, this.samplerBar, handle, this.library.root, this.toasts);
+  }
+
+  /** Phones: the secondary top bar buttons (hidden by CSS there) are offered in one menu instead of three rows. */
+  topbarMore(anchor) {
+    document.querySelector('body > .ctx-menu.tb-menu')?.remove();
+    const items = [...document.querySelectorAll('.topbar .live-btn, .topbar .link-btn, .topbar .dvs-btn, .topbar .video-btn, .topbar .light-btn, .topbar .rec-more, .topbar .signout-btn')]
+      .filter((b) => !b.hidden && !b.closest('[hidden]') && b.offsetParent === null) // hidden by the phone layout
+      .filter((b) => !(document.documentElement.classList.contains('odj-local') && /dvs-btn|light-btn|video-btn|live-btn|signout-btn/.test(b.className))); // not in the mobile app
+    if (!items.length) return;
+    const menu = el('div', { class: 'ctx-menu tb-menu', role: 'menu' }, ...items.map((b) => el('div', { class: 'ctx-item', role: 'menuitem', tabindex: 0, onclick: () => { menu.remove(); b.click(); } },
+      b.querySelector('.ico')?.cloneNode(true) || '', (b.querySelector('.lbl')?.textContent || b.title || b.textContent).trim())));
+    document.body.append(menu);
+    const r = anchor.getBoundingClientRect(), z = parseFloat(document.documentElement.style.zoom) || 1;
+    menu.style.top = `${r.bottom / z + 4}px`; menu.style.right = '8px';
+    const close = (e) => { if (!menu.contains(e.target) && e.target !== anchor) { menu.remove(); document.removeEventListener('pointerdown', close, true); } };
+    setTimeout(() => document.addEventListener('pointerdown', close, true));
   }
 
   /** Small screens: show deck i (the others stay loaded and playing, just hidden). */

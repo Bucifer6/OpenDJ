@@ -430,3 +430,12 @@ html.odj-local .panel-tab[data-panel="stems"] { display: none; }
   body.layout-waveform:not(.four-decks) .tempo-fader .fader-track { min-height: 36px; }
   body.layout-waveform:not(.four-decks) .deck-tempo { gap: 2px; }
 }
+
+/* top bar on phones: secondary buttons collapse into the "More" menu (app.topbarMore) */
+.topbar .tb-more { display: none; }
+@media (max-width: 699px) {
+  .topbar .tb-more { display: inline-flex; }
+  .topbar .live-btn, .topbar .link-wrap, .topbar .dvs-btn, .topbar .video-btn, .topbar .light-btn, .topbar .rec-more, .topbar .signout-btn { display: none !important; }
+  .ctx-menu.tb-menu .ctx-item { min-height: 44px; }
+  .ctx-menu.tb-menu .ico { width: 16px; height: 16px; }
+}
