@@ -79,6 +79,33 @@ const audit = () => ev(() => {
   }
   return out;
 });
+// Fit check, in layout units (no zoom ambiguity): the deck row, top bar, mixer and sampler bar stay inside the window,
+// the top bar is not clipped, and each visible deck's control column shows the chosen panel without scrolling.
+// (A cut-off panel row used to pass the audit above: .deck-mid is a scroll area, so controls below its edge
+// counted as "reachable by scrolling" — e.g. the right deck's FX row at 1600x960, or the whole right deck when the
+// top bar's min-content pushed the page wider than the window.)
+const fit = (panels) => ev(async (panels) => {
+  const out = [];
+  const vis = (e) => e && e.offsetParent && e.getBoundingClientRect().width > 1;
+  const decks = () => [...document.querySelectorAll('.deck')].filter(vis);
+  for (const panel of panels) {
+    // open the panel with its tab on every visible deck, as a user would (falls back to the API when the tab is hidden)
+    for (const d of decks()) { const t = d.querySelector(`.panel-tab[data-panel="${panel}"]`); if (t && vis(t)) t.click(); else window.opendj.engine.decks[+d.dataset.deck].showPanel?.(panel); }
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    for (const sel of ['.topbar', '.deck-area', '.mixer', '.sampler-bar']) { const e = document.querySelector(sel); if (!vis(e)) continue; const r = e.getBoundingClientRect(); if (r.right > innerWidth + 1 || r.left < -1) out.push(`${sel} outside the window (${Math.round(r.right)} > ${innerWidth})`); }
+    const tb = document.querySelector('.topbar'); if (tb.scrollWidth > tb.clientWidth + 1) out.push(`top bar clipped by ${tb.scrollWidth - tb.clientWidth}px`);
+    for (const d of decks()) {
+      const n = `${panel}@deck${+d.dataset.deck + 1}`, mid = d.querySelector('.deck-mid');
+      if (d.getBoundingClientRect().right > innerWidth + 1) out.push(`deck${+d.dataset.deck + 1} outside the window`);
+      if (mid.scrollHeight > mid.clientHeight + 1) out.push(`${n} cut off by ${mid.scrollHeight - mid.clientHeight}px`);
+      if (mid.scrollWidth > mid.clientWidth + 1) out.push(`${n} ${mid.scrollWidth - mid.clientWidth}px too wide`);
+      if (d.scrollHeight > d.clientHeight + 1) out.push(`${n}: deck content ${d.scrollHeight - d.clientHeight}px taller than the deck`);
+      for (const p of d.querySelectorAll('.deck-panel')) if (vis(p) && p.scrollHeight > p.clientHeight + 1) out.push(`${n}: the ${p.dataset.panel} panel's content spills ${p.scrollHeight - p.clientHeight}px out of it`);
+    }
+  }
+  return [...new Set(out)];
+}, panels);
+const PANELS = ['cues', 'loops', 'fx', 'stems', 'key'];
 const summary = (a) => [a.overlap.length && `overlap ${a.overlap.slice(0, 4).join('; ')}`, a.escape.length && `outside ${a.escape.slice(0, 4).join('; ')}`, a.covered.length && `covered ${a.covered.slice(0, 4).join('; ')}`, a.fader.length && `fader ${a.fader.join('; ')}`].filter(Boolean).join(' | ');
 
 const setUi = (o) => ev(async ({ layout, theme, zoom }) => {
@@ -103,7 +130,8 @@ try {
   const layouts = ['classic', 'performance', 'waveform', 'four'];
   const themes = QUICK ? ['midnight'] : ['midnight', 'light', 'contrast'];
   const zooms = QUICK ? [100] : [80, 100, 150];
-  const sizes = [[1920, 1080], [1366, 768], [1280, 800]];
+  // the common laptop / desktop sizes: 1600x960 is the desktop app's default window, 1440x900 a 15" laptop
+  const sizes = [[1920, 1080], [1600, 960], [1440, 900], [1366, 768], [1280, 800]];
   for (const [w, h] of sizes) {
     await page.setViewportSize({ width: w, height: h });
     for (const layout of layouts) for (const theme of themes) for (const zoom of zooms) {
@@ -112,8 +140,27 @@ try {
       await page.waitForTimeout(160);
       const a = await audit();
       check(a.count > 40 && !summary(a), `${w}x${h} ${layout} ${theme} @${zoom}%: ${a.count} controls in bounds, none overlapping or covered${summary(a) ? ' — ' + summary(a) : ''}`);
+      if (theme !== 'midnight') continue;
+      // every panel fits on every visible deck; then the full audit again with the FX panel open on all decks
+      const f = await fit(PANELS);
+      check(!f.length, `${w}x${h} ${layout} @${zoom}%: all decks' panels fit, nothing outside the window${f.length ? ' — ' + f.slice(0, 4).join('; ') : ''}`);
+      await fit(['fx']);
+      const fa = await audit();
+      check(fa.count > 30 && !summary(fa), `${w}x${h} ${layout} @${zoom}% FX panel on both decks: ${fa.count} controls in bounds${summary(fa) ? ' — ' + summary(fa) : ''}`);
+      await ev(() => window.opendj.engine.decks.forEach((d) => d.showPanel?.('cues')));
     }
   }
+  // the remaining common sizes (fit check only: these are the window sizes the layout has to hold at all zooms)
+  for (const [w, h] of QUICK ? [] : [[1280, 720], [1600, 900], [2560, 1440]]) {
+    await page.setViewportSize({ width: w, height: h });
+    for (const layout of layouts) for (const zoom of zooms) {
+      await setUi({ layout, theme: 'midnight', zoom });
+      await page.waitForTimeout(120);
+      const f = await fit(PANELS);
+      check(!f.length, `${w}x${h} ${layout} @${zoom}%: all decks' panels fit, nothing outside the window${f.length ? ' — ' + f.slice(0, 4).join('; ') : ''}`);
+    }
+  }
+  await ev(() => window.opendj.engine.decks.forEach((d) => d.showPanel?.('cues')));
 
   // ---------- 2. click sweep per layout ----------
   await page.setViewportSize({ width: 1920, height: 1080 });

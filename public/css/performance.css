@@ -439,3 +439,49 @@ body:not(.four-decks) .mixer.mx-short .mixer-master > .strip-num, body:not(.four
   .ctx-menu.tb-menu .ctx-item { min-height: 44px; }
   .ctx-menu.tb-menu .ico { width: 16px; height: 16px; }
 }
+
+/* ---- the window width is a hard limit: the top bar never pushes the decks off the right edge ----
+   (#app's single grid column used to size to the top bar's min-content, so at ≤ 1300 effective px — 1280×720, or
+   150 % on 1366–1920 px screens — the whole deck row grew past the window and the right deck was cut off) */
+#app { grid-template-columns: minmax(0, 1fr); }
+.topbar { min-width: 0; overflow: hidden; }
+.topbar .tb-group { min-width: 0; }
+.topbar .am-info { min-width: 0; flex: 0 1 auto; }
+/* narrow effective width: icon-only secondary buttons (their titles still name them), tighter spacing */
+:root.w1300 .topbar { gap: 5px; padding: 0 8px; }
+:root.w1300 .topbar .logo { margin-right: 2px; }
+:root.w1300 .topbar .btn.sm { padding: 0 7px; }
+:root.w1300 .topbar .seg-btn { padding: 0 7px; }
+:root.w1300 .topbar .tb-spacer ~ .btn .ico + .lbl, :root.w1300 .topbar .tb-spacer ~ * .btn .ico + .lbl { display: none; }
+:root.w1200 .topbar .logo-word { display: none; }
+
+/* ---- Performance layout: loops + pads + the chosen panel (FX / stems / key) always fit without scrolling ----
+   The pads share the free height (pad-shaped at most, 24 px at least) instead of fixed 52 / 40 / 32 px rows, so
+   opening the FX, stems or key panel no longer pushes the bottom row out of the deck. The chosen panel takes the
+   loop rows' place (loops + pads + a third panel did not fit at 1600x960); the LOOPS tab switches back to them. */
+@media (min-width: 700px) and (min-height: 561px) {
+  :root body.layout-performance:not(.four-decks) .deck-panel[data-panel="cues"] { flex: 1 1 auto; min-height: auto; }
+  :root body.layout-performance:not(.four-decks) .deck-panel[data-panel="cues"] .pads { flex: 1 1 auto; min-height: auto; grid-auto-rows: minmax(24px, 1fr); max-height: 112px; }
+  :root body.layout-performance:not(.four-decks) .deck-panel[data-panel="cues"] .pad { height: auto; min-height: 24px; }
+  :root.h800 body.layout-performance:not(.four-decks) .deck-panel[data-panel="cues"] .pads { gap: 3px; grid-auto-rows: minmax(18px, 1fr); }
+  :root.h800 body.layout-performance:not(.four-decks) .deck-panel[data-panel="cues"] .pad { min-height: 18px; }
+  :root.h800 body.layout-performance:not(.four-decks) .deck-toggles .btn.sm { min-height: 18px; padding-top: 1px; padding-bottom: 1px; }
+  :root.h800 body.layout-performance:not(.four-decks) .deck-mid { gap: 3px; }
+  :root.h800 body.layout-performance:not(.four-decks) .sync-row .btn { padding-top: 2px; padding-bottom: 2px; }
+  :root body.layout-performance:not(.four-decks) .deck:is([data-panel="fx"], [data-panel="stems"], [data-panel="key"]) .deck-panel[data-panel="loops"] { display: none; }
+  :root body.layout-performance:not(.four-decks) .panel-tab[data-panel="loops"] { display: block; }
+}
+/* 4 decks and Performance on narrow windows: the four stem cells stay on one line and the macro row does not wrap
+   (two lines of cells plus the macro row did not fit the short deck) */
+:root :is(.four-decks, body.layout-performance) .deck-stems .stems-row:first-child { flex-wrap: nowrap; gap: 2px; padding-right: 4px; }
+:root :is(.four-decks, body.layout-performance) .deck-stems .stem-cell { flex: 1 1 0; gap: 1px; }
+:root :is(.four-decks, body.layout-performance) .deck-stems .stem-btn { padding-left: 1px; padding-right: 1px; text-overflow: clip; }
+:root :is(.four-decks, body.layout-performance) .deck-stems .stems-row:last-child { flex-wrap: nowrap; }
+:root :is(.four-decks, body.layout-performance) .deck-stems .stems-row:last-child > .btn { min-width: 0; overflow: hidden; text-overflow: clip; padding-left: 2px; padding-right: 2px; }
+:root :is(.four-decks, body.layout-performance) .deck-stems .stems-prep { flex: 0 1 auto; }
+/* the 7 pad-mode buttons share the row evenly and clip their label rather than widen the deck (1100 px windows) */
+.pad-modes { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.pad-mode { min-width: 0; overflow: hidden; white-space: nowrap; }
+:root.w1200 .pad-mode { letter-spacing: 0; font-size: 7.5px; }
+/* waveform focus keeps its single row of 8 pads on narrow windows too (two rows overflowed the short deck) */
+@media (min-width: 700px) and (min-height: 561px) { :root.w1200.h920 body.layout-waveform:not(.four-decks) .pads { grid-template-columns: repeat(8, minmax(0, 1fr)); } }
