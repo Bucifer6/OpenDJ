@@ -29,7 +29,7 @@ wav(path.join(music, 'Sweep - Four.wav'), 45, 122, 262);
 
 const app = await start({ port: 0, dataDir: path.join(tmp, 'data') });
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
-const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+let page = await browser.newPage({ viewport: { width: 1920, height: 1080 } }); // reassigned for the DPI-scaled pass (section 6)
 const errors = [];
 page.on('pageerror', (e) => errors.push(`pageerror: ${e}`));
 page.on('console', (m) => { if (m.type() === 'error' && !/favicon|Failed to load resource.*(cover|404)/i.test(m.text())) errors.push(`console: ${m.text()}`); });
@@ -317,6 +317,28 @@ try {
   });
   check(eqp.flat === 'flat' && eqp.afterVol === 'flat' && eqp.warm === 'warm' && Math.abs(eqp.low - 0.12) < 1e-6 && eqp.custom === 'custom' && eqp.back === 'flat', `EQ preset follows EQ changes only (${JSON.stringify(eqp)})`);
   await ev(() => window.opendj.engine.decks.forEach((d) => d.pause()));
+  // ---------- 6. Windows display scaling (125 % / 150 %) with the hardware skins ----------
+  // A 1920x1080 screen at 125 % is a 1536x864 CSS window at device pixel ratio 1.25; at 150 % 1280x720 at 1.5;
+  // 2560x1440 at 150 % is 1707x960. The controller / vinyl skins change borders and radii (the vinyl jog has a 7 px
+  // rim): check them there in both layouts. (Real Windows font rendering / ClearType still needs a Windows run.)
+  if (!QUICK) {
+    const mainPage = page;
+    for (const [w, h, dpr] of [[1536, 864, 1.25], [1280, 720, 1.5], [1707, 960, 1.5], [1366, 768, 1.25]]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: dpr });
+      page = await ctx.newPage();
+      page.on('pageerror', (e) => errors.push(`pageerror: ${e}`));
+      try {
+        await page.goto(app.url); await page.waitForFunction(() => window.opendj?.ready, null, { timeout: 30000 });
+        await page.locator('.overlay.start button').click({ timeout: 1000 }).catch(() => {});
+        for (let i = 0; i < 4; i++) await ev(([i, id]) => window.opendj.loadTrack(i, id), [i, ids[i]]);
+        for (const theme of ['cdj', 'vinyl', 'performance', 'studio']) for (const layout of ['classic', 'four']) {
+          await setUi({ layout, theme, zoom: 100 }); await page.waitForTimeout(200);
+          const a = await audit(), f = await fit(['cues', 'fx']);
+          check(a.count > 40 && !summary(a) && !f.length, `DPI ${Math.round(dpr * 100)}% ${w}x${h} ${theme} ${layout}: ${a.count} controls in bounds, panels fit${summary(a) ? ' — ' + summary(a) : ''}${f.length ? ' — ' + f.slice(0, 3).join('; ') : ''}`);
+        }
+      } finally { await ctx.close(); page = mainPage; }
+    }
+  }
   check(errors.length === 0, `no page errors, console errors or unhandled rejections${errors.length ? ': ' + errors.slice(0, 5).join(' | ') : ''}`);
 } catch (e) { console.error(e); failed = true; }
 await browser.close(); app.server.close();
