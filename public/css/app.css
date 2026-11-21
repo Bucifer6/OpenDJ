@@ -403,6 +403,8 @@ input[type="range"] { accent-color: var(--accent); }
 .browse-item { padding: 5px 9px; cursor: pointer; }
 .browse-item:hover { background: var(--sel-tree); }
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 14px; overflow-x: auto; scrollbar-width: none; }
+/* dialog tabs (Settings) wrap instead of hiding the last ones behind an invisible scrollbar (longer translations) */
+.modal .tabs { flex-wrap: wrap; overflow-x: visible; }
 .tab { background: none; border: 0; padding: 8px 12px; cursor: pointer; color: var(--text-3); border-bottom: 2px solid transparent; font-weight: 650; white-space: nowrap; transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease); margin-bottom: -1px; }
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--text); border-bottom-color: var(--accent); }

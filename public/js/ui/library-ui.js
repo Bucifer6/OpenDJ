@@ -7,6 +7,7 @@ import { toCamelot, camelotCompatible } from '../audio/analysis-core.js';
 import { LibraryDialogs, TRACK_COLORS, colorName, flipSubmenus } from './library-dialogs.js';
 import { icon as uiIcon, iconLabel, glyphIcon, iconHtml } from './icons.js';
 import { platform, unavailable } from '../platform.js';
+import { t as tr } from '../i18n.js';
 
 // rows are taller on touch screens (phones, tablets) so a finger can pick one
 const COARSE = !!globalThis.matchMedia?.('(pointer: coarse)').matches;
@@ -326,7 +327,7 @@ export class LibraryUI {
     this.header = el('div', { class: 'lib-header' });
     this.renderHeader();
     this.spacer = el('div', { class: 'lib-spacer' });
-    this.rowsEl = el('div', { class: 'lib-rows' });
+    this.rowsEl = el('div', { class: 'lib-rows', translate: 'no' }); // track rows: titles, artists, genres are user data
     this.emptyEl = el('div', { class: 'lib-empty', hidden: true });
     this.scroller = el('div', { class: 'lib-scroll', tabindex: 0 }, this.spacer, this.rowsEl, this.emptyEl);
     this.scroller.addEventListener('scroll', () => this.renderRows());
@@ -397,17 +398,17 @@ export class LibraryUI {
     const cam = toCamelot(t.key);
     const comp = mCam && cam && camelotCompatible(mCam, cam);
     const bpmClose = mBpm && t.bpm && Math.abs(t.bpm / mBpm - 1) < 0.04;
-    const src = t.sourceType === 'remote' ? (SOURCE_ICONS[t.sourceKind] || 'Server') : 'Local';
+    const src = t.sourceType === 'remote' ? (SOURCE_ICONS[t.sourceKind] || tr('Server')) : tr('Local');
     const dup = this.view.kind === 'duplicates' ? ` dup-${this.dupIndex.get(t.id) % 2 ? 'b' : 'a'} ${this.dupGroups[this.dupIndex.get(t.id)]?.ids[0] === t.id ? 'dup-keep' : ''}` : '';
-    const sw = t.color ? `<i class="lc-sw" style="background:${escapeHtml(t.color)}" title="${escapeHtml(colorName(t.color) || t.color)}"></i>` : '';
+    const sw = t.color ? `<i class="lc-sw" style="background:${escapeHtml(t.color)}" title="${escapeHtml(tr(colorName(t.color)) || t.color)}"></i>` : '';
     const when = this.view.kind === 'session' ? (t._playedAt ? new Date(t._playedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') : (t.addedAt ? new Date(t.addedAt).toLocaleDateString() : '');
     const row = el('div', {
       class: `lr ${i % 2 ? 'alt' : ''} ${this.selected.has(t.id) ? 'sel' : ''} ${i === this.cursor ? 'cursor' : ''} ${loaded.has(t.id) ? 'loaded' : ''} ${t.playCount ? 'played' : ''} ${t.missing ? 'missing' : ''} ${t.unreadable ? 'unreadable' : ''}${dup}`,
-      title: t.missing ? `File missing: ${t.path}` : t.unreadable ? `Could not decode this file: ${t.path || t.title}` : null,
+      title: t.missing ? tr('File missing: {0}', { 0: t.path }) : t.unreadable ? tr('Could not decode this file: {0}', { 0: t.path || t.title }) : null,
       style: { transform: `translateY(${i * ROW_H}px)` },
       draggable: 'true', 'data-i': i,
       html: (this.showOrder ? `<div class="num ord">${(this.orderOf?.get(t) ?? i) + 1}</div>` : '') + '<div class="art"></div>'
-        + `<div class="c-title" title="${escapeHtml(t.title)}">${sw}${t.missing ? `<span class="lc-miss" title="File missing">${iconHtml('warn')}</span>` : t.unreadable ? `<span class="lc-miss lc-unreadable" title="Unreadable: the file could not be decoded">${iconHtml('warn')}</span>` : ''}${escapeHtml(t.title)}</div><div title="${escapeHtml(t.artist)}">${escapeHtml(t.artist)}</div>`
+        + `<div class="c-title" title="${escapeHtml(t.title)}">${sw}${t.missing ? `<span class="lc-miss" title="${escapeHtml(tr('File missing'))}">${iconHtml('warn')}</span>` : t.unreadable ? `<span class="lc-miss lc-unreadable" title="${escapeHtml(tr('Unreadable: the file could not be decoded'))}">${iconHtml('warn')}</span>` : ''}${escapeHtml(t.title)}</div><div title="${escapeHtml(t.artist)}">${escapeHtml(t.artist)}</div>`
         + `<div class="num ${bpmClose ? 'match' : ''}">${Number(t.bpm) > 0 ? Number(t.bpm).toFixed(Number(t.bpm) % 1 ? 1 : 0) : ''}</div>`
         + `<div class="key ${cam ? `cam-${cam.replace(/\D/g, '')}` : ''} ${comp ? 'match' : ''}">${escapeHtml(cam || t.key || '')}</div>`
         + `<div class="num">${fmtDur(t.duration)}</div><div class="num">${escapeHtml(t.energy ?? '')}</div>`

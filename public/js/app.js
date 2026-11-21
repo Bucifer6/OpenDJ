@@ -29,6 +29,7 @@ import { BackgroundAnalyser } from './audio/background-analysis.js';
 import { isUndecodable } from './audio/analysis-queue.js';
 import { platform, unavailable } from './platform.js';
 import { setupUpdates } from './ui/update.js';
+import { initI18n, storedLanguage, resolveLanguage, currentLanguage, t } from './i18n.js';
 
 /** The OpenDJ mark: a platter with a tone arm, drawn in the accent colour. */
 function logoMark() {
@@ -42,7 +43,9 @@ class App {
   constructor() { this.shift = false; this._shiftKey = false; }
 
   async init() {
-    this.settings = await api.settings();
+    // interface language: start with the stored choice (no wait for the settings), then follow the setting
+    [this.settings] = await Promise.all([api.settings(), initI18n(storedLanguage())]);
+    if (resolveLanguage(this.settings.language) !== currentLanguage() || storedLanguage() !== (this.settings.language || 'auto')) await initI18n(this.settings.language || 'auto');
     applyTheme(this.settings);
     this.deckCount = Number(this.settings.deckCount) === 4 ? 4 : 2; // only 2 or 4 decks exist
     this.engine = new Engine(this.settings);
@@ -164,7 +167,7 @@ class App {
     const shiftUp = () => { this.shift = this._shiftKey; shiftBtn.classList.remove('active'); };
     shiftBtn.addEventListener('pointerup', shiftUp); shiftBtn.addEventListener('pointerleave', shiftUp);
     const topbar = el('header', { class: 'topbar' },
-      el('div', { class: 'logo' }, logoMark(), el('span', { class: 'logo-word' }, 'Open', el('b', {}, 'DJ'))),
+      el('div', { class: 'logo', translate: 'no' }, logoMark(), el('span', { class: 'logo-word' }, 'Open', el('b', {}, 'DJ'))),
       deckSel, shiftBtn,
       el('div', { class: 'tb-group automix-actions' }, this.amBtn, this.amSkip, this.amQueueBtn), this.amInfo,
       el('div', { class: 'tb-spacer' }),
@@ -482,6 +485,7 @@ class App {
         info = `Next: ${next.artist ? next.artist + ' – ' : ''}${next.title}${nt ? ` · ${STYLE_LABEL[nt.style] || nt.style} in ${fmtTime(nt.beginsIn).slice(0, 5)}` : ''}`;
       } else info = 'Last track';
     } else if (a.queue.length) info = `${a.queue.length - a.idx} queued`;
+    info = t(info); // translated before the comparison, so the DOM translator does not rewrite it every tick
     if (this.amInfo.textContent !== info) this.amInfo.textContent = info;
     this.queuePanel?.render?.();
   }
@@ -699,5 +703,5 @@ window.opendj = app;
 app.init().catch((e) => {
   console.error(e);
   const b = document.getElementById('boot');
-  if (b) b.textContent = `OpenDJ failed to start: ${e.message}`;
+  if (b) b.textContent = t('OpenDJ failed to start: {msg}', { msg: e.message });
 });

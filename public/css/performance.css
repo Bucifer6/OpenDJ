@@ -275,7 +275,7 @@ html.odj-local .panel-tab[data-panel="stems"] { display: none; }
 /* empty / loading / error deck states */
 .overview-wrap { position: relative; }
 .deck.empty .overview-wrap { border-style: dashed; border-color: var(--line-2); background: color-mix(in srgb, var(--deck-color) 4%, var(--wave-bg)); }
-.deck.empty .overview-wrap::after { content: 'Drag a track here from the library — or select one and press Shift + ← / →'; position: absolute; inset: 0; display: grid; place-items: center; font-size: var(--fs-sm); color: var(--text-3); pointer-events: none; }
+.deck.empty .overview-wrap::after { content: var(--txt-drop-hint, 'Drag a track here from the library — or select one and press Shift + ← / →'); position: absolute; inset: 0; display: grid; place-items: center; font-size: var(--fs-sm); color: var(--text-3); pointer-events: none; }
 .deck.empty .deck-title { color: var(--text-3); font-weight: 500; }
 .deck.empty .deck-cover { background: var(--inset) no-repeat center / 20px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236a7584' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Ccircle cx='12' cy='12' r='2'/%3E%3C/svg%3E"); box-shadow: inset 0 0 0 1px var(--line-2); }
 .deck.empty .deck-bpm { color: var(--text-3); }
