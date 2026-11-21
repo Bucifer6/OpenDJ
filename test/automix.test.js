@@ -152,6 +152,25 @@ test('queue editing helpers', () => {
   assert.equal(states, 5);
 });
 
+test('shuffleRemaining shuffles only the tracks still to come', () => {
+  const am = new AutoMix(fakeApp());
+  const q = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map((id) => ({ id }));
+  am.queue = [...q]; am.idx = 2; // a, b played
+  am.reasons.set(q[4], 'old smart-mix reason');
+  const seen = new Set();
+  for (let i = 0; i < 20; i++) {
+    assert.equal(am.shuffleRemaining(), 6);
+    assert.deepEqual(am.queue.slice(0, 2).map((t) => t.id), ['a', 'b']); // history untouched
+    assert.deepEqual(am.queue.slice(2).map((t) => t.id).sort(), ['c', 'd', 'e', 'f', 'g', 'h']); // same tracks
+    seen.add(am.queue.slice(2).map((t) => t.id).join(''));
+  }
+  assert.ok(seen.size > 1, 'order changes');
+  assert.equal(am.reasons.size, 0);
+  am.idx = 7; assert.equal(am.shuffleRemaining(), 0); // one track left: nothing to shuffle
+  am.idx = 2; am.live = { ids: [] }; am.enabled = true;
+  assert.equal(am.shuffleRemaining(), 0); // live smart mix picks each next track itself
+});
+
 test('planMixOut never starts after the end of the track', async () => {
   const { planMixOut } = await import('../public/js/automix.js');
   for (const duration of [20, 60, 120.5, 201.7, 333]) for (const transitionBeats of [4, 8, 16, 32]) {

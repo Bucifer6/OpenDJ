@@ -426,6 +426,20 @@ export class AutoMix extends Emitter {
     this.idx = b;
     this.queueChanged();
   }
+  /**
+   * Shuffle the tracks still to come (works while automix runs: the next track is re-preloaded). Live mode picks
+   * each next track itself, so there is nothing to shuffle there. Returns the number of shuffled tracks.
+   */
+  shuffleRemaining() {
+    if (this.live && this.enabled) return 0;
+    const rest = this.queue.slice(this.idx);
+    if (rest.length < 2) return 0;
+    const mixed = shuffle(rest);
+    for (const t of mixed) this.reasons.delete(t); // smart-mix reasons describe the old order
+    this.queue.splice(this.idx, rest.length, ...mixed);
+    this.queueChanged();
+    return mixed.length;
+  }
   /** Insert tracks to play right after the current one. */
   insertNext(tracks) {
     const list = Array.isArray(tracks) ? tracks : [tracks];

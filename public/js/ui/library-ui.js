@@ -536,6 +536,7 @@ export class LibraryUI {
     items.push('-');
     items.push({ label: 'Add to playlist', sub: [{ label: '+ New playlist…', action: async () => { const n = await this.app.dialogs.prompt('New playlist', 'Playlist name'); if (n) { await api.createPlaylist(n, ids); this.refresh(); } } }, ...this.playlists.filter((p) => !p.sourceId && !p.smart).map((p) => ({ label: p.name, action: async () => { await api.addToPlaylist(p.id, ids); this.refresh(); this.app.toast(`Added ${ids.length} to ${p.name}`); } }))] });
     items.push({ label: 'Add to automix queue', action: () => this.app.queueAdd(tracks) });
+    items.push({ label: 'Play next in automix', action: () => this.app.queueAdd(tracks, { next: true }) });
     if (remote.length) items.push({ label: `Download ${remote.length > 1 ? remote.length + ' tracks' : 'for offline use'}`, action: () => this.download(remote.map((t) => t.id)) });
     const unanalysed = tracks.filter((t) => !t.analyzed);
     if (unanalysed.length) items.push({ label: `Analyse ${unanalysed.length > 1 ? `${unanalysed.length} tracks` : 'now'} (BPM, key, waveform)`, action: () => { const n = this.app.analyser.request(unanalysed); this.app.toast(n ? `Analysing ${n} track(s) in the background` : 'Nothing to analyse (locked BPM / imported grid)'); } });

@@ -165,9 +165,20 @@
 :root body .mixer.mx2 .mixer-master > .m-meter { grid-row: 2 / 6; }
 :root body .mixer.mx2 .mixer-master > .mic-box, :root body .mixer.mx2 .mixer-master > .m-setup { grid-column: 1 / -1; }
 :root body .mixer.mx2 .mixer-master .mic-box { flex-wrap: wrap; } /* MIC / TALK / MC wrap in a narrow master column */
+/* MASTER column fills the strip height instead of packing everything at the top: the rows spread out (space-between
+   falls back to start when the column is short), the meter stretches over the rows it spans, and knobs / buttons
+   scale with --ms (set from the column height by mixer-ui fitMaster: 1 on short windows, up to 1.35) */
+:root body .mixer.mx2 .mixer-master { grid-template-rows: none; grid-auto-rows: min-content; align-content: space-between; }
+:root body .mixer.mx2 .mixer-master > .m-meter { height: auto; }
+:root body .mixer.mx2 .mixer-master .master-vu { flex: 1 1 0; max-height: none; } /* fills the stretched meter cell without feeding back into the row sizes */
+:root body .mixer.mx2 .mixer-master .knob-sm { width: calc(30px * var(--ms, 1)); height: calc(30px * var(--ms, 1)); }
+:root body .mixer.mx2 .mixer-master .knob-xs { width: calc(22px * var(--ms, 1)); height: calc(22px * var(--ms, 1)); }
+:root body .mixer.mx2 .mixer-master .knob-label { font-size: calc(7px * min(var(--ms, 1), 1.2)); }
+:root body .mixer.mx2 .mixer-master .mic-box { gap: calc(2px * var(--ms, 1)); }
+:root body .mixer.mx2 .mixer-master .mic-box .btn, :root body .mixer.mx2 .mixer-master .m-setup .btn { min-height: calc(18px * var(--ms, 1)); font-size: calc(9px * min(var(--ms, 1), 1.15)); }
 /* 4 decks: narrower MASTER and assign buttons so four columns fit */
 :root body.four-decks .mixer.mx2 .mixer-master { flex-basis: 76px; width: 76px; grid-template-columns: 1fr 1fr 14px; }
-:root body.four-decks .mixer.mx2 .mixer-master .knob-xs { width: 19px; height: 19px; }
+:root body.four-decks .mixer.mx2 .mixer-master .knob-xs { width: calc(19px * var(--ms, 1)); height: calc(19px * var(--ms, 1)); }
 :root body.four-decks .mixer.mx2 .mixer-master .master-vu { width: 12px; }
 :root body.four-decks .mixer.mx2 .mixer-master .master-vu .vu { width: 4px; }
 :root body.four-decks .mixer.mx2 .mixer-master .knob-label { font-size: 6px; }

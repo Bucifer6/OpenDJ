@@ -272,7 +272,14 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     fitKnobs();
   };
   new ResizeObserver((ents) => { const e = ents[0], b = e.contentBoxSize?.[0]; fit(b?.blockSize ?? e.contentRect.height, b?.inlineSize ?? e.contentRect.width); }).observe(root);
-  root.setDeckCount = (n) => { for (const s of strips) s.style.display = s.idx < n ? '' : 'none'; requestAnimationFrame(() => fit(lastH, lastW, true)); };
+  // MASTER column: knobs and buttons grow with its height (1080 p windows: 1.35x), the rows spread out in CSS (mixer.css)
+  const fitMaster = () => {
+    const H = master.clientHeight; if (!H) return;
+    const ms = Math.max(1, Math.min(document.body.classList.contains('four-decks') ? 1.12 : 1.35, (H - 40) / 280)).toFixed(3);
+    if (root.style.getPropertyValue('--ms') !== ms) root.style.setProperty('--ms', ms);
+  };
+  new ResizeObserver(fitMaster).observe(master);
+  root.setDeckCount = (n) => { for (const s of strips) s.style.display = s.idx < n ? '' : 'none'; requestAnimationFrame(() => { fit(lastH, lastW, true); fitMaster(); }); };
   root.frame = () => {
     for (const s of strips) if (s.style.display !== 'none') s.vu.draw(s.ch.level());
     const m = eng.masterMeter(); mvuL.draw(m.peak[0], undefined, m.rms[0]); mvuR.draw(m.peak[1], undefined, m.rms[1]);
