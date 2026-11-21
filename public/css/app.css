@@ -214,7 +214,7 @@ body:not(.four-decks) .deck-col > .deck:nth-child(2) { display: none; }
 .knob::before { content: ''; position: absolute; inset: -4px; border-radius: 50%; pointer-events: none;
   background: conic-gradient(from var(--arc-a), var(--arc-c) 0deg var(--arc-b), transparent var(--arc-b)), conic-gradient(from -135deg, var(--led-off) 0deg 270deg, transparent 270deg);
   -webkit-mask: radial-gradient(circle, transparent 61%, #000 63%, #000 73%, transparent 75%); mask: radial-gradient(circle, transparent 61%, #000 63%, #000 73%, transparent 75%); }
-.knob.bipolar::after { content: ''; position: absolute; left: 50%; top: -6px; width: 2px; height: 3px; margin-left: -1px; border-radius: 1px; background: var(--text-3); pointer-events: none; }
+.knob.bipolar::after { content: ''; position: absolute; left: 50%; top: -4px; width: 2px; height: 3px; margin-left: -1px; border-radius: 1px; background: var(--text-3); pointer-events: none; }
 .knob.bipolar.off-center::after { background: var(--line-2); }
 .knob-md { width: 34px; height: 34px; }
 .knob-sm { width: 26px; height: 26px; }
