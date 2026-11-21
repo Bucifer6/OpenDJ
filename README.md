@@ -91,6 +91,8 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 - Any class-compliant **MIDI controller** (Web MIDI) with **MIDI Learn**: 14-bit faders, relative jogs and encoders, LED feedback and a shift layer
 - Import **Mixxx community mappings** (hundreds of controllers) with online search, a **guided mapping wizard**, generic **HID** devices and gamepads; mappings auto-load per device and export as JSON
 - Includes a best-effort Pioneer DDJ-400 / DDJ-FLX4 preset; if a control doesn't respond, fix it with Learn
+- **Recognises controllers when you plug them in**: loads a built-in [community mapping](mappings/README.md) (kept up to date from GitHub), offers a matching Mixxx mapping, or says the controller isn't supported yet and needs mapping by hand
+- **Controller Mapper** (Settings → Controller Mapper, or the standalone `OpenDJ-Controller-Mapper.html` on the release page): test and fix every control, and send new mappings and fixes to the community collection, where other owners verify them
 - **DVS**: control decks with Serato CV02 or Traktor MK1/MK2 timecode vinyl and CDs (relative, absolute and internal modes, auto-calibration). *Absolute mode has not been verified with real timecode media yet.*
 - **Ableton Link**: follow or lead the session tempo with bar-phase lock (own protocol implementation). *Not yet tested against Ableton Live itself.*
 
@@ -379,9 +381,11 @@ public/             UI (vanilla ES modules, no build step) - the same UI runs in
   js/audio/           engine (mixer graph, routing), deck, AudioWorklets, effects, sampler, sequencer, analysis
   js/ui/              deck, mixer, waveform, library, dialogs, controls, controllers panel
   js/midi/            MIDI learn/mapping engine, presets, Mixxx import, wizard
+  controller-mapper.html  Controller Mapper (built from tools/controller-mapper/)
   js/stems/ js/dvs/ js/video/ js/lighting/ js/recording/ js/cdj/ js/link/ js/lyrics/
   js/automix.js
 mobile/             Capacitor iOS / Android projects (see docs/MOBILE.md)
+mappings/           community controller mappings and the controller list (see mappings/README.md)
 scripts/            end-to-end tests (e2e-*.mjs), README demo tooling (demo/), mobile build helpers
 ```
 
