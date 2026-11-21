@@ -1,7 +1,7 @@
 import { icon, glyphIcon } from './icons.js';
 import { el, uiZoom } from '../util.js';
 import { api } from '../api.js';
-import { THEMES, applyTheme } from './themes.js';
+import { THEMES, applyTheme, refreshSkinCatalog } from './themes.js';
 import { controllersPanel } from './controllers-panel.js';
 import { platform, MOBILE_UNAVAILABLE, APP_VERSION } from '../platform.js';
 import { STYLES, normStyle } from '../automix.js';
@@ -395,10 +395,26 @@ export class Dialogs {
     ].map(([k, d]) => el('tr', {}, el('td', {}, el('kbd', {}, k)), el('td', {}, d)))));
 
     // ---- appearance ----
-    const cards = THEMES.map((t) => el('button', { class: `theme-card ${(s.theme || 'midnight') === t.id ? 'active' : ''}`, 'data-id': t.id, onclick: async () => {
-      await set('theme', t.id); applyTheme(app.settings);
-      for (const c of cards) c.classList.toggle('active', c.dataset.id === t.id);
-    } }, el('div', { class: 'theme-swatch' }, ...t.swatch.map((c) => el('span', { style: { background: c } }))), el('b', {}, t.name), el('small', {}, t.desc)));
+    let cards = [];
+    const themeGrid = el('div', { class: 'theme-grid' });
+    const renderThemeCards = () => {
+      cards = THEMES.map((t) => el('button', { class: `theme-card ${(app.settings.theme || 'midnight') === t.id ? 'active' : ''}`, 'data-id': t.id, onclick: async () => {
+        await set('theme', t.id); applyTheme(app.settings);
+        for (const c of cards) c.classList.toggle('active', c.dataset.id === t.id);
+      } }, el('div', { class: 'theme-swatch' }, ...t.swatch.map((c) => el('span', { style: { background: c } }))), el('b', {}, t.name), el('small', {}, t.desc)));
+      themeGrid.replaceChildren(...cards);
+    };
+    renderThemeCards();
+    const skinUpdateStatus = el('span', { class: 'hint' });
+    const skinUpdateButton = el('button', { class: 'btn sm', onclick: async () => {
+      skinUpdateButton.disabled = true; skinUpdateButton.textContent = 'Checking…'; skinUpdateStatus.textContent = '';
+      try {
+        const result = await refreshSkinCatalog();
+        renderThemeCards(); applyTheme(app.settings);
+        skinUpdateStatus.textContent = `${result.count} skin(s) available (catalogue v${result.version}).`;
+      } catch (e) { skinUpdateStatus.textContent = `Could not check for skins: ${e.message}`; }
+      finally { skinUpdateButton.disabled = false; skinUpdateButton.textContent = 'Check for skin updates'; }
+    } }, 'Check for skin updates');
     const accent = el('input', { type: 'color', value: s.accentColor || '#3ea6ff', title: 'Custom accent colour' });
     accent.addEventListener('input', async () => { await set('accentColor', accent.value); applyTheme(app.settings); });
     // the size is capped so the effective window stays at least 1100x700: say so instead of silently ignoring it
@@ -409,7 +425,9 @@ export class Dialogs {
     };
     scaleNote();
     const appearance = el('div', { class: 'form' },
-      el('div', { class: 'theme-grid' }, ...cards),
+      themeGrid,
+      el('div', { class: 'row' }, skinUpdateButton, skinUpdateStatus),
+      el('p', { class: 'hint' }, 'Download new and updated skins without installing a new OpenDJ release.'),
       el('div', { class: 'row' }, field('Accent colour', accent), el('button', { class: 'btn sm', onclick: async () => { await set('accentColor', ''); applyTheme(app.settings); } }, 'Use theme accent')),
       field('Interface size', sel(s.uiScale || 100, [80, 90, 100, 110, 125, 150].map((v) => [v, `${v}%`]), async (v) => { await set('uiScale', Number(v)); applyTheme(app.settings); scaleNote(); }), 'Shrink for small laptop screens, enlarge for touchscreens and big displays.'),
       scaleNoteEl,
