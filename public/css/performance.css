@@ -221,3 +221,6 @@
 /* narrow decks: the four stem cells wrap two per line so each button + knob stays readable */
 :root.w1300 .deck-stems .stems-row:first-child { flex-wrap: wrap; row-gap: 2px; }
 :root.w1300 .deck-stems .stem-cell { flex: 1 1 45%; }
+
+/* ---- knob value rings sit 4 px outside the cap: keep the labels clear of them ---- */
+.knob-wrap > .knob + .knob-label { margin-top: 3px; line-height: 1.1; }
