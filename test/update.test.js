@@ -17,7 +17,8 @@ import { installKind, updatePlan, installHint, downloadVerified, fetchReleaseFil
 import { start } from '../server/index.js';
 import { sanitizeSetting } from '../public/js/shared/settings-schema.js';
 
-const NOTES = fs.readFileSync(new URL('../docs/RELEASE_NOTES.md', import.meta.url), 'utf8');
+// (unreleased "New in 0.5" notes are taken out: the fixtures below model the released 0.4.x notes)
+const NOTES = fs.readFileSync(new URL('../docs/RELEASE_NOTES.md', import.meta.url), 'utf8').replace(/### New in 0\.5\n[\s\S]*?(?=### New in )/, '');
 const DL = (v, n) => `https://github.com/Bucifer6/OpenDJ/releases/download/v${v}/${n}`;
 const ALL_ASSETS = (v) => [`OpenDJ-Setup-${v}-x64.exe`, `OpenDJ-Setup-${v}-arm64.exe`, `OpenDJ-Setup-${v}.exe`, `OpenDJ-Portable-${v}.exe`, `OpenDJ-${v}-mac-arm64.dmg`, `OpenDJ-${v}-mac-arm64.zip`,
   `OpenDJ-${v}-mac-x64.dmg`, `OpenDJ-${v}-mac-x64.zip`, `OpenDJ-${v}-linux-x86_64.AppImage`, `OpenDJ-${v}-linux-arm64.AppImage`, `OpenDJ-${v}-linux-amd64.deb`, `OpenDJ-${v}-linux-arm64.deb`,
