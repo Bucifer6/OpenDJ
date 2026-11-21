@@ -355,11 +355,15 @@ export function ffmpegPath() {
   try { const p = require('ffmpeg-static'); if (p && fs.existsSync(p)) return p; } catch { /* not installed */ }
   return 'ffmpeg';
 }
-export const fileName = (def) => `${def.artist} - ${def.title}.mp3`.replace(/[\\/:*?"<>|]/g, '_');
+export const fileName = (def) => (def.file || `${def.artist} - ${def.title}.mp3`).replace(/[\\/:*?"<>|]/g, '_');
 
-export async function makeDemoLibrary(outDir = path.join(os.tmpdir(), 'opendj-demo-library'), { force = false, only = null, log = console.log } = {}) {
+/**
+ * Render `tracks` (default: the fictional catalogue above) into outDir. Other scripts pass their own definitions
+ * (same fields as TRACKS; optional `file` name and `comment`), e.g. scripts/review-pack/build-review-pack.mjs.
+ */
+export async function makeDemoLibrary(outDir = path.join(os.tmpdir(), 'opendj-demo-library'), { force = false, only = null, log = console.log, tracks = TRACKS } = {}) {
   fs.mkdirSync(outDir, { recursive: true });
-  const defs = TRACKS.map((t, i) => ({ ...t, i })).filter((t) => only == null || t.i === only);
+  const defs = tracks.map((t, i) => ({ ...t, i })).filter((t) => only == null || t.i === only);
   const todo = defs.filter((d) => force || !fs.existsSync(path.join(outDir, fileName(d))));
   if (!todo.length) { log(`demo library up to date in ${outDir}`); return outDir; }
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'opendj-demo-work-'));
@@ -371,7 +375,7 @@ export async function makeDemoLibrary(outDir = path.join(os.tmpdir(), 'opendj-de
     const wav = path.join(work, `t${def.i}.wav`);
     writeWav(wav, audio);
     const out = path.join(outDir, fileName(def));
-    const meta = { title: def.title, artist: def.artist, album_artist: def.artist, album: def.album, genre: def.genre, date: String(def.year), track: String(def.i + 1), TBPM: String(def.bpm), TKEY: keyName(def.key), comment: 'Fictional demo track synthesised by OpenDJ scripts/demo/make-demo-library.mjs' };
+    const meta = { title: def.title, artist: def.artist, album_artist: def.artist, album: def.album, genre: def.genre, date: String(def.year), track: String(def.i + 1), TBPM: String(def.bpm), TKEY: keyName(def.key), comment: def.comment || 'Fictional demo track synthesised by OpenDJ scripts/demo/make-demo-library.mjs' };
     const args = ['-hide_banner', '-loglevel', 'error', '-y', '-i', wav, '-i', covers[k], '-map', '0', '-map', '1', '-c:a', 'libmp3lame', '-b:a', '192k', '-c:v', 'mjpeg', '-id3v2_version', '3',
       ...Object.entries(meta).flatMap(([key, v]) => ['-metadata', `${key}=${v}`]), '-metadata:s:v', 'title=Album cover', '-metadata:s:v', 'comment=Cover (front)', out];
     const res = spawnSync(ff, args, { stdio: ['ignore', 'inherit', 'inherit'] });

@@ -240,6 +240,8 @@ Use Sonic Pi's trimmed FLACs from `github.com/sonic-pi-net/sonic-pi/tree/dev/etc
 
 Aim for 5 or 6 tracks across 3 to 4 Camelot keys. Ship them as a release-asset download (§5.4), not inside the store binaries.
 
+**Built (2026-11-21):** the app-review pack (`scripts/review-pack/manifest.json`, `docs/store/CREDITS.md`) uses three CC0 tracks from FMA, licence checked on each track page at download time: "After Party" (120 BPM, Fm / 4A) and "Roller Fever" (≈113.8 BPM, D / 10B) by Loyalty Freak Music, and "Fire Place" (≈110.4 BPM, Em / 9A) by HoliznaCC0, plus three original generated tracks (OpenDJ project, CC0). BPM / key measured with OpenDJ's analysis. Their embedded covers show the artist's logo and are removed in the pack copies. Kevin MacLeod and Tricks & Traps are not used.
+
 ---
 
 ## 4. Do-not-use list
@@ -359,6 +361,7 @@ Items that were flagged "not verified" were re-checked against primary sources o
 | Tricks & Traps pack all CC0 | Still unverified: opengameart.org unreachable; search excerpts show one CC0 licence for the submission. | [OGA](https://opengameart.org/content/free-rhythm-game-music-pack-1) |
 | HoliznaCC0 | Confirmed CC0 (*Winter Lofi*, *Orphaned Media*); note that *Orphaned Media* samples old public-domain songs. | [FMA](https://freemusicarchive.org/music/holiznacc0/winter-lofi) |
 | Loyalty Freak Music | Confirmed CC0 ("Summer Pride"). | [FMA track](https://freemusicarchive.org/music/Loyalty_Freak_Music/INSTRUMENTAL_RB_BEATS_TO_SING_OR_RAP_ON/Loyalty_Freak_Music_-_INSTRUMENTAL_RB_BEATS_TO_SING_OR_RAP_ON_-_17_Summer_Pride) |
+| FMA tracks for the review pack | Confirmed CC0 1.0 on each track page (2026-11-21): Loyalty Freak Music "After Party", "Roller Fever" (and the other *ROLLER DISCO DANCE DANCE* / *ROBOT DANCE !* tracks), HoliznaCC0 *Winter Lofi* tracks. Audio files are served from `files.freemusicarchive.org` (the track page's *download* link needs a login; the file URL is in the page's track data). SHA-256 of each download pinned in `scripts/review-pack/manifest.json`. | [After Party](https://freemusicarchive.org/music/Loyalty_Freak_Music/ROBOT_DANCE_/Loyalty_Freak_Music_-_ROBOT_DANCE__-_03_After_Party/), [Roller Fever](https://freemusicarchive.org/music/Loyalty_Freak_Music/ROLLER_DISCO_DANCE_DANCE/Loyalty_Freak_Music_-_ROLLER_DISCO_DANCE_DANCE_-_01_Roller_Fever/), [Fire Place](https://freemusicarchive.org/music/holiznacc0/winter-lofi/fire-place/) |
 | Komiku Content ID status | Still unverified (not re-checked). | — |
 | Mixotic / UnmixDB CC variant | Still unverified: zenodo.org unreachable. | — |
 | LRCLIB | Confirmed: free, no key, User-Agent required, approximate rate limits, optional app registration. No licence stated for lyrics or dumps; the terms page needs JavaScript. | [docs.txt](https://lrclib.net/docs.txt) |
