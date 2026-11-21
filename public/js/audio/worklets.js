@@ -8,6 +8,8 @@ const VEL_KNEE = 0.3; // below this speed (resampled playback) the level follows
 const HAND_K = 0.02; // velocity-mode hand smoothing per sample at the default jog weight (about a 1 ms time constant)
 const MAX_HAND = 16; // fastest platter speed a hand (or a throw) can give, x normal
 const EXTRAPOLATE = 0.03; // position mode: past its newest sample the hand eases onto it over this long (s)
+const HAND_OUT_K = 1 - Math.exp(-1 / (0.0012 * sampleRate)); // position mode: platter speed smoothing (~1.2 ms)
+const LAG_SLEW = 0.1;      // position mode: the render delay changes by at most 0.1 s per second
 const MAX_GAP = 0.025;    // position mode: input intervals above this are pauses, not the input rate (s)
 const LAG_GAP = 0.75;     // position mode: how much of the input interval the hand is rendered behind (interpolation margin)
 
@@ -220,7 +222,7 @@ class DeckProcessor extends AudioWorkletProcessor {
     const was = this.scratch;
     this.scratch = value || null;
     if (value && value.pos) {
-      if (!this.hand) this.hand = { anchor: this.pos, pts: [], lag: 0, delay: 0, gap: 1 / 120, vs: this.curRate * this.step, creep: 0 };
+      if (!this.hand) this.hand = { anchor: this.pos, pts: [], lag: 0, lagTarget: 0, delay: 0, gap: 1 / 120, vs: this.curRate * this.step, creep: 0 };
     } else this.hand = null;
     if (value) { this.coast = null; this.releaseRamp = false; return; }
     if (!was) return;
@@ -244,7 +246,8 @@ class DeckProcessor extends AudioWorkletProcessor {
     // up at once, back down slowly) plus part of the input interval
     const d = Math.max(0, Math.min(0.1, currentTime - t));
     h.delay = Math.max(d, h.delay - 0.00002);
-    h.lag = Math.min(0.1, h.delay + LAG_GAP * h.gap);
+    h.lagTarget = Math.min(0.1, h.delay + LAG_GAP * h.gap);
+    if (pts.length <= 2) h.lag = h.lagTarget; // (followHand slews it after that: no time jumps, no speed spikes)
   }
   /** Position mode: the hand's position (frames from the anchor) and speed (frames per second) at audio time t. */
   handAt(t) {
@@ -269,6 +272,8 @@ class DeckProcessor extends AudioWorkletProcessor {
   /** Position mode, per sample: drive the platter so the play head follows the hand (velocity feed-forward + position correction). */
   followHand(t) {
     const h = this.hand, sr = sampleRate;
+    const dl = h.lagTarget - h.lag, maxd = LAG_SLEW / sr; // render-delay changes warp time by at most LAG_SLEW
+    h.lag += dl > maxd ? maxd : dl < -maxd ? -maxd : dl;
     const [x, v] = this.handAt(t - h.lag);
     // slip-mat: a still hand lets a running platter drag the record along a little
     if (this.playing && this.motor.slipmat > 0) h.creep += this.motor.slipmat * 0.03 * this.rate * this.dir * this.step;
@@ -277,7 +282,9 @@ class DeckProcessor extends AudioWorkletProcessor {
     let speed = h.vs + (target - this.pos) * (1 - Math.exp(-1 / (this.tau.pos * sr)));
     const lim = MAX_HAND * this.step;
     if (speed > lim) speed = lim; else if (speed < -lim) speed = -lim;
-    this.curRate = speed / this.step;
+    // a last ~1 ms smoothing of the platter speed: a late hand sample that bends the path must not step the speed
+    // (below VEL_KNEE the level follows the speed, so a speed step would be a level step: a click)
+    this.curRate += (speed / this.step - this.curRate) * HAND_OUT_K;
   }
 
   endSlip(force) { if (this.slip || force) { if (Math.abs(this.shadow - this.pos) > 1) this.startGhost(); this.pos = this.shadow; this.resetGrains(); } }

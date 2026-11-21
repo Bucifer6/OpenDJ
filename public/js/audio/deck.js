@@ -604,7 +604,7 @@ export class Deck extends Emitter {
   jogNudge(deltaRot) {
     if (!this.track) return;
     if (this.loopAdjust) return this.adjustLoop(deltaRot * this.secPerRev * 0.25);
-    if (!this.playing) { this.seek(this.position + deltaRot * 1.8 * 0.25); return; }
+    if (!this.playing) { this.seek(this.position + deltaRot * this.secPerRev * 0.25); return; }
     this.setBend(clamp(deltaRot * 4, -0.25, 0.25));
     clearTimeout(this._bendT); this._bendT = setTimeout(() => this.setBend(0), 70);
   }
