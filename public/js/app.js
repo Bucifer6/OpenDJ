@@ -137,6 +137,7 @@ class App {
     this.recBtn = el('button', { class: 'btn rec', onclick: () => this.toggleRecord(), title: 'Record your mix to disk. R = start / stop' }, el('span', { class: 'rec-dot' }), 'REC');
     this.recTime = el('span', { class: 'rec-time' });
     this.amBtn = el('button', { class: 'btn automix-btn', onclick: () => this.toggleAutomix(), title: 'Automix the current library view' }, iconLabel('automix', 'AUTOMIX'));
+    this.amNowBtn = el('button', { class: 'btn am-now-btn', onclick: () => this.automixNow(), title: 'Start automix on the current library view using saved preferences', 'aria-label': 'Automix now' }, iconLabel('automix', 'AUTOMIX NOW'));
     this.amSkip = el('button', { class: 'btn sm icon-only', onclick: () => this.automix.skip(), title: 'Mix to next track now', 'aria-label': 'Mix to next track now' }, icon('next'));
     this.amInfo = el('span', { class: 'am-info' });
     this.amQueueBtn = el('button', { class: 'btn sm am-queue-btn', onclick: () => this.toggleQueuePanel(), title: 'Automix queue: upcoming tracks, transition styles, smart-mix reasons' }, 'QUEUE');
@@ -156,7 +157,7 @@ class App {
     const topbar = el('header', { class: 'topbar' },
       el('div', { class: 'logo' }, logoMark(), el('span', { class: 'logo-word' }, 'Open', el('b', {}, 'DJ'))),
       deckSel, shiftBtn,
-      el('div', { class: 'tb-group' }, this.amBtn, this.amSkip, this.amQueueBtn), this.amInfo,
+      el('div', { class: 'tb-group automix-actions' }, this.amBtn, this.amNowBtn, this.amSkip, this.amQueueBtn), this.amInfo,
       el('div', { class: 'tb-spacer' }),
       el('div', { class: 'tb-group' }, this.recBtn, this.recTime),
       this.midiDot, this.cpu, this.clock,
@@ -362,6 +363,16 @@ class App {
   toggleAutomix() {
     if (this.automix.enabled) { this.automix.stop(); this.toast('Automix stopped'); }
     else this.dialogs.automixQueue(this.automix.queue.length > this.automix.idx ? this.automix.queue.slice(this.automix.idx) : this.library.rows);
+  }
+
+  /** Start a smart automix immediately using the visible library rows and saved preferences. */
+  async automixNow() {
+    if (this.automix.enabled) { this.toast('Automix is already running'); return; }
+    const tracks = this.library?.rows || [];
+    if (!tracks.length) { this.toast('No tracks in this view'); return; }
+    const opts = this.settings.automix || {};
+    const mode = opts.shuffle ? 'shuffle' : 'smart';
+    await this.startAutomix(tracks, { mode, shape: opts.shape, sliders: opts.sliders });
   }
   queueAdd(tracks) {
     if (!this.automix.enabled) { this.automix.queue = [...this.automix.queue.slice(this.automix.idx), ...tracks]; this.automix.idx = 0; }
