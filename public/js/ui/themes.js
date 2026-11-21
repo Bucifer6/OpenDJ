@@ -28,7 +28,11 @@ export function applyTheme(settings) {
   // layouts in css/mobile.css) are laid out at their real size instead of being shrunk to fit the desktop layout.
   const want = (settings.uiScale || 100) / 100;
   const compact = innerWidth < 900 || innerHeight < 560;
-  const z = compact ? Math.max(0.5, Math.min(want, 1.5)) : Math.max(0.5, Math.min(want, innerWidth / 1100, innerHeight / 700, want));
+  // Shrinking (< 100 %) stops at a 1100x700 effective window; enlarging (> 100 %) stops at 1280x700, so a larger
+  // interface size never squeezes the desktop layout into its narrowest form (1600x900 at 125 % stays 1280 wide).
+  const z = compact ? Math.max(0.5, Math.min(want, 1.5))
+    : want > 1 ? Math.max(1, Math.min(want, Math.max(1, Math.min(innerWidth / 1280, innerHeight / 700))))
+    : Math.max(0.5, Math.min(want, innerWidth / 1100, innerHeight / 700));
   root.classList.toggle('compact', compact);
   root.classList.toggle('touch', !!globalThis.matchMedia?.('(pointer: coarse)').matches);
   root.style.zoom = String(z);
@@ -38,7 +42,7 @@ export function applyTheme(settings) {
   const effH = compact ? Infinity : innerHeight / z;
   root.classList.toggle('h920', effH <= 920); root.classList.toggle('h860', effH <= 860); root.classList.toggle('h800', effH <= 800);
   const effW = compact ? Infinity : innerWidth / z;
-  root.classList.toggle('w1300', effW <= 1300); root.classList.toggle('w1200', effW <= 1200);
+  root.classList.toggle('w1500', effW <= 1500); root.classList.toggle('w1400', effW <= 1400); root.classList.toggle('w1300', effW <= 1300); root.classList.toggle('w1200', effW <= 1200);
   if (!applyTheme._resize) { applyTheme._resize = true; let t; addEventListener('resize', () => { clearTimeout(t); t = setTimeout(() => applyTheme(applyTheme._last), 150); }); }
   applyTheme._last = settings;
   root.style.colorScheme = theme === 'light' ? 'light' : 'dark';

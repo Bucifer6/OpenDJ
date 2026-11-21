@@ -94,6 +94,16 @@ const fit = (panels) => ev(async (panels) => {
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     for (const sel of ['.topbar', '.deck-area', '.mixer', '.sampler-bar']) { const e = document.querySelector(sel); if (!vis(e)) continue; const r = e.getBoundingClientRect(); if (r.right > innerWidth + 1 || r.left < -1) out.push(`${sel} outside the window (${Math.round(r.right)} > ${innerWidth})`); }
     const tb = document.querySelector('.topbar'); if (tb.scrollWidth > tb.clientWidth + 1) out.push(`top bar clipped by ${tb.scrollWidth - tb.clientWidth}px`);
+    const appEl = document.getElementById('app'), z = parseFloat(document.documentElement.style.zoom) || 1;
+    if (appEl.scrollWidth > innerWidth / z + 1) out.push(`page ${appEl.scrollWidth}px wide in a ${Math.round(innerWidth / z)}px window`);
+    // top bar items (buttons, automix info, clock...) never overlap each other or leave the bar
+    const items = [...tb.querySelectorAll(':scope > *, :scope > .tb-group > *')].filter((e) => !e.matches('.tb-group, .tb-spacer') && vis(e) && e.getBoundingClientRect().width > 2);
+    const tr = tb.getBoundingClientRect();
+    for (let i = 0; i < items.length; i++) {
+      const a = items[i].getBoundingClientRect();
+      if (a.right > tr.right + 1) out.push(`top bar: ${items[i].className || items[i].tagName} outside the bar`);
+      for (let j = i + 1; j < items.length; j++) { const b = items[j].getBoundingClientRect(); if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1) out.push(`top bar: ${items[i].className} overlaps ${items[j].className}`); }
+    }
     for (const d of decks()) {
       const n = `${panel}@deck${+d.dataset.deck + 1}`, mid = d.querySelector('.deck-mid');
       if (d.getBoundingClientRect().right > innerWidth + 1) out.push(`deck${+d.dataset.deck + 1} outside the window`);
@@ -151,7 +161,7 @@ try {
     }
   }
   // the remaining common sizes (fit check only: these are the window sizes the layout has to hold at all zooms)
-  for (const [w, h] of QUICK ? [] : [[1280, 720], [1600, 900], [2560, 1440]]) {
+  for (const [w, h] of QUICK ? [] : [[1024, 768], [1280, 720], [1600, 900], [2560, 1440]]) {
     await page.setViewportSize({ width: w, height: h });
     for (const layout of layouts) for (const zoom of zooms) {
       await setUi({ layout, theme: 'midnight', zoom });
@@ -161,6 +171,22 @@ try {
     }
   }
   await ev(() => window.opendj.engine.decks.forEach((d) => d.showPanel?.('cues')));
+  // top bar in its busiest state: hosted mode's Sign out shown and automix announcing a long "Next: …" line
+  await ev(() => { const a = window.opendj; a.signOutBtn.hidden = false; a.amInfo.textContent = 'Next: A Very Long Artist Name – An Extremely Long Track Title (Extended Club Mix) · Bass swap in 01:23'; });
+  for (const [w, h] of [[1024, 768], [1280, 720], [1366, 768], [1440, 900], [1600, 900], [1920, 1080]]) for (const zoom of [100, 110, 125, 150]) {
+    await page.setViewportSize({ width: w, height: h });
+    await setUi({ layout: 'classic', theme: 'midnight', zoom });
+    await page.waitForTimeout(120);
+    const f = await fit(['fx']);
+    check(!f.length, `${w}x${h} @${zoom}% with Sign out + automix info: top bar items don't overlap, page fits${f.length ? ' — ' + f.slice(0, 4).join('; ') : ''}`);
+  }
+  // the folded buttons are offered in the More menu
+  await page.setViewportSize({ width: 1280, height: 720 }); await setUi({ layout: 'classic', theme: 'midnight', zoom: 100 }); await page.waitForTimeout(150);
+  await page.locator('.topbar .tb-more').click();
+  const moreItems = await ev(() => [...document.querySelectorAll('.tb-menu .ctx-item')].map((x) => x.textContent.trim()));
+  check(['LIVE', 'VIDEO', 'LIGHTS', 'Sign out'].every((k) => moreItems.some((t) => t.includes(k))), `1280 px: More menu offers the folded buttons (${moreItems.join(', ')})`);
+  await page.keyboard.press('Escape'); await ev(() => { document.querySelector('.tb-menu')?.remove(); const a = window.opendj; a.signOutBtn.hidden = true; a.amInfo.textContent = ''; });
+  await page.setViewportSize({ width: 1920, height: 1080 });
 
   // ---------- 2. click sweep per layout ----------
   await page.setViewportSize({ width: 1920, height: 1080 });

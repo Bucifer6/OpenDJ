@@ -154,7 +154,7 @@ class App {
     const topbar = el('header', { class: 'topbar' },
       el('div', { class: 'logo' }, logoMark(), el('span', { class: 'logo-word' }, 'Open', el('b', {}, 'DJ'))),
       deckSel, shiftBtn,
-      el('div', { class: 'tb-group' }, this.amBtn, this.amSkip, this.amQueueBtn, this.amInfo),
+      el('div', { class: 'tb-group' }, this.amBtn, this.amSkip, this.amQueueBtn), this.amInfo,
       el('div', { class: 'tb-spacer' }),
       el('div', { class: 'tb-group' }, this.recBtn, this.recTime),
       this.midiDot, this.cpu, this.clock,
@@ -200,7 +200,7 @@ class App {
     root.replaceChildren(topbar, this.waveArea, this.deckArea, this.samplerBar, handle, this.library.root, this.toasts);
   }
 
-  /** Phones: the secondary top bar buttons (hidden by CSS there) are offered in one menu instead of three rows. */
+  /** Phones and windows ≤ 1400 effective px: the secondary top bar buttons (hidden by CSS there) are offered in one menu. */
   topbarMore(anchor) {
     document.querySelector('body > .ctx-menu.tb-menu')?.remove();
     const items = [...document.querySelectorAll('.topbar .live-btn, .topbar .link-btn, .topbar .dvs-btn, .topbar .video-btn, .topbar .light-btn, .topbar .rec-more, .topbar .signout-btn')]

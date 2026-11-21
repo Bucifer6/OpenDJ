@@ -445,8 +445,14 @@ body:not(.four-decks) .mixer.mx-short .mixer-master > .strip-num, body:not(.four
    150 % on 1366–1920 px screens — the whole deck row grew past the window and the right deck was cut off) */
 #app { grid-template-columns: minmax(0, 1fr); }
 .topbar { min-width: 0; overflow: hidden; }
-.topbar .tb-group { min-width: 0; }
-.topbar .am-info { min-width: 0; flex: 0 1 auto; }
+.topbar > .tb-group { flex-shrink: 0; }
+:root .topbar > .am-info { min-width: 0; flex: 0 1 auto; } /* only the automix info text gives way (ellipsis): buttons never overlap */
+/* ≤ 1400 effective px: LIVE / LINK / DVS / VIDEO / LIGHTS / recording options / Sign out fold into "More" */
+:root.w1400:not(.compact) .topbar .tb-more { display: inline-flex; }
+:root.w1400:not(.compact) .topbar :is(.live-btn, .link-wrap, .dvs-btn, .video-btn, .light-btn, .rec-more, .signout-btn) { display: none !important; }
+/* hosted mode's Sign out needs ~90 px more: there everything folds from 1500 px down */
+:root.w1500:not(.compact) .topbar:has(.signout-btn:not([hidden])) .tb-more { display: inline-flex; }
+:root.w1500:not(.compact) .topbar:has(.signout-btn:not([hidden])) :is(.live-btn, .link-wrap, .dvs-btn, .video-btn, .light-btn, .rec-more, .signout-btn) { display: none !important; }
 /* narrow effective width: icon-only secondary buttons (their titles still name them), tighter spacing */
 :root.w1300 .topbar { gap: 5px; padding: 0 8px; }
 :root.w1300 .topbar .logo { margin-right: 2px; }
