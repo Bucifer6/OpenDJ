@@ -14,6 +14,8 @@
 //              (fails when the 95th-percentile frame is over 20 ms)
 //   * --electron: run all of the above in the desktop app (Electron, Playwright _electron; use xvfb-run -a on Linux)
 //
+//   * --skins=minimal,vinyl,cdj,turntable,player: with --perf, repeat the 2-deck run per platter skin / deck look
+//              (turntable / player are the Direct-Drive Turntable and Pro Media Player deck looks)
 //   node scripts/perf/ui-bench.mjs [--shots] [--perf] [--fx] [--latency] [--analysis] [--electron] [--out=<dir>] [--themes=midnight,light,neon] [--secs=6]
 import fs from 'node:fs';
 import os from 'node:os';
@@ -114,7 +116,10 @@ if (argv.includes('--perf')) {
   await cdp.send('Performance.enable');
   const metric = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map((m) => [m.name, m.value]));
   const results = [];
-  for (const n of [2, 4]) for (const throttle of [1, 4]) {
+  const SKINS = opt('skins', '').split(',').filter(Boolean);
+  const runs = SKINS.length ? SKINS.flatMap((skin) => [1, 4].map((throttle) => ({ n: 2, throttle, skin }))) : [2, 4].flatMap((n) => [1, 4].map((throttle) => ({ n, throttle, skin: null })));
+  for (const { n, throttle, skin } of runs) {
+    if (skin) await ev((skin) => { const a = window.opendj, look = skin === 'turntable' || skin === 'player'; a.settings.deckOptions = { ...(a.settings.deckOptions || {}), platterSkin: look ? 'minimal' : skin, deckLook: look ? skin : 'standard' }; }, skin);
     await playState(n);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle });
     await sleep(800);
@@ -136,7 +141,7 @@ if (argv.includes('--perf')) {
     const pct = (p) => f[Math.min(f.length - 1, Math.floor(f.length * p))];
     const d = (k) => ((m1[k] - m0[k]) * 1000 / (r.wall / 1000)); // ms per second of wall time
     const row = {
-      decks: n, cpu: `${throttle}x`, fps: +(1000 / avg).toFixed(1), p50: +pct(0.5).toFixed(1), p95: +pct(0.95).toFixed(1), p99: +pct(0.99).toFixed(1),
+      decks: n, ...(skin ? { skin } : {}), cpu: `${throttle}x`, fps: +(1000 / avg).toFixed(1), p50: +pct(0.5).toFixed(1), p95: +pct(0.95).toFixed(1), p99: +pct(0.99).toFixed(1),
       dropped: f.filter((x) => x > 1000 / 60 * 1.5).length, frames: f.length, longTasks: r.longs.length, longMs: Math.round(r.longs.reduce((a, b) => a + b, 0)),
       'script ms/s': +d('ScriptDuration').toFixed(0), 'style ms/s': +d('RecalcStyleDuration').toFixed(0), 'layout ms/s': +d('LayoutDuration').toFixed(0), 'task ms/s': +d('TaskDuration').toFixed(0),
       'audio glitches': a0 && a1 ? a1.fallback - a0.fallback : 'n/a',

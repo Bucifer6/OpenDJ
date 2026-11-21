@@ -173,6 +173,18 @@ export function buildProPlayer(app, deck, ctx) {
     el('div', { class: 'pmp-body' }, left, el('div', { class: 'pmp-center' }, jog), right),
   );
 
+  // size classes (short decks hide the extras) and the jog's square, from ResizeObservers: no layout reads per frame
+  const center = root.querySelector('.pmp-center');
+  const ro = new ResizeObserver(() => {
+    const deckEl = root.parentElement; if (!deckEl) return;
+    const h = deckEl.getBoundingClientRect().height;
+    deckEl.classList.toggle('pmp-short', h > 0 && h < 430); deckEl.classList.toggle('pmp-tiny', h > 0 && h < 380);
+    const r = center.getBoundingClientRect(), sz = Math.max(60, Math.floor(Math.min(r.width, r.height)));
+    jog.style.width = jog.style.height = `${sz}px`;
+  });
+  let stripW = 0; new ResizeObserver((es) => { stripW = es.at(-1).contentRect.width; }).observe(strip);
+  ro.observe(center); queueMicrotask(() => root.parentElement && ro.observe(root.parentElement));
+
   // ---------------------------------------------------------------- updates
   const setText = (n, t) => { if (n._t !== t) { n._t = t; n.textContent = t; } };
   const updateMeta = () => {
@@ -194,12 +206,12 @@ export function buildProPlayer(app, deck, ctx) {
       if (now - lastText < 50) return; lastText = now;
       const pos = deck.position;
       setText(tElapsed, fmtTime(pos)); setText(tRemain, deck.track && deck.duration ? fmtTime(deck.duration - pos, true) : '-00:00.0');
-      tRemain.classList.toggle('warn', deck.duration > 0 && deck.duration - pos < 30 && deck.playing);
+      const w = deck.duration > 0 && deck.duration - pos < 30 && deck.playing; if (tRemain._w !== w) { tRemain._w = w; tRemain.classList.toggle('warn', w); }
       const tp = `${deck.tempo >= 0 ? '+' : ''}${deck.tempo.toFixed(2)}%`;
       setText(tTempo, tp); setText(tempoLed, tp); setText(tRange, deck.tempoRange >= 100 ? 'WIDE' : `±${deck.tempoRange}`);
       setText(tBpm, deck.effectiveBpm ? deck.effectiveBpm.toFixed(1) : '--.-'); setText(tKey, deck.playingCamelot || deck.camelot || '');
-      sMaster.hidden = !deck.isMaster; sSync.hidden = !deck.syncOn;
-      stripPos.style.left = `${deck.duration ? (pos / deck.duration) * 100 : 0}%`;
+      if (sMaster.hidden !== !deck.isMaster) sMaster.hidden = !deck.isMaster; if (sSync.hidden !== !deck.syncOn) sSync.hidden = !deck.syncOn;
+      const sp = `translateX(${(deck.duration ? (pos / deck.duration) : 0) * stripW}px)`; if (stripPos._t !== sp) { stripPos._t = sp; stripPos.style.transform = sp; }
     },
   };
 }
