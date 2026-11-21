@@ -74,6 +74,11 @@ notes say, and neither does a container.
   Romanian voice, 20–60 MB each). Fallbacks: speechSynthesis (heard locally only, said so), else text.
   **Coordination with the mixer agent:** `engine.voiceInput()` (3 lines in `engine.js`) returns `engine.voiceBus` if
   the new mic / voice bus sets one, else the master bus. VoiceBus ducks through `engine.duck`, like talkover.
+  The mixer worktree (`/home/user/OpenDJ-mixer`) already has its own `engine.voiceInput()` (voice bus into the mic bus,
+  with auto talkover, mic FX and "mic in recording" routing) and keeps `engine.duck`. On merge, keep the mixer's
+  `voiceInput()` and drop this branch's 3-line version: `voice.js` calls `engine.voiceInput()` and needs no change.
+  If the mixer's auto talkover ducks on the voice bus, call `VoiceBus.play(buffer, { duck: false })` to avoid ducking
+  twice.
 - **Live dedications** (`public/js/dedications.js`, MC button in the mixer): English or Romanian, next 32-beat
   phrase, ducking, on-screen banner, video lower third, stream metadata held while it plays.
 - **Authenticated MCP remote control** (`server/mcp.js`, `public/js/remote-control.js`, Settings → Remote control),
