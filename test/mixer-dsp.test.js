@@ -245,5 +245,5 @@ test('settings: crossfaderCurve migrates into the continuous crossfader; setting
   assert.equal(normalizeMixer({}).eqType, MIXER_DEFAULTS.eqType);
   const r = sanitizeSetting('mixer', { eqType: 'rotaryIso', xfCutTime: 100, personality: 'battle', fx1: { assign: 'bogus', quantize: true } });
   assert.deepEqual(r.value, { eqType: 'rotaryIso', personality: 'battle', fx1: { quantize: true } });
-  assert.equal(sanitizeSetting('theme', 'booth').ok, true);
+  assert.equal(sanitizeSetting('mixer', { eqType: 'nope' }).value.eqType, undefined);
 });
