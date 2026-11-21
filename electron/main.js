@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { start, LAUNCH_COOKIE } from '../server/index.js';
 import { installKind, normArch, updatePlan, installHint, downloadVerified, downloadDir, replaceAppImage, sha256File } from './updater.js';
+import { startOnStablePort } from './stable-port.js';
 import { selectAsset, isNewer, isReleaseDownloadUrl, isReleasePageUrl } from '../public/js/shared/update-core.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -45,7 +46,8 @@ async function createWindow() {
   const launchToken = crypto.randomBytes(32).toString('base64url');
   // The desktop server is guarded by the launch token, so the hosted-mode login variables (OPENDJ_PASSWORD,
   // OPENDJ_TRUST_PROXY, OPENDJ_ALLOWED_HOSTS, OPENDJ_AUTH) must not switch a login page on in the app window.
-  server = await start({ port: 0, dataDir: process.env.OPENDJ_DATA || path.join(app.getPath('userData'), 'library'), launchToken, auth: false, password: '', trustProxy: '', allowedHosts: [] });
+  // a stable port keeps the page's origin, and so its browser storage (sampler sounds, sequencer…), across launches
+  ({ server } = await startOnStablePort((port) => start({ port, dataDir: process.env.OPENDJ_DATA || path.join(app.getPath('userData'), 'library'), launchToken, auth: false, password: '', trustProxy: '', allowedHosts: [] }), path.join(app.getPath('userData'), 'server-port.json')));
   appOrigin = new URL(server.url).origin;
   await session.defaultSession.cookies.set({ url: server.url, name: LAUNCH_COOKIE, value: launchToken, path: '/', httpOnly: true, sameSite: 'strict', secure: false });
   const allowed = new Set(['midi', 'midiSysex', 'media', 'speaker-selection', 'hid', 'clipboard-sanitized-write', 'fullscreen', 'serial', 'window-management']);
