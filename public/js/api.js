@@ -63,6 +63,10 @@ export const api = {
   sources: () => req('GET', '/api/sources'),
   addSource: (cfg) => req('POST', '/api/sources', cfg),
   syncSource: (id) => req('POST', `/api/sources/${enc(id)}/sync`),
+  /** Live playlists of a media server: [{ remoteId, name, trackCount, duration, smart, playlistId }] */
+  sourcePlaylists: (id) => req('GET', `/api/sources/${enc(id)}/playlists`),
+  /** Open a media-server playlist: { playlist (library mirror), tracks (remote library tracks, in order) } */
+  sourcePlaylist: (id, pid, name) => req('GET', `/api/sources/${enc(id)}/playlists/${enc(pid)}${name ? `?name=${encodeURIComponent(name)}` : ''}`),
   removeSource: (id) => req('DELETE', `/api/sources/${enc(id)}`),
   downloads: () => req('GET', '/api/downloads'),
   download: (trackIds) => req('POST', '/api/downloads', { trackIds }),

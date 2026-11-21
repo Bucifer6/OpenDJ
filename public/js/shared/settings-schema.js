@@ -41,8 +41,12 @@ const SCHEMA = {
   waveformColors: oneOf('rgb', 'blue', 'mono'),
   downloadDir: str(), uploadDir: str(),
   automix: shape({
-    transitionBeats: num(1, 256), style: oneOf('phrase', 'eqswap', 'crossfade', 'filter', 'echo'),
+    transitionBeats: num(1, 256),
+    style: oneOf('auto', 'blend', 'bassswap', 'crossfade', 'filter', 'echo', 'cut', 'backspin', 'brake', 'loop', 'reverb', 'phrase', 'eqswap'),
     keepSync: bool(), skipSilence: bool(), shuffle: bool(), keySync: bool(), order: oneOf('harmonic', 'build', 'peak', 'wave'),
+    varyStyles: bool(), onAirLoad: oneOf('ask', 'queue', 'stop'), shape: oneOf('warmup', 'rising', 'steady', 'peak', 'wave'),
+    preset: oneOf('balanced', 'harmonic', 'energy', 'variety', 'custom'), liveSetLength: num(2, 1000),
+    sliders: (v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(['harmonic', 'energy', 'variety'].map((k) => [k, num(0, 1)(v[k]) ?? 0.5])) : undefined),
   }),
   midiMappings: obj(),
   recordFormat: oneOf('wav', 'flac', 'mp3', 'aac', 'opus'),
@@ -51,6 +55,15 @@ const SCHEMA = {
   talkoverDb: num(-60, 0),
   colorFx: oneOf('filter', 'space', 'dubecho', 'noise', 'crush', 'pitch'),
   sequencer: objOrNull(),
+  sampler: (v) => {
+    if (v === null) return null;
+    if (!v || typeof v !== 'object' || !Array.isArray(v.pads)) return undefined;
+    return { pads: v.pads.slice(0, 8).map((p) => ({
+      sound: typeof p?.sound === 'string' && /^[a-z0-9]{1,32}$/.test(p.sound) ? p.sound : null,
+      volume: num(0, 1.5)(p?.volume) ?? 1,
+      sync: p?.sync === true,
+    })) };
+  },
   link: shape({ enabled: bool(), quantum: num(1, 16), startStopSync: bool() }),
   lyrics: shape({ online: bool(), writeLrc: bool() }),
   stemsModelUrl: str(), stemsModelSha256: str(128), stemsBackend: oneOf('auto', 'wasm'), stemsOverlap: num(0, 0.75),

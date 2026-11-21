@@ -45,7 +45,7 @@ It lists what each offers, what OpenDJ had before this pass, what this pass adde
 | **Color FX / Sound Color FX** (Space, Dub Echo, Noise, Crush…) | ✔ | ✔ (Fade FX) | ✔ (Filter FX) | ✔ | ✔ | 🆕 Filter, Space, Dub Echo, Noise, Crush, Jet on the filter knob |
 | Beat FX (echo, reverb, flanger, phaser, trans, etc.) | ✔ | ✔ | ✔ | ✔ | ✔ | ✅ 10 effects + pad FX |
 | **Stems** (vocal / instrumental / drums) | ✔ AI 3/4-stem | ✔ AI, Stem Slip | ✔ AI 4-stem | ✔ AI | ✔ Neural Mix | 🆕 v0.2: AI 4-stem separation (HT-Demucs, prepared per track and cached), per-stem mute/level, acapella/instrumental, vocal echo. DSP quick stems remain as fallback. ◐ CPU separation is slow (~2.5× track length single-threaded); faster with WebGPU |
-| Sampler | ✔ | ✔ | ✔ | ✔ | ✔ | ✅ 8 slots |
+| Sampler | ✔ | ✔ | ✔ | ✔ | ✔ | ✅ 8 slots; 12 synthesised DJ FX (air horn ×1 / ×3, siren, laser, rewind, vinyl stop, riser, downlifter, impact, noise sweep, clap, kick) rendered with Web Audio at -14 LUFS, own samples, pad volume, sync to beat |
 | **Sampler sequencer** | ✔ | ✔ (Scratch Bank/Sampler) | (Remix decks) | ✔ | ✔ | 🆕 16-step sequencer locked to the master deck's beat grid, with swing |
 | **Microphone / aux input + talkover** | ✔ | ✔ | ✔ | ✔ | ✔ | 🆕 mic channel with EQ, compressor and talkover ducking |
 | Headphone cue (split / separate output / 4-ch) | ✔ | ✔ | ✔ | ✔ | ✔ | ✅ |
@@ -85,7 +85,10 @@ It lists what each offers, what OpenDJ had before this pass, what this pass adde
 |---|---|---|---|---|---|---|
 | Automix playlist | ✔ | ✔ | ✔ | ✔ | ✔ Automix AI | ✅ |
 | Beat-matched, phrase-aware transitions | ◐ | — | — | ✔ | ✔ | 🆕 mixes out at the outro and in at the intro, aligned to phrases |
-| Smart ordering by key/tempo/energy curve | — | — | — | ◐ | ✔ | 🆕 harmonic / build / peak / wave |
+| Transition styles | ◐ | ◐ | ◐ | ✔ | ✔ | 🆕 blend, bass swap, crossfade, filter sweep, echo out, cut, backspin, vinyl brake, loop out, reverb wash; Auto picks per pair; per-transition override, 4–32 bars, vary styles |
+| Smart ordering by key/tempo/energy curve | — | — | — | ◐ | ✔ | 🆕 smart mix: compatibility score (Camelot, BPM incl. half/double, energy toward a set shape, genre/tags, artist/recent-play variety, intros), up front (beam search) or live, with an explanation per transition; shuffle & mix |
+| Media-server playlists in automix | — | — | — | — | — | 🆕 Plex / Jellyfin / Emby / Subsonic / MediaMax playlists listed live; automix, shuffle, smart mix, import, download |
+| Loading tracks while automix runs | ✔ | ✔ | ✔ | ✔ | ✔ | ✅ next deck = next track; on-air deck asks; queued during a transition |
 | Key clash fixing during automix | — | — | — | ✔ | ✔ | 🆕 optional Key Sync on transitions |
 
 ## 5. Hardware & integration
@@ -106,7 +109,7 @@ It lists what each offers, what OpenDJ had before this pass, what this pass adde
 - **Bridged in this pass (24 features):**
   - key shift + Key Sync + Pitch Play, WSOLA key lock, phase-quantized hot cues, saved loops, slicer, instant doubles, phase meter
   - Color FX, quick stems, step sequencer, mic + talkover, MIDI clock out, latency setting
-  - phrase analysis, auto cues, phrase-aware automix with energy-curve ordering and key fixing
+  - phrase analysis, auto cues, phrase-aware automix with 10 mixing styles (auto-picked per pair), smart mix ordering with explanations, media-server playlists, and key fixing
   - smart playlists, colours/tags, track editor, history sessions/setlists, relocate missing, duplicate finder, backup/restore, Traktor/Serato/VirtualDJ import
 - **Remaining gaps that are legally blocked:** commercial streaming services and proprietary hardware/network protocols (Pro DJ Link, vendor HID).
 - **Bridged in v0.2:** AI stems, DVS, CDJ USB export, Ableton Link, live broadcasting, disk recording, lyrics/karaoke, lower deck memory use.

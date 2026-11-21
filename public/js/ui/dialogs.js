@@ -4,6 +4,36 @@ import { api } from '../api.js';
 import { THEMES, applyTheme } from './themes.js';
 import { controllersPanel } from './controllers-panel.js';
 import { platform, MOBILE_UNAVAILABLE, APP_VERSION } from '../platform.js';
+import { STYLES, normStyle } from '../automix.js';
+import { SET_SHAPES, PRESETS } from '../smartmix.js';
+
+/** Automix modes offered in the start dialog. */
+export const AUTOMIX_MODES = [
+  ['order', 'Play in this order'],
+  ['shuffle', 'Shuffle & mix (random order, still beat-matched)'],
+  ['smart', 'Smart mix (order by how well tracks go together)'],
+  ['live', 'Smart mix live (pick each next track while playing)'],
+];
+const BAR_CHOICES = [4, 8, 16, 32];
+const styleValue = (s) => (s === 'auto' ? 'auto' : normStyle(s));
+
+/** Smart-mix weight controls: preset select + harmonic / energy / variety sliders. Returns { el, value() }. */
+function smartControls(am, onChange) {
+  const sliders = { ...PRESETS.balanced, ...(am.sliders || {}) };
+  const preset = el('select', { class: 'sel', 'data-smart': 'preset' }, ...[['balanced', 'Balanced'], ['harmonic', 'Harmonic first'], ['energy', 'Energy flow first'], ['variety', 'Variety first'], ['custom', 'Custom']].map(([v, l]) => el('option', { value: v }, l)));
+  preset.value = am.preset || 'balanced';
+  const inputs = {};
+  const row = (k, label) => {
+    const i = el('input', { type: 'range', min: 0, max: 1, step: 0.05, value: sliders[k], 'data-smart': k });
+    i.addEventListener('input', () => { sliders[k] = Number(i.value); preset.value = 'custom'; onChange?.(); });
+    inputs[k] = i;
+    return el('label', { class: 'field' }, el('span', {}, label), i);
+  };
+  preset.addEventListener('change', () => { const p = PRESETS[preset.value]; if (p) for (const k of Object.keys(p)) { sliders[k] = p[k]; inputs[k].value = p[k]; } onChange?.(); });
+  const node = el('div', { class: 'form' }, el('label', { class: 'field' }, el('span', {}, 'Smart mix priorities'), preset),
+    row('harmonic', 'Harmonic (key compatibility)'), row('energy', 'Energy flow (follow the set shape)'), row('variety', 'Variety (no repeated artists / genres)'));
+  return { el: node, value: () => ({ preset: preset.value, sliders: { ...sliders } }) };
+}
 
 export class Dialogs {
   constructor(app) { this.app = app; }
@@ -173,28 +203,43 @@ export class Dialogs {
     if (r) this.app.toast(`Exported ${r.files} files to ${r.target}`);
   }
 
-  async automixQueue(tracks) {
+  /**
+   * Start automix on a list of tracks. opts.mode preselects 'order' | 'shuffle' | 'smart' | 'live'; opts.title names
+   * the source (playlist name). Smart modes analyse unanalysed tracks first where possible.
+   */
+  async automixQueue(tracks, { mode, title } = {}) {
     if (!tracks?.length) return this.app.toast('No tracks in this view');
-    const smart = el('input', { type: 'checkbox', checked: true });
     const o = this.app.settings.automix;
-    const style = el('select', { class: 'sel' }, ...[['phrase', 'Phrase-aligned bass swap'], ['eqswap', 'EQ swap (bass swap)'], ['crossfade', 'Smooth crossfade'], ['filter', 'Filter fade'], ['echo', 'Echo out']].map(([v, l]) => el('option', { value: v }, l)));
-    style.value = o.style;
-    const order = el('select', { class: 'sel' }, ...[['harmonic', 'Harmonic (key + tempo)'], ['build', 'Build up (rising energy)'], ['peak', 'Peak (rise, then cool down)'], ['wave', 'Waves (up and down)']].map(([v, l]) => el('option', { value: v }, l)));
-    order.value = o.order || 'harmonic';
+    const modeSel = el('select', { class: 'sel', 'data-am': 'mode' }, ...AUTOMIX_MODES.map(([v, l]) => el('option', { value: v }, l)));
+    modeSel.value = mode || (o.shuffle ? 'shuffle' : 'smart');
+    const style = el('select', { class: 'sel', 'data-am': 'style' }, ...STYLES.map(([v, l]) => el('option', { value: v }, l)));
+    style.value = styleValue(o.style);
+    const shape = el('select', { class: 'sel', 'data-am': 'shape' }, ...SET_SHAPES.map(([v, l]) => el('option', { value: v }, l)));
+    shape.value = o.shape || 'warmup';
     const keySync = el('input', { type: 'checkbox', checked: !!o.keySync });
-    const beats = el('select', { class: 'sel' }, ...[8, 16, 32, 64].map((b) => el('option', { value: b }, `${b} beats`)));
-    beats.value = String(o.transitionBeats);
+    const vary = el('input', { type: 'checkbox', checked: !!o.varyStyles, 'data-am': 'vary' });
+    const bars = el('select', { class: 'sel', 'data-am': 'bars' }, ...BAR_CHOICES.map((b) => el('option', { value: b }, `${b} bars`)));
+    bars.value = String(BAR_CHOICES.reduce((a, b) => (Math.abs(b * 4 - o.transitionBeats) < Math.abs(a * 4 - o.transitionBeats) ? b : a), 8));
+    const big = tracks.length > 200;
+    const limit = el('input', { class: 'inp', type: 'number', min: 2, max: tracks.length, value: big ? 40 : tracks.length, 'data-am': 'limit' });
+    const smartBox = smartControls(o);
+    const smartPart = el('div', { class: 'form' }, el('label', { class: 'field' }, el('span', {}, 'Set shape (energy)'), shape),
+      el('label', { class: 'field' }, el('span', {}, 'Tracks in the set'), limit), smartBox.el);
+    const showSmart = () => { smartPart.hidden = !['smart', 'live'].includes(modeSel.value); };
+    modeSel.addEventListener('change', showSmart); showSmart();
     const body = el('div', { class: 'form' },
-      el('p', {}, `Auto-mix ${tracks.length} tracks on decks 1 & 2 with beat-matched transitions.`),
-      el('label', { class: 'check' }, smart, ' Smart order'),
-      el('label', { class: 'field' }, el('span', {}, 'Energy curve'), order),
-      el('label', { class: 'check' }, keySync, ' Fix key clashes with Key Sync'),
+      el('p', {}, `Auto-mix ${tracks.length} tracks${title ? ` from "${title}"` : ''} on decks 1 & 2 with beat-matched transitions.`),
+      el('label', { class: 'field' }, el('span', {}, 'Order'), modeSel),
+      smartPart,
       el('label', { class: 'field' }, el('span', {}, 'Transition style'), style),
-      el('label', { class: 'field' }, el('span', {}, 'Transition length'), beats));
+      el('label', { class: 'field' }, el('span', {}, 'Transition length'), bars),
+      el('label', { class: 'check' }, vary, ' Vary styles'),
+      el('label', { class: 'check' }, keySync, ' Fix key clashes with Key Sync'));
     const r = await this.modal('Automix', body, [{ label: 'Cancel', value: null }, { label: 'Start automix', primary: true, value: true }]);
     if (!r) return;
-    this.app.setSetting('automix', { ...o, style: style.value, transitionBeats: Number(beats.value), order: order.value, keySync: keySync.checked });
-    try { await this.app.automix.start(tracks, { smart: smart.checked, order: order.value }); } catch (e) { this.app.toast(e.message); }
+    const sm = smartBox.value();
+    await this.app.setSetting('automix', { ...o, style: style.value, transitionBeats: Number(bars.value) * 4, keySync: keySync.checked, varyStyles: vary.checked, shape: shape.value, preset: sm.preset, sliders: sm.sliders, shuffle: modeSel.value === 'shuffle' });
+    return this.app.startAutomix(tracks, { mode: modeSel.value, shape: shape.value, sliders: sm.sliders, limit: Number(limit.value) || undefined });
   }
 
   gridEditor(deck) {
@@ -257,15 +302,20 @@ export class Dialogs {
       el('label', { class: 'check' }, chk(s.quantize, (v) => { set('quantize', v); for (const d of app.engine.decks) d.setQuantize(v); }), ' Quantize'),
     );
     const am = s.automix;
+    const amSet = (patch) => set('automix', { ...app.settings.automix, ...patch });
+    const amSmart = smartControls(am, () => amSet(amSmart.value()));
     const automix = el('div', { class: 'form' },
-      field('Transition style', sel(am.style, [['phrase', 'Phrase-aligned bass swap'], ['eqswap', 'EQ swap (bass swap)'], ['crossfade', 'Smooth crossfade'], ['filter', 'Filter fade'], ['echo', 'Echo out']], (v) => set('automix', { ...app.settings.automix, style: v }))),
-      field('Transition length', sel(am.transitionBeats, [8, 16, 32, 64].map((b) => [b, `${b} beats`]), (v) => set('automix', { ...app.settings.automix, transitionBeats: Number(v) }))),
-      el('label', { class: 'check' }, chk(am.keepSync, (v) => set('automix', { ...app.settings.automix, keepSync: v })), ' Beat-match transitions'),
-      el('label', { class: 'check' }, chk(am.skipSilence, (v) => set('automix', { ...app.settings.automix, skipSilence: v })), ' Skip silence at track ends'),
-      el('label', { class: 'check' }, chk(am.shuffle, (v) => set('automix', { ...app.settings.automix, shuffle: v })), ' Shuffle'),
-      el('label', { class: 'check' }, chk(am.keySync, (v) => set('automix', { ...app.settings.automix, keySync: v })), ' Fix key clashes with Key Sync'),
-      el('label', { class: 'check' }, chk(am.restoreTempo !== false, (v) => set('automix', { ...app.settings.automix, restoreTempo: v })), ' Ease each track back to its original tempo after the transition'),
-      field('Smart order energy curve', sel(am.order || 'harmonic', [['harmonic', 'Harmonic'], ['build', 'Build up'], ['peak', 'Peak'], ['wave', 'Waves']], (v) => set('automix', { ...app.settings.automix, order: v }))),
+      field('Default transition style', sel(styleValue(am.style), STYLES, (v) => amSet({ style: v })), 'Auto picks a style per transition from the BPM difference, energy change, key and genre. You can override single transitions in the automix queue.'),
+      field('Transition length', sel(BAR_CHOICES.reduce((a, b) => (Math.abs(b * 4 - am.transitionBeats) < Math.abs(a * 4 - am.transitionBeats) ? b : a), 8), BAR_CHOICES.map((b) => [b, `${b} bars`]), (v) => amSet({ transitionBeats: Number(v) * 4 }))),
+      el('label', { class: 'check' }, chk(am.varyStyles, (v) => amSet({ varyStyles: v })), ' Vary styles (alternate between styles that suit each transition)'),
+      el('label', { class: 'check' }, chk(am.keepSync, (v) => amSet({ keepSync: v })), ' Beat-match transitions'),
+      el('label', { class: 'check' }, chk(am.skipSilence, (v) => amSet({ skipSilence: v })), ' Skip silence at track ends'),
+      el('label', { class: 'check' }, chk(am.shuffle, (v) => amSet({ shuffle: v })), ' Shuffle'),
+      el('label', { class: 'check' }, chk(am.keySync, (v) => amSet({ keySync: v })), ' Fix key clashes with Key Sync'),
+      el('label', { class: 'check' }, chk(am.restoreTempo !== false, (v) => amSet({ restoreTempo: v })), ' Ease each track back to its original tempo after the transition'),
+      field('Loading a track on the deck automix is playing', sel(am.onAirLoad || 'ask', [['ask', 'Ask'], ['queue', 'Play it next'], ['stop', 'Stop automix and load it']], (v) => amSet({ onAirLoad: v })), 'Loading on the other deck always makes the track the next one; during a transition it is queued next.'),
+      field('Smart mix set shape', sel(am.shape || 'warmup', SET_SHAPES, (v) => amSet({ shape: v }))),
+      amSmart.el,
     );
     const dlIn = el('input', { class: 'inp', value: s.downloadDir });
     dlIn.addEventListener('change', () => set('downloadDir', dlIn.value));
