@@ -161,3 +161,13 @@ html.theme-switching *, html.theme-switching *::before { transition: none !impor
 :root[data-theme="studio"] .fader-thumb { border-radius: 3px; }
 :root[data-theme="studio"] .deck { border-radius: 6px; border-color: #465158; }
 :root[data-theme="studio"] .am-now-btn { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 36%, transparent), 0 2px 12px color-mix(in srgb, var(--accent) 18%, transparent); }
+
+/* Club Booth: media players either side of a 4-channel club mixer (css/club-booth.css draws the mixer faceplate) */
+:root[data-theme="booth"] {
+  --bg: #08090b; --panel: #15171a; --panel-2: #1c1e22; --panel-3: #25282d; --line: #2c3036; --line-2: #3d434a;
+  --text: #eef0f2; --text-2: #aeb4bb; --text-3: #767d86; --accent: #ff8a1f; --on-accent: #160b00;
+  --deck1: #3aa0ff; --deck2: #ff8a1f; --deck3: #e8e8e8; --deck4: #b08cff;
+  --inset: #0f1013; --deep: #101215; --wave-bg: #060708; --row-alt: #17191c; --hover: #24272c; --sel: #343940; --sel-tree: #2a2e33;
+  --topbar-1: #17191c; --topbar-2: #0e1012; --knob-hi: #d9dde2; --knob-lo: #5a5f66; --knob-ring: #141619;
+  --platter-1: #2c2f34; --platter-2: #141619; --platter-3: #0b0c0e; --platter-4: #1e2125; --fader-cap-1: #e3e6ea; --fader-cap-2: #8a9099;
+}

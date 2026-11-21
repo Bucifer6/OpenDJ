@@ -3,15 +3,40 @@
 //   createEq(ctx, type, opts) -> { type, input, output, set(state, k), dispose(), biquads, bands? }
 // set() takes the channel's logical controls { eqHigh, eqMid, eqLow, eqMidHigh, eqMidLow, eqFreq } (-1..1 knobs,
 // eqFreq 0..1), so automix lanes and MIDI maps keep their meaning whatever the type.
-import { isoKnobGain, cutKnobDb, classicKnobDb, sculptKnobDb, sculptFreq, dbToGain } from './curves.js';
+import { isoKnobGain, cutKnobDb, sculptKnobDb, sculptFreq, dbToGain } from './curves.js';
 
-export const EQ_TYPES = [
-  { id: 'isolator', label: 'Isolator', knobs: ['eqHigh', 'eqMid', 'eqLow'], biquads: 18 },
-  { id: 'classic', label: 'Classic (full kill)', knobs: ['eqHigh', 'eqMid', 'eqLow'], biquads: 3 },
-  { id: 'fourBand', label: '4-band', knobs: ['eqHigh', 'eqMidHigh', 'eqMidLow', 'eqLow'], biquads: 30 },
-  { id: 'sculpt', label: 'Sculpt', knobs: ['eqHigh', 'eqMid', 'eqFreq', 'eqLow'], biquads: 5 },
+/**
+ * EQ presets (mixer M3): modelled on how real club / rotary / battle mixers behave. Generic names only. Reference and
+ * target curve for each (⚠ = from published spec sheets / reviews, not measured on the hardware):
+ *  isolator   "Club Isolator" (default, today's): 3-band LR8 isolator 200 Hz / 2.5 kHz, +6 dB .. -26 dB at 8 o'clock
+ *             then a full kill; bands sum to a flat all-pass. Ref: club 4-channel mixers in isolator mode.
+ *  classic    "Club Classic": 3-band shelving / peaking EQ like a 900-class club mixer: low shelf 70 Hz, mid peak 1 kHz
+ *             (Q 0.7), high shelf 13 kHz, +6 / -26 dB (⚠ spec sheets list +6 / -26 dB at 70 Hz / 1 kHz / 13 kHz); the last
+ *             tenth of the travel slides into a kill (shelves -50 dB, corners glide to 180 Hz / 5 kHz).
+ *  fourBand   "4-Band Club": LR8 isolator 150 Hz / 1 kHz / 5 kHz with separate low-mid and high-mid; Hi and Low full
+ *             kill, mids +6 / -26 dB (⚠ flagship 6-channel mixer, exact frequencies unverified).
+ *  rotaryIso  "Rotary Isolator": wide-range, smooth 24 dB/oct (LR4) isolator at 300 Hz / 4 kHz, +12 dB .. -inf with a
+ *             long log taper and a gentle tanh "colour" stage (⚠ boutique rotary / 4th-order isolator mixers: +12 / -inf).
+ *  battle     "Battle": simple 3-band LR8 isolator at 250 Hz / 3 kHz with a steep kill (full kill by 9 o'clock) for
+ *             cuts on scratch mixers, +6 dB boost.
+ *  vintage    "Vintage Warm": analogue-feel EQ, broad overlapping bands: low shelf 100 Hz, mid peak 800 Hz (Q 0.5), high
+ *             shelf 8 kHz, +10 / -20 dB, kill at the end, mild tanh colour.
+ *  sculpt     "Sculpt": one wide sweepable band (+8 / -20 dB, Q 0.35, 70 Hz - 7 kHz) between cut-only HP / LP filters.
+ * Logical controls are the same for all: LOW / MID / HIGH (-1..1), plus MID-LO / MID-HI (4-band; MID drives both) and
+ * FREQ (sculpt). The automix's bass swap (LOW = -1) removes >= 30 dB at 60 Hz with every preset.
+ */
+export const EQ_PRESETS = [
+  { id: 'isolator', label: 'Club Isolator', type: 'isolator', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { xover: [200, 2500], order: 8, boost: 6, cut: 26, killFrom: -0.8 } },
+  { id: 'classic', label: 'Club Classic', type: 'shelving', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { freqs: [70, 1000, 13000], q: 0.7, boost: 6, cut: 26, kill: [180, 5000] } },
+  { id: 'fourBand', label: '4-Band Club', type: 'fourBand', knobs: ['eqHigh', 'eqMidHigh', 'eqMidLow', 'eqLow'], opts: { xover: [150, 1000, 5000], order: 8 } },
+  { id: 'rotaryIso', label: 'Rotary Isolator', type: 'isolator', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { xover: [300, 4000], order: 4, boost: 12, cut: 30, killFrom: -0.55, color: 'soft' } },
+  { id: 'battle', label: 'Battle', type: 'isolator', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { xover: [250, 3000], order: 8, boost: 6, cut: 30, killFrom: -0.45 } },
+  { id: 'vintage', label: 'Vintage Warm', type: 'shelving', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { freqs: [100, 800, 8000], q: 0.5, boost: 10, cut: 20, kill: [300, 4000], color: 'warm' } },
+  { id: 'sculpt', label: 'Sculpt', type: 'sculpt', knobs: ['eqHigh', 'eqMid', 'eqFreq', 'eqLow'], opts: {} },
 ];
-export const EQ_TYPE_IDS = EQ_TYPES.map((t) => t.id);
+export const EQ_TYPES = EQ_PRESETS; // (older name)
+export const EQ_TYPE_IDS = EQ_PRESETS.map((t) => t.id);
+export const eqPreset = (id) => EQ_PRESETS.find((p) => p.id === id) || EQ_PRESETS[0];
 /** Default isolator crossovers (Hz): low < 200 < mid < 2500 < high (today's). */
 export const ISO_XOVER = [200, 2500];
 const BW4 = [-5.333, 2.323]; // 4th-order Butterworth stage Qs (0.5412, 1.3066) in dB (lowpass/highpass Q is in dB)
@@ -53,30 +78,54 @@ export function bandSplitter(ctx, xovers, { order = 8, sum = true } = {}) {
 
 const K = 0.012; // knob smoothing time constant (s), as the rest of the channel
 
-function isolator(ctx, { xover = ISO_XOVER, order = 8 } = {}) {
+/** Isolator knob law: +boost dB at the right, 0 at noon, cut dB at the left fading to a full kill from `killFrom`. */
+export const isoLaw = (v, { boost = 6, cut = 26, killFrom = -0.8 } = {}) => (v >= 0 ? dbToGain(v * boost) : dbToGain(v * cut) * (1 - smoothstep(killFrom, -1, v)));
+const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+/** Gentle colour stage: a tanh curve with unity slope at 0 (transparent at low level, rounds off peaks). */
+function colorStage(ctx, kind) {
+  const sh = ctx.createWaveShaper(), n = 2049, c = new Float32Array(n), k = kind === 'warm' ? 0.9 : 0.6;
+  for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 4 - 2; c[i] = Math.tanh(k * x) / (2 * k); }
+  sh.curve = c; // pre 0.5 / post 2: the curve covers ±2 full scale (no hard clip), unity slope at 0
+  const pre = ctx.createGain(), post = ctx.createGain(); pre.gain.value = 0.5; post.gain.value = 2; pre.connect(sh); sh.connect(post);
+  return { input: pre, output: post, nodes: [pre, sh, post] };
+}
+/** Wrap an EQ with an optional colour stage after it. */
+function withColor(ctx, eq, kind) {
+  if (!kind) return eq;
+  const c = colorStage(ctx, kind); eq.output.connect(c.input);
+  const d = eq.dispose;
+  return { ...eq, output: c.output, color: kind, dispose() { d(); for (const n of c.nodes) try { n.disconnect(); } catch { /* */ } } };
+}
+
+function isolator(ctx, { xover = ISO_XOVER, order = 8, boost = 6, cut = 26, killFrom = -0.8 } = {}) {
   const s = bandSplitter(ctx, xover, { order });
-  const [low, mid, high] = s.bands;
+  const [low, mid, high] = s.bands, law = { boost, cut, killFrom };
   return {
     input: s.input, output: s.output, biquads: s.biquads.length, bands: { low, mid, high },
     set(st, t, k = K) {
-      high.gain.setTargetAtTime(isoKnobGain(st.eqHigh), t, k);
-      mid.gain.setTargetAtTime(isoKnobGain(st.eqMid), t, k);
-      low.gain.setTargetAtTime(isoKnobGain(st.eqLow), t, k);
+      high.gain.setTargetAtTime(isoLaw(st.eqHigh, law), t, k);
+      mid.gain.setTargetAtTime(isoLaw(st.eqMid, law), t, k);
+      low.gain.setTargetAtTime(isoLaw(st.eqLow, law), t, k);
     },
     dispose: s.dispose,
   };
 }
 
-/** Classic shelving / peaking EQ: 3 biquads, overlapping bands like an analogue EQ, -26 dB with a kill at the end. */
-function classic(ctx, { kill = true } = {}) {
-  const lo = bq(ctx, 'lowshelf', 150, 0, 0), mid = bq(ctx, 'peaking', 1000, 0.7, 0), hi = bq(ctx, 'highshelf', 7000, 0, 0);
+/** Shelving knob law: +boost .. -cut dB at -0.9, then (kill on) the last tenth slides to -50 dB. */
+export const shelfLawDb = (v, { boost = 6, cut = 26, kill = true } = {}) => (v >= 0 ? v * boost : !kill ? v * cut : v >= -0.9 ? v / 0.9 * cut : -cut - (50 - cut) * smoothstep(-0.9, -1, v));
+/** Shelving / peaking EQ: 3 biquads, overlapping bands like an analogue EQ; in the kill zone the shelf corners glide
+ *  up / down (`kill` = [low corner, high corner]) so a LOW kill removes the bass like an isolator would. */
+function shelving(ctx, { freqs = [70, 1000, 13000], q = 0.7, boost = 6, cut = 26, kill = [180, 5000], killOn = true } = {}) {
+  const lo = bq(ctx, 'lowshelf', freqs[0], 0, 0), mid = bq(ctx, 'peaking', freqs[1], q, 0), hi = bq(ctx, 'highshelf', freqs[2], 0, 0);
   chain(lo, mid, hi);
+  const law = { boost, cut, kill: killOn }, kz = (v) => (killOn ? smoothstep(-0.9, -1, v) : 0);
   return {
     input: lo, output: hi, biquads: 3,
     set(st, t, k = K) {
-      lo.gain.setTargetAtTime(classicKnobDb(st.eqLow, kill), t, k);
-      mid.gain.setTargetAtTime(classicKnobDb(st.eqMid, kill), t, k);
-      hi.gain.setTargetAtTime(classicKnobDb(st.eqHigh, kill), t, k);
+      lo.gain.setTargetAtTime(shelfLawDb(st.eqLow, law), t, k); lo.frequency.setTargetAtTime(freqs[0] * Math.pow(kill[0] / freqs[0], kz(st.eqLow)), t, k);
+      mid.gain.setTargetAtTime(shelfLawDb(st.eqMid, law), t, k);
+      hi.gain.setTargetAtTime(shelfLawDb(st.eqHigh, law), t, k); hi.frequency.setTargetAtTime(freqs[2] * Math.pow(kill[1] / freqs[2], kz(st.eqHigh)), t, k);
     },
     dispose() { for (const n of [lo, mid, hi]) try { n.disconnect(); } catch { /* */ } },
   };
@@ -123,10 +172,11 @@ function sculpt(ctx) {
   };
 }
 
-/** Create an EQ of `type` ('isolator' | 'classic' | 'fourBand' | 'sculpt'); unknown types give the isolator. */
-export function createEq(ctx, type = 'isolator', opts = {}) {
-  const f = { isolator, classic, fourBand, sculpt }[type] || isolator;
-  const eq = f(ctx, opts);
-  eq.type = { isolator: 1, classic: 1, fourBand: 1, sculpt: 1 }[type] ? type : 'isolator';
+/** Create the EQ of preset `id` (EQ_PRESETS; unknown ids give the Club Isolator). opts override the preset's. */
+export function createEq(ctx, id = 'isolator', opts = {}) {
+  const p = eqPreset(id), o = { ...p.opts, ...opts };
+  const f = { isolator, shelving, fourBand, sculpt }[p.type];
+  const eq = withColor(ctx, f(ctx, o), o.color);
+  eq.type = p.id; eq.preset = p;
   return eq;
 }

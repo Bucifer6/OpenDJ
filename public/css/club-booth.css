@@ -1,0 +1,65 @@
+/* Club Booth skin (theme `booth`, body.skin-club-booth): media players either side of a 4-channel club mixer.
+   Shared contract with the deck skins: the tokens below, and .deck-area as a 3-column row [deck | mixer | deck] with
+   stretched rows so the players and the mixer share the height and their tops line up. This file styles only the
+   mixer and the .deck-area grid container (deck internals belong to the deck skins). Original art, no vendor marks. */
+:root[data-theme="booth"] {
+  --booth-panel-1: #1f2226; --booth-panel-2: #121417; --booth-edge: #3a3f46; --booth-silk: #e9ecef;
+  --booth-cue: #ff8a1f; --booth-fx-on: #2f8cff; --booth-led-ok: #36d27a; --booth-led-hot: #ffc23a; --booth-led-clip: #ff3b3b;
+  --booth-knob-cap: #d4d8dd; --booth-knob-rubber: #1a1c1f; --booth-radius: 10px; --booth-gap: 8px; --booth-top-pad: 8px;
+  --meter-ok: var(--booth-led-ok); --meter-hot: var(--booth-led-hot); --meter-clip: var(--booth-led-clip);
+}
+.mx-club { display: none; }
+body.skin-club-booth .mx-club { display: flex; }
+
+/* row: players left / right, mixer centre, matched height and aligned tops */
+:root:not(.compact) body.skin-club-booth .deck-area { grid-template-columns: minmax(0, 1fr) minmax(400px, 34%) minmax(0, 1fr); align-items: stretch; gap: var(--booth-gap); padding-top: var(--booth-top-pad); }
+:root:not(.compact) body.skin-club-booth.four-decks .deck-area { grid-template-columns: minmax(0, 1fr) minmax(480px, 40%) minmax(0, 1fr); }
+
+/* faceplate */
+body.skin-club-booth .mixer { background: repeating-linear-gradient(90deg, rgba(255,255,255,.012) 0 1px, transparent 1px 3px), linear-gradient(180deg, var(--booth-panel-1), var(--booth-panel-2)); border: 1px solid var(--booth-edge); border-radius: var(--booth-radius); box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 6px 18px rgba(0,0,0,.55); }
+body.skin-club-booth .mixer .strip, body.skin-club-booth .mixer .mixer-master, body.skin-club-booth .club-col { background: transparent; border: 0; border-radius: 0; box-shadow: none; }
+body.skin-club-booth .mixer .strip + .strip { border-left: 1px solid rgba(255,255,255,.06); }
+body.skin-club-booth .mixer .strip::before { display: none; }
+body.skin-club-booth .mixer .knob-label, body.skin-club-booth .club-title, body.skin-club-booth .club-mini { color: var(--booth-silk); letter-spacing: .06em; }
+body.skin-club-booth .mixer-master, body.skin-club-booth .club-fx { border-left: 1px solid rgba(255,255,255,.08) !important; }
+body.skin-club-booth .club-left { border-right: 1px solid rgba(255,255,255,.08) !important; }
+/* silver caps on dark rubber */
+body.skin-club-booth .mixer .knob { background: radial-gradient(circle at 50% 50%, var(--booth-knob-cap) 0 38%, #8d939b 41%, var(--booth-knob-rubber) 46% 100%); box-shadow: 0 2px 5px rgba(0,0,0,.7), 0 0 0 1px #000; }
+body.skin-club-booth .mixer .knob-ind { background: #111; }
+/* strips: one knob column TRIM / HI / MID / LOW / COLOR, orange CUE with the channel number under it, long fader */
+:root body.skin-club-booth .mixer .strip { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+body.skin-club-booth .strip > .knob-wrap { order: 1; }
+body.skin-club-booth .strip > .btn-pfl { order: 6; }
+body.skin-club-booth .strip > .strip-num { order: 7; color: var(--booth-silk); }
+body.skin-club-booth .strip > .fader-row { order: 8; }
+body.skin-club-booth .strip > .xf-assign { order: 9; }
+body.skin-club-booth .strip > .stem-knobs { display: none; }
+body.skin-club-booth .btn-pfl { border-radius: 4px; background: #2a1a0c; border-color: #5a3410; color: var(--booth-cue); font-weight: 800; }
+body.skin-club-booth .btn-pfl.active { background: var(--booth-cue) !important; border-color: var(--booth-cue) !important; color: #1a0d00 !important; box-shadow: 0 0 12px color-mix(in srgb, var(--booth-cue) 70%, transparent) !important; }
+body.skin-club-booth .fader-row { background: repeating-linear-gradient(180deg, transparent 0 9px, rgba(233,236,239,.22) 9px 10px) center / 44px 100% no-repeat; }
+body.skin-club-booth .ch-fader .fader-thumb { background: linear-gradient(180deg, #f1f3f5, #9aa0a8); }
+/* side columns */
+.club-col { flex-direction: column; align-items: center; gap: 5px; padding: 4px 6px; min-width: 0; }
+.club-left { flex: 0 0 96px; }
+.club-fx { flex: 0 0 104px; }
+.club-title { font: 800 9px var(--mono); margin-top: 4px; text-align: center; white-space: nowrap; }
+.club-mini { font: 700 8px var(--mono); }
+.club-color-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; width: 100%; }
+.club-color-btn { padding: 3px 0; font-size: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.club-color-btn.active { background: color-mix(in srgb, var(--booth-cue, var(--accent)) 30%, #000) !important; border-color: var(--booth-cue, var(--accent)) !important; color: #fff !important; }
+.club-pair, .club-btns { display: flex; gap: 6px; justify-content: center; align-items: center; flex-wrap: wrap; }
+.club-btns .btn { padding: 2px 5px; font-size: 8.5px; }
+.club-master-extra { flex-direction: column; gap: 4px; align-items: center; }
+.club-fx-display { width: 100%; min-height: 40px; white-space: pre-line; text-align: center; font: 700 10px/1.25 var(--mono); color: #bfe0ff; background: #05080c; border: 1px solid #22303e; border-radius: 4px; padding: 4px 2px; box-shadow: inset 0 0 10px rgba(47,140,255,.25); overflow: hidden; }
+.club-fx-on { width: 100%; padding: 10px 0; font-weight: 800; border-radius: 6px; }
+.club-fx-on.active { background: var(--booth-fx-on, var(--accent)) !important; border-color: var(--booth-fx-on, var(--accent)) !important; color: #fff !important; box-shadow: 0 0 16px color-mix(in srgb, var(--booth-fx-on, var(--accent)) 65%, transparent) !important; }
+.club-curves { justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 4px; }
+.club-curves label { display: flex; align-items: center; gap: 5px; }
+body.skin-club-booth .mixer-master .mixer-tools .mixer-color { display: none; }
+body.skin-club-booth .club-left { flex-basis: 112px; }
+body.skin-club-booth .mixer-master { min-width: 118px; }
+:root body.skin-club-booth .mixer .strip .knob-sm { width: 28px; height: 28px; }
+:root body.skin-club-booth .mixer .strip .knob-md { width: 36px; height: 36px; }
+:root body.skin-club-booth .mixer .strip { gap: 2px; }
+:root body.skin-club-booth .mixer .strip .knob-wrap { gap: 0; }
+body.skin-club-booth .strip .fader-row { min-height: 120px; }

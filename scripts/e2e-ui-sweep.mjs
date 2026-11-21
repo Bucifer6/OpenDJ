@@ -104,6 +104,20 @@ const fit = (panels) => ev(async (panels) => {
       if (a.right > tr.right + 1) out.push(`top bar: ${items[i].className || items[i].tagName} outside the bar`);
       for (let j = i + 1; j < items.length; j++) { const b = items[j].getBoundingClientRect(); if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1) out.push(`top bar: ${items[i].className} overlaps ${items[j].className}`); }
     }
+    // mixer: full-width crossfader, strips edge to edge (no empty bands between the columns)
+    const mx = document.querySelector('.mixer');
+    if (vis(mx)) {
+      const R = mx.getBoundingClientRect(), zr = R.width / mx.offsetWidth || 1, W = R.width, pad = parseFloat(getComputedStyle(mx).paddingLeft) * zr;
+      const xf = document.querySelector('.mixer .crossfader .fader-track')?.getBoundingClientRect();
+      if (!xf || xf.width < Math.min(0.8 * W, 220 * zr) || xf.width < 0.7 * W) out.push(`crossfader squished: ${Math.round(xf?.width || 0)} of ${Math.round(W)} px mixer`);
+      const cols = [...mx.querySelectorAll('.mixer-strips > .strip, .mixer-top > .mixer-master')].filter(vis).map((e) => e.getBoundingClientRect()).sort((a, b) => a.left - b.left);
+      const edges = [R.left + pad, ...cols.flatMap((c) => [c.left, c.right]), R.right - pad];
+      const maxGap = Math.max(16 * zr, 0.03 * W);
+      for (let i = 0; i < edges.length; i += 2) if (edges[i + 1] - edges[i] > maxGap + 0.5) out.push(`mixer: ${Math.round(edges[i + 1] - edges[i])} px empty band between columns ${i / 2} and ${i / 2 + 1}`);
+      const master = mx.querySelector('.mixer-master')?.getBoundingClientRect();
+      const sum = cols.slice(0, -1).reduce((a, c) => a + c.width, 0), avail = W - 2 * pad - (master?.width || 0);
+      if (sum < 0.9 * avail) out.push(`mixer strips fill ${Math.round(sum)} of ${Math.round(avail)} px`);
+    }
     for (const d of decks()) {
       const n = `${panel}@deck${+d.dataset.deck + 1}`, mid = d.querySelector('.deck-mid');
       if (d.getBoundingClientRect().right > innerWidth + 1) out.push(`deck${+d.dataset.deck + 1} outside the window`);

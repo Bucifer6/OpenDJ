@@ -29,7 +29,7 @@ export const EQ_XOVER = ISO_XOVER;
 const FILTER_DEAD = 0.03;
 
 /** Value range of each continuous channel control (knobs, faders, MIDI, automation are clamped to it). */
-const CHANNEL_LIMITS = { trim: [-1, 1], eqHigh: [-1, 1], eqMid: [-1, 1], eqLow: [-1, 1], eqMidHigh: [-1, 1], eqMidLow: [-1, 1], eqFreq: [0, 1], filter: [-1, 1], filterHp: [0, 1], filterLp: [0, 1], volume: [0, 1], fxMix: [0, 1], fxParam: [0, 1], fxParam2: [0, 1], vocal: [0, 1], inst: [0, 1], comp: [0, 1], send: [0, 1] };
+const CHANNEL_LIMITS = { trim: [-1, 1], eqHigh: [-1, 1], eqMid: [-1, 1], eqLow: [-1, 1], eqMidHigh: [-1, 1], eqMidLow: [-1, 1], eqFreq: [0, 1], filter: [-1, 1], filterHp: [0, 1], filterLp: [0, 1], volume: [0, 1], fxMix: [0, 1], fxParam: [0, 1], fxParam2: [0, 1], vocal: [0, 1], inst: [0, 1], comp: [0, 1], send: [0, 1], colorParam: [0, 1] };
 const mixerOf = (engine) => engine.mx || normalizeMixer(engine.settings || {});
 
 // ---------------------------------------------------------------- automation helpers
@@ -139,7 +139,7 @@ export class Channel extends Emitter {
     this.cuePre.connect(this.cueSrc); this.cuePostG.connect(this.cueSrc); this.cueSrc.connect(this.cueSend); this.cueSend.connect(engine.cueBus);
     // post-fader FX tails: the wet signal is summed after the faders (silent in pre-fader mode)
     this.fx.wetOut.connect(engine.musicBus); this.fx.wetOut.connect(this.cueSrc); this.fx.wetOut.connect(this.meter);
-    this.state = { trim: 0, autoGain: 0, eqHigh: 0, eqMid: 0, eqLow: 0, eqMidHigh: 0, eqMidLow: 0, eqFreq: 0.5, filter: 0, filterHp: 0, filterLp: 0, volume: 0.8, cue: false, cue2: false, cuePost: !!mx.cuePost, faderReverse: false, comp: 0, send: 0, xfAssign: index % 2 === 0 ? 'A' : 'B', fxOn: false, fxType: 'echo', fxMix: 0.5, fxParam: 0.5, fxParam2: 0.5, fxBeats: 0.5, vocal: 1, inst: 1, colorFx: engine.settings.colorFx || 'filter' };
+    this.state = { trim: 0, autoGain: 0, eqHigh: 0, eqMid: 0, eqLow: 0, eqMidHigh: 0, eqMidLow: 0, eqFreq: 0.5, filter: 0, filterHp: 0, filterLp: 0, volume: 0.8, cue: false, cue2: false, cuePost: !!mx.cuePost, faderReverse: false, comp: 0, send: 0, colorParam: 0.5, xfAssign: index % 2 === 0 ? 'A' : 'B', fxOn: false, fxType: 'echo', fxMix: 0.5, fxParam: 0.5, fxParam2: 0.5, fxBeats: 0.5, vocal: 1, inst: 1, colorFx: engine.settings.colorFx || 'filter' };
     this.pst = { fader: {}, postFader: {}, xf: {}, postXf: {} }; // automation bookkeeping per param
     this.setEqType(mx.eqType, false);
     this.setColorFx(this.state.colorFx);
@@ -172,8 +172,10 @@ export class Channel extends Emitter {
 
   /** EQ type: builds the new chain, cross-fades 30 ms (equal gain), frees the old one. */
   setEqType(type, fade = true) {
-    const mx = mixerOf(this.engine), opts = { xover: mx.eqXover, kill: mx.classicKill, order: this.engine.lowEnd && type === 'fourBand' ? 4 : 8 };
-    const key = `${type}|${opts.xover}|${opts.kill}|${opts.order}`;
+    const mx = mixerOf(this.engine), opts = { killOn: mx.classicKill !== false };
+    if (type === 'isolator' && Array.isArray(mx.eqXover) && String(mx.eqXover) !== '200,2500') opts.xover = mx.eqXover; // advanced crossover adjust
+    if (this.engine.lowEnd && type === 'fourBand') opts.order = 4; // phones: LR4 fallback
+    const key = `${type}|${opts.xover || ''}|${opts.killOn}|${opts.order || 8}`;
     if (key === this.eqKey) return;
     const ctx = this.ctx, t = ctx.currentTime, old = this.eq, oldFade = this.eqFade;
     const eq = createEq(ctx, type, opts), g = ctx.createGain();
@@ -279,7 +281,7 @@ export class Channel extends Emitter {
     const side = s.filter < 0 ? -1 : 1, x = Math.max(0, (Math.abs(s.filter) - FILTER_DEAD) / (1 - FILTER_DEAD));
     const cfx = this.colorFx;
     if (cfx) {
-      cfx.setColor(x, side);
+      cfx.setColor(x, side, s.colorParam ?? 0.5);
       if (cfx.kind === 'send') { this.colorSend.gain.setTargetAtTime(cfx.sendAmount(x), t, k); this.colorWet.gain.setTargetAtTime(1, t, k); this.colorDry.gain.setTargetAtTime(1, t, k); }
       else if (cfx.kind === 'insert') { const w = x > 0 ? cfx.wetAmount(x) : 0; this.colorSend.gain.setTargetAtTime(1, t, k); this.colorWet.gain.setTargetAtTime(w, t, k); this.colorDry.gain.setTargetAtTime(1 - w, t, k); }
       else { this.colorSend.gain.setTargetAtTime(0, t, k); this.colorWet.gain.setTargetAtTime(1, t, k); this.colorDry.gain.setTargetAtTime(1, t, k); }
@@ -287,7 +289,7 @@ export class Channel extends Emitter {
     } else { this.colorDry.gain.setTargetAtTime(1, t, k); this.colorWet.gain.setTargetAtTime(0, t, k); this.colorSend.gain.setTargetAtTime(0, t, k); }
     const dry = x * (cfx ? cfx.dryFilter : 1);
     if (mx.filterMode === 'dual') this.applyDualFilter(Math.max(s.filterHp, side > 0 ? dry : 0), Math.max(s.filterLp, side < 0 ? dry : 0), t);
-    else this.applyFilter(dry, side, t);
+    else this.applyFilter(dry, side, t, s.colorParam ?? 0.5);
     // channel fader: today's 5 ms smoothing; the cut curve uses the fast-cut ramp, the rotary knob a heavy 30 ms
     const g = this.faderTarget();
     if (g !== this._fg && !this.engine._holdFader) { // (a personality switch glides instead: glideFader)
@@ -303,7 +305,7 @@ export class Channel extends Emitter {
     this.cueSend2?.gain.setTargetAtTime(s.cue2 ? 1 : 0, t, 0.005);
   }
   /** One-knob filter: amount x (0..1, dead zone removed), side -1 = low-pass, +1 = high-pass. */
-  applyFilter(x, side, t) {
+  applyFilter(x, side, t, param = 0.5) {
     const k = 0.012;
     const lpOn = x > 0 && side < 0, hpOn = x > 0 && side > 0;
     // exponential sweeps: LPF 18 kHz -> 70 Hz (1.1 kHz half way), HPF 20 Hz -> 8 kHz (400 Hz half way); parked
@@ -312,7 +314,7 @@ export class Channel extends Emitter {
     const hpF = hpOn ? 20 * Math.pow(8000 / 20, x) : 3;
     // resonance fades in over the first 20 % of travel (no jump out of the dead zone), eases off at the extremes
     const res = smoothstep(0, 0.2, x) * (1 - 0.35 * smoothstep(0.8, 1, x));
-    const q2 = 2.32 + 4.2 * res; // dB: Butterworth 2nd stage (+2.3 dB) up to ~+6.5 dB resonant peak
+    const q2 = 2.32 + 4.2 * res * (0.2 + 1.6 * param); // dB: Butterworth 2nd stage (+2.3 dB) up to ~+6.5 dB resonant peak (PARAMETER 0.5)
     for (const f of this.lpf) f.frequency.setTargetAtTime(lpF, t, k);
     for (const f of this.hpf) f.frequency.setTargetAtTime(hpF, t, k);
     this.lpf[1].Q.setTargetAtTime(lpOn ? q2 : 2.32, t, k); this.hpf[1].Q.setTargetAtTime(hpOn ? q2 : 2.32, t, k);

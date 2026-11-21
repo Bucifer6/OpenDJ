@@ -1,0 +1,45 @@
+/* Mixer v2 layout: strips fill the width edge to edge, the crossfader owns the bottom row, setup dropdowns sit in the
+   MASTER column's free space (or a compact row above the crossfader when MASTER has none). Width classes .mx-w1 /
+   .mx-w2 are set by mixer-ui.js from the strip width (no container queries: they re-ran style on every frame). */
+.mixer-strips { justify-content: stretch; gap: 6px; }
+.mixer-top { gap: 6px; }
+.strip { flex: 1 1 0; max-width: none; min-width: 0; }
+.mixer-master { flex: 0 1 auto; min-width: 0; }
+.mixer-master > .mixer-tools { grid-column: 1 / -1; align-self: end; }
+
+/* setup dropdowns in the MASTER column */
+.mixer-tools { display: flex; flex-direction: column; gap: 4px; width: 0; min-width: 100%; /* never widens MASTER */ margin-top: auto; padding-top: 6px; border-top: 1px solid var(--line); }
+.mixer-tools .sel { width: 100%; min-width: 0; padding-left: 4px; padding-right: 2px; }
+.mixer-tools .mixer-eq-preset { flex: none; width: 100%; }
+.mixer-tools-pair { display: flex; gap: 4px; min-width: 0; }
+.mixer-tools-pair .sel { flex: 1 1 auto; }
+.mixer-adv-btn { flex: 0 0 auto; padding: 1px 7px; font-size: 13px; line-height: 1; }
+.mixer-adv-btn[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+/* ... or the row above the crossfader */
+.mixer-tools-row { display: none; }
+.mixer.tools-row .mixer-tools-row { display: block; }
+.mixer-tools-row .mixer-tools { flex-direction: row; width: 100%; margin: 0; padding: 0; border: 0; }
+.mixer-tools-row .mixer-tools > * { flex: 1 1 0; min-width: 0; }
+.mixer-tools-row .mixer-tools-pair { flex: 1.2 1 0; }
+
+/* full-width crossfader with real travel */
+.xfader-row { display: block; }
+.xfader-control { display: flex; align-items: center; gap: 10px; min-width: 0; width: 100%; }
+.xfader-control .crossfader { flex: 1 1 auto; min-width: 0; width: auto; }
+.crossfader .fader-thumb { width: 30px; }
+
+/* wider strips: bigger knobs, wider meters and fader caps, longer fader */
+.mixer.mx-w1:not(.mx-tiny) .strip .knob-sm { width: 28px; height: 28px; }
+.mixer.mx-w1:not(.mx-tiny) .strip .knob-md { width: 34px; height: 34px; }
+.mixer.mx-w1:not(.mx-short) .strip .knob-sm { width: 30px; height: 30px; }
+.mixer.mx-w1:not(.mx-short) .strip .knob-md { width: 36px; height: 36px; }
+.mixer.mx-w1 .strip .vu { width: 8px; }
+.mixer.mx-w1 .ch-fader .fader-track { width: 34px; }
+.mixer.mx-w1 .ch-fader { --cap: 18px; }
+.mixer.mx-w1 .fader-row { gap: 6px; }
+.mixer.mx-w2:not(.mx-short) .strip .knob-sm { width: 36px; height: 36px; }
+.mixer.mx-w2:not(.mx-short) .strip .knob-md { width: 44px; height: 44px; }
+.mixer.mx-w2 .strip .vu { width: 10px; }
+.mixer.mx-w2 .ch-fader .fader-track { width: 40px; }
+.mixer.mx-w2 .strip .xf-assign .btn { padding: 2px 8px; }
+.four-decks .mixer-strips, .four-decks .mixer-top { gap: 4px; }

@@ -412,8 +412,8 @@ const COLOR = {
       return {
         input, output,
         sendAmount: (x) => Math.min(1, x * 1.6),
-        setColor(x, side) {
-          smooth(P('decay'), 1.6 + 4.4 * x, ctx, 0.06);
+        setColor(x, side, p = 0.5) {
+          smooth(P('decay'), (1.6 + 4.4 * x) * (0.4 + 1.2 * p), ctx, 0.06);
           smooth(wLp.frequency, side < 0 ? lerpExp(16000, 1100, x) : 20000, ctx, 0.03);
           smooth(wHp.frequency, side > 0 ? lerpExp(120, 3500, x) : 20, ctx, 0.03);
         },
@@ -431,8 +431,8 @@ const COLOR = {
       return {
         input, output,
         sendAmount: (x) => Math.min(1, x * 1.8),
-        setColor(x, side) {
-          smooth(d.fb.gain, 0.45 + 0.4 * x, ctx, 0.05);
+        setColor(x, side, p = 0.5) {
+          smooth(d.fb.gain, Math.min(0.95, 0.45 + 0.4 * x + (p - 0.5) * 0.3), ctx, 0.05);
           smooth(wLp.frequency, side < 0 ? lerpExp(12000, 900, x) : 20000, ctx, 0.03);
           smooth(wHp.frequency, side > 0 ? lerpExp(150, 3000, x) : 20, ctx, 0.03);
         },
@@ -452,8 +452,8 @@ const COLOR = {
       src.connect(lp); lp.connect(hp); hp.connect(level); level.connect(output);
       return {
         input, output,
-        setColor(x, side) {
-          smooth(level.gain, 0.55 * Math.pow(x, 1.3), ctx, 0.03);
+        setColor(x, side, p = 0.5) {
+          smooth(level.gain, 0.55 * Math.pow(x, 1.3) * (0.3 + 1.4 * p), ctx, 0.03);
           smooth(lp.frequency, side < 0 ? lerpExp(18000, 250, x) : 20000, ctx, 0.03);
           smooth(hp.frequency, side > 0 ? lerpExp(40, 9000, x) : 20, ctx, 0.03);
         },
@@ -471,8 +471,8 @@ const COLOR = {
       return {
         input, output,
         wetAmount: (x) => smoothstep(0, 0.25, x),
-        setColor(x) {
-          smooth(cr.parameters.get('bits'), 12 - 8.5 * Math.pow(x, 0.7), ctx, 0.03);
+        setColor(x, side, p = 0.5) {
+          smooth(cr.parameters.get('bits'), Math.max(1.5, 12 - 8.5 * Math.pow(x, 0.7) * (0.5 + p)), ctx, 0.03);
           smooth(cr.parameters.get('rate'), lerpExp(20000, 1800, x), ctx, 0.03);
         },
         dispose: () => disconnectAll(input, output, cr, lp),
@@ -503,13 +503,13 @@ const COLOR = {
       return {
         input, output,
         wetAmount: (x) => smoothstep(0, 0.1, x),
-        setColor(x, side) {
+        setColor(x, side, p = 0.5) {
           const lo = side < 0;
           const hpF = lo ? lerpExp(20, 70, x) : lerpExp(20, 3500, x), lpF = lo ? lerpExp(20000, 380, x) : lerpExp(20000, 11000, x);
           for (const f of hp) smooth(f.frequency, hpF, ctx, 0.03);
           for (const f of lp) smooth(f.frequency, lpF, ctx, 0.03);
           smooth(pk.frequency, lo ? lerpExp(1000, 160, x) : lerpExp(1000, 6000, x), ctx, 0.03);
-          smooth(pk.gain, 7 * smoothstep(0, 0.6, x), ctx, 0.03); // a resonant edge, then level-matched below
+          smooth(pk.gain, 7 * smoothstep(0, 0.6, x) * (0.3 + 1.4 * p), ctx, 0.03); // resonant edge (PARAMETER), level-matched below
           smooth(output.gain, lo ? 1 + 0.8 * x : 1 + 0.9 * x, ctx, 0.03);
         },
         dispose: () => disconnectAll(input, output, ...hp, ...lp, pk),

@@ -16,13 +16,13 @@ export const PERSONALITIES = Object.freeze({
     knobs: { warmth: 0 },
   },
   rotary: {
-    label: 'Rotary', blurb: 'Rotary channel levels, wide isolators at 300 Hz / 4 kHz, gentle HP / LP filters, master isolator and warmth',
-    mixer: { eqType: 'isolator', eqXover: [300, 4000], classicKill: true, filterMode: 'dual', centerLock: false, xfCurve: 0.5, xfCutIn: 0, xfCutTime: 5, xfReverse: false, faderCurve: 'smooth', rotary: true, hideXfader: true, colorHidden: true, revVisible: false, showBooth: false, showComp: false, showMasterIso: true, showWarmth: true, fxBusCollapsed: true },
+    label: 'Rotary', blurb: 'Rotary channel levels, wide-range rotary isolator EQ (300 Hz / 4 kHz), gentle HP / LP filters, master isolator and warmth',
+    mixer: { eqType: 'rotaryIso', eqXover: [200, 2500], classicKill: true, filterMode: 'dual', centerLock: false, xfCurve: 0.5, xfCutIn: 0, xfCutTime: 5, xfReverse: false, faderCurve: 'smooth', rotary: true, hideXfader: true, colorHidden: true, revVisible: false, showBooth: false, showComp: false, showMasterIso: true, showWarmth: true, fxBusCollapsed: true },
     knobs: { warmth: 0.25 },
   },
   battle: {
-    label: 'Battle', blurb: 'Fast-cut crossfader (1 ms, 2 % cut-in), cut upfaders, hamster switch up front',
-    mixer: { eqType: 'isolator', eqXover: [200, 2500], classicKill: true, filterMode: 'oneKnob', centerLock: false, xfCurve: 1, xfCutIn: 0.02, xfCutTime: 1, xfReverse: false, faderCurve: 'cut', rotary: false, hideXfader: false, colorHidden: false, revVisible: true, showBooth: false, showComp: false, showMasterIso: false, showWarmth: false, fxBusCollapsed: false },
+    label: 'Battle', blurb: 'Fast-cut crossfader (1 ms, 2 % cut-in), cut upfaders, steep-kill EQ, hamster switch up front',
+    mixer: { eqType: 'battle', eqXover: [200, 2500], classicKill: true, filterMode: 'oneKnob', centerLock: false, xfCurve: 1, xfCutIn: 0.02, xfCutTime: 1, xfReverse: false, faderCurve: 'cut', rotary: false, hideXfader: false, colorHidden: false, revVisible: true, showBooth: false, showComp: false, showMasterIso: false, showWarmth: false, fxBusCollapsed: false },
     knobs: { warmth: 0 },
     // for the deck side (platter skin, scratch view, jog weight): read by the deck UI if it supports them
     hints: { platterSkin: 'vinyl', jogWeight: 0.2, scratchView: true },

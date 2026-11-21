@@ -13,6 +13,7 @@ const BUILT_IN_THEMES = [
   { id: 'vinyl', name: 'Vinyl Booth', desc: 'Turntable-inspired platters and warm analogue tones', swatch: ['#10100f', '#282725', '#d9b56d', '#e66a4b'] },
   { id: 'performance', name: 'Pad Performance', desc: 'Colour-coded pads and a modern performance controller', swatch: ['#101018', '#23232e', '#b276ff', '#3de0c1'] },
   { id: 'studio', name: 'Studio Mixer', desc: 'Brushed-metal mixer with classic channel colours', swatch: ['#111418', '#252b31', '#70a9d8', '#e6a759'] },
+  { id: 'booth', name: 'Club Booth', desc: 'Media players either side of a 4-channel club mixer (matte panel, orange cue)', swatch: ['#0b0c0e', '#1c1e22', '#ff8a1f', '#2f8cff'] },
 ];
 
 const THEME_CACHE_KEY = 'opendj-skin-catalog-v1';
@@ -123,6 +124,7 @@ export function applyTheme(settings) {
   if (!applyTheme._resize) { applyTheme._resize = true; let t; addEventListener('resize', () => { clearTimeout(t); t = setTimeout(() => applyTheme(applyTheme._last), 150); }); }
   applyTheme._last = settings;
   root.style.colorScheme = theme === 'light' ? 'light' : 'dark';
+  document.body?.classList.toggle('skin-club-booth', theme === 'booth'); // shared booth contract (css/club-booth.css)
   cache = new Map();
   window.dispatchEvent(new Event('opendj-theme'));
   requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove('theme-switching')));

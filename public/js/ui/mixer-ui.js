@@ -2,6 +2,10 @@ import { el, uiZoom } from '../util.js';
 import { knob, fader, button } from './controls.js';
 import { DECK_COLORS } from './deck-ui.js';
 import { cssVar } from './themes.js';
+import { COLOR_FX } from '../audio/effects.js';
+import { EQ_PRESETS as EQ_MODEL_LIST } from '../audio/eq.js';
+import { updateMixer } from './mixer-state.js';
+import { buildClubSections } from './mixer-club.js';
 
 /**
  * Segmented LED meter. Meter ballistics like hardware: instant attack, ~24 dB/s release, a peak-hold segment that
@@ -53,13 +57,14 @@ export function buildMixer(app) {
   const renderers = [];
   const byCh = []; let cur = null; // per-channel renderers so one change only re-renders its own strip
   const R = (c) => { renderers.push(c); if (cur) cur.push(c); return c; };
+  // tone presets: set the EQ *knobs* of every deck (not the EQ model, which is the EQ preset selector above it)
   const EQ_PRESETS = [
-  { id: 'flat', label: 'Flat EQ', values: [0, 0, 0] },
-  { id: 'warm', label: 'Warm', values: [0.12, -0.04, -0.08] },
-  { id: 'bright', label: 'Bright', values: [-0.08, 0.04, 0.16] },
-  { id: 'vocal', label: 'Vocal focus', values: [-0.12, 0.16, 0.08] },
-  { id: 'bass-light', label: 'Bass light', values: [-0.22, 0.05, 0.1] },
-  { id: 'custom', label: 'Custom', values: null },
+  { id: 'flat', label: 'Tone: flat', values: [0, 0, 0] },
+  { id: 'warm', label: 'Tone: warm', values: [0.12, -0.04, -0.08] },
+  { id: 'bright', label: 'Tone: bright', values: [-0.08, 0.04, 0.16] },
+  { id: 'vocal', label: 'Tone: vocal', values: [-0.12, 0.16, 0.08] },
+  { id: 'bass-light', label: 'Tone: bass light', values: [-0.22, 0.05, 0.1] },
+  { id: 'custom', label: 'Tone: custom', values: null },
 ];
 const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   const stripsWrap = el('div', { class: 'mixer-strips' });
@@ -108,7 +113,7 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   );
   const xfader = R(fader({ min: -1, max: 1, def: 0, get: () => eng.crossfader, set: (v) => eng.setCrossfader(v), horizontal: true, cls: 'crossfader', title: 'Crossfader' }));
   let applyingEqPreset = false;
-  const eqPreset = el('select', { class: 'sel tiny mixer-eq-preset', title: 'Apply a channel EQ preset to all decks', 'aria-label': 'Mixer EQ preset' },
+  const eqPreset = el('select', { class: 'sel tiny mixer-eq-preset', title: 'Tone: set the EQ knobs of all decks to a starting point', 'aria-label': 'EQ knob tone preset (all decks)' },
     ...EQ_PRESETS.map((p) => el('option', { value: p.id }, p.label)));
   eqPreset.value = 'flat';
   eqPreset.addEventListener('change', () => {
@@ -120,33 +125,69 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     eqPreset.value = preset.id;
   });
 
-  const curveSel = el('select', { class: 'sel tiny', title: 'Crossfader curve' },
-    el('option', { value: 'smooth' }, 'Smooth'), el('option', { value: 'constant' }, 'Linear'), el('option', { value: 'sharp' }, 'Scratch'));
-  curveSel.value = app.settings.crossfaderCurve;
-  curveSel.addEventListener('change', () => { app.setSetting('crossfaderCurve', curveSel.value); eng.applyCrossfader(); });
+  // crossfader curve presets (the continuous curve, cut-in and cut time live in the advanced drawer)
+  const CURVES = [['0', 'Linear', { xfCurve: 0, xfCutIn: 0 }], ['0.5', 'Smooth', { xfCurve: 0.5, xfCutIn: 0 }], ['0.9', 'Scratch', { xfCurve: 0.9, xfCutIn: 0 }], ['1', 'Fast cut', { xfCurve: 1, xfCutIn: 0.02 }]];
+  const curveSel = el('select', { class: 'sel tiny mixer-curve', title: 'Crossfader curve', 'aria-label': 'Crossfader curve' },
+    ...CURVES.map(([v, l]) => el('option', { value: v }, l)), el('option', { value: 'custom', disabled: true }, 'Custom'));
+  const renderCurve = () => { const m = eng.mx, hit = CURVES.find(([, , p]) => Math.abs(p.xfCurve - m.xfCurve) < 1e-3 && Math.abs(p.xfCutIn - m.xfCutIn) < 1e-3); curveSel.value = hit ? hit[0] : 'custom'; };
+  renderCurve();
+  curveSel.addEventListener('change', () => { const c = CURVES.find(([v]) => v === curveSel.value); if (c) updateMixer(app, c[2]); });
 
-  const colorSel = el('select', { class: 'sel tiny', title: 'Color FX: what the filter knobs do' },
-    ...[['filter', 'Filter'], ['space', 'Space'], ['dubecho', 'Dub Echo'], ['noise', 'Noise'], ['crush', 'Crush'], ['pitch', 'Jet']].map(([v, l]) => el('option', { value: v }, l)));
+  const colorSel = el('select', { class: 'sel tiny mixer-color', title: 'Color FX: what the filter knobs do', 'aria-label': 'Color FX' },
+    ...COLOR_FX.map(([v, l]) => el('option', { value: v }, l)));
   colorSel.value = app.settings.colorFx || 'filter';
   colorSel.addEventListener('change', () => { for (const ch of eng.channels) ch.set('colorFx', colorSel.value); app.setSetting('colorFx', colorSel.value); });
+  const advBtn = el('button', { class: 'btn xs mixer-adv-btn', title: 'Advanced mixer: EQ type, faders, booth, mic, FX units, loudness', 'aria-label': 'Advanced mixer', 'aria-expanded': 'false', onclick: () => root.toggleDrawer?.() }, '⚙');
+  // setup dropdowns: in the MASTER column's free space, or (when it has none) a compact row above the crossfader
+  // EQ preset: the EQ model (isolator / classic / 4-band / rotary / battle / vintage / sculpt), per personality by default
+  const eqModel = el('select', { class: 'sel tiny mixer-eq-model', title: 'EQ preset: how the channel EQs behave (modelled on club, rotary and battle mixers)', 'aria-label': 'Mixer EQ preset' },
+    ...EQ_MODEL_LIST.map((p) => el('option', { value: p.id }, `EQ: ${p.label}`)));
+  eqModel.value = eng.mx.eqType;
+  eqModel.addEventListener('change', () => updateMixer(app, { eqType: eqModel.value }));
+  const tools = el('div', { class: 'mixer-tools' }, eqModel, el('div', { class: 'mixer-tools-pair' }, eqPreset, colorSel), el('div', { class: 'mixer-tools-pair' }, curveSel, advBtn));
+  // club booth faceplate sections (shown only with the Club Booth skin)
+  const club = buildClubSections(app, R);
+  master.querySelector('.mic-box').before(club.masterExtra);
+  master.append(tools);
+  const toolsRow = el('div', { class: 'mixer-tools-row' });
   const root = el('section', { class: 'mixer' },
-    el('div', { class: 'mixer-top' }, stripsWrap, master),
+    el('div', { class: 'mixer-top' }, club.left, stripsWrap, master, club.fx),
+    toolsRow,
     el('div', { class: 'xfader-row' },
-      el('div', { class: 'xfader-options' }, eqPreset, colorSel, curveSel),
+      club.curves,
       el('div', { class: 'xfader-control' }, el('span', { class: 'xf-l' }, 'A'), xfader, el('span', { class: 'xf-l' }, 'B')),
     ),
   );
+  eng.on('mixer-config', () => { renderCurve(); eqModel.value = eng.mx.eqType; });
 
   eng.on('mixer', (i) => { for (const r of byCh[i] || renderers) r.render(); if (!applyingEqPreset) eqPreset.value = 'custom'; });
   eng.on('master', () => { for (const r of renderers) r.render(); });
+  window.addEventListener('opendj-theme', () => requestAnimationFrame(() => fit(lastH, lastW)));
   eng.on('mic', () => { for (const r of renderers) r.render(); });
   // compact strips when the layout leaves the mixer little height (.mx-short / .mx-400 / .mx-tiny in performance.css);
   // phones stack the mixer at its natural height, so only desktop / tablet grids use this
   const desk = matchMedia('(min-width: 700px) and (min-height: 561px)');
-  const fit = (h) => { const on = desk.matches; root.classList.toggle('mx-short', on && h <= 470); root.classList.toggle('mx-400', on && h <= 400); root.classList.toggle('mx-tiny', on && h <= 330); };
-  new ResizeObserver((ents) => fit(ents[0].contentBoxSize?.[0]?.blockSize ?? ents[0].contentRect.height)).observe(root);
+  let lastW = 0, lastH = 0;
+  /** The setup dropdowns go where there is room: MASTER's free space first, else the row above the crossfader. */
+  const placeTools = () => {
+    if (tools.parentNode !== master) master.append(tools);
+    root.classList.remove('tools-row');
+    if (master.scrollHeight > master.clientHeight + 1 || (document.body.classList.contains('four-decks') && !document.body.classList.contains('skin-club-booth'))) { toolsRow.append(tools); root.classList.add('tools-row'); }
+  };
+  const fit = (h, w = lastW) => {
+    const on = desk.matches;
+    root.classList.toggle('mx-short', on && h <= 470); root.classList.toggle('mx-400', on && h <= 400); root.classList.toggle('mx-tiny', on && h <= 330);
+    // strips flex to fill the width; larger knobs, meters and fader caps when a strip is wide
+    const vis = strips.filter((x) => x.style.display !== 'none').length || 2;
+    const side = (club.left.offsetWidth || 0) + (club.fx.offsetWidth || 0);
+    const sw = (w - 16 - (master.offsetWidth || 110) - side - 6 * vis) / vis;
+    root.classList.toggle('mx-w1', sw >= 88); root.classList.toggle('mx-w2', sw >= 128);
+    lastW = w; lastH = h;
+    placeTools();
+  };
+  new ResizeObserver((ents) => { const e = ents[0], b = e.contentBoxSize?.[0]; fit(b?.blockSize ?? e.contentRect.height, b?.inlineSize ?? e.contentRect.width); }).observe(root);
   desk.addEventListener?.('change', () => fit(root.getBoundingClientRect().height / (parseFloat(document.documentElement.style.zoom) || 1)));
-  root.setDeckCount = (n) => { for (const s of strips) s.style.display = s.idx < n ? '' : 'none'; };
+  root.setDeckCount = (n) => { for (const s of strips) s.style.display = s.idx < n ? '' : 'none'; requestAnimationFrame(() => fit(lastH, lastW)); };
   root.frame = () => {
     for (const s of strips) if (s.style.display !== 'none') s.vu.draw(s.ch.level());
     const [l, r] = eng.masterLevels(); mvuL.draw(l); mvuR.draw(r);
