@@ -129,6 +129,8 @@ try {
   check(await ev(() => (window.opendj.engine.hpVolume ?? 1) < 0.01), 'HEADPHONES LEVEL (CC 0x0D ch7)');
   await midi([0xb6, 0x0d, 0x66]); await midi([0xb6, 0x2d, 0x00]);
   // jog: touch + scratch, ring nudge, shift search
+  await ev(() => { const d = window.opendj.engine.decks[1]; d.pause(); d.seek(5); });
+  await page.waitForTimeout(100);
   const pos0 = await ev(() => window.opendj.engine.decks[1].position);
   await midi([0xb1, 0x29, 0x50]);
   check(await ev((p) => window.opendj.engine.decks[1].position > p + 0.5, pos0), 'SHIFT + jog (CC 0x29) searches forward');
@@ -181,8 +183,8 @@ try {
   await page.keyboard.press('Escape');
 
   // ---------- Smart Fader button next to the crossfader ----------
-  await page.locator('.xfader-control .smart-xf').click();
-  check(await ev(() => window.opendj.ctl.smartFader) && await page.locator('.smart-xf.active').count() === 1, 'mixer SMART button turns the Smart Fader on');
+  await page.locator('.xfader-options .smart-xf').click();
+  check(await ev(() => window.opendj.ctl.smartFader) && await page.locator('.smart-xf.active').count() === 1, 'mixer SMART button (crossfader options row) turns the Smart Fader on');
   await midi([0x96, 0x01, 0x7f]); await midi([0x96, 0x01, 0x00]); await page.waitForTimeout(80);
   check(await ev(() => !window.opendj.ctl.smartFader) && await page.locator('.smart-xf.active').count() === 0, 'the hardware SMART FADER turns it off and the button follows');
   await page.screenshot({ path: path.join(shots, 'mixer-smart-fader.png'), clip: await page.locator('.mixer').boundingBox() });

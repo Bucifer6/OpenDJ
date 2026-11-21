@@ -140,8 +140,8 @@ export function buildMixer(app) {
   const root = el('section', { class: 'mixer' },
     el('div', { class: 'mixer-top' }, stripsWrap, master),
     el('div', { class: 'xfader-row' },
-      el('div', { class: 'xfader-options' }, eqPreset, colorSel, curveSel),
-      el('div', { class: 'xfader-control' }, el('span', { class: 'xf-l' }, 'A'), xfader, el('span', { class: 'xf-l' }, 'B'), smartXf),
+      el('div', { class: 'xfader-options' }, eqPreset, colorSel, curveSel, smartXf),
+      el('div', { class: 'xfader-control' }, el('span', { class: 'xf-l' }, 'A'), xfader, el('span', { class: 'xf-l' }, 'B')),
     ),
   );
 

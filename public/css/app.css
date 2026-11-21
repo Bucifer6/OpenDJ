@@ -284,7 +284,7 @@ body:not(.four-decks) .deck-col > .deck:nth-child(2) { display: none; }
 .crossfader .fader-slot { height: 5px; background: linear-gradient(90deg, var(--deck1), var(--slot) 50%, var(--deck2)); }
 .crossfader { --cap: 28px; } /* the thumb width IS --cap: a fixed 28 px thumb on a 26 px --cap ran 2 px past the track end */
 .xf-l { font: 800 11px var(--mono); color: var(--text-2); }
-.xfader-control .smart-xf { flex: none; } /* Smart Fader toggle (mixer-ui.js) */
+.xfader-options .smart-xf { flex: none; } /* Smart Fader toggle (mixer-ui.js) */
 @media (max-width: 560px) {
   .xfader-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .xfader-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }

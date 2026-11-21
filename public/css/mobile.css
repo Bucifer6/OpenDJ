@@ -172,6 +172,7 @@ html.tablet .mixer .btn-pfl { min-height: 36px; }
 html.tablet .mixer .xf-assign { width: 100%; }
 html.tablet .mixer .xf-assign .btn { flex: 1 1 0; min-width: 0; min-height: 36px; padding: 0; font-size: 11px; }
 html.tablet .mixer .mic-box .btn { min-height: 36px; min-width: 44px; }
+html.tablet .mixer .xfader-options .smart-xf { min-height: 36px; } /* Smart Fader toggle */
 html.tablet .strip .fader-v .fader-track { min-height: 110px; }
 html.tablet .crossfader .fader-track { height: 44px; }
 html.tablet .fx-unit .btn, html.tablet .fx-unit .sel { min-height: 36px; }
