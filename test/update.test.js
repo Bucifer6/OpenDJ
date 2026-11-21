@@ -271,7 +271,7 @@ test('checker: headers, ETag revalidation, caching, rate-limit back-off, offline
   assert.equal(calls[0].init.redirect, 'error');
   assert.equal(calls[0].init.credentials, 'omit');
   assert.deepEqual(Object.keys(calls[0].init.headers).sort(), ['Accept', 'User-Agent', 'X-GitHub-Api-Version'], 'nothing about the user');
-  assert.deepEqual(r1.latest.notes, [], 'no "New in" section newer than 0.4.0 in these notes');
+  assert.deepEqual(r1.latest.notes.map((section) => section.version), ['0.4.1'], 'show the release notes newer than 0.4.0');
   await c.check(); assert.equal(calls.length, 1, 'cached');
   t += 16 * 60e3;
   reply = () => res(304, null, { ETag: '"e1"' });
