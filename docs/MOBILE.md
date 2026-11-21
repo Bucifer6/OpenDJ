@@ -163,6 +163,11 @@ npm run mobile:vendor      # rebuild public/vendor/opendj-vendor.js after updati
   exported IPA and a TestFlight upload.
 - **release-android**: on *Run workflow* with `release_tag`, attaches the APK to that GitHub Release.
 
+The signing secrets below are **environment secrets** of the `release` environment (Settings → Environments →
+`release`), which needs the maintainer's approval and only allows `v*` tags and `main`. The **android** and **ios**
+jobs use it only for a tag push (`v*`) or *Run workflow* with `release_tag`; pull requests and branch pushes get no
+secrets, so they build a debug-signed APK and the unsigned simulator build (no TestFlight upload).
+
 | Secret | Used for |
 |---|---|
 | `ANDROID_KEYSTORE_BASE64` | release keystore (`base64 -w0 release.jks`) |

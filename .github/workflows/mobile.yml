@@ -2,6 +2,7 @@ name: Build mobile apps
 
 # Android: release APK + AAB (signed with the release keystore from secrets, else debug-signed so the APK still installs).
 # iOS: unsigned simulator build to prove it compiles; signed archive + TestFlight upload only when the Apple secrets exist.
+# Signing secrets are environment secrets of `release`: only tag pushes (v*) and manual runs with release_tag use it.
 # Required secrets: see docs/MOBILE.md ("CI secrets").
 on:
   push:
@@ -39,6 +40,9 @@ jobs:
   android:
     needs: web
     runs-on: ubuntu-latest
+    # Signing keys live in the protected `release` environment (approval required; tags v* and main only).
+    # Other runs (pull requests, branch pushes) get no secrets and build debug-signed / unsigned.
+    environment: ${{ (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')) && 'release' || '' }}
     env:
       HAVE_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' }}
     steps:
@@ -93,6 +97,9 @@ jobs:
   ios:
     needs: web
     runs-on: macos-latest
+    # Signing keys live in the protected `release` environment (approval required; tags v* and main only).
+    # Other runs (pull requests, branch pushes) get no secrets and build debug-signed / unsigned.
+    environment: ${{ (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')) && 'release' || '' }}
     env:
       HAVE_APPLE: ${{ secrets.APPLE_TEAM_ID != '' && secrets.IOS_DIST_CERT_P12_BASE64 != '' && secrets.IOS_DIST_CERT_PASSWORD != '' && secrets.IOS_PROVISIONING_PROFILE_BASE64 != '' && secrets.APP_STORE_CONNECT_API_KEY_ID != '' && secrets.APP_STORE_CONNECT_API_ISSUER_ID != '' && secrets.APP_STORE_CONNECT_API_KEY_P8 != '' }}
     steps:
@@ -178,7 +185,7 @@ jobs:
           rm -rf "$HOME/.appstoreconnect/private_keys" "$RUNNER_TEMP/app.mobileprovision" "$RUNNER_TEMP/profile.plist"
 
   release-android:
-    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != '' || (github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Publish OpenDJ v0.4.2 (#'))
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
     needs: android
     runs-on: ubuntu-latest
     permissions:
@@ -190,7 +197,7 @@ jobs:
           path: artifacts
       - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
-          tag_name: ${{ inputs.release_tag || 'v0.4.2' }}
+          tag_name: ${{ inputs.release_tag }}
           target_commitish: ${{ github.sha }}
           files: artifacts/*.apk
           fail_on_unmatched_files: true
