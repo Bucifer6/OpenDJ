@@ -13,7 +13,7 @@ import { lyricsMidiTargets } from '../lyrics/lyrics.js';
 import { PRESETS } from './presets.js';
 import { BEATLOOPS, BEATJUMPS, ROLLS, convertMixxx, toStoredMapping } from './mixxx.js';
 import { HidManager, describeHidKey } from './hid.js';
-import { listMixxxMappings, matchMappings, downloadMixxxMapping, mappingTitle } from './mixxx-online.js';
+import { listMixxxMappings, matchMappings, confidentMatch, downloadMixxxMapping, mappingTitle } from './mixxx-online.js';
 import { fetchControllerIndex, findController, controllerName, fetchCommunityMapping, hashEntries } from './community.js';
 import { GamepadManager, describeGamepadKey } from './gamepad.js';
 
@@ -212,7 +212,13 @@ export class MidiManager extends Emitter {
       const preset = PRESETS.find((p) => p.match.test(inp.name));
       if (preset) {
         this.mappings[inp.name] = { name: preset.name, entries: structuredClone(preset.entries), source: 'preset' }; this.save();
-        this.applyBundled(inp.name).then((ok) => { if (!ok) this.app.toast(`MIDI: loaded "${preset.name}" mapping for ${inp.name}`); });
+        // a proven mapping (OpenDJ community, then Mixxx) replaces the best-effort preset when there is one
+        this.applyBundled(inp.name).then(async (ok) => {
+          if (ok) return;
+          const m = await this.autoProven(inp.name).catch(() => null);
+          if (m) this.app.toast(`MIDI: recognised ${inp.name} and loaded the proven Mixxx community mapping (${m.entries.length} controls). Something wrong? Settings → Controller Mapper.`);
+          else this.app.toast(`MIDI: loaded "${preset.name}" mapping for ${inp.name}`);
+        });
       } else if (inp.state !== 'disconnected') this.applyBundled(inp.name).then((ok) => { if (!ok) this.offerMapping(inp.name); });
     }
     this.emit('devices');
@@ -249,6 +255,21 @@ export class MidiManager extends Emitter {
     this.recognise(name).then(({ community, mixxx, online }) => {
       if (!box.isConnected || this.hasMapping(name) || (!online && !community)) return;
       clearTimeout(timer); timer = setTimeout(close, 30000);
+      // a proven Mixxx mapping that is certainly for this controller: use it straight away
+      if (!community?.file && mixxx?.confident) {
+        this.autoProven(name).then((m) => {
+          if (!m) return; // converted too little to be useful: keep the suggestion below
+          const st = m.importInfo?.stats || {};
+          box.classList.remove('ctl-unsupported');
+          box.replaceChildren(mk('div', 'ctl-offer-title', `Recognised: ${mixxx.name}`),
+            mk('div', 'ctl-offer-text', `Loaded the proven community mapping from the Mixxx library: ${m.entries.length} controls${st.unmapped ? ` (${st.unmapped} controls OpenDJ can't use yet)` : ''}. Test it; if something doesn't work, fix it in the Controller Mapper and share the fix.`));
+          const r3 = mk('div', 'ctl-offer-actions');
+          r3.append(mk('button', 'btn sm primary', 'OK', close), mk('button', 'btn sm', 'Controller Mapper', () => { close(); this.openMapper(name); }),
+            mk('button', 'btn sm', 'Undo', () => { this.undoMapping(name); close(); }));
+          box.append(r3);
+          this.emit('devices');
+        }).catch(() => {});
+      }
       const unsupported = !community?.file && !mixxx;
       const title = unsupported ? `Not supported yet: ${community ? controllerName(community) : name}` : community ? `Recognised: ${controllerName(community)}` : `New controller: ${name}`;
       const apply = async (fn, label) => {
@@ -270,8 +291,9 @@ export class MidiManager extends Emitter {
         if (!community) btns.push(mk('button', 'btn sm', 'Choose my controller', () => { close(); this.openMapper(name, { pick: true }); }));
         btns.push(mk('button', 'btn sm', "Don't ask again", dismiss));
       } else {
-        text = `${community ? 'No OpenDJ community mapping yet. ' : ''}${mixxx ? `The Mixxx library has "${mixxx.name}".` : ''} You can also map it yourself and share it.`;
-        if (mixxx) btns.push(mk('button', 'btn sm primary', 'Use Mixxx mapping', () => apply(async () => this.applyMixxx(name, await downloadMixxxMapping(mixxx.file), mixxx.file), 'Mixxx mapping')));
+        text = `${community ? 'No OpenDJ community mapping yet. ' : ''}${mixxx ? `The Mixxx library has a proven mapping that may fit: "${mixxx.name}".` : ''} You can also choose your controller from the list, or map it yourself.`;
+        if (mixxx) btns.push(mk('button', 'btn sm primary', 'Use this mapping', () => apply(() => this.useMixxxMapping(name, mixxx.file), 'Mixxx mapping')));
+        btns.push(mk('button', 'btn sm', 'Choose my controller', () => { close(); this.openMapper(name, { pick: true }); }));
       }
       if (!unsupported) btns.push(mk('button', 'btn sm', 'Controller Mapper', () => { close(); this.openMapper(name); }), mk('button', 'btn sm', 'Not now', close));
       box.classList.toggle('ctl-unsupported', unsupported);
@@ -318,6 +340,18 @@ export class MidiManager extends Emitter {
         Object.assign(stored, { source: 'community', communityFile: d.community.file, communityHash: hashEntries(entries) }); this.save();
       }
       this.app.toast?.(`Controller Mapper: ${entries.length} control${entries.length === 1 ? '' : 's'} applied to ${d.device}`);
+    } else if (d.type === 'opendj-mapper:mixxx-list') {
+      // the Mixxx library's proven mappings, for "Choose my controller" (the page can't reach the GitHub API itself)
+      const reply = (extra) => ev.source.postMessage({ type: 'opendj-mapper:mixxx-list', device: d.device, ...extra }, location.origin);
+      listMixxxMappings().then((items) => {
+        const sure = confidentMatch(d.device, items), likely = matchMappings(d.device, items, 5);
+        reply({ items: items.map((i) => ({ file: i.file, name: mappingTitle(i.file) })), suggested: sure?.file || null, likely: likely.map((i) => i.file) });
+      }, (e) => reply({ error: e.message }));
+    } else if (d.type === 'opendj-mapper:use-mixxx' && typeof d.file === 'string' && /^[^/\\]{1,200}\.midi\.xml$/i.test(d.file)) {
+      this.useMixxxMapping(d.device, d.file).then((m) => {
+        this.app.toast?.(`Loaded the Mixxx mapping "${mappingTitle(d.file)}" for ${d.device}: ${m.entries.length} controls`);
+        ev.source.postMessage({ type: 'opendj-mapper:mapping', device: d.device, mapping: { name: m.name, entries: m.entries }, mixxx: { file: d.file, stats: m.importInfo?.stats || null } }, location.origin);
+      }, (e) => ev.source.postMessage({ type: 'opendj-mapper:mixxx-error', device: d.device, error: e.message }, location.origin));
     }
   }
 
@@ -396,12 +430,50 @@ export class MidiManager extends Emitter {
       if (b) community = findController(b.index.controllers, name);
       try { this._index ||= await fetchControllerIndex(fetchFn, 6000); community = findController(this._index.controllers, name) || community; online = true; } catch { /* offline */ }
       if (!community?.file) {
-        try { const best = matchMappings(name, await listMixxxMappings({ fetchFn }), 1)[0]; online = true; if (best) mixxx = { file: best.file, name: best.name || mappingTitle(best.file) }; } catch { /* offline or rate-limited */ }
+        try {
+          const items = await listMixxxMappings({ fetchFn }); online = true;
+          const sure = confidentMatch(name, items), best = sure || matchMappings(name, items, 1)[0];
+          if (best) mixxx = { file: best.file, name: best.name || mappingTitle(best.file), confident: !!sure };
+        } catch { /* offline or rate-limited */ }
       }
       return { community, mixxx, online };
     })();
     this._recognised.set(name, job);
     return job;
+  }
+  /**
+   * Download a proven Mixxx mapping and apply it when the conversion gives a usable controller: transport (play or
+   * cue) on a deck and at least 8 controls. Returns the stored mapping, or null (nothing changed) when it falls short.
+   * The previous mapping is kept for undo.
+   */
+  async useMixxxMapping(device, file, { fetchFn = globalThis.fetch, requireUsable = false } = {}) {
+    const xml = await downloadMixxxMapping(file, { fetchFn });
+    const conv = convertMixxx(xml);
+    const usable = conv.entries.length >= 8 && conv.entries.some((e) => /^deck\d\.(play|cue)$/.test(e.target));
+    if (requireUsable && !usable) return null;
+    this._undo = { device, mapping: this.mappings[device] ? structuredClone(this.mappings[device]) : null };
+    return this.applyMixxx(device, xml, file);
+  }
+  /**
+   * Apply the proven Mixxx mapping for a device when it is certainly the right one and converts usefully, unless the
+   * user already has their own mapping (a built-in preset may be replaced). Returns the mapping or null.
+   */
+  async autoProven(device) {
+    const cur = this.mappings[device];
+    if (cur?.entries?.length && cur.source !== 'preset') return null;
+    const { mixxx } = await this.recognise(device);
+    if (!mixxx?.confident) return null;
+    if (this.mappings[device]?.entries?.length && this.mappings[device].source !== 'preset') return null; // changed meanwhile
+    const m = await this.useMixxxMapping(device, mixxx.file, { requireUsable: true });
+    if (m) this.emit('devices');
+    return m;
+  }
+  /** Put back the mapping a device had before the last automatic change. */
+  undoMapping(device) {
+    if (this._undo?.device !== device) return false;
+    if (this._undo.mapping) this.mappings[device] = this._undo.mapping; else delete this.mappings[device];
+    this._undo = null; this.resetRuntime(); this.save(); this.emit('devices');
+    return true;
   }
   /** Download and apply the community mapping for a recognised controller. */
   async useCommunityMapping(device, entry) {

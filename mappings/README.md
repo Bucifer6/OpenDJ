@@ -17,9 +17,15 @@ over 2 MB are downloaded when needed instead). When you plug in a controller wit
 from its MIDI name:
 
 - **Community mapping available:** it is loaded straight away (built-in DJ-400 / FLX4-style presets are replaced by it).
-- **Not in the OpenDJ collection:** OpenDJ looks for a matching mapping in the Mixxx library and offers it.
-- **Not recognised:** "Not supported yet", with **Map it now** and **Choose my controller**. Choosing it from the
-  community list downloads its mapping and applies it, and OpenDJ remembers the choice for that MIDI name.
+- **Not in the OpenDJ collection:** OpenDJ uses the **proven mapping from the Mixxx library** (hundreds of controllers,
+  maintained and tested by the Mixxx community). When the match is certain (every word of the MIDI name, model number
+  included, is in exactly one Mixxx file) and the conversion gives a working controller, it is downloaded, converted
+  and applied straight away, replacing OpenDJ's own best-effort preset if one was loaded; **Undo** puts back what was
+  there. A likely but uncertain match is offered instead. Mixxx mappings are GPL, so they are downloaded when needed
+  and never copied into this repository.
+- **Not recognised:** "Not supported yet", with **Map it now** and **Choose my controller**. The list has OpenDJ's
+  community mappings and the Mixxx library's proven ones: choosing one downloads and applies its mapping, and OpenDJ
+  remembers the choice for that MIDI name. Then only what didn't convert needs fixing in the Mapper.
 - **Recognised but nobody has mapped it yet:** "needs to be mapped by hand", with **Map it now**.
 
 With **Recognise new controllers online** on (Settings → Controller Mapper; on by default), OpenDJ checks GitHub every
