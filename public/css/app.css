@@ -21,7 +21,7 @@
   --platter-1: #262b33; --platter-2: #121519; --platter-3: #0a0c0f; --platter-4: #1a1e24; --fader-cap-1: #5f6976; --fader-cap-2: #2a3039; --slot: #040506; --platter-mark: #eef1f5; --platter-text: #c3cad4; --platter-text-2: #6a7584;
   --platter-rim-1: var(--knob-hi); --platter-rim-2: var(--knob-lo); --platter-label: var(--platter-3); --platter-label-on: var(--platter-4);
   /* waveform (3-band: low / mid / high), grid and playhead */
-  --wf-low: #1f78ff; --wf-mid: #ff9a2e; --wf-high: #f4f7ff; --wf-axis: rgba(255,255,255,.06); --wf-beat: rgba(255,255,255,.30); --wf-bar: rgba(255,255,255,.55); --playhead: #ffffff;
+  --wf-low: #ff5964; --wf-mid: #55d98a; --wf-high: #4da8ff; --wf-axis: rgba(255,255,255,.06); --wf-beat: rgba(255,255,255,.30); --wf-bar: rgba(255,255,255,.55); --playhead: #ffffff;
   /* meters */
   --meter-ok: #2fd67b; --meter-hot: #ffb224; --meter-clip: #ff3d50;
   /* buttons: raised hardware look */
@@ -416,3 +416,6 @@ kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-bottom
 ::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-track { background: transparent; }
 
+
+/* The EQ preset is deliberately compact so it fits beside the crossfader on smaller mixer panels. */
+.xfader-row .mixer-eq-preset { flex: 0 0 82px; width: 82px; padding-left: 4px; padding-right: 4px; }
