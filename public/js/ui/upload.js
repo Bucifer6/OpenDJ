@@ -7,6 +7,7 @@
 import { api } from '../api.js';
 import { el } from '../util.js';
 import { platform } from '../platform.js';
+import { checkFormat } from '../local/media.js';
 
 // Mobile app / ?local=1: the same queue imports into the on-device library (copy-in) instead of uploading.
 const LOCAL = platform.local;
@@ -54,7 +55,7 @@ class Uploader {
       // rejected files stay visible: a toast naming them and a failed row each in the uploads panel
       const names = skipped.slice(0, 5).map((f) => `"${f.name}"`).join(', ') + (skipped.length > 5 ? ` and ${skipped.length - 5} more` : '');
       this.app.toast?.(`⚠ Not ${WORD.ed.toLowerCase()} (not an audio file OpenDJ can play here): ${names}`);
-      for (const file of skipped) { const job = { file, resolve() {}, ctrl: new AbortController() }; this.row(job); this.finish(job, null, 'Not an audio / video file'); }
+      for (const file of skipped) { const job = { file, resolve() {}, ctrl: new AbortController() }; this.row(job); this.finish(job, null, LOCAL ? checkFormat(file.name).reason || 'Not supported here' : 'Not an audio / video file'); }
       this.panel.hidden = false;
     }
     const maxMB = this.caps?.upload?.maxMB;
@@ -115,6 +116,9 @@ class Uploader {
   updateTitle() {
     const n = this.active + this.queue.length;
     this.title.textContent = n ? `${WORD.ing} ${n} file(s)…` : WORD.noun;
+    // phones: the panel covers the controls; once everything is done it goes away by itself (failures were toasted)
+    clearTimeout(this._hide);
+    if (LOCAL && !n) this._hide = setTimeout(() => { if (!this.active && !this.queue.length) this.panel.hidden = true; }, 6000);
   }
 
   /** Open the file picker (the native one in the mobile app). `folder`: pick a whole folder where the browser can. */

@@ -119,6 +119,8 @@ html.touch .lr .art { width: 28px; height: 28px; margin: 6px 1px; }
   .lib-search { min-height: 40px; font-size: 16px; } /* 16 px: iOS does not zoom into the field */
   .modal { max-width: calc(100vw - 16px); max-height: calc(100vh - var(--sat) - var(--sab) - 16px); }
   .modal .btn { min-height: 44px; }
+  .modal .tabs { flex-wrap: wrap; row-gap: 4px; }
+  .modal .tab { min-height: 40px; }
   .ctx-item { min-height: 40px; display: flex; align-items: center; }
   .toasts { left: 8px; right: 8px; bottom: calc(8px + var(--sab)); }
   .toast { max-width: none; }

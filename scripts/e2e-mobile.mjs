@@ -132,7 +132,10 @@ async function runProfile({ name, device }) {
     const sync = await page.evaluate(() => { const [a, b] = window.opendj.engine.decks; return { a: a.effectiveBpm, b: b.effectiveBpm }; });
     check(Math.abs(sync.a - sync.b) < 0.05, `SYNC: deck 2 follows deck 1 (${sync.a.toFixed(2)} / ${sync.b.toFixed(2)} BPM)`);
     // crossfader by touch drag
-    const xf = await page.locator('.xfader-row input[type=range], .xfader-row .fader, .xfader-row [class*=xfader]').first().boundingBox();
+    await page.evaluate(() => { const p = document.querySelector('.upl-panel'); if (p) p.hidden = true; }); // the import panel may cover it
+    const xfLoc = page.locator('.xfader-row .crossfader .fader-track, .xfader-row .crossfader').first();
+    await xfLoc.scrollIntoViewIfNeeded();
+    const xf = await xfLoc.boundingBox();
     if (xf) {
       await page.evaluate(() => window.opendj.engine.setCrossfader(-1));
       await page.mouse.move(xf.x + 4, xf.y + xf.height / 2); await page.mouse.down();

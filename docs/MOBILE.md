@@ -7,6 +7,9 @@ downloads need no computer and no OpenDJ server.
 > Status: phase 1. The web side is tested in Chromium with phone and tablet emulation (`npm run test:mobile`); the
 > native projects are built by CI (`.github/workflows/mobile.yml`). See [What is not verified yet](#what-is-not-verified-yet).
 
+<p><img src="images/mobile-phone.png" alt="OpenDJ on a phone in portrait" height="420"> <img src="images/mobile-phone-landscape.png" alt="OpenDJ on a phone in landscape" height="210"></p>
+<p><img src="images/mobile-tablet.png" alt="OpenDJ on a tablet in landscape" width="700"></p>
+
 ## Architecture
 
 ```
