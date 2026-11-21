@@ -3,6 +3,12 @@
 //   opendj-reverb   feedback-delay-network reverb with smooth decay, damping and pre-delay
 //   opendj-crush    bit depth + sample-rate reduction
 //   opendj-limiter  look-ahead brickwall limiter for the master bus
+//   opendj-moddelay flanger / chorus / jet modulated delay
+//   opendj-pitch    delay-line pitch shifter (Color FX Pitch, Spiral / Shimmer beat FX, mic pitch)
+//   opendj-comp     one-knob channel compressor (exact pass-through until first used)
+//   opendj-ducker   talkover envelope follower: voice on the side-chain -> ducking control signal
+//   opendj-meter    BS.1770-4 / EBU R128 loudness (M, S, I), 4x true peak, RMS
+//   opendj-warmth   2nd/3rd-harmonic warmth (adds only the harmonics: exact pass-through at 0)
 // Loaded with audioWorklet.addModule() (see loadEffectWorklets in effects.js).
 
 const TAU = Math.PI * 2;
@@ -338,3 +344,268 @@ class ModDelayProcessor extends AudioWorkletProcessor {
   }
 }
 registerProcessor('opendj-moddelay', ModDelayProcessor);
+
+/**
+ * Pitch shifter: two read taps sweep through a 50 ms delay line at `ratio` × the write speed, each faded by a Hann
+ * window that is zero where its delay wraps (the two windows always sum to 1). Output frequency = ratio × input
+ * exactly; latency ~ half the window. Wet signal only.
+ */
+class PitchProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    return [{ name: 'ratio', defaultValue: 1, minValue: 0.25, maxValue: 4, automationRate: 'k-rate' }];
+  }
+  constructor() {
+    super();
+    this.W = Math.round(0.05 * sampleRate); this.size = this.W + 8;
+    this.buf = [new Float32Array(this.size), new Float32Array(this.size)]; this.w = 0; this.ph = 0; this.r = null;
+  }
+  process(inputs, outputs, p) {
+    const inp = inputs[0], out = outputs[0], n = out[0].length, W = this.W, size = this.size;
+    const target = p.ratio[0]; if (this.r === null) this.r = target;
+    const r0 = this.r, dr = (target - r0) / n;
+    const x0 = inp[0], x1 = inp[1] || inp[0];
+    const b0 = this.buf[0], b1 = this.buf[1], o0 = out[0], o1 = out[1] || out[0];
+    let w = this.w, ph = this.ph, r = r0;
+    for (let i = 0; i < n; i++) {
+      b0[w] = x0 ? x0[i] : 0; b1[w] = x1 ? x1[i] : 0;
+      r += dr;
+      ph -= (r - 1) / W; ph -= Math.floor(ph); // delay (in windows) shrinks when shifting up
+      let y0 = 0, y1 = 0;
+      for (let k = 0; k < 2; k++) {
+        const phk = k ? (ph + 0.5) % 1 : ph, d = 2 + phk * W;
+        let rp = w - d; if (rp < 0) rp += size;
+        const i0 = Math.floor(rp), f = rp - i0, i1 = i0 + 1 >= size ? 0 : i0 + 1;
+        const g = Math.sin(Math.PI * phk) ** 2;
+        y0 += g * (b0[i0] + (b0[i1] - b0[i0]) * f); y1 += g * (b1[i0] + (b1[i1] - b1[i0]) * f);
+      }
+      o0[i] = y0; if (o1 !== o0) o1[i] = y1;
+      w = w + 1 >= size ? 0 : w + 1;
+    }
+    this.w = w; this.ph = ph; this.r = target;
+    return true;
+  }
+}
+registerProcessor('opendj-pitch', PitchProcessor);
+
+/**
+ * One-knob compressor (mixer M11). amount 0..1 -> threshold 0 .. -30 dB, ratio 1 .. 4, 6 dB soft knee; stereo-linked
+ * peak detector (instant attack, 150 ms release) with a 2 ms look-ahead so drum transients are caught, auto make-up
+ * for a -14 LUFS programme. Until it is first turned up the input is copied unchanged (no latency); the first time it
+ * engages the look-ahead delay glides in over ~300 ms (a 0.7 % speed change for a moment: no click, no comb filter),
+ * then stays (at 0 the output is the input delayed by exactly 2 ms).
+ */
+class CompProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    return [{ name: 'amount', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' }];
+  }
+  constructor() {
+    super();
+    this.L = Math.round(0.002 * sampleRate); this.size = this.L + 4;
+    this.buf = [new Float32Array(this.size), new Float32Array(this.size)]; this.w = 0; this.lat = 0; this.engaged = false;
+    this.env = 0; this.a = 0; this.g = 1; this.report = 0; this.minG = 1;
+  }
+  process(inputs, outputs, p) {
+    const inp = inputs[0], out = outputs[0], n = out[0].length;
+    const x0 = inp[0], x1 = inp[1] || inp[0], o0 = out[0], o1 = out[1] || out[0];
+    const target = p.amount[0], ka = 1 - Math.exp(-n / (0.03 * sampleRate));
+    this.a += (target - this.a) * ka; if (Math.abs(this.a - target) < 1e-4) this.a = target;
+    if (!x0) { o0.fill(0); if (o1 !== o0) o1.fill(0); return true; }
+    if (!this.engaged) { if (this.a === 0) { o0.set(x0); if (o1 !== o0) o1.set(x1); return true; } this.engaged = true; }
+    const a = this.a, T = -30 * a, R = 1 + 3 * a, knee = 6, slope = 1 - 1 / R;
+    const makeup = 0.9 * Math.max(0, -5 - T) * slope; // detector level of a -14 LUFS programme ~ -5 dB
+    const rel = Math.exp(-1 / (0.15 * sampleRate)), gAtk = Math.exp(-1 / (0.0005 * sampleRate)), gRel = Math.exp(-1 / (0.002 * sampleRate));
+    const L = this.L, size = this.size, b0 = this.buf[0], b1 = this.buf[1], latStep = L / (0.3 * sampleRate);
+    let env = this.env, g = this.g, minG = this.minG, w = this.w, lat = this.lat;
+    for (let i = 0; i < n; i++) {
+      const l = x0[i], r = x1[i];
+      b0[w] = l; b1[w] = r;
+      if (lat < L) lat = Math.min(L, lat + latStep);
+      let rp = w - lat; if (rp < 0) rp += size;
+      const i0 = Math.floor(rp), f = rp - i0, i1 = i0 + 1 >= size ? 0 : i0 + 1;
+      const dl = b0[i0] + (b0[i1] - b0[i0]) * f, dr = b1[i0] + (b1[i1] - b1[i0]) * f;
+      w = w + 1 >= size ? 0 : w + 1;
+      if (a === 0 && g === 1) { o0[i] = dl; if (o1 !== o0) o1[i] = dr; continue; }
+      const e = Math.max(l < 0 ? -l : l, r < 0 ? -r : r);
+      env = e > env ? e : e + (env - e) * rel;
+      const over = 20 * Math.log10(env + 1e-9) - 3 - T;
+      let gr = 0;
+      if (over > knee / 2) gr = -over * slope; else if (over > -knee / 2) { const z = over + knee / 2; gr = -slope * z * z / (2 * knee); }
+      const tg = Math.pow(10, (gr + makeup) / 20);
+      g = tg < g ? tg + (g - tg) * gAtk : tg + (g - tg) * gRel;
+      if (a === 0 && Math.abs(g - 1) < 1e-6) g = 1;
+      o0[i] = dl * g; if (o1 !== o0) o1[i] = dr * g;
+      const grLin = Math.pow(10, gr / 20); if (grLin < minG) minG = grLin;
+    }
+    this.env = env; this.g = g; this.minG = minG; this.w = w; this.lat = lat;
+    if ((this.report += n) >= 4096) { this.port.postMessage({ gr: this.minG }); this.report = 0; this.minG = 1; }
+    return true;
+  }
+}
+registerProcessor('opendj-comp', CompProcessor);
+
+/**
+ * Talkover follower (mixer M8). Input: the voice (mic + voice bus). Output channel 0 / 1: (gain - 1) to add to the
+ * music duck gain (full duck) or to the music's voice band (300 Hz - 5 kHz, "advanced" mode). The duck opens when
+ * the voice peak envelope passes `threshold` (auto) or while `manual` is on, reaches `depth` within ~10 ms and
+ * releases over ~250 ms after `hold`.
+ */
+class DuckerProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    return [
+      { name: 'threshold', defaultValue: -36, minValue: -80, maxValue: 0, automationRate: 'k-rate' },
+      { name: 'depth', defaultValue: -12, minValue: -60, maxValue: 0, automationRate: 'k-rate' },
+      { name: 'auto', defaultValue: 1, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
+      { name: 'manual', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
+      { name: 'band', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
+      { name: 'hold', defaultValue: 0.12, minValue: 0, maxValue: 2, automationRate: 'k-rate' },
+    ];
+  }
+  constructor() { super(); this.env = 0; this.g = 1; this.holdN = 0; this.open = false; this.sent = null; }
+  process(inputs, outputs, p) {
+    const inp = inputs[0], out = outputs[0], n = out[0].length, sr = sampleRate;
+    const thr = Math.pow(10, p.threshold[0] / 20), depth = Math.pow(10, p.depth[0] / 20), auto = p.auto[0] >= 0.5, manual = p.manual[0] >= 0.5, band = p.band[0] >= 0.5;
+    const envRel = Math.exp(-1 / (0.05 * sr)), att = Math.exp(-1 / (0.003 * sr)), rel = Math.exp(-1 / (0.08 * sr)), holdN = p.hold[0] * sr;
+    const c0 = out[0], c1 = out[1] || out[0];
+    let env = this.env, g = this.g;
+    for (let i = 0; i < n; i++) {
+      let a = 0; for (let c = 0; c < inp.length; c++) { const v = Math.abs(inp[c][i]); if (v > a) a = v; }
+      env = a > env ? a : env * envRel;
+      if (auto && env > thr) { this.open = true; this.holdN = holdN; } else if (this.holdN > 0) this.holdN--; else if (env < thr * 0.7) this.open = false;
+      const tg = (this.open && auto) || manual ? depth : 1;
+      g = tg < g ? tg + (g - tg) * att : tg + (g - tg) * rel;
+      const off = g - 1;
+      c0[i] = band ? 0 : off; if (c1 !== c0) c1[i] = band ? off : 0;
+    }
+    this.env = env; this.g = g;
+    const ducking = g < 0.97;
+    if (ducking !== this.sent) { this.sent = ducking; this.port.postMessage({ ducking }); }
+    return true;
+  }
+}
+registerProcessor('opendj-ducker', DuckerProcessor);
+
+/** BS.1770-4 K-weighting coefficients for any sample rate (pre-filter shelf + RLB high-pass), as libebur128. */
+export function kWeighting(fs) {
+  let f0 = 1681.974450955533, G = 3.999843853973347, Q = 0.7071752369554196;
+  let K = Math.tan(Math.PI * f0 / fs);
+  const Vh = Math.pow(10, G / 20), Vb = Math.pow(Vh, 0.4996667741545416), a0 = 1 + K / Q + K * K;
+  const pre = { b: [(Vh + Vb * K / Q + K * K) / a0, 2 * (K * K - Vh) / a0, (Vh - Vb * K / Q + K * K) / a0], a: [2 * (K * K - 1) / a0, (1 - K / Q + K * K) / a0] };
+  f0 = 38.13547087602444; Q = 0.5003270373238773; K = Math.tan(Math.PI * f0 / fs);
+  const d = 1 + K / Q + K * K;
+  const rlb = { b: [1, -2, 1], a: [2 * (K * K - 1) / d, (1 - K / Q + K * K) / d] };
+  return [pre, rlb];
+}
+/** 4x interpolation FIR for true peak (BS.1770-4 Annex 2 style): 4 phases x 16 taps, Kaiser-windowed sinc. */
+function truePeakFir() {
+  const N = 64, P = 4, h = new Float64Array(N), beta = 7;
+  const i0 = (x) => { let s = 1, t = 1; for (let k = 1; k < 30; k++) { t *= (x / (2 * k)) ** 2; s += t; } return s; };
+  for (let n = 0; n < N; n++) {
+    const m = n - (N - 1) / 2, x = m / P, sinc = x === 0 ? 1 : Math.sin(Math.PI * x) / (Math.PI * x);
+    h[n] = sinc * i0(beta * Math.sqrt(1 - (2 * n / (N - 1) - 1) ** 2)) / i0(beta);
+  }
+  const ph = [];
+  for (let p = 0; p < P; p++) { const c = []; for (let k = p; k < N; k += P) c.push(h[k]); const s = c.reduce((a, b) => a + b, 0); ph.push(Float64Array.from(c, (v) => v / s)); }
+  return ph;
+}
+/**
+ * Loudness meter (mixer M14, EBU Tech 3341 "EBU Mode"): K-weighted momentary (400 ms), short-term (3 s) and gated
+ * integrated loudness (absolute -70 LUFS, relative -10 LU, 400 ms blocks with 75 % overlap), true peak (4x
+ * oversampled) and RMS / sample peak per channel. Posts { m, s, i, tp, tpMax, rms:[l,r], peak:[l,r] } 10x a second.
+ * Message { cmd: 'reset' } restarts the integration.
+ */
+class MeterProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.kw = kWeighting(sampleRate); this.z = [[0, 0, 0, 0], [0, 0, 0, 0]].map((a) => [a.slice(), a.slice()]);
+    this.blk = Math.round(sampleRate / 10); this.acc = [0, 0]; this.cnt = 0; this.sq = [0, 0]; this.pk = [0, 0];
+    this.hist = []; // 100 ms block mean squares (sum over channels)
+    this.gated = []; this.tp = 0; this.tpMax = 0;
+    this.fir = truePeakFir(); this.tl = this.fir[0].length; this.tbuf = [new Float64Array(this.tl * 2), new Float64Array(this.tl * 2)]; this.tw = 0; // doubled ring: contiguous reads
+    this.port.onmessage = (e) => { if (e.data?.cmd === 'reset') { this.gated = []; this.tpMax = 0; } };
+  }
+  static lufs(ms) { return ms > 0 ? -0.691 + 10 * Math.log10(ms) : -Infinity; }
+  process(inputs) {
+    const inp = inputs[0], n = 128;
+    if (!inp || !inp.length) return true;
+    const kw = this.kw, fir = this.fir, tl = this.tl;
+    for (let c = 0; c < 2; c++) {
+      const x = inp[c] || inp[0], z = this.z[c], tb = this.tbuf[c];
+      let acc = 0, sq = 0, pk = this.pk[c], tp = this.tp;
+      let tw = this.tw;
+      for (let i = 0; i < x.length; i++) {
+        let v = x[i];
+        sq += v * v; const av = Math.abs(v); if (av > pk) pk = av;
+        // true peak: 4 interpolated phases of the last 16 samples
+        tb[tw] = v; tb[tw + tl] = v; tw = tw + 1 === tl ? 0 : tw + 1;
+        const top = tw + tl - 1;
+        for (let p = 0; p < 4; p++) { const h = fir[p]; let s = 0; for (let k = 0; k < tl; k++) s += h[k] * tb[top - k]; const a = s < 0 ? -s : s; if (a > tp) tp = a; }
+        // K-weighting (two biquads, direct form I)
+        for (let s = 0; s < 2; s++) {
+          const f = kw[s], st = z[s];
+          const y = f.b[0] * v + f.b[1] * st[0] + f.b[2] * st[1] - f.a[0] * st[2] - f.a[1] * st[3];
+          st[1] = st[0]; st[0] = v; st[3] = st[2]; st[2] = y; v = y;
+        }
+        acc += v * v;
+      }
+      this.acc[c] += acc; this.sq[c] += sq; this.pk[c] = pk; this.tp = tp;
+      if (c === 1) this.tw = tw;
+      if (c === 0 && inp.length === 1) { this.acc[1] += acc; this.sq[1] += sq; this.pk[1] = pk; this.tw = tw; break; }
+    }
+    this.cnt += n;
+    if (this.cnt >= this.blk) {
+      const N = this.cnt;
+      this.hist.push((this.acc[0] + this.acc[1]) / N); if (this.hist.length > 30) this.hist.shift();
+      const mean = (k) => { const h = this.hist.slice(-k); return h.length < k ? null : h.reduce((a, b) => a + b, 0) / k; };
+      const m4 = mean(4);
+      if (m4 != null) this.gated.push(m4);
+      const L = MeterProcessor.lufs;
+      // integrated: absolute gate, then relative gate 10 LU under the absolute-gated loudness
+      let I = -Infinity;
+      const abs = this.gated.filter((v) => L(v) > -70);
+      if (abs.length) {
+        const rel = L(abs.reduce((a, b) => a + b, 0) / abs.length) - 10;
+        const g2 = abs.filter((v) => L(v) > rel);
+        if (g2.length) I = L(g2.reduce((a, b) => a + b, 0) / g2.length);
+      }
+      if (this.tp > this.tpMax) this.tpMax = this.tp;
+      const dB = (x) => (x > 0 ? 20 * Math.log10(x) : -Infinity);
+      this.last = { m: m4 == null ? -Infinity : L(m4), s: mean(30) == null ? -Infinity : L(mean(30)), i: I, tp: dB(this.tp), tpMax: dB(this.tpMax), rms: [Math.sqrt(this.sq[0] / N), Math.sqrt(this.sq[1] / N)], peak: this.pk.slice() };
+      this.port.postMessage(this.last);
+      this.acc = [0, 0]; this.sq = [0, 0]; this.pk = [0, 0]; this.cnt = 0; this.tp = 0;
+    }
+    return true;
+  }
+}
+registerProcessor('opendj-meter', MeterProcessor);
+
+/**
+ * Warmth (mixer M16): adds 2nd and 3rd harmonics, mostly 2nd, to the untouched signal: y = x + d·(0.2·DC-blocked x²
+ * - 0.1·x³). At drive 0 the output is the input exactly; ~1 % THD at drive 0.5 on a -14 dBFS sine. No oversampling
+ * and no latency: a 3rd-order polynomial only creates harmonics up to 3x, the level is kept low.
+ */
+class WarmthProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors() { return [{ name: 'drive', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' }]; }
+  constructor() { super(); this.d = 0; this.dc = [[0, 0], [0, 0]]; }
+  process(inputs, outputs, p) {
+    const inp = inputs[0], out = outputs[0], n = out[0].length;
+    const target = p.drive[0], d0 = this.d, d1 = Math.abs(target - d0) < 1e-5 ? target : d0 + (target - d0) * (1 - Math.exp(-n / (0.03 * sampleRate)));
+    const R = 1 - 2 * Math.PI * 8 / sampleRate; // DC blocker on the x² term (8 Hz)
+    for (let c = 0; c < out.length; c++) {
+      const x = inp[c] || inp[0], o = out[c];
+      if (!x) { o.fill(0); continue; }
+      if (d0 === 0 && d1 === 0) { o.set(x); this.dc[c] = [0, 0]; continue; }
+      const st = this.dc[c] || (this.dc[c] = [0, 0]);
+      let xp = st[0], yp = st[1];
+      for (let i = 0; i < n; i++) {
+        const v = x[i], xc = v > 1.2 ? 1.2 : v < -1.2 ? -1.2 : v, sq = xc * xc;
+        const h2 = sq - xp + R * yp; xp = sq; yp = h2;
+        const d = d0 + (d1 - d0) * (i + 1) / n;
+        o[i] = v + d * (0.2 * h2 - 0.1 * xc * xc * xc);
+      }
+      st[0] = xp; st[1] = yp;
+    }
+    this.d = d1;
+    return true;
+  }
+}
+registerProcessor('opendj-warmth', WarmthProcessor);
