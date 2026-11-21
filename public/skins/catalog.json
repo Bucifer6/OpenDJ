@@ -1,0 +1,102 @@
+{
+  "schema": 1,
+  "version": 1,
+  "skins": [
+    {
+      "id": "cdj",
+      "name": "Club Decks",
+      "desc": "Updated CDJ booth colours",
+      "swatch": [
+        "#090c10",
+        "#20262d",
+        "#32c7dd",
+        "#ffb64d"
+      ],
+      "vars": {
+        "--bg": "#090c10",
+        "--panel": "#161b20",
+        "--panel-2": "#20262d",
+        "--panel-3": "#29313a",
+        "--line": "#37424d",
+        "--line-2": "#4a5968",
+        "--text": "#edf4f6",
+        "--text-2": "#a5b7bf",
+        "--text-3": "#718891",
+        "--accent": "#32c7dd",
+        "--on-accent": "#071114",
+        "--deck1": "#32c7dd",
+        "--deck2": "#ffb64d",
+        "--deck3": "#f26f91",
+        "--deck4": "#a58aff",
+        "--wave-bg": "#070a0d",
+        "--wf-low": "#ff5964",
+        "--wf-mid": "#55d98a",
+        "--wf-high": "#4da8ff"
+      }
+    },
+    {
+      "id": "vinyl",
+      "name": "Vinyl Booth",
+      "desc": "Refreshed warm analogue palette",
+      "swatch": [
+        "#10100f",
+        "#282725",
+        "#d9b56d",
+        "#e66a4b"
+      ],
+      "vars": {
+        "--bg": "#10100f",
+        "--panel": "#1b1a18",
+        "--panel-2": "#282725",
+        "--panel-3": "#34312c",
+        "--line": "#403d37",
+        "--line-2": "#58534b",
+        "--text": "#f3eee5",
+        "--text-2": "#c2b8a7",
+        "--text-3": "#8c8273",
+        "--accent": "#d9b56d",
+        "--on-accent": "#1a1710",
+        "--deck1": "#d9b56d",
+        "--deck2": "#e66a4b",
+        "--deck3": "#91b89b",
+        "--deck4": "#9b91cb",
+        "--wave-bg": "#090908",
+        "--wf-low": "#e66a4b",
+        "--wf-mid": "#d9b56d",
+        "--wf-high": "#7c9ec2"
+      }
+    },
+    {
+      "id": "remote-sunset",
+      "name": "Sunset Session",
+      "desc": "Warm sunset tones for evening sets",
+      "swatch": [
+        "#170f1e",
+        "#28182b",
+        "#ff8b5e",
+        "#ffd166"
+      ],
+      "vars": {
+        "--bg": "#170f1e",
+        "--panel": "#211629",
+        "--panel-2": "#28182b",
+        "--panel-3": "#38213a",
+        "--line": "#50304a",
+        "--line-2": "#6c4054",
+        "--text": "#fff3e8",
+        "--text-2": "#d7b7aa",
+        "--text-3": "#9c7c78",
+        "--accent": "#ff8b5e",
+        "--on-accent": "#21110b",
+        "--deck1": "#ff8b5e",
+        "--deck2": "#ffd166",
+        "--deck3": "#a8dadc",
+        "--deck4": "#c77dff",
+        "--wave-bg": "#100a15",
+        "--wf-low": "#ff6b6b",
+        "--wf-mid": "#ffd166",
+        "--wf-high": "#6ec6ff"
+      }
+    }
+  ]
+}

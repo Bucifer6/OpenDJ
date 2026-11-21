@@ -28,7 +28,7 @@ const shape = (fields) => (v) => {
 
 const SCHEMA = {
   deckCount: oneOf(2, 4),
-  theme: oneOf(...THEME_IDS),
+  theme: (v) => (typeof v === 'string' && (THEME_IDS.includes(v) || /^remote-[a-z0-9]+(?:-[a-z0-9]+){0,5}$/.test(v)) ? v : undefined),
   accentColor: (v) => (v === '' || v == null ? '' : typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : undefined),
   uiScale: num(50, 200),
   layoutMode: oneOf('classic', 'performance', 'waveform'),

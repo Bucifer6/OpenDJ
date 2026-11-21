@@ -1,5 +1,5 @@
 // App themes. Each theme overrides CSS custom properties (see public/css/themes.css); canvases read them via cssVar().
-export const THEMES = [
+const BUILT_IN_THEMES = [
   { id: 'midnight', name: 'Midnight', desc: 'Default dark blue-grey', swatch: ['#0b0d10', '#191d23', '#3ea6ff', '#ff8a3d'] },
   { id: 'graphite', name: 'Graphite', desc: 'Neutral studio grey', swatch: ['#121212', '#1e1e1e', '#e0e0e0', '#ffb347'] },
   { id: 'club', name: 'Club Red', desc: 'Dark with red accents (low light)', swatch: ['#0c0708', '#1b1113', '#ff2e4d', '#ffb020'] },
@@ -15,6 +15,69 @@ export const THEMES = [
   { id: 'studio', name: 'Studio Mixer', desc: 'Brushed-metal mixer with classic channel colours', swatch: ['#111418', '#252b31', '#70a9d8', '#e6a759'] },
 ];
 
+const THEME_CACHE_KEY = 'opendj-skin-catalog-v1';
+const SKIN_CATALOG_URL = 'https://raw.githubusercontent.com/Bucifer6/OpenDJ/main/public/skins/catalog.json';
+const THEME_VARS = new Set([
+  '--bg', '--panel', '--panel-2', '--panel-3', '--line', '--line-2', '--text', '--text-2', '--text-3',
+  '--accent', '--on-accent', '--deck1', '--deck2', '--deck3', '--deck4', '--inset', '--deep', '--wave-bg',
+  '--row-alt', '--hover', '--sel', '--sel-tree', '--topbar-1', '--topbar-2', '--knob-hi', '--knob-lo',
+  '--knob-ring', '--platter-1', '--platter-2', '--platter-3', '--platter-4', '--fader-cap-1', '--fader-cap-2',
+  '--wf-low', '--wf-mid', '--wf-high',
+]);
+const BUILT_IN_IDS = new Set(BUILT_IN_THEMES.map((t) => t.id));
+export const THEMES = [...BUILT_IN_THEMES];
+const skinVars = new Map();
+const appliedSkinVars = new Set();
+
+function validateSkin(s) {
+  if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
+  const id = String(s.id || '');
+  if (!(BUILT_IN_IDS.has(id) || /^remote-[a-z0-9]+(?:-[a-z0-9]+){0,5}$/.test(id))) return null;
+  const vars = Object.fromEntries(Object.entries(s.vars || {}).filter(([k, v]) =>
+    THEME_VARS.has(k) && typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v)));
+  if (!Object.keys(vars).length) return null;
+  const swatch = Array.isArray(s.swatch) ? s.swatch.filter((v) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v)).slice(0, 4) : [];
+  return {
+    id, name: String(s.name || id).slice(0, 40), desc: String(s.desc || 'Downloadable OpenDJ skin').slice(0, 100),
+    swatch: swatch.length ? swatch : [vars['--bg'] || '#101318', vars['--panel'] || '#20252c', vars['--accent'] || '#49aaff', vars['--deck2'] || '#f3a74f'],
+    vars,
+  };
+}
+
+function installSkinCatalog(list) {
+  skinVars.clear();
+  THEMES.splice(0, THEMES.length, ...BUILT_IN_THEMES);
+  for (const raw of list.slice(0, 50)) {
+    const skin = validateSkin(raw);
+    if (!skin) continue;
+    skinVars.set(skin.id, skin.vars);
+    const index = THEMES.findIndex((t) => t.id === skin.id);
+    if (index >= 0) THEMES[index] = { ...THEMES[index], name: skin.name, desc: skin.desc, swatch: skin.swatch };
+    else THEMES.push({ id: skin.id, name: skin.name, desc: skin.desc, swatch: skin.swatch });
+  }
+}
+
+try {
+  const cached = JSON.parse(localStorage.getItem(THEME_CACHE_KEY) || 'null');
+  if (Array.isArray(cached?.skins)) installSkinCatalog(cached.skins);
+} catch { /* storage is optional */ }
+
+export async function refreshSkinCatalog() {
+  const ctl = new AbortController(), timeout = setTimeout(() => ctl.abort(), 12000);
+  try {
+    const res = await fetch(SKIN_CATALOG_URL, { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal: ctl.signal });
+    if (!res.ok) throw new Error(`Skin catalogue returned HTTP ${res.status}`);
+    const catalog = await res.json();
+    if (catalog?.schema !== 1 || !Array.isArray(catalog.skins)) throw new Error('Skin catalogue format is not supported');
+    const skins = catalog.skins.map(validateSkin).filter(Boolean).slice(0, 50);
+    if (!skins.length) throw new Error('No valid skins were found in the catalogue');
+    installSkinCatalog(skins);
+    try { localStorage.setItem(THEME_CACHE_KEY, JSON.stringify({ schema: 1, version: Number(catalog.version) || 1, skins })); } catch { /* storage may be full or disabled */ }
+    window.dispatchEvent(new Event('opendj-skins-updated'));
+    return { count: skins.length, version: Number(catalog.version) || 1 };
+  } finally { clearTimeout(timeout); }
+}
+
 let cache = new Map();
 export function cssVar(name) {
   if (!cache.has(name)) cache.set(name, getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#000');
@@ -25,7 +88,12 @@ export function applyTheme(settings) {
   const root = document.documentElement;
   const theme = THEMES.some((t) => t.id === settings.theme) ? settings.theme : 'midnight';
   root.classList.add('theme-switching');
-  root.dataset.theme = theme;
+  root.dataset.theme = BUILT_IN_IDS.has(theme) ? theme : 'midnight';
+  for (const name of appliedSkinVars) root.style.removeProperty(name);
+  appliedSkinVars.clear();
+  for (const [name, value] of Object.entries(skinVars.get(theme) || {})) {
+    root.style.setProperty(name, value); appliedSkinVars.add(name);
+  }
   // optional custom accent colour on top of any theme
   if (settings.accentColor) root.style.setProperty('--accent', settings.accentColor); else root.style.removeProperty('--accent');
   // never scale beyond what keeps a usable 1100x700 effective window. Phones and small tablets (the compact
