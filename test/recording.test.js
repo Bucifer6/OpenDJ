@@ -114,7 +114,7 @@ test('cue sheet + text tracklist from played tracks', () => {
   assert.ok(!lines.some((l) => l.includes('PERFORMER ""')), 'no empty performer');
   assert.match(buildCue({ file: 'a.flac', tracks: [] }), /FILE "a.flac" WAVE/);
   const txt = buildTracklistText({ title: 'My mix', tracks, duration: 4000 });
-  assert.equal(txt, 'My mix\n\n01. [00:00:03] A - First\n02. [00:05:12] B "Quote" - Second\n03. [01:05:00] Third\nline\n'.replace('Third\nline', 'Third\nline'));
+  assert.equal(txt, 'My mix\n\n01. [00:00:03] A - First\n02. [00:05:12] B "Quote" - Second\n03. [01:05:00] Third\nline\n');
   assert.match(buildTracklistText({ tracks: [] }), /no tracks detected/);
 });
 
