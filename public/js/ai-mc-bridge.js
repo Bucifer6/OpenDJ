@@ -122,6 +122,11 @@ function applyPlan(p) {
   const t = a.library?.track?.(p.nextId);
   if (!t) return;
   const nx = am.nextTrack();
+  if (p.viaMcp) {
+    // AI MC already queued the track, the style and the mix-out point through OpenDJ's MCP server: only the FX are ours
+    dj = { nextId: nx?.id, fx: p.fx || [], startDone: false, dropDone: false };
+    return;
+  }
   if (!p.locked && !(nx && requested.has(nx.id)) && nx?.id !== t.id) {
     // a newer plan (e.g. the music filter changed) replaces the DJ's previous pick instead of stacking up
     if (dj?.nextId && nx?.id === dj.nextId && !dj.startDone) am.remove(am.idx);

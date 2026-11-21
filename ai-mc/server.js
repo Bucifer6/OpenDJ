@@ -12,10 +12,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { ROOT, DATA, loadConfig, saveConfig, listPersonas, savePersona, loadMemory, saveMemory } from './lib/store.js';
-import { generate, listModels, buildMessages, TASK_TYPES, direct, SOUNDS, modeOf, radioTalk } from './lib/llm.js';
+import { generate, listModels, buildMessages, TASK_TYPES, direct, SOUNDS, modeOf, radioTalk, musicFromPrompt } from './lib/llm.js';
 import { speak, ttsStatus, cleanupAudio, xttsHealth, makeReference, makeSfx } from './lib/tts.js';
 import { findTracks, label } from './lib/match.js';
 import { wikiSearch, weatherNow, headlines } from './lib/facts.js';
+import { McpClient } from './lib/mcp-client.js';
 import { musicMatch, describe as describeMusic, genresOf, languageOf } from '../public/js/ai-mc-music.js';
 
 const LANGS = ['ro', 'en', 'es', 'other'];
@@ -35,6 +36,8 @@ if (!config.adminPassword) config.adminPassword = crypto.randomBytes(6).toString
 saveConfig(config);
 
 const PUBLIC = path.join(ROOT, 'public');
+// OpenDJ's remote-control (MCP) server: the token comes from OpenDJ → Settings → Remote control (scopes read + playback)
+let mcp = new McpClient(config.mcp || {});
 const VOICES = path.join(ROOT, 'voices');
 // Recorded sound effects (ai-mc/sfx/<role>.mp3). Kept out of git: their licences (e.g. Pixabay) allow use, not redistribution.
 const SFX = path.join(ROOT, 'sfx');
@@ -185,14 +188,34 @@ async function runRadio(p, job) {
 }
 async function runDirector(p, d) {
   const t0 = now();
+  // through OpenDJ's MCP server (when set up): the playing track's sections, so the DJ also picks WHEN to mix out
+  if (mcp.configured) {
+    try {
+      const s = await mcp.call('get_track_structure');
+      if (s?.sections?.length) d.structure = s;
+      state.mcpOk = true;
+    } catch (e) { state.mcpOk = false; state.mcpError = e.message; }
+  }
+  d.mood = str(config.musicMood, 300);
   const plan = await direct(config, p, d, state.chat.filter((m) => m.kind === 'user').slice(-6), sfxAvailable());
   if (!plan.nextId) throw new Error('DJ: nicio piesă aleasă');
   tame(plan, d.locked, p);
   state.lastError = '';
+  // execute through MCP: next track, transition style, mix-out point; the page bridge only does voice and beat-synced FX
+  let viaMcp = false;
+  if (mcp.configured && state.mcpOk) {
+    try {
+      if (!d.locked) await mcp.call('automix_queue_next', { track_id: plan.nextId });
+      await mcp.call('automix_set_transition', { style: plan.style });
+      if (plan.mixOut != null) await mcp.call('automix_set_mix_out', { position: plan.mixOut });
+      viaMcp = true;
+    } catch (e) { state.mcpError = e.message; console.error('[ai-mc] MCP:', e.message, '(folosesc bridge-ul)'); }
+  }
   const fxTxt = plan.fx.map((f) => `${SOUNDS[f.sound]} la ${f.when === 'start' ? 'început' : 'drop'}`).join(', ');
-  console.log(`[ai-mc] DJ (${((now() - t0) / 1000).toFixed(0)}s): ${plan.next?.label} · ${plan.style}${fxTxt ? ' · ' + fxTxt : ''} · ${plan.why}`);
-  state.outputs.unshift({ id: uid(), at: now(), persona: p.id, type: 'dj', text: `Urmează: ${plan.next?.label}\nTrecere: ${plan.style}${fxTxt ? ' + ' + fxTxt : ''}\nDe ce: ${plan.why}${plan.shout ? '\nStrigă: ' + plan.shout : ''}`, prompt: {} });
-  state.plans.push({ forTrack: d.forTrack, nextId: plan.nextId, style: plan.style, fx: plan.fx, locked: !!d.locked, label: plan.next?.label });
+  const outTxt = plan.mixOut != null ? ` · iese la ${Math.round(plan.mixOut)} s (${plan.mixOutSection})` : '';
+  console.log(`[ai-mc] DJ (${((now() - t0) / 1000).toFixed(0)}s${viaMcp ? ', MCP' : ''}): ${plan.next?.label} · ${plan.style}${outTxt}${fxTxt ? ' · ' + fxTxt : ''} · ${plan.why}`);
+  state.outputs.unshift({ id: uid(), at: now(), persona: p.id, type: 'dj', text: `Urmează: ${plan.next?.label}\nTrecere: ${plan.style}${outTxt}${fxTxt ? ' + ' + fxTxt : ''}${viaMcp ? ' (prin MCP)' : ''}\nDe ce: ${plan.why}${plan.shout ? '\nStrigă: ' + plan.shout : ''}`, prompt: {} });
+  state.plans.push({ forTrack: d.forTrack, nextId: plan.nextId, style: plan.style, fx: plan.fx, locked: !!d.locked, label: plan.next?.label, viaMcp });
   if (!d.locked) postChat('system', 'DJ', `🎛️ Urmează ${plan.next?.label}${plan.why ? ' – ' + plan.why : ''}`);
   if (plan.talk) enqueueRadio(plan.nextId, d.current?.label);
   if (plan.shout) {
@@ -381,11 +404,16 @@ const clientIp = (req) => {
   return real && (config.trustedProxies || []).includes(peer) ? real.slice(0, 64) : peer;
 };
 
+async function mcpStatus() {
+  if (!mcp.configured) return { configured: false };
+  try { const tools = await mcp.tools(); state.mcpOk = true; return { configured: true, ok: true, tools: tools.length, djTools: ['automix_queue_next', 'automix_set_transition', 'automix_set_mix_out', 'get_track_structure'].every((t) => tools.includes(t)) }; }
+  catch (e) { state.mcpOk = false; return { configured: true, ok: false, why: e.message.slice(0, 160) }; }
+}
 async function status() {
   let ollama = { ok: false };
   try { const models = await listModels(config); ollama = { ok: true, models, hasModel: models.includes(config.model) || models.includes(config.model + ':latest') }; } catch (e) { ollama = { ok: false, why: e.message }; }
   return {
-    ...publicState(), ollama, tts: ttsStatus(config), xtts: await xttsHealth(config), bridge: now() - state.bridgeAt < 5000, automix: state.automix,
+    ...publicState(), ollama, tts: ttsStatus(config), xtts: await xttsHealth(config), mcp: await mcpStatus(), bridge: now() - state.bridgeAt < 5000, automix: state.automix,
     jobs: state.jobs.length + (state.busy ? 1 : 0), lastError: state.lastError, pending: state.pending, tracks: (await libraryTracks()).length,
   };
 }
@@ -481,16 +509,23 @@ const server = http.createServer(async (req, res) => {
       if (!isAdmin(req)) return send(res, 401, { error: 'Parolă greșită' });
       const a = p.slice('/admin/api/'.length);
       if (a === 'status') return send(res, 200, await status());
-      if (a === 'config' && req.method === 'GET') { const { adminPassword, ...c } = config; return send(res, 200, c); }
+      if (a === 'config' && req.method === 'GET') { const { adminPassword, ...c } = config; return send(res, 200, { ...c, mcp: { url: config.mcp?.url || '', hasToken: !!config.mcp?.token } }); }
       if (a === 'config' && req.method === 'PUT') {
         const b = await body(req);
         const pick = ['stationName', 'ollamaUrl', 'model', 'temperature', 'persona', 'opendjUrl', 'city'];
         for (const k of pick) if (b[k] !== undefined) config[k] = typeof config[k] === 'number' ? Number(b[k]) : str(b[k], 300);
         if (b.music) config.music = cleanMusic(b.music);
+        if (typeof b.musicMood === 'string') config.musicMood = str(b.musicMood, 300);
+        if (b.mcp) {
+          const url = str(b.mcp.url, 200) || 'http://127.0.0.1:47800/mcp';
+          if (!/^https?:\/\/[^\s/]+\/mcp$/.test(url)) return send(res, 400, { error: 'Adresa MCP trebuie să fie de forma http://127.0.0.1:47800/mcp' });
+          config.mcp = { url, token: typeof b.mcp.token === 'string' ? str(b.mcp.token, 200) : (config.mcp?.token || '') };
+          mcp = new McpClient(config.mcp); state.mcpOk = null; state.mcpError = '';
+        }
         if (b.auto) config.auto = { ...config.auto, introEvery: Math.max(0, Number(b.auto.introEvery) || 0), speakChat: !!b.auto.speakChat, horn: b.auto.horn !== false, radioTopics: b.auto.radioTopics !== false, director: b.auto.director !== false, djIntensity: ['subtle', 'normal', 'hype'].includes(b.auto.djIntensity) ? b.auto.djIntensity : (config.auto.djIntensity || 'subtle'), moderation: b.auto.moderation === 'manual' ? 'manual' : 'auto' };
         if (b.tts) config.tts = { ...config.tts, ...Object.fromEntries(['engine', 'piperPath', 'voice', 'edgeVoice', 'edgeRate', 'edgePitch', 'python', 'xttsUrl', 'xttsVoice', 'xttsSpeed'].filter((k) => b.tts[k] !== undefined).map((k) => [k, str(b.tts[k], 400)])), lengthScale: Number(b.tts.lengthScale) || config.tts.lengthScale };
         saveConfig(config); pushState();
-        const { adminPassword, ...c } = config; return send(res, 200, c);
+        const { adminPassword, ...c } = config; return send(res, 200, { ...c, mcp: { url: config.mcp?.url || '', hasToken: !!config.mcp?.token } });
       }
       if (a === 'personas' && req.method === 'GET') return send(res, 200, listPersonas());
       if (a === 'personas' && req.method === 'PUT') {
@@ -530,6 +565,14 @@ const server = http.createServer(async (req, res) => {
         const counts = new Map();
         for (const t of await libraryTracks()) for (const g of genresOf(t)) counts.set(g, (counts.get(g) || 0) + 1);
         return send(res, 200, [...counts].sort((x, y) => y[1] - x[1]).slice(0, 80).map(([genre, count]) => ({ genre, count })));
+      }
+      if (a === 'music-prompt' && req.method === 'POST') {
+        const text = str((await body(req)).text, 300);
+        if (!text) return send(res, 400, { error: 'Scrie ce muzică vrei' });
+        const counts = new Map();
+        for (const t of await libraryTracks()) for (const g of genresOf(t)) counts.set(g, (counts.get(g) || 0) + 1);
+        const genres = [...counts].sort((x, y) => y[1] - x[1]).map(([g]) => g);
+        return send(res, 200, { music: await musicFromPrompt(config, text, genres), mood: text });
       }
       if (a === 'music-preview' && req.method === 'POST') {
         const f = cleanMusic((await body(req)).music);

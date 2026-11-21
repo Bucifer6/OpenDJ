@@ -64,6 +64,11 @@
     <label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input id="director" type="checkbox" style="width:auto"> 🎛️ DJ AI: alege el piesele, trecerile și efectele (cererile prietenilor au prioritate)</label>
     <label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input id="speakChat" type="checkbox" style="width:auto"> Răspunde și la chat cu voce (altfel doar în scris)</label>
     <div class="row"><label>Viteză voce (1 = normal, mai mare = mai rar)<input id="lengthScale" type="number" min="0.5" max="2" step="0.05"></label></div>
+    <h2 style="margin-top:8px">🔌 Legătura MCP cu OpenDJ</h2>
+    <p class="muted">În OpenDJ: Settings → Remote control → pornește, bifează <b>read</b> și <b>playback</b>, creează tokenul și lipește-l aici. Prin el DJ-ul AI alege piesa, trecerea și momentul trecerii.</p>
+    <label>Adresa MCP<input id="mcpUrl" placeholder="http://127.0.0.1:47800/mcp"></label>
+    <label>Token (din OpenDJ)<input id="mcpToken" type="password" autocomplete="off" placeholder="lipește tokenul aici"></label>
+    <div class="muted" id="mcpState"></div>
     <button class="p" id="saveCfg">Salvează setările</button>
   </section>
 
@@ -103,6 +108,8 @@
   <section class="wide">
     <h2>🎵 Ce muzică pune DJ-ul</h2>
     <p class="muted">DJ-ul AI alege următoarea piesă doar dintre cele care se potrivesc aici. Cererile prietenilor trec oricum.</p>
+    <label>Spune-i în cuvintele tale ce să pună<textarea id="mPrompt" style="min-height:56px" placeholder="ex: manele vechi și lăutărești, fără rap, atmosferă de nuntă"></textarea></label>
+    <div class="row"><button id="mAsk">🤖 Înțelege cererea (completează filtrul de mai jos)</button></div>
     <div class="row" style="align-items:center">
       <b style="flex:none;min-width:0">Limbi:</b>
       <label class="chk"><input type="checkbox" class="lang" value="ro"> 🇷🇴 română</label>
@@ -184,6 +191,8 @@ async function loadStatus() {
   const st = $('status'); st.textContent = '';
   const line = (k, ok, v) => st.append(el('span', { textContent: k }), el('span', { className: ok ? 'ok' : 'bad', textContent: v }));
   line('Ollama', s.ollama.ok && s.ollama.hasModel, s.ollama.ok ? (s.ollama.hasModel ? 'conectat' : `conectat, dar lipsește modelul ${cfg.model}`) : 'nu răspunde: ' + (s.ollama.why || ''));
+  line('MCP OpenDJ', !!s.mcp?.ok, !s.mcp?.configured ? 'neconfigurat (DJ-ul merge prin bridge)' : s.mcp.ok ? (s.mcp.djTools ? 'conectat – DJ-ul controlează OpenDJ prin MCP' : 'conectat, dar OpenDJ nu are uneltele noi (actualizează OpenDJ)') : 'nu răspunde: ' + (s.mcp.why || ''));
+  $('mcpState').textContent = s.mcp?.configured ? (s.mcp.ok ? '✓ conectat' : '✗ ' + (s.mcp.why || 'nu răspunde')) : '';
   line('Voce', s.tts.ok, s.tts.ok ? ({ xtts: `clonată (${s.tts.voice})${s.xtts?.ok ? '' : ' – serverul nu rulează, merge Microsoft'}`, edge: 'Microsoft ' + (s.tts.voice || ''), piper: 'Piper' }[s.tts.engine] || 'OK') : s.tts.why);
   line('OpenDJ', s.bridge, s.bridge ? `conectat${s.automix ? ', automix pornit' : ''}` : 'pagina OpenDJ nu e deschisă');
   line('Emisie', s.onAir, s.onAir ? 'LIVE' : 'oprită (OpenDJ → Broadcast)');
@@ -250,10 +259,11 @@ async function loadConfig() {
   for (const k of ['stationName', 'ollamaUrl', 'temperature']) $(k).value = cfg[k];
   $('introEvery').value = cfg.auto.introEvery; $('moderation').value = cfg.auto.moderation; $('speakChat').checked = cfg.auto.speakChat; $('director').checked = cfg.auto.director !== false; $('djIntensity').value = cfg.auto.djIntensity || 'subtle'; $('city').value = cfg.city || ''; $('radioTopics').checked = cfg.auto.radioTopics !== false;
   $('lengthScale').value = cfg.tts.lengthScale;
+  $('mcpUrl').value = cfg.mcp?.url || 'http://127.0.0.1:47800/mcp'; $('mcpToken').value = ''; $('mcpToken').placeholder = cfg.mcp?.hasToken ? 'token salvat (lasă gol ca să-l păstrezi)' : 'lipește tokenul aici';
 }
 $('saveCfg').onclick = async () => {
   cfg = await api('config', { method: 'PUT', body: { stationName: $('stationName').value, ollamaUrl: $('ollamaUrl').value, model: $('model').value, temperature: $('temperature').value, persona: $('persona').value, city: $('city').value,
-    auto: { introEvery: $('introEvery').value, moderation: $('moderation').value, speakChat: $('speakChat').checked, director: $('director').checked, djIntensity: $('djIntensity').value, radioTopics: $('radioTopics').checked }, tts: { lengthScale: $('lengthScale').value } } });
+    auto: { introEvery: $('introEvery').value, moderation: $('moderation').value, speakChat: $('speakChat').checked, director: $('director').checked, djIntensity: $('djIntensity').value, radioTopics: $('radioTopics').checked }, tts: { lengthScale: $('lengthScale').value }, mcp: { url: $('mcpUrl').value.trim(), ...($('mcpToken').value.trim() ? { token: $('mcpToken').value.trim() } : {}) } } });
   await loadStatus();
 };
 async function test(onAir) {
@@ -373,7 +383,7 @@ async function loadMusic() {
   const m = cfg.music || { languages: ['ro', 'en', 'es'] };
   document.querySelectorAll('.lang').forEach((c) => { c.checked = !m.languages?.length || m.languages.includes(c.value); });
   $('mRo').checked = !!m.romanian; $('mInc').value = m.include || ''; $('mExc').value = m.exclude || '';
-  selGenres = new Set(m.genres || []);
+  selGenres = new Set(m.genres || []); $('mPrompt').value = cfg.musicMood || '';
   genreList = await api('genres').catch(() => []);
   renderGenres(); previewMusic();
 }
@@ -386,7 +396,16 @@ document.querySelectorAll('[data-preset]').forEach((b) => b.onclick = () => {
 ['mRo', 'mInc', 'mExc'].forEach((id) => $(id).addEventListener('input', previewMusic));
 document.querySelectorAll('.lang').forEach((c) => c.onchange = previewMusic);
 $('gSearch').oninput = renderGenres;
-$('mSave').onclick = async () => { cfg = await api('config', { method: 'PUT', body: { music: currentMusic() } }); $('mSave').textContent = '✓ Salvat – DJ-ul replanifică'; setTimeout(() => $('mSave').textContent = 'Salvează muzica', 2500); };
+$('mAsk').onclick = async () => {
+  const b = $('mAsk'), t = b.textContent; b.disabled = true; b.textContent = 'Gemma se gândește…';
+  try {
+    const r = await api('music-prompt', { method: 'POST', body: { text: $('mPrompt').value } });
+    selGenres = new Set(r.music.genres); $('mRo').checked = r.music.romanian; $('mInc').value = r.music.include; $('mExc').value = r.music.exclude;
+    document.querySelectorAll('.lang').forEach((c) => { c.checked = !r.music.languages.length || r.music.languages.includes(c.value); });
+    renderGenres(); previewMusic();
+  } catch (e) { alert(e.message); } finally { b.disabled = false; b.textContent = t; }
+};
+$('mSave').onclick = async () => { cfg = await api('config', { method: 'PUT', body: { music: currentMusic(), musicMood: $('mPrompt').value } }); $('mSave').textContent = '✓ Salvat – DJ-ul replanifică'; setTimeout(() => $('mSave').textContent = 'Salvează muzica', 2500); };
 
 async function boot() {
   try {

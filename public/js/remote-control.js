@@ -7,7 +7,7 @@ import { platform } from './platform.js';
 const pageId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
 const post = (url, body) => fetch(url, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const deckOf = (app, n) => { const i = Number(n) - 1; if (!Number.isInteger(i) || i < 0 || i >= (app.deckCount || 2) || i > 3) throw new Error(`Deck ${n} is not shown (OpenDJ has ${app.deckCount || 2} decks)`); return app.engine.decks[i]; };
-const LABEL = { play: 'play', pause: 'pause', cue: 'cue', load_track: 'load a track', automix_start: 'start automix', automix_stop: 'stop automix', automix_skip: 'mix to the next track', set_crossfader: 'move the crossfader', trigger_sample: 'fire a sampler pad', queue_dedication: 'queue a dedication', broadcast_start: 'start a broadcast', broadcast_stop: 'stop a broadcast' };
+const LABEL = { play: 'play', pause: 'pause', cue: 'cue', load_track: 'load a track', automix_start: 'start automix', automix_stop: 'stop automix', automix_skip: 'mix to the next track', automix_queue_next: 'choose the next track', automix_set_transition: 'choose the next transition', automix_set_mix_out: 'choose when to mix out', set_crossfader: 'move the crossfader', trigger_sample: 'fire a sampler pad', queue_dedication: 'queue a dedication', broadcast_start: 'start a broadcast', broadcast_stop: 'stop a broadcast' };
 
 /** Status snapshot for get_status (metadata only). */
 export async function remoteStatus(app) {
@@ -59,6 +59,42 @@ export async function runRemote(app, tool, args = {}) {
       return { enabled: app.automix.enabled, queued: app.automix.queue.length };
     }
     case 'automix_stop': app.automix.stop(); return { enabled: false };
+    case 'get_track_structure': {
+      const am = app.automix, d = am.current || E.decks.slice(0, 2).find((x) => x.playing);
+      if (!d?.track) throw new Error('Nothing is playing');
+      const info = am.info(d), nt = am.enabled ? am.nextTransition() : null, r1 = (x) => (Number.isFinite(+x) ? +(+x).toFixed(1) : null);
+      return {
+        title: d.track.title || null, artist: d.track.artist || null, position: r1(d.position), duration: r1(d.duration), bpm: r1(d.effectiveBpm || d.bpm),
+        sections: (info.phrases || []).slice(0, 60).map((p) => ({ type: p.type, start: r1(p.start), end: r1(p.end) })),
+        mix_out: r1(info.mixOut), chosen_mix_out: am.mixOutAt?.trackId === d.track.id ? r1(am.mixOutAt.at) : null,
+        next_transition: nt ? { style: nt.style, begins_at: r1(nt.begin), begins_in: r1(nt.beginsIn) } : null,
+      };
+    }
+    case 'automix_queue_next': {
+      const am = app.automix, t = app.library.track(args.track_id);
+      if (!t) throw new Error('No track with that id (use search_library)');
+      if (!am.enabled) throw new Error('Automix is not running (use automix_start)');
+      if (am.transition) throw new Error('A transition is in progress: try again in a few seconds');
+      if (am.nextTrack()?.id !== t.id) {
+        am.insertNext([t]);
+        for (let i = am.queue.length - 1; i > am.idx; i--) if (am.queue[i].id === t.id) am.remove(i);
+      }
+      return { next: { id: t.id, title: t.title, artist: t.artist } };
+    }
+    case 'automix_set_transition': {
+      const am = app.automix;
+      if (!am.enabled || !am.nextTrack()) throw new Error('No upcoming track in automix');
+      am.setOverride(am.idx, args.style);
+      return { style: args.style, next: am.nextTrack()?.title || null };
+    }
+    case 'automix_set_mix_out': {
+      const am = app.automix;
+      if (!am.enabled || !am.current?.track) throw new Error('Automix is not playing a track');
+      if (am.transition) throw new Error('A transition is already in progress');
+      const r = am.setMixOut(args.automatic || args.position == null ? null : args.position);
+      const nt = am.nextTransition();
+      return { mix_out: r ? +r.at.toFixed(1) : 'automatic', next_transition_begins_at: nt ? +nt.begin.toFixed(1) : null };
+    }
     case 'automix_skip': {
       if (!app.automix.enabled) throw new Error('Automix is not running');
       const r = app.automix.skip();

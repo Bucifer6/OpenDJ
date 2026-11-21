@@ -42,7 +42,15 @@ const DECK = { type: 'integer', minimum: 1, maximum: 4, description: 'Deck numbe
 /** Tool definitions: name -> { scope, description, inputSchema, where: 'server' | 'page' } */
 export const TOOLS = {
   get_status: { scope: 'read', where: 'page', description: 'What OpenDJ is doing now: decks (track, BPM, key, position, playing), crossfader, automix, broadcast targets (id, name, state), queued dedications.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-  search_library: { scope: 'read', where: 'server', description: 'Search the music library by title, artist, album or genre. Returns metadata only (id, title, artist, album, genre, BPM, key, duration); use an id with load_track.', inputSchema: { type: 'object', properties: { query: { type: 'string', maxLength: 120, description: 'Words to match; empty lists the most recently added tracks' }, limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 } }, additionalProperties: false } },
+  search_library: { scope: 'read', where: 'server', description: 'Search the music library by title, artist, album or genre, optionally filtered by genre, BPM range and year range (e.g. "old manele", "80s pop around 120 BPM"). Returns metadata only (id, title, artist, album, genre, year, BPM, key, duration); use an id with load_track, automix_queue_next or automix_start.', inputSchema: { type: 'object', properties: {
+    query: { type: 'string', maxLength: 120, description: 'Words to match; empty lists the most recently added tracks (or everything matching the filters)' },
+    genre: { type: 'string', maxLength: 60, description: 'Only tracks whose genre contains this (see list_genres)' },
+    bpm_min: { type: 'number', minimum: 40, maximum: 250 }, bpm_max: { type: 'number', minimum: 40, maximum: 250 },
+    year_from: { type: 'integer', minimum: 1900, maximum: 2100 }, year_to: { type: 'integer', minimum: 1900, maximum: 2100 },
+    random: { type: 'boolean', default: false, description: 'Shuffle the matches (variety instead of the first ones)' },
+    limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 } }, additionalProperties: false } },
+  list_genres: { scope: 'read', where: 'server', description: 'The genres in the music library with their number of tracks, most common first (use with search_library genre).', inputSchema: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 100, default: 40 } }, additionalProperties: false } },
+  get_track_structure: { scope: 'read', where: 'page', description: 'The track automix is playing: position, duration, BPM, its sections (intro / verse / build / drop / breakdown / outro with start and end seconds) and the planned next transition (style, where it begins). Use it to choose a mix-out point.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   play: { scope: 'playback', where: 'page', description: 'Start playback on a deck.', inputSchema: { type: 'object', properties: { deck: DECK }, required: ['deck'], additionalProperties: false } },
   pause: { scope: 'playback', where: 'page', description: 'Pause a deck.', inputSchema: { type: 'object', properties: { deck: DECK }, required: ['deck'], additionalProperties: false } },
   cue: { scope: 'playback', where: 'page', description: 'Return a stopped or playing deck to its cue point and stop there.', inputSchema: { type: 'object', properties: { deck: DECK }, required: ['deck'], additionalProperties: false } },
@@ -50,6 +58,9 @@ export const TOOLS = {
   automix_start: { scope: 'playback', where: 'page', description: 'Start automix on the given tracks (ids from search_library), or on the library view shown in OpenDJ when none are given.', inputSchema: { type: 'object', properties: { track_ids: { type: 'array', items: ID, maxItems: 200 }, mode: { type: 'string', enum: ['smart', 'order', 'shuffle'], default: 'smart' } }, additionalProperties: false } },
   automix_stop: { scope: 'playback', where: 'page', description: 'Stop automix (the playing track keeps playing).', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   automix_skip: { scope: 'playback', where: 'page', description: 'Mix into the next queued track now.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  automix_queue_next: { scope: 'playback', where: 'page', description: 'Make a library track (id from search_library) the next one automix plays; a later copy of it in the queue is removed.', inputSchema: { type: 'object', properties: { track_id: { ...ID, description: 'Track id from search_library' } }, required: ['track_id'], additionalProperties: false } },
+  automix_set_transition: { scope: 'playback', where: 'page', description: 'Transition style into the next queued track: blend, bassswap, crossfade, filter, echo, cut, backspin, brake, loop, reverb, or auto.', inputSchema: { type: 'object', properties: { style: { type: 'string', enum: ['auto', 'blend', 'bassswap', 'crossfade', 'filter', 'echo', 'cut', 'backspin', 'brake', 'loop', 'reverb'] } }, required: ['style'], additionalProperties: false } },
+  automix_set_mix_out: { scope: 'playback', where: 'page', description: 'Choose when the transition out of the playing track starts (track seconds, e.g. right after the last chorus; see get_track_structure). automatic = true goes back to the analysed outro.', inputSchema: { type: 'object', properties: { position: { type: 'number', minimum: 0, maximum: 7200 }, automatic: { type: 'boolean', default: false } }, additionalProperties: false } },
   set_crossfader: { scope: 'playback', where: 'page', description: 'Set the crossfader: -1 = fully A (left), 0 = centre, 1 = fully B (right).', inputSchema: { type: 'object', properties: { position: { type: 'number', minimum: -1, maximum: 1 } }, required: ['position'], additionalProperties: false } },
   trigger_sample: { scope: 'playback', where: 'page', description: 'Fire a sampler pad (1-8, e.g. 1 = air horn by default).', inputSchema: { type: 'object', properties: { pad: { type: 'integer', minimum: 1, maximum: 8 } }, required: ['pad'], additionalProperties: false } },
   queue_dedication: { scope: 'playback', where: 'page', description: 'Queue a short spoken dedication over the mix at the next phrase (music ducked), shown on screen. English or Romanian.', inputSchema: { type: 'object', properties: { text: { type: 'string', minLength: 1, maxLength: 200 }, language: { type: 'string', enum: ['en', 'ro'], default: 'en' }, show_on_screen: { type: 'boolean', default: true }, stream_metadata: { type: 'boolean', default: true } }, required: ['text'], additionalProperties: false } },
@@ -96,7 +107,8 @@ export function validateArgs(schema, args) {
 /** A library track as an assistant may see it: metadata only (never a path, source URL, token or file name). */
 export const publicTrack = (t) => ({
   id: t.id, title: String(t.title || '').slice(0, 200), artist: String(t.artist || '').slice(0, 200), album: String(t.album || '').slice(0, 200),
-  genre: String(t.genre || '').slice(0, 80), bpm: Number(t.bpm) || null, key: t.key ? String(t.key).slice(0, 8) : null, duration: Number(t.duration) || null,
+  genre: String(t.genre || '').slice(0, 80), year: Number(t.year) || null, bpm: Number(t.bpm) || null, key: t.key ? String(t.key).slice(0, 8) : null,
+  energy: Number.isFinite(+t.energy) ? +t.energy : null, duration: Number(t.duration) || null,
 });
 
 // ------------------------------------------------------------------ limits / audit
@@ -180,9 +192,29 @@ export function registerMcp({ route, library, emit = () => {}, auth, hosted = fa
   const runTool = async (name, args) => {
     if (name === 'search_library') {
       const q = String(args.query || '').toLowerCase().trim().split(/\s+/).filter(Boolean).slice(0, 8);
-      const all = library.allTracks().filter((t) => !t.hidden);
-      const hit = q.length ? all.filter((t) => { const s = `${t.title || ''} ${t.artist || ''} ${t.album || ''} ${t.genre || ''}`.toLowerCase(); return q.every((w) => s.includes(w)); }) : [...all].sort((a, b) => (b.added || 0) - (a.added || 0));
+      const g = String(args.genre || '').toLowerCase().trim();
+      const all = library.allTracks().filter((t) => !t.hidden && !t.unreadable);
+      let hit = all.filter((t) => {
+        if (q.length) { const s = `${t.title || ''} ${t.artist || ''} ${t.album || ''} ${t.genre || ''}`.toLowerCase(); if (!q.every((w) => s.includes(w))) return false; }
+        if (g && !String(t.genre || '').toLowerCase().includes(g)) return false;
+        const bpm = Number(t.bpm) || 0, year = Number(t.year) || 0;
+        if (args.bpm_min != null && !(bpm >= args.bpm_min)) return false;
+        if (args.bpm_max != null && !(bpm && bpm <= args.bpm_max)) return false;
+        if (args.year_from != null && !(year >= args.year_from)) return false;
+        if (args.year_to != null && !(year && year <= args.year_to)) return false;
+        return true;
+      });
+      if (args.random) for (let i = hit.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [hit[i], hit[j]] = [hit[j], hit[i]]; }
+      else if (!q.length && !g) hit = hit.sort((a, b) => (b.addedAt || b.added || 0) - (a.addedAt || a.added || 0));
       return { total: hit.length, tracks: hit.slice(0, args.limit || 20).map(publicTrack) };
+    }
+    if (name === 'list_genres') {
+      const counts = new Map();
+      for (const t of library.allTracks()) {
+        if (t.hidden) continue;
+        for (const g of String(t.genre || '').split(/\s*[;,/|]\s*/)) { const k = g.trim(); if (k && k.length < 40) counts.set(k, (counts.get(k) || 0) + 1); }
+      }
+      return { genres: [...counts].sort((a, b) => b[1] - a[1]).slice(0, args.limit || 40).map(([genre, tracks]) => ({ genre, tracks })) };
     }
     if (name === 'broadcast_start' || name === 'broadcast_stop') {
       const t = (broadcastConfig().targets || []).find((x) => x.id === args.target_id);

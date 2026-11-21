@@ -122,6 +122,8 @@ const fmt = (t) => `${t.label}${t.bpm ? ` · ${Math.round(t.bpm)} BPM` : ''}${t.
 /** Asks the model for the next DJ move. Returns a validated plan (or throws). */
 export async function direct(config, persona, d, chat = [], available = ['airhorn']) {
   const cands = (d.candidates || []).slice(0, 16);
+  // sections of the playing track (from OpenDJ's get_track_structure over MCP): only those after the current position
+  const sections = (d.structure?.sections || []).filter((s) => s.end > (d.structure.position || 0) + 10).slice(-14);
   const sounds = Object.fromEntries([...new Set(['airhorn', ...available])].filter((k) => SOUNDS[k]).map((k) => [k, SOUNDS[k]]));
   const radio = modeOf(persona) === 'radio';
   const system = (radio
@@ -146,8 +148,10 @@ Sunete: ${Object.entries(sounds).map(([k, v]) => `${k} = ${v}`).join('; ')}. Mom
 Răspunzi doar cu JSON.`;
   const user = [
     `Acum se aude: ${fmt(d.current)}`,
-    d.music && d.music !== 'toată colecția' ? `Organizatorul petrecerii vrea muzică: ${d.music}. Candidatele respectă deja asta.` : '',
+    d.music && d.music !== 'toată colecția' ? `Organizatorul vrea muzică: ${d.music}. Candidatele respectă deja asta.` : '',
+    d.mood ? `Ce a cerut organizatorul (atmosfera, cu vorbele lui): ${d.mood}` : '',
     d.history?.length ? `Înainte au fost: ${d.history.join(' | ')}` : '',
+    sections.length ? `Structura piesei de acum (secunde; poziția ${Math.round(d.structure.position)} din ${Math.round(d.structure.duration)}), alege la care secțiune începe trecerea (mix_out = numărul ei; 0 = automat, la outro). Un DJ bun iese de obicei după ultimul refren sau la începutul outro-ului, nu taie un refren și nu așteaptă liniștea de la final:\n${sections.map((s, i) => `${i + 1}. ${s.type} ${Math.round(s.start)}–${Math.round(s.end)} s`).join('\n')}` : '',
     chat.length ? `Ultimele mesaje din chat (atmosfera): ${chat.map((m) => `${m.name}: ${m.text}`).join(' | ')}` : '',
     d.locked
       ? `Piesa următoare e deja cerută de un prieten: ${fmt(cands[0])}. Pune next = 1 și alege doar trecerea, efectele și ce strigi.`
@@ -161,8 +165,9 @@ Răspunzi doar cu JSON.`;
       fx: { type: 'array', items: { type: 'object', properties: { sound: { type: 'string', enum: Object.keys(sounds) }, when: { type: 'string', enum: ['start', 'drop'] } }, required: ['sound', 'when'] } },
       shout: { type: 'string' },
       why: { type: 'string' },
+      ...(sections.length ? { mix_out: { type: 'integer' } } : {}),
     },
-    required: ['next', 'style', 'fx', 'shout', 'why'],
+    required: ['next', 'style', 'fx', 'shout', 'why', ...(sections.length ? ['mix_out'] : [])],
   };
   const r = await fetch(config.ollamaUrl.replace(/\/+$/, '') + '/api/chat', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -174,12 +179,52 @@ Răspunzi doar cu JSON.`;
   let p; try { p = JSON.parse(raw); } catch { throw new Error('DJ: răspuns care nu e JSON'); }
   const idx = d.locked ? 0 : Math.min(cands.length, Math.max(1, Math.round(Number(p.next) || 1))) - 1;
   const seen = new Set();
+  // mix-out: start of the chosen section, only if it is still ahead (≥ 20 s) and not in the first half of the track
+  const sec = sections[Math.round(Number(p.mix_out) || 0) - 1];
+  const mixOut = sec && sec.start > d.structure.position + 20 && sec.start > d.structure.duration * 0.5 ? sec.start : null;
   return {
-    nextId: cands[idx]?.id, next: cands[idx],
+    nextId: cands[idx]?.id, next: cands[idx], mixOut, mixOutSection: mixOut != null ? sec.type : null,
     style: STYLES[p.style] ? p.style : 'blend',
     fx: (Array.isArray(p.fx) ? p.fx : []).filter((f) => sounds[f?.sound] && ['start', 'drop'].includes(f.when) && !seen.has(f.when + f.sound) && seen.add(f.when + f.sound)).slice(0, 2),
     shout: clean(p.shout).slice(0, 200),
     why: clean(p.why).slice(0, 200),
+  };
+}
+
+// ------------------------------------------------------------------ "what should the DJ play" in plain words → music filter
+/** "manele vechi și lăutărești, fără rap" → { genres: [...from the library], romanian, languages, include, exclude } */
+export async function musicFromPrompt(config, text, genres) {
+  const list = genres.slice(0, 80);
+  const schema = {
+    type: 'object',
+    properties: {
+      genres: { type: 'array', items: { type: 'string', enum: list.length ? list : ['-'] } },
+      romanian: { type: 'boolean' },
+      languages: { type: 'array', items: { type: 'string', enum: ['ro', 'en', 'es', 'other'] } },
+      include: { type: 'string' }, exclude: { type: 'string' },
+    },
+    required: ['genres', 'romanian', 'languages', 'include', 'exclude'],
+  };
+  const system = `Transformi cererea organizatorului unui radio într-un filtru pentru colecția de muzică.
+- genres: genurile din listă care se potrivesc cererii (poți alege mai multe, inclusiv variante ale aceluiași gen); listă goală = toate genurile.
+- romanian: true doar dacă cere explicit muzică românească.
+- languages: limbile pieselor (ro, en, es, other); toate patru dacă nu contează.
+- include: cuvinte (separate prin virgulă) care trebuie să apară în artist / titlu / album, doar dacă cererea pomenește artiști sau cuvinte anume; altfel gol.
+- exclude: cuvinte de evitat (separate prin virgulă) dacă cere „fără …”; altfel gol.
+Nu inventa genuri care nu sunt în listă. Răspunzi doar cu JSON.
+Genurile din colecție (cele mai frecvente primele): ${list.join(', ')}`;
+  const r = await fetch(config.ollamaUrl.replace(/\/+$/, '') + '/api/chat', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: config.model, messages: [{ role: 'system', content: system }, { role: 'user', content: String(text).slice(0, 300) }], stream: false, format: schema, keep_alive: '30m', options: { temperature: 0.2, num_predict: 300 } }),
+    signal: AbortSignal.timeout(120000),
+  });
+  if (!r.ok) throw new Error(`Ollama a răspuns ${r.status}`);
+  const p = JSON.parse((await r.json()).message?.content || '{}');
+  return {
+    genres: (p.genres || []).filter((g) => list.includes(g)),
+    romanian: !!p.romanian,
+    languages: (p.languages || []).filter((l) => ['ro', 'en', 'es', 'other'].includes(l)),
+    include: String(p.include || '').slice(0, 200), exclude: String(p.exclude || '').slice(0, 200),
   };
 }
 

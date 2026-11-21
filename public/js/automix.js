@@ -488,7 +488,32 @@ export class AutoMix extends Emitter {
   }
 
   /** Structure info for the track on a deck: analysed fields, else derived from the deck's waveform (older analyses). */
+  /**
+   * Where to start mixing out of the playing track (track seconds), e.g. chosen by an assistant after the last chorus
+   * instead of the analysed outro; null = automatic. Applies to the track playing now only.
+   */
+  setMixOut(at) {
+    const cur = this.current;
+    if (!cur?.track) return null;
+    if (at == null) this.mixOutAt = null;
+    else {
+      const end = (cur.track.endTime || cur.duration || 0) - 2;
+      this.mixOutAt = { trackId: cur.track.id, at: Math.max(cur.position + 1, Math.min(Number(at), end)) };
+    }
+    this.upcoming = null; this.emit('state');
+    return this.mixOutAt;
+  }
+
   info(deck) {
+    const i = this.structureInfo(deck), o = this.mixOutAt;
+    if (!o || !deck.track || o.trackId !== deck.track.id) return i;
+    // chosen mix-out point: the transition starts there and the outgoing track ends one transition later
+    const beat = i.bpm ? 60 / i.bpm : 0.5;
+    const len = Math.min((this.opts.transitionBeats || 32) * beat, (i.duration || 0) * 0.4);
+    return { ...i, mixOut: o.at, endTime: Math.min(i.endTime || i.duration, o.at + len) };
+  }
+
+  structureInfo(deck) {
     const t = deck.track || {};
     const base = { bpm: deck.bpm, gridOffset: deck.gridOffset, duration: deck.duration || t.duration, startTime: t.startTime, endTime: t.endTime };
     if (t.mixOut != null || t.mixIn != null) return { ...base, mixIn: t.mixIn, mixOut: t.mixOut, downbeat: t.downbeat, phrases: t.phrases };
@@ -538,7 +563,7 @@ export class AutoMix extends Emitter {
   nextTransition() {
     const cur = this.current, next = this.nextTrack();
     if (!this.enabled || !cur?.track || !next) return null;
-    const key = `${cur.track.id}>${next.id}|${this.opts.style}|${this.opts.transitionBeats}|${this.opts.varyStyles}|${this.overrides.get(next) || ''}|${cur.bpm}|${cur.gridOffset}`;
+    const key = `${cur.track.id}>${next.id}|${this.opts.style}|${this.opts.transitionBeats}|${this.opts.varyStyles}|${this.overrides.get(next) || ''}|${cur.bpm}|${cur.gridOffset}|${this.mixOutAt?.trackId === cur.track.id ? this.mixOutAt.at : ""}`;
     if (!this.upcoming || this.upcoming.key !== key) {
       const s = this.styleFor(this.idx, this.app.library?.track?.(cur.track.id) || cur.track);
       this.upcoming = { key, ...s, plan: planTransition(this.info(cur), s.style, this.opts) };

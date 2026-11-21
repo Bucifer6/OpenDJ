@@ -124,7 +124,7 @@ test('protocol: initialize, session id, tools/list, ping, notifications, GET 405
     assert.equal((await s.rpc(null, null, { raw: { jsonrpc: '2.0', method: 'notifications/initialized' } })).status, 202);
     assert.deepEqual((await s.rpc('ping')).body.result, {});
     const tools = (await s.rpc('tools/list')).body.result.tools.map((t) => t.name).sort();
-    assert.deepEqual(tools, ['get_status', 'search_library'], 'only the tools the scopes allow are listed');
+    assert.deepEqual(tools, ['get_status', 'get_track_structure', 'list_genres', 'search_library'], 'only the tools the scopes allow are listed');
     assert.equal((await s.rpc('nope/method')).body.error.code, -32601);
     assert.equal((await s.rpc(null, null, { raw: [{ jsonrpc: '2.0', id: 1, method: 'ping' }] })).status, 400, 'no batching');
     assert.equal((await s.rpc('ping', null, { headers: { 'MCP-Protocol-Version': '1999-01-01' } })).status, 400);
@@ -198,7 +198,13 @@ test('injection-safe input schemas: unknown properties, wrong types, bounds, pat
   assert.equal(v('broadcast_start', { target_id: 'a; rm -rf /' }).ok, false);
   assert.equal(v('automix_start', { track_ids: Array(201).fill('a') }).ok, false);
   assert.equal(v('automix_start', { track_ids: [{}] }).ok, false);
-  assert.deepEqual(v('search_library', {}).value, { limit: 20 });
+  assert.deepEqual(v('search_library', {}).value, { random: false, limit: 20 });
+  assert.equal(v('search_library', { bpm_min: 10 }).ok, false, 'BPM below the range');
+  assert.equal(v('search_library', { year_from: 1999.5 }).ok, false, 'year must be an integer');
+  assert.equal(v('search_library', { genre: 'x'.repeat(61) }).ok, false);
+  assert.equal(v('automix_set_transition', { style: 'explode' }).ok, false, 'only known transition styles');
+  assert.equal(v('automix_set_mix_out', { position: -1 }).ok, false);
+  assert.equal(v('automix_queue_next', { track_id: '../etc' }).ok, false);
   assert.equal(v('get_status', ['x']).ok, false);
   const s = await setup({ port: 7910 });
   try {
@@ -223,10 +229,10 @@ test('no secret leakage: library search returns metadata only; broadcast targets
     await s.init();
     const r = (await s.call('search_library', { query: 'night' })).body.result.structuredContent;
     assert.equal(r.total, 2);
-    for (const x of r.tracks) assert.deepEqual(Object.keys(x).sort(), ['album', 'artist', 'bpm', 'duration', 'genre', 'id', 'key', 'title']);
+    for (const x of r.tracks) assert.deepEqual(Object.keys(x).sort(), ['album', 'artist', 'bpm', 'duration', 'energy', 'genre', 'id', 'key', 'title', 'year']);
     const all = JSON.stringify(r);
     assert.ok(!all.includes('Secret Folder') && !all.includes('SECRET123') && !all.includes('night.mp3'));
-    assert.deepEqual(Object.keys(publicTrack(t.data.tracks.t2)).sort(), ['album', 'artist', 'bpm', 'duration', 'genre', 'id', 'key', 'title']);
+    assert.deepEqual(Object.keys(publicTrack(t.data.tracks.t2)).sort(), ['album', 'artist', 'bpm', 'duration', 'energy', 'genre', 'id', 'key', 'title', 'year']);
     // a target that does not exist is refused before anything is relayed
     const nope = await s.call('broadcast_start', { target_id: 'other' });
     assert.equal(nope.body.result.isError, true); assert.match(nope.body.result.content[0].text, /No stream target/);
@@ -285,4 +291,24 @@ test('hosted mode: no separate listener; /api/mcp/rpc needs the login session AN
     assert.equal(ok.status, 200);
     assert.equal((await ok.json()).result.serverInfo.name, 'OpenDJ');
   } finally { app.shutdown(); await app.mcp.close(); app.server.closeAllConnections?.(); await new Promise((r) => app.server.close(r)); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('search_library filters by genre, BPM and year; list_genres counts the library', async () => {
+  const s = await setup({ port: 7912 });
+  try {
+    const t = s.app.library;
+    t.data.tracks.m1 = { id: 'm1', title: 'De ce', artist: 'Guta', genre: 'Manele', year: 2004, bpm: 98, duration: 200, sourceType: 'local', added: 1 };
+    t.data.tracks.m2 = { id: 'm2', title: 'Inima', artist: 'Salam', genre: 'Manele; Party', year: 2015, bpm: 104, duration: 210, sourceType: 'local', added: 2 };
+    t.data.tracks.p1 = { id: 'p1', title: 'Uptown Girl', artist: 'Billy Joel', genre: 'Pop', year: 1983, bpm: 128, duration: 197, sourceType: 'local', added: 3 };
+    await s.init();
+    const find = async (args) => (await s.call('search_library', args)).body.result.structuredContent;
+    assert.deepEqual((await find({ genre: 'manele' })).tracks.map((x) => x.id).sort(), ['m1', 'm2']);
+    assert.deepEqual((await find({ genre: 'manele', year_to: 2010 })).tracks.map((x) => x.id), ['m1'], 'old manele only');
+    assert.deepEqual((await find({ bpm_min: 120 })).tracks.map((x) => x.id), ['p1']);
+    assert.equal((await find({ genre: 'manele', bpm_max: 100 })).total, 1);
+    assert.equal((await find({ genre: 'manele', random: true, limit: 2 })).tracks.length, 2);
+    const g = (await s.call('list_genres', {})).body.result.structuredContent.genres;
+    assert.deepEqual(g[0], { genre: 'Manele', tracks: 2 }, 'most common first, multi-genre tags split');
+    assert.ok(g.some((x) => x.genre === 'Party') && g.some((x) => x.genre === 'Pop'));
+  } finally { await s.close(); }
 });

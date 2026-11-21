@@ -42,5 +42,10 @@
     "include": "",
     "exclude": ""
   },
-  "city": ""
+  "city": "",
+  "mcp": {
+    "url": "http://127.0.0.1:47800/mcp",
+    "token": ""
+  },
+  "musicMood": ""
 }
