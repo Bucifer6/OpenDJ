@@ -39,7 +39,8 @@ function writeWav(file, seconds) {
 writeWav(path.join(music, 'Update Artist - Long Tone.wav'), 30);
 
 // ---------------------------------------------------------------- fake GitHub API
-const NOTES = fs.readFileSync(path.join(root, 'docs', 'RELEASE_NOTES.md'), 'utf8');
+// the fixture adds its own 0.5 section: drop the unreleased one being written in the real notes
+const NOTES = fs.readFileSync(path.join(root, 'docs', 'RELEASE_NOTES.md'), 'utf8').replace(/### New in 0\.5\n[\s\S]*?(?=### New in 0\.4)/, '');
 const NEW_SECTION = `### New in 0.5
 **Update prompt**
 - OpenDJ tells you when a new version is out, with *what's new* and an **Update now** button.
