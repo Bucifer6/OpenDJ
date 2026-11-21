@@ -6,8 +6,13 @@
 //
 //   * --fx:    with --perf: heavy effects on every channel (reverb, flanger, phaser, trans, Space / Jet Color FX)
 //              and the audio thread's load / glitch counters where the browser exposes them
+//   * --latency: pointer-to-frame latency of the live controls, then the long tasks of a track load and of the
+//              background analyser while a deck plays
+//   * --analysis: only the last part: long tasks / dropped frames while a deck plays and the background analyser
+//              re-analyses --tracks=N tracks (default 4), --rounds=N times; every long task's duration is listed
+//   * --electron: run all of the above in the desktop app (Electron, Playwright _electron; use xvfb-run -a on Linux)
 //
-//   node scripts/perf/ui-bench.mjs [--shots] [--perf] [--fx] [--out=<dir>] [--themes=midnight,light,neon] [--secs=6]
+//   node scripts/perf/ui-bench.mjs [--shots] [--perf] [--fx] [--latency] [--analysis] [--electron] [--out=<dir>] [--themes=midnight,light,neon] [--secs=6]
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,15 +32,29 @@ fs.mkdirSync(OUT, { recursive: true });
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'opendj-bench-'));
 const lib = await makeDemoLibrary(path.join(os.tmpdir(), 'opendj-demo-library'));
-const app = await start({ port: 0, dataDir: path.join(tmp, 'data') });
-const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
-const context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
-const page = await context.newPage();
+const ELECTRON = argv.includes('--electron');
+let app, browser, context, page, electronApp;
+if (ELECTRON) {
+  // the desktop app starts its own server (launch-token guarded) on the throw-away data folder
+  const { _electron } = require('playwright');
+  const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
+  electronApp = await _electron.launch({ executablePath: require(path.join(root, 'node_modules/electron')), args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', root], env: { ...process.env, OPENDJ_DATA: path.join(tmp, 'data') } });
+  page = await electronApp.firstWindow();
+  page.on('crash', () => console.error('[electron] renderer crashed'));
+  electronApp.process().stderr.on('data', (d) => { if (process.env.VERBOSE) process.stderr.write(d); });
+  context = electronApp.context();
+  console.log('[electron]', await electronApp.evaluate(() => `Electron ${process.versions.electron}, Chrome ${process.versions.chrome}`));
+} else {
+  app = await start({ port: 0, dataDir: path.join(tmp, 'data') });
+  browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+  context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
+  page = await context.newPage();
+}
 page.on('pageerror', (e) => console.error('[page error]', String(e)));
 const ev = (fn, arg) => page.evaluate(fn, arg);
 const sleep = (ms) => page.waitForTimeout(ms);
 
-await page.goto(app.url);
+if (!ELECTRON) await page.goto(app.url);
 await page.waitForFunction(() => window.opendj?.ready, null, { timeout: 30000 });
 await ev(() => window.opendj.engine.resume());
 await page.locator('.overlay.start button').click({ timeout: 1000 }).catch(() => {});
@@ -49,8 +68,8 @@ async function loadDeck(i, title) {
 }
 const titles = ['Pressure Index', 'Copper Skyline', 'Static Bloom', 'Midnight Transit'];
 for (let i = 0; i < 4; i++) await loadDeck(i, titles[i]);
-// let the background analyser finish first (measured separately with --analysis)
-if (!argv.includes('--analysis')) await page.waitForFunction(() => !window.opendj.analyser.running, null, { timeout: 180000 }).catch(() => console.warn('analyser still running'));
+// let the background analyser finish its first pass (the analysis measurement below re-analyses on purpose)
+await page.waitForFunction(() => !window.opendj.analyser.running, null, { timeout: 180000 }).catch(() => console.warn('analyser still running'));
 async function playState(n, layout = 'classic') {
   await ev(async ([n, layout, fx]) => {
     const a = window.opendj, E = a.engine;
@@ -127,6 +146,18 @@ if (argv.includes('--perf')) {
   fs.writeFileSync(path.join(OUT, 'perf.json'), JSON.stringify(results, null, 2));
 }
 
+// long tasks + frames while `src` (an async function, as source) runs in the page
+const measure = (fn) => ev(async (src) => {
+  const longs = []; const po = new PerformanceObserver((l) => { for (const e of l.getEntries()) longs.push(e.duration); }); po.observe({ type: 'longtask' });
+  const frames = []; let last = performance.now(), run = true; const tick = (t) => { frames.push(t - last); last = t; if (run) requestAnimationFrame(tick); }; requestAnimationFrame(tick);
+  await (0, eval)(src)();
+  run = false; po.disconnect();
+  const f = frames.slice(1);
+  return { longTasks: longs.length, longest: Math.round(Math.max(0, ...longs)), over50ms: longs.filter((x) => x > 50).length, durations: longs.map(Math.round), droppedFrames: f.filter((x) => x > 25).length, frames: f.length, worstFrame: Math.round(Math.max(...f)) };
+}, fn);
+const TRACKS_N = Number(opt('tracks', 4)), ROUNDS = Number(opt('rounds', 1));
+const analysisRun = `async () => { const a = window.opendj; a.engine.decks[0].pause(); a.engine.decks[1].play(); let n = 0; const off = a.analyser.on('analysed', () => n++); const want = a.analyser.request([...a.library.tracks.values()].slice(0, ${TRACKS_N}), { force: true }); await new Promise((r) => setTimeout(r, 400)); for (let i = 0; i < 600 && (a.analyser.running || n < want); i++) await new Promise((r) => setTimeout(r, 100)); off(); window._analysed = n; }`;
+
 if (argv.includes('--latency')) {
   // pointer down -> next rendered frame (double rAF after the event's timestamp), for the controls you hit live
   await page.setViewportSize({ width: 1920, height: 1080 });
@@ -138,20 +169,17 @@ if (argv.includes('--latency')) {
   const res = { samples: lat.length, p50: +lat[Math.floor(lat.length / 2)].toFixed(1), p95: +lat[Math.floor(lat.length * 0.95)].toFixed(1), max: +lat.at(-1).toFixed(1) };
   console.log('[latency] pointerdown -> next frame (ms):', JSON.stringify(res));
   // long tasks while a track loads onto deck 1 and while the background analyser works, deck 2 playing
-  const measure = (fn) => ev(async (src) => {
-    const longs = []; const po = new PerformanceObserver((l) => { for (const e of l.getEntries()) longs.push(e.duration); }); po.observe({ type: 'longtask' });
-    const frames = []; let last = performance.now(), run = true; const tick = (t) => { frames.push(t - last); last = t; if (run) requestAnimationFrame(tick); }; requestAnimationFrame(tick);
-    await (0, eval)(src)();
-    run = false; po.disconnect();
-    const f = frames.slice(1);
-    return { longTasks: longs.length, longest: Math.round(Math.max(0, ...longs)), droppedFrames: f.filter((x) => x > 25).length, frames: f.length, worstFrame: Math.round(Math.max(...f)) };
-  }, fn);
   const load = await measure(`async () => { const a = window.opendj, E = a.engine; E.decks[1].play(); E.decks[0].pause(); const id = [...a.library.tracks.values()].find((t) => t.title === 'Glass Horizon').id; await a.loadTrack(0, id); await new Promise((r) => setTimeout(r, 500)); }`);
   console.log('[load] track load while a deck plays:', JSON.stringify(load));
-  const ana = await measure(`async () => { const a = window.opendj; a.engine.decks[1].play(); a.analyser.request([...a.library.tracks.values()].slice(0, 3), { force: true }); await new Promise((r) => setTimeout(r, 400)); for (let i = 0; i < 300 && a.analyser.running; i++) await new Promise((r) => setTimeout(r, 100)); }`);
-  console.log('[analysis] background analysis of 3 tracks while a deck plays:', JSON.stringify(ana));
+}
+if (argv.includes('--latency') || argv.includes('--analysis')) {
+  await playState(2, LAYOUTS[0]);
+  for (let k = 0; k < ROUNDS; k++) {
+    const ana = { analysed: 0, ...(await measure(analysisRun)) }; ana.analysed = await ev(() => window._analysed);
+    console.log(`[analysis] background analysis of ${TRACKS_N} tracks while a deck plays${ROUNDS > 1 ? ` (round ${k + 1})` : ''}:`, JSON.stringify(ana));
+  }
 }
 
-await browser.close();
-app.shutdown?.(); app.server.close();
+if (ELECTRON) await electronApp.close();
+else { await browser.close(); app.shutdown?.(); app.server.close(); }
 process.exit(0);

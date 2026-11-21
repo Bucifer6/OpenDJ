@@ -113,6 +113,38 @@ try {
   });
   check(JSON.stringify(same.bg) === JSON.stringify(same.deck), `background result equals deck analysis ${JSON.stringify(same.bg)}`);
 
+  // main thread stays free while a deck plays: the only long task the analyser may cause is the browser's decode
+  // hand-over (decodeAudioData resolving); the mix-down for the worker is sliced per frame. And it holds while a
+  // deck loads: no decode starts during a deck load.
+  const jank = await page.evaluate(async () => {
+    const app = window.opendj, E = app.engine, a = app.analyser;
+    E.decks[1].play();
+    const ends = [], decodesWhileLoading = [];
+    const orig = E.ctx.decodeAudioData.bind(E.ctx);
+    E.ctx.decodeAudioData = (ab) => {
+      const mine = /background-analysis/.test(new Error().stack || ''); // the analyser's decode, not the deck's
+      if (mine && E.decks.some((d) => d.loading)) decodesWhileLoading.push(performance.now());
+      return orig(ab).then((b) => { if (mine) ends.push(performance.now()); return b; });
+    };
+    const longs = []; const po = new PerformanceObserver((l) => { for (const e of l.getEntries()) longs.push([e.startTime, e.startTime + e.duration]); }); po.observe({ type: 'longtask' });
+    const audio = [...app.library.tracks.values()].filter((t) => /^Track \d+$/.test(t.title));
+    a.request(audio, { force: true });
+    // a deck load in the middle of it: the analyser pauses for it
+    await new Promise((r) => setTimeout(r, 30));
+    const t = audio.find((x) => x.title === 'Track 122');
+    const ls = performance.now();
+    const loading = app.loadTrack(0, t.id);
+    let pausedSeen = false; const watch = setInterval(() => { if (a.paused && E.decks[0].loading) pausedSeen = true; }, 20);
+    await loading; const le = performance.now() + 50;
+    for (let i = 0; i < 600 && a.running; i++) await new Promise((r) => setTimeout(r, 100));
+    clearInterval(watch); po.disconnect(); E.ctx.decodeAudioData = orig; E.decks[1].pause();
+    // long tasks during the deck load itself are the deck's, not the analyser's
+    const other = longs.filter(([s0, e0]) => !(e0 > ls && s0 < le) && !ends.some((d) => Math.abs(e0 - d) < 8));
+    return { longs: longs.length, other: other.map(([s0, e0]) => Math.round(e0 - s0)), decodes: ends.length, decodesWhileLoading: decodesWhileLoading.length, pausedSeen };
+  });
+  check(jank.decodes >= 2 && jank.decodesWhileLoading === 0, `background analysis holds while a deck loads (${jank.decodes} decodes, ${jank.decodesWhileLoading} during the deck load${jank.pausedSeen ? ', paused shown' : ''})`);
+  check(jank.other.length <= 1, `while a deck plays, no long main-thread task besides the decode hand-over (${jank.longs} long tasks, other: ${JSON.stringify(jank.other)})`);
+
   // corrupt file on a deck: title kept, toast names the file
   const corrupt = await page.evaluate(async () => {
     const app = window.opendj; const t = [...app.library.tracks.values()].find((x) => x.title === 'corrupt');

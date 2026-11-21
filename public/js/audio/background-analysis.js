@@ -10,6 +10,15 @@
 //
 // Low priority: one track at a time, an idle gap between tracks (longer while a deck plays), and it waits
 // while a deck is loading or the page is busy (main thread lagging). Works the same in hosted mode.
+//
+// Main-thread budget: decoding itself runs on the browser's decoder thread, but decodeAudioData hands the result
+// over in one native task (allocating the AudioBuffer: ~50 ms for a 4-minute track). That task is the only
+// unavoidable one — it can't move to the worker without giving up "same decoder as the deck" (AudioContext /
+// OfflineAudioContext don't exist in workers, and a WebCodecs decode yields different samples: native rate instead
+// of the context's resampled rate, different encoder-delay trimming), which would make results differ from a deck
+// load. Everything after it is split up: the decode result is not touched in the same task, and the mono mix-down
+// for the worker runs in slices of a few ms (`mixDown`), pausing while a deck loads. Before, the decode hand-over,
+// two full-length channel copies and the transfer ran as one 120–150 ms task while a deck played.
 import { Emitter } from '../util.js';
 import { api } from '../api.js';
 import { encodeWaveform, analysisPatch } from './analysis-core.js';
@@ -18,6 +27,7 @@ import { AnalysisQueue, needsAnalysis, isUndecodable } from './analysis-queue.js
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const GAP_IDLE = 150, GAP_PLAYING = 2500; // ms between tracks
 const LAG_BUSY = 60; // ms of timer lag that counts as "the page is busy"
+const SLICE_MS = 5; // main-thread budget per mix-down slice (one slice per frame)
 
 export class BackgroundAnalyser extends Emitter {
   constructor(app) {
@@ -27,6 +37,7 @@ export class BackgroundAnalyser extends Emitter {
     this.running = false; this.current = null; this.paused = false;
     this.userStopped = false; // cancelled by the user: don't restart by itself until the next scan / explicit request
     this._failed = new Set(); // failed this session (network etc.): not retried automatically
+    this._forced = new Set(); // "Analyse again": re-analysed even though the library (re-synced from the server) says analysed
     this._abort = null;
   }
 
@@ -49,7 +60,7 @@ export class BackgroundAnalyser extends Emitter {
     const ids = [];
     for (const t of tracks) {
       if (!t) continue;
-      if (force && t.analyzed && !t.bpmLocked && !t.gridLocked) { t.analyzed = false; }
+      if (force && t.analyzed && !t.bpmLocked && !t.gridLocked) { t.analyzed = false; this._forced.add(t.id); }
       if (needsAnalysis(t, { explicit: true })) { this._failed.delete(t.id); ids.push(t.id); }
     }
     this.queue.add(ids, { front: true });
@@ -59,7 +70,7 @@ export class BackgroundAnalyser extends Emitter {
 
   cancel() {
     this.userStopped = true;
-    this.queue.clear();
+    this.queue.clear(); this._forced.clear();
     this._abort?.abort();
     this.emit('progress', this.status());
   }
@@ -80,19 +91,23 @@ export class BackgroundAnalyser extends Emitter {
     else run();
   }
 
+  /** Still to analyse? (A forced track counts even after a library re-sync from the server marks it analysed.) */
+  _wanted(t) { return !!t && (needsAnalysis(t, { explicit: true }) || (this._forced.has(t.id) && needsAnalysis({ ...t, analyzed: false }, { explicit: true }))); }
+
   async _loop() {
     const lib = this.app.library;
     for (;;) {
-      const id = this.queue.next((x) => { const t = lib.track(x); return !t || !needsAnalysis(t, { explicit: true }); });
+      const id = this.queue.next((x) => { const ok = this._wanted(lib.track(x)); if (!ok) this._forced.delete(x); return !ok; });
       if (!id) return;
       await this._waitQuiet();
       if (this.userStopped) return;
       const t = lib.track(id);
-      if (!t || !needsAnalysis(t, { explicit: true })) continue;
+      if (!this._wanted(t)) { this._forced.delete(id); continue; }
       this.current = t;
       this.emit('progress', this.status());
       let ok = false;
       try { ok = await this.analyseTrack(t); } catch (e) { console.warn('analysis failed', t.title, e); }
+      this._forced.delete(id);
       this.queue.finished(ok);
       if (!ok) this._failed.add(id);
       this.current = null;
@@ -122,7 +137,16 @@ export class BackgroundAnalyser extends Emitter {
     return this._worker;
   }
 
-  analyseInWorker({ left, right }, sampleRate, signal) {
+  /** Resolves once no deck is loading (deck loads come first: they decode and analyse on the main thread too). */
+  async _holdWhileLoading(signal) {
+    while (this.engine.decks.some((d) => d.loading) && !signal?.aborted) {
+      if (!this.paused) { this.paused = true; this.emit('progress', this.status()); }
+      await sleep(200);
+    }
+    if (this.paused) { this.paused = false; this.emit('progress', this.status()); }
+  }
+
+  analyseInWorker(mono, sampleRate, signal) {
     const w = this.worker();
     return new Promise((resolve, reject) => {
       const id = ++this._wid;
@@ -131,8 +155,30 @@ export class BackgroundAnalyser extends Emitter {
       const cleanup = () => { w.removeEventListener('message', onMsg); signal?.removeEventListener('abort', onAbort); };
       w.addEventListener('message', onMsg);
       signal?.addEventListener('abort', onAbort, { once: true });
-      w.postMessage({ id, left, right, sampleRate }, right ? [left.buffer, right.buffer] : [left.buffer]);
+      w.postMessage({ id, mono, sampleRate }, [mono.buffer]);
     });
+  }
+
+  /**
+   * Mono mix of a decoded AudioBuffer for the analysis worker, sample for sample what Deck.load computes
+   * ((L + R) * 0.5 in a Float32Array), one slice of ≤ SLICE_MS per frame so no main-thread task gets long and the
+   * waveforms keep their frame rate; waits while a deck loads. Reads the AudioBuffer's channel views directly (no full-length copies). null when aborted.
+   */
+  async mixDown(buf, signal) {
+    const c0 = buf.getChannelData(0), c1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : null;
+    const n = c0.length, mono = new Float32Array(n), STEP = 65536;
+    let i = 0;
+    while (i < n) {
+      const t0 = performance.now();
+      do {
+        const end = Math.min(n, i + STEP);
+        if (c1) for (let k = i; k < end; k++) mono[k] = (c0[k] + c1[k]) * 0.5; else mono.set(c0.subarray(i, end), i);
+        i = end;
+      } while (i < n && performance.now() - t0 < SLICE_MS);
+      if (i < n) { await yieldFrame(); await this._holdWhileLoading(signal); }
+      if (signal?.aborted) return null;
+    }
+    return mono;
   }
 
   /** Analyse one track like Deck.load does and save the result. Resolves true on success. */
@@ -147,16 +193,20 @@ export class BackgroundAnalyser extends Emitter {
       }
       const ab = await res.arrayBuffer();
       if (!ab.byteLength) throw Object.assign(new Error('Empty file'), { undecodable: true });
+      await this._holdWhileLoading(ac.signal); // the decode hand-over below is the one long task: not while a deck loads
+      if (ac.signal.aborted) return false;
       let buf;
       try { buf = await this.engine.ctx.decodeAudioData(ab); } catch (e) { throw Object.assign(e instanceof Error ? e : new Error(String(e)), { undecodable: true }); }
+      await yieldTask(); // don't add work to the decode hand-over task
       if (ac.signal.aborted) return false;
-      // copies of the channels (a fast memcpy); the worker mixes them to mono exactly like Deck.load does
-      const left = new Float32Array(buf.getChannelData(0)), right = buf.numberOfChannels > 1 ? new Float32Array(buf.getChannelData(1)) : null;
-      const duration = buf.duration, sampleRate = buf.sampleRate; buf = null;
-      const r = await this.analyseInWorker({ left, right }, sampleRate, ac.signal);
+      const duration = buf.duration, sampleRate = buf.sampleRate;
+      const mono = await this.mixDown(buf, ac.signal);
+      buf = null;
+      if (!mono) return false;
+      const r = await this.analyseInWorker(mono, sampleRate, ac.signal);
       // the track may have been analysed on a deck meanwhile (or edited): use its latest state
       const cur = this.app.library.track(track.id) || track;
-      if (cur.analyzed) return true;
+      if (cur.analyzed && !this._forced.has(track.id)) return true;
       const patch = analysisPatch(cur, r.result, { duration, autoCues: this.app.settings.autoCues });
       await api.saveWaveform(track.id, r.wave);
       const saved = await api.updateTrack(track.id, patch);
@@ -173,6 +223,17 @@ export class BackgroundAnalyser extends Emitter {
       throw e;
     } finally { if (this._abort === ac) this._abort = null; }
   }
+}
+
+/** Let other tasks (frames, input) run: scheduler.yield() where available, else a 0 ms timer. */
+function yieldTask() {
+  return globalThis.scheduler?.yield ? globalThis.scheduler.yield() : new Promise((r) => setTimeout(r, 0));
+}
+
+/** Wait for the next frame to be drawn, then a task later (hidden page: no frames, just a 0 ms timer). */
+function yieldFrame() {
+  if (document.hidden || typeof requestAnimationFrame !== 'function') return new Promise((r) => setTimeout(r, 0));
+  return new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 }
 
 /** How late a 0 ms timer fires (ms): a cheap "is the page busy?" probe (hidden tabs: timers are throttled, so 0). */
