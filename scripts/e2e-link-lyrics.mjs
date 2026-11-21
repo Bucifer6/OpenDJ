@@ -120,21 +120,34 @@ try {
 
   // ---- playback: the line follows the heard position
   await page.evaluate(() => { const d = window.opendj.engine.decks[0]; d.seek(0.5); d.play(); });
-  const seen = await page.evaluate((sel) => new Promise((resolve) => {
+  // The line display refreshes on its own 50 ms timer, so a sample taken just after a line change can still show the
+  // previous line — and under CPU contention (the full e2e run next to other work) that refresh can slip by a few
+  // ticks, which made this check flaky (3/104 vs an allowance of 2). A sample now counts as wrong only when the
+  // display matches neither the line heard now nor the line heard LAG ms ago: display lag up to LAG is tolerated,
+  // a display that is ahead of the audio, on a wrong line or late by more than LAG still fails.
+  const LAG = 0.15;
+  const seen = await page.evaluate(async ({ sel, LAG }) => {
+    const { lyricStateAt } = await import('/js/lyrics/lrc.js');
+    return new Promise((resolve) => {
     const out = []; const t0 = performance.now();
     const iv = setInterval(() => {
       const d = window.opendj.engine.decks[0], m = window.opendj.lyrics;
       const txt = document.querySelector(`${sel} .lyr-cur`).textContent;
       const st = m.stateFor(d);
-      out.push({ txt, expect: st?.line && !st.gap ? st.line.text : null, sung: document.querySelectorAll(`${sel} .lyr-cur .sung`).length, next: document.querySelector(`${sel} .lyr-next`).textContent, pos: d.position });
+      const lagged = st ? lyricStateAt(m.get(d.track.id), st.t - LAG * (d.rate || 1)) : null;
+      out.push({ txt, expect: st?.line && !st.gap ? st.line.text : null, lagged: lagged?.line && !lagged.gap ? lagged.line.text : null, sung: document.querySelectorAll(`${sel} .lyr-cur .sung`).length, next: document.querySelector(`${sel} .lyr-next`).textContent, pos: d.position });
       if (performance.now() - t0 > 6200) { clearInterval(iv); resolve(out); }
     }, 60);
-  }), sel);
+    });
+  }, { sel, LAG });
   if (process.env.DEBUG) console.log(seen.filter((_, i) => i % 8 === 0));
   const order = [...new Set(seen.map((s) => s.txt).filter((t) => /^(Line \d+|Word timed line)$/.test(t)))];
   check(order.slice(0, 3).join(' | ') === 'Line 1 | Word timed line | Line 3', `lines appear in order while playing (${order.join(' | ')})`);
-  const mismatch = seen.filter((s) => s.expect && s.txt !== s.expect).length;
-  check(mismatch <= 2, `displayed line matches the heard position (${mismatch}/${seen.length} samples off, at line changes)`);
+  const strict = seen.filter((s) => s.expect && s.txt !== s.expect).length;
+  const off = seen.filter((s) => s.expect && s.txt !== s.expect && s.txt !== (s.lagged ?? ''));
+  const mismatch = off.length;
+  if (off.length) console.log('# off:', JSON.stringify(off.map(({ txt, expect, lagged, pos }) => ({ txt, expect, lagged, pos }))));
+  check(mismatch <= 1, `displayed line matches the heard position (${mismatch}/${seen.length} samples off by more than ${LAG * 1000} ms of display lag; ${strict} within it, at line changes)`);
   check(seen.some((s) => s.txt === 'Word timed line' && s.sung >= 1 && s.sung < 3), 'enhanced LRC words highlight one by one');
   check(seen.some((s) => s.txt === 'Line 1' && s.next === 'Word timed line'), 'next line shown after the current one');
 

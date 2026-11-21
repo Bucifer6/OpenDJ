@@ -50,3 +50,140 @@
   .toast { max-width: none; }
   .modal { max-width: calc(100vw - 16px); }
 }
+
+/* ---------- mobile app / on-device mode (html.odj-local, set by js/platform.js) ----------
+   Features that need the OpenDJ server, UDP, USB or Web MIDI are hidden (Settings → Mobile explains why). */
+.odj-local .topbar .dvs-btn, .odj-local .topbar .light-btn, .odj-local .topbar .video-btn, .odj-local .topbar .midi-dot,
+.odj-local .topbar .live-btn, .odj-local .topbar .signout-btn { display: none !important; }
+.odj-native .topbar .btn[title="Full screen"] { display: none !important; } /* the app is full screen already */
+.odj-local .deck-stems, .odj-local .stem-knobs { display: none !important; } /* AI stems: desktop app */
+.unavail-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.unavail-list b { color: var(--text); }
+
+/* ---------- phones (portrait and landscape) at real size: touch targets, safe areas, no rubber-banding ----------
+   themes.js no longer shrinks compact screens to the desktop layout (html.compact), so controls get finger-sized
+   here. The page itself never scrolls or bounces: #app is the scroll container (iOS: scrollEnabled=false in
+   capacitor.config.json keeps the WebView still). */
+:root { --sat: var(--safe-area-inset-top, env(safe-area-inset-top, 0px)); --sab: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --sal: var(--safe-area-inset-left, env(safe-area-inset-left, 0px)); --sar: var(--safe-area-inset-right, env(safe-area-inset-right, 0px)); }
+html.compact, html.compact body { overscroll-behavior: none; }
+html.touch button, html.touch .btn, html.touch .pad { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+html.touch body { -webkit-touch-callout: none; -webkit-text-size-adjust: 100%; }
+html.touch .lr { height: 40px; align-items: center; }
+html.touch .lr .art { width: 28px; height: 28px; margin: 6px 1px; }
+
+@media (max-width: 699px), (max-height: 560px) {
+  html, body { height: 100%; overflow: hidden; }
+  #app { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+    padding: var(--sat) var(--sar) var(--sab) var(--sal); box-sizing: border-box; --wave-h: 46px; }
+  .topbar { flex: none; gap: 6px; flex-wrap: wrap; }
+  .topbar .btn { min-height: 44px; min-width: 44px; }
+  .topbar .logo { margin-right: auto; }
+  .topbar .shift-btn, .topbar .seg, .topbar .cpu, .topbar .clock { display: none; }
+  .waves { flex: none; }
+  .deck-tabs { display: flex; }
+  .deck-tab { min-height: 44px; font-size: 12px; }
+  .deck-area { display: flex; flex-direction: column; overflow: visible; padding: 6px; flex: none; }
+  .deck-area .deck, .deck-area .mixer { flex: none; overflow: visible; }
+  .deck-header { grid-template-columns: 26px minmax(0, 1fr) auto; row-gap: 2px; }
+  .deck-header .deck-cover { display: none; }
+  .deck-header .deck-times { grid-column: 2 / 4; grid-row: 2; display: flex; gap: 10px; justify-content: flex-start; }
+  .deck-title { font-size: 15px; }
+  /* deck: jog + CUE / PLAY + tempo fader on top, all buttons full width below */
+  .deck-body { display: grid; grid-template-columns: minmax(0, 1fr) 58px; grid-template-areas: 'left tempo' 'mid mid'; gap: 8px; }
+  .deck-left { grid-area: left; flex-direction: row; align-items: center; justify-content: flex-start; gap: 12px; }
+  .deck-left .jog { width: min(150px, 42vw); flex: none; }
+  .deck-left .transport { grid-template-columns: 1fr; width: auto; flex: 1; justify-items: center; gap: 10px; }
+  .deck-left .transport .btn.big { width: 66px; height: 66px; max-width: none; font-size: 15px; }
+  .deck-tempo { grid-area: tempo; min-height: 170px; }
+  .deck-tempo .btn, .deck-tempo .sel { min-height: 36px; }
+  .deck-mid { grid-area: mid; overflow: visible; gap: 6px; }
+  .deck-mid .btn, .deck-toggles .btn { min-height: 44px; font-size: 12px; }
+  .deck-toggles, .loop-row { flex-wrap: nowrap; }
+  .deck-toggles .btn, .loop-row .btn { flex: 1 1 0; }
+  .pad-modes { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .pad-mode { min-height: 40px; font-size: 10px; }
+  .pads { gap: 6px; }
+  .pad { height: 54px; }
+  .fx-unit { flex-wrap: wrap; }
+  .xfader-row { min-height: 48px; }
+  .xfader-row .sel { min-height: 40px; }
+  .strip .btn { min-height: 40px; }
+  .sampler-bar { flex: none; min-height: 48px; }
+  .sampler-bar .spad, .sampler-bar .btn { min-height: 44px; }
+  .resize-handle { display: none; }
+  .library { flex: none; height: calc(88vh - var(--sat) - var(--sab)); grid-template-columns: 1fr; grid-template-rows: minmax(0, 150px) minmax(0, 1fr); }
+  .lib-tree { border-right: 0; border-bottom: 1px solid var(--line); }
+  .tree-item { min-height: 36px; }
+  .lib-tools .btn { min-height: 44px; }
+  .lib-search { min-height: 40px; font-size: 16px; } /* 16 px: iOS does not zoom into the field */
+  .modal { max-width: calc(100vw - 16px); max-height: calc(100vh - var(--sat) - var(--sab) - 16px); }
+  .modal .btn { min-height: 44px; }
+  .modal .tabs { flex-wrap: wrap; row-gap: 4px; }
+  .modal .tab { min-height: 40px; }
+  .ctx-item { min-height: 40px; display: flex; align-items: center; }
+  .toasts { left: 8px; right: 8px; bottom: calc(8px + var(--sab)); }
+  .toast { max-width: none; }
+}
+
+/* phones in landscape: both decks side by side around a compact mixer (no jog wheels, no stacked waveforms) */
+@media (max-height: 560px) and (orientation: landscape) {
+  .waves, .deck-tabs { display: none !important; }
+  .deck-area { display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, 230px) minmax(0, 1fr); grid-template-rows: auto; align-items: start; }
+  .deck-col { display: contents; }
+  .deck-area .deck.m-hide { display: flex !important; }
+  .deck-area .deck[data-deck="0"] { grid-column: 1; grid-row: 1; }
+  .deck-area .mixer { grid-column: 2; grid-row: 1; }
+  .deck-area .deck[data-deck="1"] { grid-column: 3; grid-row: 1; }
+  .deck-area .deck[data-deck="2"], .deck-area .deck[data-deck="3"] { display: none !important; }
+  .deck-left .jog { display: none; }
+  .deck-left .transport { grid-template-columns: 1fr 1fr; }
+  .deck-left .transport .btn.big { width: 56px; height: 56px; }
+  .deck-tempo { min-height: 120px; }
+  .deck-header .deck-bpmbox { min-width: 0; }
+  .mixer .strip { min-width: 0; }
+  .library { height: calc(100vh - var(--sat) - var(--sab)); }
+  .xfader-row .sel, .xfader-row .xf-l { display: none; } /* room for the crossfader */
+}
+
+/* tablets (and touch laptops) on the desktop layout: finger-sized deck controls */
+html.touch:not(.compact) body .deck .pads .pad { height: 44px; }
+html.touch:not(.compact) .sync-row .btn, html.touch:not(.compact) .topbar .btn.rec, html.touch:not(.compact) .lib-tools .import-btn { min-height: 44px; }
+html.touch:not(.compact) .transport .btn.big { height: 52px; max-width: 64px; }
+html.touch:not(.compact) .topbar { min-height: 50px; }
+
+/* ---------- touch tablets in landscape (html.tablet: coarse pointer, 900-1366 px wide; iPad 1080x810) ----------
+   The desktop layout at 100 % (never shrunk), with room for the decks (shorter waveforms, smaller library), a
+   usable channel fader and 36-44 px tap targets (QA M4: 37 px fader, 16-21 px buttons, clipped labels). */
+html.tablet { --wave-h: 44px; --browser-h: clamp(140px, 19vh, 220px); }
+html.tablet body:not(.four-decks) .deck .pads .pad { height: 44px; min-height: 44px; }
+html.tablet body:not(.four-decks) .deck-mid { gap: 3px; }
+html.tablet .deck-toggles .btn.sm { min-height: 36px; font-size: 10px; letter-spacing: 0; padding-left: 1px; padding-right: 1px; text-overflow: clip; }
+html.tablet .panel-tab { min-height: 34px; font-size: 10.5px; }
+html.tablet .pad-mode { min-height: 32px; font-size: 9px; letter-spacing: 0; }
+html.tablet .deck-mid .btn.sm, html.tablet .loop-row .btn, html.tablet .key-row .btn { min-height: 36px; }
+html.tablet .deck-tempo .btn { min-height: 36px; }
+html.tablet .deck-tempo .bend { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; width: 100%; }
+html.tablet .deck-tempo .bend .btn { min-width: 0; padding: 0; }
+html.tablet .sync-row .btn { min-height: 38px; }
+html.tablet .mixer .btn-pfl { min-height: 36px; }
+html.tablet .mixer .xf-assign { width: 100%; }
+html.tablet .mixer .xf-assign .btn { flex: 1 1 0; min-width: 0; min-height: 36px; padding: 0; font-size: 11px; }
+html.tablet .mixer .mic-box .btn { min-height: 36px; min-width: 44px; }
+html.tablet .strip .fader-v .fader-track { min-height: 110px; }
+html.tablet .crossfader .fader-track { height: 44px; }
+html.tablet .fx-unit .btn, html.tablet .fx-unit .sel { min-height: 36px; }
+/* narrow decks: a smaller platter column, toggles in 3 columns, pad modes in two rows of 4 (finger-wide) */
+html.tablet body:not(.four-decks) .deck-body { grid-template-columns: minmax(84px, 0.4fr) minmax(0, 1.8fr) 54px; }
+html.tablet .deck-toggles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+html.tablet .pad-modes { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* touch screens: finger-sized crossfader assign / mic buttons; on narrow mixers (tablet portrait, phones) the
+   crossfader gets the whole row and the two selects move below it (QA m8: 16x40 A/T/B, 35x18 MIC/TALK, 85 px fader) */
+html.touch .mixer .xf-assign .btn { min-height: 36px; min-width: 0; flex: 1 1 0; padding: 0; font-size: 11px; }
+html.touch .mixer .xf-assign { width: 100%; }
+html.touch .mixer .mic-box .btn { min-height: 36px; min-width: 44px; }
+html.touch.compact .xfader-row { flex-wrap: wrap; row-gap: 6px; }
+html.touch.compact .xfader-row .crossfader { order: -1; flex: 1 0 100%; }
+html.touch.compact .xfader-row .xf-l { display: none; }
+html.touch.compact .xfader-row .sel { flex: 1 1 0; min-width: 0; }

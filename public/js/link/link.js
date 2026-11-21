@@ -5,6 +5,7 @@
 //           (hard seek for big errors, tiny pitch bend for small ones), using the audio actually heard
 //           (AudioContext output timestamp + outputLatency + a user offset) against Link's host-time beat clock.
 // Server: server/link (UDP discovery + measurement); state arrives on /api/link/stream at ~20 Hz.
+import { icon } from '../ui/icons.js';
 import { el, uiZoom } from '../util.js';
 import {
   browserMicros, estimateOffset, audioLagSec, heardPosition, deckBeats, linkBeatAt, followPlan, phaseError, beatScale, tempoRatio,
@@ -184,10 +185,10 @@ export class LinkClient {
     if (!topbar || this.btn) return;
     this.peersEl = el('span', { class: 'link-peers' }, '0');
     this.beatEl = el('span', { class: 'link-beats' }, ...[0, 1, 2, 3].map(() => el('i')));
-    this.btn = el('button', { class: 'btn sm link-btn', title: 'Ableton Link: tempo & beat sync with other apps on the network (right-click for options)' }, 'LINK ', this.peersEl);
+    this.btn = el('button', { class: 'btn sm link-btn', title: 'Ableton Link: tempo & beat sync with other apps on the network (right-click for options)' }, icon('link'), el('span', { class: 'lbl' }, 'LINK'), this.peersEl);
     this.btn.addEventListener('click', () => this.toggle());
     this.btn.addEventListener('contextmenu', (e) => { e.preventDefault(); this.togglePopover(); });
-    const more = el('button', { class: 'btn sm link-more', title: 'Link options', 'aria-label': 'Link options', onclick: () => this.togglePopover() }, '▾');
+    const more = el('button', { class: 'btn sm link-more', title: 'Link options', 'aria-label': 'Link options', onclick: () => this.togglePopover() }, icon('chevron-down'));
     this.wrap = el('div', { class: 'link-wrap' }, this.btn, this.beatEl, more);
     const anchor = topbar.querySelector('.midi-dot') || topbar.querySelector('.tb-spacer')?.nextSibling || null;
     topbar.insertBefore(this.wrap, anchor);

@@ -5,8 +5,12 @@ import { stemsMenuItems } from '../stems/stems-ui.js';
 import { api } from '../api.js';
 import { toCamelot, camelotCompatible } from '../audio/analysis-core.js';
 import { LibraryDialogs, TRACK_COLORS, colorName, flipSubmenus } from './library-dialogs.js';
+import { icon as uiIcon, iconLabel, glyphIcon, iconHtml } from './icons.js';
+import { platform, unavailable } from '../platform.js';
 
-const ROW_H = 26;
+// rows are taller on touch screens (phones, tablets) so a finger can pick one
+const COARSE = !!globalThis.matchMedia?.('(pointer: coarse)').matches;
+let ROW_H = COARSE ? 40 : 26; // 'art' rows (Settings / library toolbar) are 44 px: see setRowMode()
 const COLS = [
   { id: '#', label: '#', w: 34, ordered: true }, // position in a playlist / set / history view (only shown there)
   { id: 'art', label: '', w: 30, sort: null },
@@ -34,6 +38,7 @@ export class LibraryUI {
     this.view = { kind: 'all' }; this.sort = { col: 'addedAt', dir: -1 }; this.query = '';
     this.rows = []; this.selected = new Set(); this.cursor = -1; this.downloads = { queued: [], active: [], done: [] };
     this.sessions = []; this.sessionRows = []; this.dupGroups = []; this.dupIndex = new Map(); this.showAllSessions = false;
+    this.remoteLists = new Map(); // source id -> { lists, error, loading } (live media-server playlists)
     this.dlg = new LibraryDialogs(app, this);
     this.build();
   }
@@ -45,6 +50,42 @@ export class LibraryUI {
     this.playlists = playlists; this.folders = folders; this.sources = sources; this.sessions = sessions;
     await this.loadViewData();
     this.renderTree(); this.applyView();
+    for (const src of sources) if (!this.remoteLists.has(src.id)) this.loadRemoteLists(src.id);
+  }
+  /** Fetch a media server's playlists (live) for the sidebar. */
+  async loadRemoteLists(sourceId) {
+    const prev = this.remoteLists.get(sourceId);
+    this.remoteLists.set(sourceId, { ...(prev || { lists: [] }), loading: true, error: null });
+    try { this.remoteLists.set(sourceId, { lists: await api.sourcePlaylists(sourceId), loading: false, error: null }); }
+    catch (e) { this.remoteLists.set(sourceId, { lists: prev?.lists || [], loading: false, error: e.message }); }
+    this.renderTree();
+  }
+  /** Open a media-server playlist: its tracks become remote library tracks and the playlist is mirrored. Returns the tracks. */
+  async openRemotePlaylist(src, rp, { show = true } = {}) {
+    this.setJobStatus(`Loading "${rp.name}" from ${src.name || src.type}…`);
+    let r;
+    try { r = await api.sourcePlaylist(src.id, rp.remoteId, rp.name); }
+    catch (e) { this.setJobStatus(''); this.app.toast(`Could not open "${rp.name}": ${e.message}`); throw e; }
+    this.setJobStatus('');
+    rp.playlistId = r.playlist.id;
+    await this.refresh();
+    if (show) await this.setView({ kind: 'playlist', id: r.playlist.id }, rp.name);
+    return r.tracks.map((t) => this.tracks.get(t.id) || t);
+  }
+  remotePlaylistMenu(src, rp, e) {
+    const r = this.tree.getBoundingClientRect();
+    const x = e?.clientX ?? r.right - 20, y = e?.clientY ?? r.top + 100;
+    const withTracks = (fn) => async () => { let t; try { t = await this.openRemotePlaylist(src, rp, { show: false }); } catch { return; } if (!t.length) { this.app.toast(`"${rp.name}" is empty`); return; } fn(t); };
+    this.app.dialogs.menu(x, y, [
+      { label: 'Open', action: () => this.openRemotePlaylist(src, rp).catch(() => {}) },
+      { label: 'Automix this playlist', action: withTracks((t) => this.app.dialogs.automixQueue(t, { mode: 'order', title: rp.name })) },
+      { label: 'Shuffle & mix', action: withTracks((t) => this.app.dialogs.automixQueue(t, { mode: 'shuffle', title: rp.name })) },
+      { label: 'Smart mix', action: withTracks((t) => this.app.dialogs.automixQueue(t, { mode: 'smart', title: rp.name })) },
+      { label: 'Add to automix queue', action: withTracks((t) => this.app.queueAdd(t)) },
+      '-',
+      { label: 'Import as local playlist', action: withTracks(async (t) => { await api.createPlaylist(rp.name, t.map((x) => x.id), src.name || src.serverName || 'Imported'); await this.refresh(); this.app.toast(`Imported "${rp.name}" (${t.length} tracks, streamed from ${src.name || src.type} until downloaded)`); }) },
+      { label: 'Download all for offline use', action: withTracks((t) => { const ids = t.filter((x) => x.sourceType === 'remote' && !x.localPath).map((x) => x.id); if (ids.length) this.download(ids); else this.app.toast('All tracks are already downloaded'); }) },
+    ]);
   }
   /** Fetch server-side data needed by the current view (history session entries, duplicate groups). */
   async loadViewData() {
@@ -68,7 +109,8 @@ export class LibraryUI {
   }
   async refreshDrives() { try { this.drives = await api.drives(); } catch { this.drives = []; } this.renderTree(); }
   track(id) { return this.tracks.get(id); }
-  updateTrack(t) { if (t?.id) { this.tracks.set(t.id, { ...this.tracks.get(t.id), ...t }); this.renderRows(true); } }
+  // background analysis updates tracks one after another, also during playback: coalesce the row redraws to one per frame
+  updateTrack(t) { if (t?.id) { this.tracks.set(t.id, { ...this.tracks.get(t.id), ...t }); this._rowsRaf ||= requestAnimationFrame(() => { this._rowsRaf = 0; this.renderRows(true); }); } }
 
   viewTracks() {
     const all = [...this.tracks.values()]; const v = this.view;
@@ -101,6 +143,10 @@ export class LibraryUI {
     // a whole-number upper bound includes its decimals: bpm:120-128 matches 128.5 like bpm:128 does
     const upper = (v) => (v.includes('.') ? +v : +v + 0.999);
     q = q.replace(/bpm:(\d+(?:\.\d+)?)(?:-(\d+(?:\.\d+)?))?/g, (_, a, b) => { const lo = +a, hi = upper(b ?? a); tests.push((t) => t.bpm >= lo && t.bpm <= hi); return ''; });
+    // chips (ui/lib-chips.js): bpm:near = within 6 % of the master deck (or half / double time), key:compat = harmonic match
+    const m = this.app.engine.masterDeck?.(), mBpm = m?.effectiveBpm, mCam = toCamelot(m?.track?.key);
+    q = q.replace(/bpm:near/g, () => { tests.push((t) => !mBpm || (t.bpm > 0 && [1, 2, 0.5].some((f) => Math.abs(t.bpm * f / mBpm - 1) < 0.06))); return ''; });
+    q = q.replace(/key:compat/g, () => { tests.push((t) => !mCam || camelotCompatible(mCam, toCamelot(t.key))); return ''; });
     q = q.replace(/key:(\S*)/g, (_, k) => { const c = toCamelot(k); tests.push(c ? (t) => toCamelot(t.key) === c : () => false); return ''; }); // unknown key: no match
     q = q.replace(/genre:(\S+)/g, (_, g) => { tests.push((t) => (t.genre || '').toLowerCase().includes(g)); return ''; });
     q = q.replace(/tag:(\S+)/g, (_, g) => { tests.push((t) => (t.tags || []).some((x) => x.toLowerCase().includes(g))); return ''; });
@@ -110,6 +156,14 @@ export class LibraryUI {
       const hay = `${t.title} ${t.artist} ${t.album} ${t.genre} ${t.key || ''} ${toCamelot(t.key) || ''} ${t.comment || ''} ${(t.tags || []).join(' ')} ${colorName(t.color)}`.toLowerCase();
       return words.every((w) => hay.includes(w));
     });
+  }
+
+  /** Row style: 'compact' (26 px, 40 px on touch screens) or 'art' (44 px with larger artwork). */
+  setRowMode(mode) {
+    ROW_H = mode === 'art' ? 44 : COARSE ? 40 : 26;
+    this.root?.classList.toggle('rows-art', mode === 'art');
+    this.root?.style.setProperty('--row-h', `${ROW_H}px`);
+    this.renderRows(true);
   }
 
   get showOrder() { return ORDERED_VIEWS.has(this.view.kind); }
@@ -143,7 +197,16 @@ export class LibraryUI {
     const an = this.app.analyser?.status?.();
     const needsAnalysis = /bpm:|key:/.test(this.query) || ['matching'].includes(this.view.kind)
       || (this.view.kind === 'playlist' && this.playlists.find((p) => p.id === this.view.id)?.smart);
-    if (!this.tracks.size && this.view.kind === 'all' && !this.query.trim()) {
+    if (!this.tracks.size && this.view.kind === 'all' && !this.query.trim() && platform.local) {
+      e.replaceChildren(
+        el('h3', {}, 'Your library is empty'),
+        el('p', {}, 'OpenDJ keeps its own copy of the music you import, so it works offline and needs no computer or server.'),
+        el('ul', {},
+          el('li', {}, el('button', { class: 'btn sm', onclick: () => this.app.upload?.pick?.() }, '＋ Import music'), platform.native && platform.os === 'ios' ? ' from the Files app (iCloud Drive, On My iPhone, USB drives, cloud storage)' : ' from your files (Downloads, Music, a USB stick or a cloud drive)'),
+          el('li', {}, el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addSource() }, '+ Media server'), ' stream from Plex, Jellyfin, Emby, Subsonic / Navidrome and download for offline use'),
+          el('li', {}, 'bring cues and playlists from rekordbox: ', el('button', { class: 'btn sm', onclick: (ev) => { const r = ev.currentTarget.getBoundingClientRect(); this.dlg.libraryMenu(r.left, r.bottom + 4); } }, '⋯ Library → Import'), ' (after importing the music)')),
+        el('p', { class: 'hint' }, 'MP3, AAC / M4A, WAV, AIFF and FLAC play everywhere; Ogg / Opus where the phone supports it. New tracks are analysed in the background (BPM, key, waveform, cues).'));
+    } else if (!this.tracks.size && this.view.kind === 'all' && !this.query.trim()) {
       const hosted = !!this.app.hosted;
       e.replaceChildren(
         el('h3', {}, 'Your library is empty'),
@@ -189,22 +252,24 @@ export class LibraryUI {
   // ---------------- DOM ----------------
   build() {
     this.tree = el('nav', { class: 'lib-tree' });
-    this.search = el('input', { class: 'lib-search', type: 'search', placeholder: 'Search…  (try bpm:120-128  key:8A  genre:house)' });
+    this.search = el('input', { class: 'lib-search', type: 'search', placeholder: 'Search…  (try bpm:120-128  key:8A  genre:house)', title: 'Search title, artist, album, genre, tags; filters: bpm:120-128  key:8A  genre:house' });
+    // a narrow search box gets the short placeholder instead of a cut-off hint ("Search… (try l")
+    new ResizeObserver((es) => { const w = es.at(-1).contentRect.width; this.search.placeholder = w < 330 ? 'Search…' : 'Search…  (try bpm:120-128  key:8A  genre:house)'; }).observe(this.search);
     let tmr; this.search.addEventListener('input', () => { clearTimeout(tmr); tmr = setTimeout(() => { this.query = this.search.value; this.applyView(); }, 120); });
     this.countEl = el('span', { class: 'lib-count' });
     this.viewTitle = el('span', { class: 'lib-view-title' }, 'Collection');
     this.statusEl = el('span', { class: 'lib-status' });
     this.analysisText = el('span', {});
     this.analysisEl = el('span', { class: 'lib-analysis', hidden: true }, this.analysisText,
-      el('button', { class: 'btn xs', title: 'Stop analysing (Analyse all in ⋯ Library starts it again)', onclick: () => this.app.analyser?.cancel() }, '✕'));
+      el('button', { class: 'btn xs', title: 'Stop analysing (Analyse all in ⋯ Library starts it again)', onclick: () => this.app.analyser?.cancel() }, uiIcon('x')));
     this.viewActions = el('span', { class: 'lib-view-actions' });
     const tools = el('div', { class: 'lib-tools' },
       this.viewTitle, this.countEl, this.viewActions, this.search,
-      el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addFolder(), title: 'Add a folder, USB drive or NAS share' }, '+ Folder'),
+      platform.local ? null : el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addFolder(), title: 'Add a folder, USB drive or NAS share' }, iconLabel('folder-plus', 'Folder')),
       uploadButton(this.app),
-      el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addSource(), title: 'Connect Plex, Jellyfin, Emby, Subsonic/Navidrome or MediaMax' }, '+ Media server'),
-      el('button', { class: 'btn sm', onclick: () => this.app.dialogs.automixQueue(this.rows), title: 'Auto-mix the tracks in this view' }, '▶ Automix view'),
-      el('button', { class: 'btn sm lib-menu-btn', title: 'Smart playlists, import from rekordbox / Traktor / Serato / VirtualDJ, missing files, duplicates, backup', onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); this.dlg.libraryMenu(r.left, r.bottom + 4); } }, '⋯ Library'),
+      el('button', { class: 'btn sm', onclick: () => this.app.dialogs.addSource(), title: 'Connect Plex, Jellyfin, Emby, Subsonic/Navidrome or MediaMax' }, iconLabel('server', 'Media server')),
+      el('button', { class: 'btn sm', onclick: () => this.app.dialogs.automixQueue(this.rows), title: 'Auto-mix the tracks in this view' }, iconLabel('automix', 'Automix view')),
+      el('button', { class: 'btn sm lib-menu-btn', title: 'Smart playlists, import from rekordbox / Traktor / Serato / VirtualDJ, missing files, duplicates, backup', onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); this.dlg.libraryMenu(r.left, r.bottom + 4); } }, iconLabel('more', 'Library')),
       this.statusEl, this.analysisEl,
     );
     this.header = el('div', { class: 'lib-header' });
@@ -224,13 +289,20 @@ export class LibraryUI {
   gridTemplate() { return this.cols().map((c) => (typeof c.w === 'number' ? `${c.w}px` : c.w)).join(' '); }
   renderHeader() {
     this.header.style.gridTemplateColumns = this.gridTemplate();
+    this.rowsEl?.style.setProperty('--lib-cols', this._tpl = this.gridTemplate());
     const label = (c) => (c.id === 'addedAt' && this.view.kind === 'session' ? 'Played' : c.label);
     this.header.replaceChildren(...this.cols().map((c) => el('div', {
       class: `lh ${this.sort.col === c.id ? 'sorted' : ''}`,
       onclick: () => { if (c.sort === null) return; this.sort = { col: c.id, dir: this.sort.col === c.id ? -this.sort.dir : 1 }; this.renderHeader(); this.applyView(); },
-    }, label(c), this.sort.col === c.id ? (this.sort.dir > 0 ? ' ▲' : ' ▼') : '')));
+    }, label(c), this.sort.col === c.id ? uiIcon(this.sort.dir > 0 ? 'chevron-up' : 'chevron-down', { cls: 'lh-sort' }) : '')));
   }
 
+  /**
+   * Virtualised rows. Scrolling only builds the rows that come into view and drops the ones that leave (rows are
+   * positioned with transform, the column template is one CSS variable on the container); a forced render (data,
+   * selection, sort) rebuilds the visible rows. Cover art is attached once scrolling settles. Rebuilding ~40 rows
+   * through innerHTML with per-row grid templates and cover images on every scroll step cost 50–117 ms a frame.
+   */
   renderRows(force) {
     const H = this.scroller.clientHeight || 300;
     this.spacer.style.height = `${this.rows.length * ROW_H}px`;
@@ -238,39 +310,64 @@ export class LibraryUI {
     const last = Math.min(this.rows.length, first + Math.ceil(H / ROW_H) + 10);
     if (!force && this._range && this._range[0] === first && this._range[1] === last) return;
     this._range = [first, last];
-    const master = this.app.engine.masterDeck();
-    const mCam = master?.camelot, mBpm = master?.effectiveBpm;
-    const loaded = new Set(this.app.engine.decks.map((d) => d.track?.id).filter(Boolean));
-    const dl = new Set([...this.downloads.queued, ...this.downloads.active].map((x) => x.trackId));
+    const tpl = this.gridTemplate();
+    if (tpl !== this._tpl) { this._tpl = tpl; this.rowsEl.style.setProperty('--lib-cols', tpl); }
+    const scrolling = !force && performance.now() - (this._scrollAt || 0) < 400;
+    if (!force) this._scrollAt = performance.now();
+    if (force || !this._rowMap) { this._rowMap = new Map(); this.rowsEl.replaceChildren(); }
+    const map = this._rowMap;
+    for (const [i, row] of map) if (i < first || i >= last) { row.remove(); map.delete(i); }
+    let ctx = null;
     const frag = document.createDocumentFragment();
     for (let i = first; i < last; i++) {
-      const t = this.rows[i];
-      const cam = toCamelot(t.key);
-      const comp = mCam && cam && camelotCompatible(mCam, cam);
-      const bpmClose = mBpm && t.bpm && Math.abs(t.bpm / mBpm - 1) < 0.04;
-      const src = t.sourceType === 'remote' ? (SOURCE_ICONS[t.sourceKind] || 'Server') + (t.localPath ? ' ✓' : '') : 'Local';
-      const dup = this.view.kind === 'duplicates' ? ` dup-${this.dupIndex.get(t.id) % 2 ? 'b' : 'a'} ${this.dupGroups[this.dupIndex.get(t.id)]?.ids[0] === t.id ? 'dup-keep' : ''}` : '';
-      const sw = t.color ? `<i class="lc-sw" style="background:${escapeHtml(t.color)}" title="${escapeHtml(colorName(t.color) || t.color)}"></i>` : '';
-      const when = this.view.kind === 'session' ? (t._playedAt ? new Date(t._playedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') : (t.addedAt ? new Date(t.addedAt).toLocaleDateString() : '');
-      const row = el('div', {
-        class: `lr ${this.selected.has(t.id) ? 'sel' : ''} ${i === this.cursor ? 'cursor' : ''} ${loaded.has(t.id) ? 'loaded' : ''} ${t.playCount ? 'played' : ''} ${t.missing ? 'missing' : ''} ${t.unreadable ? 'unreadable' : ''}${dup}`,
-        title: t.missing ? `File missing: ${t.path}` : t.unreadable ? `Could not decode this file: ${t.path || t.title}` : null,
-        style: { top: `${i * ROW_H}px`, gridTemplateColumns: this.gridTemplate() },
-        draggable: 'true', 'data-i': i,
-        html: (this.showOrder ? `<div class="num ord">${(this.orderOf?.get(t) ?? i) + 1}</div>` : '') + `<div class="art" style="background-image:url(${api.coverUrl(t.id)})"></div>`
-          + `<div class="c-title" title="${escapeHtml(t.title)}">${sw}${t.missing ? '<span class="lc-miss">⚠</span>' : t.unreadable ? '<span class="lc-miss lc-unreadable" title="Unreadable: the file could not be decoded">⚠</span>' : ''}${escapeHtml(t.title)}</div><div title="${escapeHtml(t.artist)}">${escapeHtml(t.artist)}</div>`
-          + `<div class="num ${bpmClose ? 'match' : ''}">${Number(t.bpm) > 0 ? Number(t.bpm).toFixed(Number(t.bpm) % 1 ? 1 : 0) : ''}</div>`
-          + `<div class="key ${cam ? `cam-${cam.replace(/\D/g, '')}` : ''} ${comp ? 'match' : ''}">${escapeHtml(cam || t.key || '')}</div>`
-          + `<div class="num">${fmtDur(t.duration)}</div><div class="num">${escapeHtml(t.energy ?? '')}</div>`
-          + `<div>${escapeHtml(t.genre)}</div><div class="lc-tags">${(t.tags || []).map((x) => `<span class="tag-chip">${escapeHtml(x)}</span>`).join('')}</div><div>${escapeHtml(t.album)}</div>`
-          + `<div class="stars" data-rate>${[1, 2, 3, 4, 5].map((s) => `<span data-s="${s}" class="${s <= (t.rating || 0) ? 'on' : ''}">★</span>`).join('')}</div>`
-          + `<div class="src ${t.sourceType === 'remote' && !t.localPath ? 'stream' : ''}">${dl.has(t.id) ? '⬇ …' : escapeHtml(src)}</div>`
-          + `<div class="num">${when}</div>`,
-      });
-      frag.append(row);
+      if (map.has(i)) continue;
+      ctx ||= this.rowContext();
+      const row = this.buildRow(i, ctx, !scrolling && !force ? true : !scrolling);
+      map.set(i, row); frag.append(row);
     }
-    this.rowsEl.replaceChildren(frag);
+    if (frag.childNodes.length) this.rowsEl.append(frag);
+    // cover art once the list stops moving
+    clearTimeout(this._artT);
+    this._artT = setTimeout(() => { for (const row of this._rowMap.values()) if (row._art) { row.firstArt.style.backgroundImage = row._art; row._art = null; } }, scrolling ? 160 : 0);
     if (!this._wired) this.wireRows();
+  }
+
+  rowContext() {
+    const master = this.app.engine.masterDeck();
+    return {
+      mCam: master?.camelot, mBpm: master?.effectiveBpm,
+      loaded: new Set(this.app.engine.decks.map((d) => d.track?.id).filter(Boolean)),
+      dl: new Set([...this.downloads.queued, ...this.downloads.active].map((x) => x.trackId)),
+    };
+  }
+
+  buildRow(i, { mCam, mBpm, loaded, dl }) {
+    const t = this.rows[i];
+    const cam = toCamelot(t.key);
+    const comp = mCam && cam && camelotCompatible(mCam, cam);
+    const bpmClose = mBpm && t.bpm && Math.abs(t.bpm / mBpm - 1) < 0.04;
+    const src = t.sourceType === 'remote' ? (SOURCE_ICONS[t.sourceKind] || 'Server') : 'Local';
+    const dup = this.view.kind === 'duplicates' ? ` dup-${this.dupIndex.get(t.id) % 2 ? 'b' : 'a'} ${this.dupGroups[this.dupIndex.get(t.id)]?.ids[0] === t.id ? 'dup-keep' : ''}` : '';
+    const sw = t.color ? `<i class="lc-sw" style="background:${escapeHtml(t.color)}" title="${escapeHtml(colorName(t.color) || t.color)}"></i>` : '';
+    const when = this.view.kind === 'session' ? (t._playedAt ? new Date(t._playedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') : (t.addedAt ? new Date(t.addedAt).toLocaleDateString() : '');
+    const row = el('div', {
+      class: `lr ${i % 2 ? 'alt' : ''} ${this.selected.has(t.id) ? 'sel' : ''} ${i === this.cursor ? 'cursor' : ''} ${loaded.has(t.id) ? 'loaded' : ''} ${t.playCount ? 'played' : ''} ${t.missing ? 'missing' : ''} ${t.unreadable ? 'unreadable' : ''}${dup}`,
+      title: t.missing ? `File missing: ${t.path}` : t.unreadable ? `Could not decode this file: ${t.path || t.title}` : null,
+      style: { transform: `translateY(${i * ROW_H}px)` },
+      draggable: 'true', 'data-i': i,
+      html: (this.showOrder ? `<div class="num ord">${(this.orderOf?.get(t) ?? i) + 1}</div>` : '') + '<div class="art"></div>'
+        + `<div class="c-title" title="${escapeHtml(t.title)}">${sw}${t.missing ? `<span class="lc-miss" title="File missing">${iconHtml('warn')}</span>` : t.unreadable ? `<span class="lc-miss lc-unreadable" title="Unreadable: the file could not be decoded">${iconHtml('warn')}</span>` : ''}${escapeHtml(t.title)}</div><div title="${escapeHtml(t.artist)}">${escapeHtml(t.artist)}</div>`
+        + `<div class="num ${bpmClose ? 'match' : ''}">${Number(t.bpm) > 0 ? Number(t.bpm).toFixed(Number(t.bpm) % 1 ? 1 : 0) : ''}</div>`
+        + `<div class="key ${cam ? `cam-${cam.replace(/\D/g, '')}` : ''} ${comp ? 'match' : ''}">${escapeHtml(cam || t.key || '')}</div>`
+        + `<div class="num">${fmtDur(t.duration)}</div><div class="num">${escapeHtml(t.energy ?? '')}</div>`
+        + `<div>${escapeHtml(t.genre)}</div><div class="lc-tags">${(t.tags || []).map((x) => `<span class="tag-chip">${escapeHtml(x)}</span>`).join('')}</div><div>${escapeHtml(t.album)}</div>`
+        + `<div class="stars" data-rate>${[1, 2, 3, 4, 5].map((s) => `<span data-s="${s}" class="${s <= (t.rating || 0) ? 'on' : ''}">★</span>`).join('')}</div>`
+        + `<div class="src ${t.sourceType === 'remote' && !t.localPath ? 'stream' : ''}">${dl.has(t.id) ? `${iconHtml('download')} …` : escapeHtml(src)}${t.sourceType === 'remote' && t.localPath ? ` <span title="Downloaded for offline use">${iconHtml('check', 'lc-offline')}</span>` : ''}</div>`
+        + `<div class="num">${when}</div>`,
+    });
+    row.firstArt = row.querySelector('.art');
+    row._art = `url(${api.coverUrl(t.id)})`;
+    return row;
   }
 
   wireRows() {
@@ -392,12 +489,12 @@ export class LibraryUI {
     const unanalysed = tracks.filter((t) => !t.analyzed);
     if (unanalysed.length) items.push({ label: `Analyse ${unanalysed.length > 1 ? `${unanalysed.length} tracks` : 'now'} (BPM, key, waveform)`, action: () => { const n = this.app.analyser.request(unanalysed); this.app.toast(n ? `Analysing ${n} track(s) in the background` : 'Nothing to analyse (locked BPM / imported grid)'); } });
     else items.push({ label: 'Re-analyse (BPM, key, waveform)', action: async () => { const ok = tracks.filter((t) => !t.bpmLocked); for (const t of ok) { await api.updateTrack(t.id, { analyzed: false, gridLocked: false }); t.analyzed = false; t.gridLocked = false; } const n = this.app.analyser.request(ok); this.app.toast(`Re-analysing ${n} track(s) in the background${ok.length < tracks.length ? ' (locked BPMs kept)' : ''}`); } });
-    items.push(...stemsMenuItems(this.app, tracks));
+    if (!unavailable('stems')) items.push(...stemsMenuItems(this.app, tracks));
     if (window.opendjNative && tracks[0] && (tracks[0].localPath || tracks[0].path)) items.push({ label: 'Show in folder', action: () => window.opendjNative.reveal(tracks[0].localPath || tracks[0].path) });
     items.push('-');
     const curPl = this.view.kind === 'playlist' && this.playlists.find((p) => p.id === this.view.id);
     if (curPl && !curPl.sourceId && !curPl.smart) items.push({ label: 'Remove from playlist', action: () => this.removeFromPlaylist() });
-    items.push({ label: 'Remove from library', danger: true, action: async () => { if (await this.app.dialogs.confirm(`Remove ${ids.length} track(s) from the library? Files are not deleted.`)) { await api.deleteTracks(ids); this.selected.clear(); this.refresh(); } } });
+    items.push({ label: 'Remove from library', danger: true, action: async () => { if (await this.app.dialogs.confirm(platform.local ? `Remove ${ids.length} track(s) from OpenDJ? The copies imported into the app are deleted from this device (your original files are not touched).` : `Remove ${ids.length} track(s) from the library? Files are not deleted.`)) { await api.deleteTracks(ids); this.selected.clear(); this.refresh(); } } });
     this.app.dialogs.menu(x, y, items);
     flipSubmenus();
     // Colour dots for the colour sub-menu (menu() renders plain labels).
@@ -444,12 +541,12 @@ export class LibraryUI {
   }
 
   renderTree() {
-    const item = (label, v, { icon = '', actions = [], count, drop, cls = '' } = {}) => {
+    const item = (label, v, { icon = '', actions = [], count, drop, cls = '', click } = {}) => {
       const active = this.view.kind === v.kind && this.view.id === v.id;
-      const node = el('div', { class: `tree-item ${active ? 'active' : ''} ${cls}`, onclick: () => this.setView(v, label) },
-        el('span', { class: 'ti-icon' }, icon), el('span', { class: 'ti-label' }, label),
+      const node = el('div', { class: `tree-item ${active ? 'active' : ''} ${cls}`, onclick: () => (click ? click() : this.setView(v, label)) },
+        el('span', { class: 'ti-icon' }, glyphIcon(icon)), el('span', { class: 'ti-label' }, label),
         count != null ? el('span', { class: 'ti-count' }, String(count)) : null,
-        ...actions.map((a) => el('button', { class: 'ti-act', title: a.title, onclick: (e) => { e.stopPropagation(); a.fn(e); } }, a.icon)));
+        ...actions.map((a) => el('button', { class: 'ti-act', title: a.title, 'aria-label': a.title, onclick: (e) => { e.stopPropagation(); a.fn(e); } }, glyphIcon(a.icon))));
       if (actions[0]?.menu) node.addEventListener('contextmenu', (e) => { e.preventDefault(); actions[0].fn(e); });
       if (drop) {
         node.addEventListener('dragover', (e) => { e.preventDefault(); node.classList.add('drop'); });
@@ -501,25 +598,47 @@ export class LibraryUI {
       ...(!this.sessions.length ? [el('div', { class: 'tree-empty' }, 'Sets you play are recorded here')] : []),
       head('PLAYLISTS', el('button', { class: 'ti-act', title: 'New playlist', onclick: async () => { const n = await this.app.dialogs.prompt('New playlist', 'Playlist name'); if (n) { await api.createPlaylist(n); this.refresh(); } } }, '+')),
       ...plNodes,
-      head('FOLDERS · USB · NAS', el('button', { class: 'ti-act', title: 'Add folder', onclick: () => this.app.dialogs.addFolder() }, '+')),
+      ...(platform.local ? [] : [head('FOLDERS · USB · NAS', el('button', { class: 'ti-act', title: 'Add folder', onclick: () => this.app.dialogs.addFolder() }, '+'))]),
       ...this.folders.map((f) => item(f.name, { kind: 'folder', id: f.id }, {
         icon: f.online ? '🗀' : '⚠', count: f.trackCount, cls: f.online ? '' : 'offline',
         actions: [{ icon: '⟳', title: 'Rescan', fn: () => api.rescanFolder(f.id).catch((e) => this.app.toast(e.message)) }, { icon: '✕', title: 'Remove folder from library', fn: async () => { if (await this.app.dialogs.confirm(`Remove "${f.name}" from the library? (Files stay on disk.)`)) { await api.removeFolder(f.id); this.refresh(); } } }],
       })),
-      ...this.drives.filter((d) => !this.folders.some((f) => f.path === d.path)).map((d) => el('div', { class: 'tree-item drive', title: `${d.path} — click to add to library`, onclick: async () => { await api.addFolder(d.path, d.name); this.refresh(); this.app.toast(`Scanning ${d.name}…`); } },
-        el('span', { class: 'ti-icon' }, d.kind === 'network' ? '🖧' : d.kind === 'home' ? '⌂' : '⛁'), el('span', { class: 'ti-label' }, `${d.name}`), el('span', { class: 'ti-count' }, d.kind === 'network' ? 'NAS +' : d.kind === 'home' ? '+' : 'USB +'))),
+      ...(platform.local ? [] : this.drives).filter((d) => !this.folders.some((f) => f.path === d.path)).map((d) => el('div', { class: 'tree-item drive', title: `${d.path} — click to add to library`, onclick: async () => { await api.addFolder(d.path, d.name); this.refresh(); this.app.toast(`Scanning ${d.name}…`); } },
+        el('span', { class: 'ti-icon' }, glyphIcon(d.kind === 'network' ? '🖧' : d.kind === 'home' ? '⌂' : '⛁')), el('span', { class: 'ti-label' }, `${d.name}`), el('span', { class: 'ti-count' }, d.kind === 'network' ? 'NAS +' : d.kind === 'home' ? '+' : 'USB +'))),
       head('MEDIA SERVERS', el('button', { class: 'ti-act', title: 'Add media server', onclick: () => this.app.dialogs.addSource() }, '+')),
       ...this.sources.flatMap((s) => [
         item(s.name || s.serverName || s.type, { kind: 'source', id: s.id }, {
           icon: '☁', count: s.trackCount,
           actions: [{ icon: '⬇', title: 'Download all tracks for offline use', fn: () => this.download([...this.tracks.values()].filter((t) => t.sourceId === s.id && !t.localPath).map((t) => t.id)) },
-            { icon: '⟳', title: 'Sync library', fn: () => api.syncSource(s.id).catch((e) => this.app.toast(e.message)) },
+            { icon: '⟳', title: 'Sync library and reload its playlists', fn: () => { api.syncSource(s.id).catch((e) => this.app.toast(e.message)); this.loadRemoteLists(s.id); } },
             { icon: '✎', title: 'Edit connection', fn: () => this.app.dialogs.addSource(s) },
             { icon: '✕', title: 'Remove server', fn: async () => { if (await this.app.dialogs.confirm(`Disconnect ${s.name}? Downloaded tracks are kept.`)) { await api.removeSource(s.id); this.refresh(); } } }],
         }),
-        ...remotePl.filter((p) => p.sourceId === s.id).map((p) => item(p.name, { kind: 'playlist', id: p.id }, { icon: '♫', count: p.trackIds.length, cls: 'nested', actions: [{ icon: '⋯', title: 'Playlist options', menu: true, fn: (e) => this.playlistMenu(p, e) }] })),
+        ...this.sourcePlaylistNodes(s, remotePl, item),
       ]),
     );
+  }
+
+  /** Sidebar entries under a media server: its live playlists (click to open), plus mirrored ones it no longer lists. */
+  sourcePlaylistNodes(s, remotePl, item) {
+    const st = this.remoteLists.get(s.id);
+    const live = st?.lists || [];
+    const nodes = live.map((rp) => {
+      const mirror = remotePl.find((p) => p.sourceId === s.id && p.remoteId === rp.remoteId);
+      const node = item(rp.name, { kind: 'playlist', id: mirror?.id || `remote:${s.id}:${rp.remoteId}` }, {
+        icon: rp.smart ? '⚙' : '♫', count: rp.trackCount ?? mirror?.trackIds.length, cls: 'nested remote-pl',
+        actions: [{ icon: '⋯', title: 'Playlist options: automix, shuffle & mix, smart mix, import, download', menu: true, fn: (e) => this.remotePlaylistMenu(s, rp, e) }],
+        click: () => this.openRemotePlaylist(s, rp).catch(() => {}),
+      });
+      node.dataset.remotePl = rp.remoteId;
+      return node;
+    });
+    for (const p of remotePl.filter((x) => x.sourceId === s.id && !live.some((rp) => rp.remoteId === x.remoteId))) {
+      nodes.push(item(p.name, { kind: 'playlist', id: p.id }, { icon: '♫', count: p.trackIds.length, cls: 'nested', actions: [{ icon: '⋯', title: 'Playlist options', menu: true, fn: (e) => this.playlistMenu(p, e) }] }));
+    }
+    if (st?.loading && !live.length) nodes.push(el('div', { class: 'tree-empty nested' }, 'Loading playlists…'));
+    else if (st?.error) nodes.push(el('div', { class: 'tree-empty nested', title: st.error }, 'Playlists unavailable ', el('button', { class: 'ti-act', title: 'Try again', onclick: () => this.loadRemoteLists(s.id) }, '⟳')));
+    return nodes;
   }
 
   playlistMenu(p, e) {
@@ -527,12 +646,14 @@ export class LibraryUI {
     const x = e?.clientX ?? r.right - 20, y = e?.clientY ?? r.top + 100;
     const items = [
       ...(p.smart ? [{ label: 'Edit rules…', action: () => this.dlg.smartPlaylist(p) }] : []),
-      { label: 'Automix this playlist', action: () => this.app.dialogs.automixQueue(p.trackIds.map((i) => this.tracks.get(i)).filter(Boolean)) },
+      { label: 'Automix this playlist', action: () => this.app.dialogs.automixQueue(p.trackIds.map((i) => this.tracks.get(i)).filter(Boolean), { mode: 'order', title: p.name }) },
+      { label: 'Shuffle & mix', action: () => this.app.dialogs.automixQueue(p.trackIds.map((i) => this.tracks.get(i)).filter(Boolean), { mode: 'shuffle', title: p.name }) },
+      { label: 'Smart mix', action: () => this.app.dialogs.automixQueue(p.trackIds.map((i) => this.tracks.get(i)).filter(Boolean), { mode: 'smart', title: p.name }) },
       { label: 'Download all for offline use', action: () => this.download(p.trackIds.filter((i) => { const t = this.tracks.get(i); return t?.sourceType === 'remote' && !t.localPath; })) },
       { label: 'Export as M3U8', action: () => { const a = el('a', { href: api.m3uUrl(p.id), download: '' }); document.body.append(a); a.click(); a.remove(); } }, // no navigation: beforeunload would ask while decks play
-      { label: 'Export to USB / folder…', action: () => this.app.dialogs.exportUsb([p.id]) },
-      { label: 'Export to CDJ USB (rekordbox)…', action: () => openCdjExport(this.app, [p.id]) },
-      { label: 'Prepare AI stems for playlist', action: () => this.app.stems?.enqueue(p.trackIds).catch((e) => this.app.toast(e.message)) },
+      ...(unavailable('usbExport') ? [] : [{ label: 'Export to USB / folder…', action: () => this.app.dialogs.exportUsb([p.id]) }]),
+      ...(unavailable('cdj') ? [] : [{ label: 'Export to CDJ USB (rekordbox)…', action: () => openCdjExport(this.app, [p.id]) }]),
+      ...(unavailable('stems') ? [] : [{ label: 'Prepare AI stems for playlist', action: () => this.app.stems?.enqueue(p.trackIds).catch((e) => this.app.toast(e.message)) }]),
     ];
     if (p.smart) {
       items.push('-',

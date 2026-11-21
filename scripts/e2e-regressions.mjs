@@ -166,6 +166,162 @@ try {
   const lbl = await page.evaluate(async () => { const d = window.opendj.engine.decks[0]; d.autoLoop(4); await new Promise((r) => setTimeout(r, 100)); const t = document.querySelector('.loop-size').textContent; d.exitLoop(); return t; });
   check(lbl === '4', `loop size label reads "4" (${lbl})`);
 
+  // Faders and knobs stay inside their drawn bounds and range (user report: the tempo cap slid far past its track)
+  await page.evaluate(async (id) => { await window.opendj.loadTrack(1, id); }, ids.Long);
+  const setUi = (z, n) => page.evaluate(async ([z, n]) => { const { applyTheme } = await import('/js/ui/themes.js'); const a = window.opendj; a.engine.decks.forEach((d) => d.pause()); a.settings.uiScale = z; applyTheme(a.settings); a.setDeckCount(n, false); }, [z, n]);
+  // every visible fader: is the cap inside the track, and does the drawn value match the engine?
+  const faderState = () => page.evaluate(() => {
+    const a = window.opendj, E = a.engine, out = [];
+    for (const f of document.querySelectorAll('.fader')) {
+      if (!f.offsetParent) continue;
+      const tr = f.querySelector('.fader-track').getBoundingClientRect(), th = f.querySelector('.fader-thumb').getBoundingClientRect();
+      if (!tr.width || !tr.height) continue;
+      const inside = th.top >= tr.top - 0.6 && th.bottom <= tr.bottom + 0.6 && th.left >= tr.left - 0.6 && th.right <= tr.right + 0.6;
+      const v = Number(f.getAttribute('aria-valuenow')), lo = Number(f.getAttribute('aria-valuemin')), hi = Number(f.getAttribute('aria-valuemax'));
+      let engine = null, ok = v >= lo - 1e-6 && v <= hi + 1e-6;
+      const deckEl = f.closest('.deck'), strip = f.closest('.strip');
+      if (f.classList.contains('tempo-fader')) {
+        const d = E.decks[deckEl.dataset.deck]; engine = d.tempo / d.tempoRange;
+        const rate = d.rate / (1 + d.tempo / 100);
+        const shown = parseFloat(deckEl.querySelector('.tempo-val').textContent);
+        ok = ok && Math.abs(d.tempo) <= d.tempoRange + 1e-6 && Math.abs(rate - 1 - d.bend) < 1e-6 && (Date.now() - (window._lastTempoSet || 0) < 120 || Math.abs(shown - d.tempo) < 0.006);
+      } else if (strip) engine = E.channels[strip.dataset.ch].state.volume;
+      else if (f.classList.contains('crossfader')) engine = E.crossfader;
+      if (engine != null) ok = ok && Math.abs(engine - v) < 1e-3;
+      out.push({ cls: f.className.replace('fader ', ''), inside, ok, v, engine, th: [th.top | 0, th.bottom | 0, th.left | 0, th.right | 0], tr: [tr.top | 0, tr.bottom | 0, tr.left | 0, tr.right | 0] });
+    }
+    return out;
+  });
+  const knobState = () => page.evaluate(() => {
+    const E = window.opendj.engine;
+    const knobsOk = [...document.querySelectorAll('.knob')].filter((k) => k.offsetParent).every((k) => { const v = Number(k.getAttribute('aria-valuenow')); return v >= Number(k.getAttribute('aria-valuemin')) - 1e-6 && v <= Number(k.getAttribute('aria-valuemax')) + 1e-6; });
+    const lim = { trim: [-1, 1], eqHigh: [-1, 1], eqMid: [-1, 1], eqLow: [-1, 1], filter: [-1, 1], volume: [0, 1], fxMix: [0, 1], fxParam: [0, 1], fxParam2: [0, 1], vocal: [0, 1], inst: [0, 1] };
+    const engineOk = E.channels.every((c) => Object.entries(lim).every(([k, [lo, hi]]) => c.state[k] >= lo && c.state[k] <= hi)) && [E.masterVolume, E.cueMix, E.hpVolume].every((v) => v == null || (v >= 0 && v <= 1));
+    return { knobsOk, engineOk };
+  });
+  const dragAll = async (sel, overshoot) => {
+    const boxes = await page.evaluate((sel) => [...document.querySelectorAll(sel)].filter((e) => e.offsetParent && e.getBoundingClientRect().width).map((e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, h: e.closest('.fader-h') ? 1 : 0 }; }), sel);
+    for (const b of boxes) for (const dir of [-1, 1]) {
+      await page.mouse.move(b.x, b.y); await page.mouse.down();
+      await page.mouse.move(b.x + (b.h ? dir * overshoot : 0), b.y + (b.h ? 0 : dir * overshoot), { steps: 6 });
+      await page.mouse.up();
+    }
+    return boxes.length;
+  };
+  const bad = (list) => list.filter((x) => !x.inside || !x.ok);
+  for (const [w, h, z, n] of [[1600, 960, 100, 2], [1366, 768, 100, 4], [1100, 700, 80, 2], [1920, 1080, 150, 4]]) {
+    await page.setViewportSize({ width: w, height: h }); await setUi(z, n); await page.waitForTimeout(300);
+    for (const r of [6, 16, 50]) {
+      await page.evaluate((r) => window.opendj.engine.decks.forEach((d) => d.setTempoRange(r)), r);
+      const nf = await dragAll('.fader-thumb', 2000);
+      await page.waitForTimeout(150);
+      const st = await faderState();
+      check(nf > 0 && bad(st).length === 0, `${w}x${h} @${z}% ${n} decks ±${r}%: ${nf} fader caps dragged past both ends stay inside their tracks, values clamped and in sync${bad(st).length ? ' ' + JSON.stringify(bad(st)) : ''}`);
+    }
+    const nk = await dragAll('.knob', 3000);
+    const ks = await knobState();
+    check(nk > 0 && ks.knobsOk && ks.engineOk, `${w}x${h} @${z}%: ${nk} knobs dragged past both ends stay in range (${JSON.stringify(ks)})`);
+  }
+  // wheel, keyboard, MIDI and programmatic values (sync far away, range shrink) never push the tempo cap off its track
+  await page.setViewportSize({ width: 1600, height: 960 }); await setUi(100, 2); await page.waitForTimeout(300);
+  const tf = page.locator('.deck[data-deck="0"] .tempo-fader');
+  await tf.hover(); for (let k = 0; k < 150; k++) await page.mouse.wheel(0, -120);
+  await tf.focus(); for (let k = 0; k < 80; k++) await page.keyboard.press('ArrowDown');
+  await page.evaluate(() => { const d = window.opendj.engine.decks[0]; d.setTempoFader(7); window.opendj.midi; for (let k = 0; k < 60; k++) d.stepTempo(0.5); });
+  await page.waitForTimeout(150);
+  let st = await faderState();
+  check(bad(st).length === 0, `tempo fader after wheel/keys/MIDI overshoot stays inside and in range${bad(st).length ? ' ' + JSON.stringify(bad(st)) : ''}`);
+  const prog = await page.evaluate(async () => {
+    const [a, b] = window.opendj.engine.decks; a.setTempoRange(8); b.setTempoRange(8); a.resetTempo(); b.resetTempo();
+    a.bpm = 124; b.bpm = 172; a.setMaster(); a.play(); b.play(); b.sync(); await new Promise((r) => setTimeout(r, 200));
+    const synced = { tempo: b.tempo, range: b.tempoRange, sel: document.querySelector('.deck[data-deck="1"] .deck-tempo select').value };
+    a.pause(); b.pause(); b.setTempoRange(50); b.setTempoFader(1); b.setTempoRange(6);
+    return { synced, shrunk: { tempo: b.tempo, range: b.tempoRange } };
+  });
+  await page.waitForTimeout(150);
+  st = await faderState();
+  check(Math.abs(prog.synced.tempo) <= prog.synced.range && String(prog.synced.range) === prog.synced.sel && prog.shrunk.tempo === 6 && prog.shrunk.range === 6 && bad(st).length === 0,
+    `sync to a far BPM widens the range instead of overshooting; shrinking the range clamps the tempo (${JSON.stringify(prog)})`);
+  await page.evaluate(() => window.opendj.engine.decks.forEach((d) => { d.setTempoRange(8); d.resetTempo(); }));
+
+  // QA final round: loops and loading (M2, m1, m5, m6)
+  const loops = await page.evaluate(async ({ long, third }) => {
+    const app = window.opendj, d = app.engine.decks[0];
+    await app.loadTrack(0, third); d.setGrid(120, 0);
+    const out = {};
+    // M2: a ¼-beat loop pressed late in the beat starts on the ¼-beat grid that holds the play head (no jump back)
+    d.seek(10.43); await new Promise((r) => setTimeout(r, 50)); const pos = d.position;
+    d.autoLoop(0.25); out.quarter = { start: d.loop.start, end: d.loop.end, pos };
+    // halving stops at 1/8 beat
+    for (let k = 0; k < 6; k++) d.loopHalve(); out.minBeats = d.loopBeats;
+    d.exitLoop();
+    // m1: ½ / ×2 after the loop was exited change the auto-loop size, not the stored inactive loop
+    const btns = [...document.querySelectorAll('.deck[data-deck="0"] .loop-row:not(.jump-row) .btn')];
+    const half = btns.find((b) => b.textContent.trim() === '½'), size = document.querySelector('.deck[data-deck="0"] .loop-size');
+    const before = size.textContent; half.click(); await new Promise((r) => setTimeout(r, 50)); out.halfAfterExit = { before, after: size.textContent, stored: d.loopBeats };
+    // m6: a loop roll / slice keeps the user's stored inactive loop
+    d.setLoop(4, 6); d.exitLoop(); d.play();
+    d.rollOn(0.25); await new Promise((r) => setTimeout(r, 80)); d.rollOff();
+    out.afterRoll = d.loop && { start: d.loop.start, end: d.loop.end, active: d.loop.active };
+    d.sliceDown(2); await new Promise((r) => setTimeout(r, 80)); d.sliceUp();
+    out.afterSlice = d.loop && { start: d.loop.start, end: d.loop.end, active: d.loop.active };
+    d.pause(); d.loop = null;
+    // m5: loop / hot cue / sync are ignored while the deck is still loading
+    const p = app.loadTrack(0, long);
+    await new Promise((r) => setTimeout(r, 30));
+    out.loadingWas = d.loading; const cues0 = (d.track?.cues || []).length; d.autoLoop(4); d.hotCueDown(0); d.sync();
+    out.whileLoading = { loop: d.loop, sync: d.syncOn, cues: (d.track?.cues || []).length - cues0 };
+    await p; d.syncOn = false;
+    return out;
+  }, { long: ids.Long, third: ids.Third });
+  const q = loops.quarter;
+  check(Math.abs(q.end - q.start - 0.125) < 1e-6 && q.start <= q.pos + 1e-3 && q.pos < q.end + 0.02, `¼-beat loop pressed late in the beat contains the play head (${q.start.toFixed(3)}–${q.end.toFixed(3)} s, play head ${q.pos.toFixed(3)} s)`);
+  check(loops.minBeats === 0.125, `loop ½ stops at 1/8 beat (${loops.minBeats})`);
+  check(loops.halfAfterExit.after !== loops.halfAfterExit.before && loops.halfAfterExit.stored === loops.minBeats, `½ after exiting a loop changes the auto-loop size (${JSON.stringify(loops.halfAfterExit)})`);
+  check(loops.afterRoll?.start === 4 && loops.afterRoll?.end === 6 && !loops.afterRoll.active, `a loop roll keeps the stored loop (${JSON.stringify(loops.afterRoll)})`);
+  check(loops.afterSlice?.start === 4 && loops.afterSlice?.end === 6 && !loops.afterSlice.active, `the slicer keeps the stored loop (${JSON.stringify(loops.afterSlice)})`);
+  check(loops.loadingWas && !loops.whileLoading.loop && !loops.whileLoading.sync && loops.whileLoading.cues === 0, `loop / hot cue / sync ignored while the deck loads (${JSON.stringify(loops.whileLoading)})`);
+
+  // M5: scrolling a big list recycles row nodes (rows that stay in view are not rebuilt), positions them with
+  // transform and keeps the column template on the container
+  const lib = await page.evaluate(async () => {
+    const L = window.opendj.library, base = L.rows[0];
+    const saved = L.rows;
+    L.rows = Array.from({ length: 2000 }, (_, i) => ({ ...base, id: `fake${i}`, title: `Row ${i}` }));
+    L.renderRows(true);
+    const sc = L.scroller; sc.scrollTop = 0; L.renderRows(true);
+    const keep = L.rowsEl.querySelector('.lr[data-i="12"]');
+    sc.scrollTop = 26 * 3; L.renderRows();
+    const same = L.rowsEl.querySelector('.lr[data-i="12"]') === keep;
+    sc.scrollTop = 26 * 1500; L.renderRows();
+    const out = { same, count: L.rowsEl.children.length, transform: !!L.rowsEl.querySelector('.lr').style.transform, rowTpl: L.rowsEl.querySelector('.lr').style.gridTemplateColumns, varTpl: L.rowsEl.style.getPropertyValue('--lib-cols') };
+    L.rows = saved; sc.scrollTop = 0; L.renderRows(true);
+    return out;
+  });
+  check(lib.same && lib.count < 80 && lib.transform && !lib.rowTpl && !!lib.varTpl, `library rows are recycled while scrolling (${JSON.stringify(lib)})`);
+
+  // m3: the Echo Out pad gives the user's beat FX settings back after the tail
+  const eo = await page.evaluate(async (id) => {
+    const app = window.opendj, d = app.engine.decks[0], ch = app.engine.channels[0];
+    await app.loadTrack(0, id); d.setGrid(240, 0); d.play();
+    ch.set('fxType', 'flanger'); ch.set('fxMix', 0.3); ch.set('fxParam', 0.4); ch.set('fxBeats', 1);
+    app.padFx(d, 'echoOut', true);
+    const during = ch.state.fxType;
+    await new Promise((r) => setTimeout(r, d.beatLen * 8000 + 400));
+    return { during, after: { fxType: ch.state.fxType, fxMix: ch.state.fxMix, fxParam: ch.state.fxParam, fxBeats: ch.state.fxBeats, fxOn: ch.state.fxOn } };
+  }, ids.Third);
+  check(eo.during === 'echo' && eo.after.fxType === 'flanger' && eo.after.fxMix === 0.3 && eo.after.fxParam === 0.4 && eo.after.fxBeats === 1 && !eo.after.fxOn, `Echo Out pad restores the beat FX afterwards (${JSON.stringify(eo)})`);
+
+  // m4: a deck load reports its progress (Loading x % / Decoding / Analysing) under the title
+  const prog2 = await page.evaluate(async (id) => {
+    const app = window.opendj, d = app.engine.decks[1], seen = [], notes = new Set();
+    const off = d.on('load-progress', (p) => { seen.push(`${p.name}${p.pct != null ? ':' + p.pct : ''}`); notes.add(document.querySelector('.deck[data-deck="1"] .deck-load-note').textContent); });
+    const t = app.library.track(id); const r = await fetch(`/api/tracks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ analyzed: false }) }).then((x) => x.json()); app.library.updateTrack(r);
+    await app.loadTrack(1, id); off();
+    return { phases: [...new Set(seen.map((x) => x.split(':')[0]))], pcts: seen.filter((x) => x.startsWith('Loading:')).length, notes: [...notes].slice(0, 4), after: document.querySelector('.deck[data-deck="1"] .deck-load-note').textContent };
+  }, ids.Long);
+  check(['Loading', 'Decoding', 'Analysing'].every((p) => prog2.phases.includes(p)) && prog2.pcts >= 2 && prog2.after === '', `deck load shows its progress (${JSON.stringify(prog2)})`);
+
   check(errors.length === 0, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
 } catch (e) { console.error(e); failed = true; }
 await browser.close(); app.server.close();

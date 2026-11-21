@@ -1,4 +1,5 @@
 // DVS UI: topbar button, per-deck ABS/REL/INT indicator and the setup / calibration panel.
+import { icon } from '../ui/icons.js';
 import { el, fmtTime } from '../util.js';
 import { TIMECODES, RPM_FACTOR } from './timecode-defs.js';
 
@@ -13,7 +14,7 @@ function ensureCss() {
 /** Topbar entry: opens the DVS panel; lit while the timecode input is running. */
 export function dvsButton(app) {
   ensureCss();
-  const b = el('button', { class: 'btn sm dvs-btn', title: 'DVS: control decks with timecode vinyl or CDs', onclick: () => openDvsPanel(app) }, 'DVS');
+  const b = el('button', { class: 'btn sm dvs-btn', title: 'DVS: control decks with timecode vinyl or CDs', onclick: () => openDvsPanel(app) }, icon('dvs'), el('span', { class: 'lbl' }, 'DVS'));
   const render = () => { const m = app.dvs; b.classList.toggle('active', !!m?.running); b.classList.toggle('error', !!m?.error); };
   app.dvs?.on('change', render); render();
   return b;

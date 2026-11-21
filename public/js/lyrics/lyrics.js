@@ -2,6 +2,7 @@
 // karaoke mode per deck (vocals down: AI stem mute when the deck has stems, else the quick-stems VOC knob) and a
 // karaoke layer in the video mix. setupLyrics(app) → app.lyrics.
 import { el } from '../util.js';
+import { icon } from '../ui/icons.js';
 import { lyricStateAt, heardTrackTime } from './lrc.js';
 import { installKaraokeOverlay } from './karaoke-overlay.js';
 import { openLyricsEditor } from './editor.js';
@@ -93,8 +94,8 @@ export class LyricsManager {
       const cur = el('span', { class: 'lyr-cur' });
       const next = el('span', { class: 'lyr-next' });
       const text = el('div', { class: 'lyr-text', title: 'Lyrics (click to edit / sync)', onclick: () => this.openEditor(i) }, cur, next);
-      const kBtn = el('button', { class: 'lyr-kara', title: 'Karaoke mode: vocals down + lyrics on the video output', onclick: (e) => { e.stopPropagation(); this.toggleKaraoke(i); } }, '🎤');
-      const eBtn = el('button', { class: 'lyr-edit', title: 'Lyrics editor (tap to sync, import / export .lrc)', onclick: (e) => { e.stopPropagation(); this.openEditor(i); } }, '✎');
+      const kBtn = el('button', { class: 'lyr-kara', title: 'Karaoke mode: vocals down + lyrics on the video output', onclick: (e) => { e.stopPropagation(); this.toggleKaraoke(i); } }, icon('mic'));
+      const eBtn = el('button', { class: 'lyr-edit', title: 'Lyrics editor (tap to sync, import / export .lrc)', onclick: (e) => { e.stopPropagation(); this.openEditor(i); } }, icon('pencil'));
       const root = el('div', { class: 'lyr-line', 'data-deck': i }, text, kBtn, eBtn);
       const row = waves[i];
       if (row) { row.classList.add('has-lyrics'); row.append(root); }

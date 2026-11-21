@@ -14,7 +14,7 @@ import { Library, newId } from './library.js';
 import { scanFolder, addFile, walk, AUDIO_EXT, isMediaPath } from './scanner.js';
 import { listDrives, browseDir } from './drives.js';
 import { aiffToWav } from './aiff.js';
-import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clientFor, isInside, uniqueName, safe } from './remote.js';
+import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clientFor, isInside, uniqueName, safe, sourcePlaylists, openSourcePlaylist, remoteError } from './remote.js';
 import { findFfmpeg, needsTranscode, remoteBrowserDecodable, browserPlayableVideo, formatList, DSD_EXT, VIDEO_MIME, extOf, probe, isVideoByName, BROWSER_VIDEO_EXT } from './media.js';
 import { Transcoder } from './transcode.js';
 import { Auth, parseCookies, parseTrustProxy } from './auth.js';
@@ -34,6 +34,7 @@ import { registerBroadcastRoutes } from './broadcast.js';
 import { registerCdjRoutes } from './cdj/routes.js';
 import { findIdenticalTrack } from './upload-dedupe.js';
 import { registerStemRoutes } from './stems.js';
+import { registerUpdateRoutes } from './update.js';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const MIME = {
@@ -148,7 +149,32 @@ function sendPlaceholder(res) {
 }
 
 /** Stream a remote media-server URL to the client (Range passed through). Aborts upstream when the client leaves. */
-async function proxy(req, res, { url, headers = {} }, { connectTimeout = 15000, kind = 'audio' } = {}) {
+/** A media server problem in words a DJ can act on (instead of Node's "fetch failed"). */
+export function mediaServerError(url, { status, err, timeout, name } = {}) {
+  let host = ''; try { host = new URL(url).host; } catch { /* */ }
+  const who = name ? `${name}${host ? ` (${host})` : ''}` : host || 'the media server';
+  if (timeout) return `${who} did not answer in time — check it's on and reachable`;
+  if (err) return `Can't reach ${who} — check it's on and reachable from this computer`;
+  if (status === 401 || status === 403) return `${who} refused the request — check the login in the server's settings`;
+  if (status === 404) return `${who} no longer has this track (HTTP 404) — rescan the server`;
+  if (status >= 500) return `${who} had a problem (HTTP ${status}) — try again in a moment`;
+  return `${who} answered HTTP ${status}`;
+}
+
+const cspCache = new Map();
+/** The Content-Security-Policy header for a public HTML page: its <meta http-equiv> policy + frame-ancestors 'none'. */
+export async function htmlCsp(file, mtime = 0) {
+  const hit = cspCache.get(file);
+  if (hit && hit.mtime === mtime) return hit.csp;
+  const html = await fs.promises.readFile(file, 'utf8').catch(() => '');
+  const m = /<meta\s+http-equiv=["']Content-Security-Policy["']\s+content=(["'])(.*?)\1/i.exec(html);
+  const meta = m ? m[2].trim().replace(/;\s*$/, '') : '';
+  const csp = meta ? `${meta}; frame-ancestors 'none'` : "frame-ancestors 'none'";
+  cspCache.set(file, { mtime, csp });
+  return csp;
+}
+
+async function proxy(req, res, { url, headers = {}, name }, { connectTimeout = 15000, kind = 'audio' } = {}) {
   const h = { ...headers };
   if (req.headers.range) h.Range = req.headers.range;
   const ctrl = new AbortController();
@@ -159,12 +185,12 @@ async function proxy(req, res, { url, headers = {} }, { connectTimeout = 15000, 
   try { up = await fetch(url, { headers: h, signal: ctrl.signal }); } catch (e) {
     res.off('close', onClose);
     if (res.destroyed) return;
-    throw new HttpError(502, ctrl.signal.aborted ? 'Media server did not answer in time' : `Media server unreachable: ${e.message}`);
+    throw new HttpError(502, mediaServerError(url, { timeout: ctrl.signal.aborted, err: !ctrl.signal.aborted, name }));
   } finally { clearTimeout(timer); }
   if (![200, 206, 416].includes(up.status)) {
     ctrl.abort();
     res.off('close', onClose);
-    throw new HttpError(502, `Media server answered HTTP ${up.status}`);
+    throw new HttpError(502, mediaServerError(url, { status: up.status, name }));
   }
   const out = { 'content-type': safeMediaType(up.headers.get('content-type'), kind) };
   for (const k of ['content-length', 'content-range', 'accept-ranges']) {
@@ -369,6 +395,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     return sendFileRange(req, res, cached, 'audio/wav');
   };
 
+  const srcName = (t) => { try { return library.getSource(t.sourceId)?.name || ''; } catch { return ''; } };
   route('GET', '/api/tracks/:id/stream', async ({ params, req, res }) => {
     const t = track(params.id);
     const local = await servableFile(t);
@@ -397,8 +424,9 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
         return transcoder.serveAudio(req, res, {
           key: t.id, sampleRate: t.sampleRate, dsd: ['dsf', 'dff'].includes(String(t.format).toLowerCase()),
           input: async (signal, tmp) => {
-            const up = await fetch(reqInfo.url, { headers: reqInfo.headers || {}, signal });
-            if (!up.ok || !up.body) throw new HttpError(502, `Media server answered HTTP ${up.status}`);
+            let up;
+            try { up = await fetch(reqInfo.url, { headers: reqInfo.headers || {}, signal }); } catch (e) { if (signal?.aborted) throw e; throw new HttpError(502, mediaServerError(reqInfo.url, { err: true, name: srcName(t) })); }
+            if (!up.ok || !up.body) throw new HttpError(502, mediaServerError(reqInfo.url, { status: up.status, name: srcName(t) }));
             await pipeline(Readable.fromWeb(up.body), fs.createWriteStream(tmp), { signal });
             return tmp;
           },
@@ -407,10 +435,10 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       // No local FFmpeg: ask the media server to transcode, where its API can.
       const c = clientFor(library, t.sourceId);
       const tr = c.transcodeRequest?.(t.remoteId, t);
-      if (tr) return proxy(req, res, tr);
+      if (tr) return proxy(req, res, { ...tr, name: srcName(t) });
       throw needsFfmpeg(`This ${String(t.format).toUpperCase()} track`);
     }
-    return proxy(req, res, remoteStream(library, t));
+    return proxy(req, res, { ...remoteStream(library, t), name: srcName(t) });
   });
 
   // Video of a track (for the video decks): browser-playable files as is (Range), others remuxed/transcoded to MP4.
@@ -733,7 +761,22 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     runJob('sync:' + params.id, () => syncSource(library, params.id, { onProgress: (p) => emit('sync', p) }));
     return { started: true };
   });
-  route('GET', '/api/sources/:id/libraries', async ({ params }) => { const c = clientFor(library, params.id); await c.connect(); return c.listLibraries(); });
+  // Live playlists of a media server, and one playlist's tracks (stored as remote library tracks so they play,
+  // analyse and download like synced ones; the playlist is mirrored in the library under the server).
+  const remoteFail = (e) => (e.expose ? new HttpError(e.status, e.message) : e);
+  route('GET', '/api/sources/:id/libraries', async ({ params }) => {
+    if (!library.getSource(params.id)) throw new HttpError(404, 'No source');
+    try { const c = clientFor(library, params.id); await c.connect(); return await c.listLibraries(); } catch (e) { throw remoteFail(remoteError(e)); }
+  });
+  route('GET', '/api/sources/:id/playlists', async ({ params }) => {
+    if (!library.getSource(params.id)) throw new HttpError(404, 'No source');
+    try { return await sourcePlaylists(library, params.id); } catch (e) { throw remoteFail(e); }
+  });
+  route('GET', '/api/sources/:id/playlists/:pid', async ({ params, query }) => {
+    if (!library.getSource(params.id)) throw new HttpError(404, 'No source');
+    if (!params.pid || params.pid.length > 256) throw new HttpError(400, 'Bad playlist id');
+    try { return await openSourcePlaylist(library, params.id, params.pid, { name: query.get('name') || undefined }); } catch (e) { throw remoteFail(e); }
+  });
   route('DELETE', '/api/sources/:id', async ({ params }) => { library.removeSource(params.id); return { ok: true }; });
 
   // ---------------- downloads ----------------
@@ -763,6 +806,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   const recording = registerRecordingRoutes({ route, library, emit, pathAllowed, allowedRoots });
   const broadcast = registerBroadcastRoutes({ route, library, emit, pathAllowed: readable, log });
   registerCdjRoutes({ route, library, emit, allowPath, readable });
+  const updates = registerUpdateRoutes({ route, library, version: VERSION, hosted: restricted });
 
   route('GET', '/api/events', ({ req, res }) => {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -805,7 +849,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     const v = parseCookies(req.headers.cookie)[LAUNCH_COOKIE];
     return typeof v === 'string' && crypto.timingSafeEqual(crypto.createHash('sha256').update(v).digest(), launchKey);
   };
-  const PUBLIC_FILES = new Set(['login.html', 'icon.svg', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest', 'sw.js', 'favicon.ico']);
+  const PUBLIC_FILES = new Set(['login.html', 'icon.svg', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest', 'sw.js', 'favicon.ico', 'fonts/inter-latin-wght-normal.woff2', 'fonts/inter-latin-ext-wght-normal.woff2']); // the login page's UI font
 
   const server = http.createServer(async (req, res) => {
     let url;
@@ -854,8 +898,9 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       if (!st?.isFile()) throw new HttpError(404, 'Not found');
       const headers = { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' };
       if (rel === 'sw.js') headers['Service-Worker-Allowed'] = '/';
-      // frame-ancestors only works as a header (the pages' own CSP is a <meta> tag); both policies apply
-      if (path.extname(file) === '.html') headers['Content-Security-Policy'] = "frame-ancestors 'none'";
+      // HTML pages: the page's own <meta> CSP is also sent as a header (one source of truth: the meta tag, read once
+      // per file version), plus frame-ancestors, which only works as a header
+      if (path.extname(file) === '.html') headers['Content-Security-Policy'] = await htmlCsp(file, st.mtimeMs);
       res.writeHead(200, headers);
       if (req.method === 'HEAD') return res.end();
       await pipeQuiet(fs.createReadStream(file), res);
@@ -881,7 +926,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     downloads.queue = [];
     for (const j of downloads.active.values()) j.ctrl.abort();
   };
-  return { server, library, history, downloads, transcoder, auth, lighting, link, stems, recording, broadcast, ffmpegReady: ffReady, shutdown, newId };
+  return { server, library, history, downloads, transcoder, auth, lighting, link, stems, recording, broadcast, updates, ffmpegReady: ffReady, shutdown, newId };
 }
 
 /**

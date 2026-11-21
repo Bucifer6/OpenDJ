@@ -24,16 +24,30 @@ export function applyTheme(settings) {
   root.dataset.theme = theme;
   // optional custom accent colour on top of any theme
   if (settings.accentColor) root.style.setProperty('--accent', settings.accentColor); else root.style.removeProperty('--accent');
-  // never scale beyond what keeps a usable 1100x700 effective window
+  // never scale beyond what keeps a usable 1100x700 effective window. Phones and small tablets (the compact
+  // layouts in css/mobile.css) are laid out at their real size instead of being shrunk to fit the desktop layout.
   const want = (settings.uiScale || 100) / 100;
-  const z = Math.max(0.5, Math.min(want, innerWidth / 1100, innerHeight / 700, want));
+  const compact = innerWidth < 900 || innerHeight < 560;
+  // touch tablets in landscape (iPad 1024-1366 px): the desktop layout, but never shrunk below 100 % and with
+  // finger-sized controls (css/mobile.css html.tablet)
+  const tablet = !compact && !!globalThis.matchMedia?.('(pointer: coarse)').matches && innerWidth <= 1366;
+  // Shrinking (< 100 %) stops at a 1100x700 effective window; enlarging (> 100 %) stops at 1280x700, so a larger
+  // interface size never squeezes the desktop layout into its narrowest form (1600x900 at 125 % stays 1280 wide).
+  const z = compact ? Math.max(0.5, Math.min(want, 1.5))
+    : tablet ? Math.max(1, Math.min(want, innerWidth / 1024, innerHeight / 700))
+    : want > 1 ? Math.max(1, Math.min(want, Math.max(1, Math.min(innerWidth / 1280, innerHeight / 700))))
+    : Math.max(0.5, Math.min(want, innerWidth / 1100, innerHeight / 700));
+  root.classList.toggle('compact', compact);
+  root.classList.toggle('tablet', tablet);
+  root.classList.toggle('touch', !!globalThis.matchMedia?.('(pointer: coarse)').matches);
   root.style.zoom = String(z);
   root.style.setProperty('--ui-zoom', String(z)); // layout heights divide by this so the page still fits the window
   root.classList.toggle('zoom-large', z > 1.05);
-  const effH = innerHeight / z;
-  root.classList.toggle('h920', effH <= 920); root.classList.toggle('h860', effH <= 860); root.classList.toggle('h800', effH <= 800);
-  const effW = innerWidth / z;
-  root.classList.toggle('w1300', effW <= 1300); root.classList.toggle('w1200', effW <= 1200);
+  // short / narrow desktop windows squeeze the desktop layout (css/performance.css); compact screens have their own
+  const effH = compact ? Infinity : innerHeight / z;
+  root.classList.toggle('h1250', effH >= 1250 && effH !== Infinity); root.classList.toggle('h920', effH <= 920); root.classList.toggle('h860', effH <= 860); root.classList.toggle('h800', effH <= 800);
+  const effW = compact ? Infinity : innerWidth / z;
+  root.classList.toggle('w1500', effW <= 1500); root.classList.toggle('w1400', effW <= 1400); root.classList.toggle('w1300', effW <= 1300); root.classList.toggle('w1200', effW <= 1200);
   if (!applyTheme._resize) { applyTheme._resize = true; let t; addEventListener('resize', () => { clearTimeout(t); t = setTimeout(() => applyTheme(applyTheme._last), 150); }); }
   applyTheme._last = settings;
   root.style.colorScheme = theme === 'light' ? 'light' : 'dark';

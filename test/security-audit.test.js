@@ -379,7 +379,10 @@ test('#11 frames are refused in every mode (X-Frame-Options + frame-ancestors on
     const r = await c('GET', p);
     assert.equal(r.status, 200, p);
     assert.equal(r.headers['x-frame-options'], 'DENY', p);
-    assert.equal(r.headers['content-security-policy'], "frame-ancestors 'none'", p);
+    // the page's own <meta> policy is sent as the header too (QA p5), with frame-ancestors added
+    const csp = r.headers['content-security-policy'], meta = /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]+)"/.exec(r.body)?.[1];
+    assert.ok(csp.endsWith("; frame-ancestors 'none'") && meta && csp.startsWith(meta.replace(/;\s*$/, '')), `${p}: ${csp}`);
+    assert.match(csp, /default-src 'self'/, p);
   }
   assert.equal((await c('GET', '/api/info')).headers['x-frame-options'], 'DENY');
 }));

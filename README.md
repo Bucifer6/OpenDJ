@@ -45,8 +45,8 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 - Jog wheels with vinyl scratch, nudge, motor brake and backspin
 - Scrolling 3-band colour waveforms with beat grid, cue, loop and **phrase** markers, plus a full-track overview; beat grid editor with tap tempo
 - Mixer: trim, 3-band isolator EQ with kill, one-knob filter / **Color FX** (Filter, Space, Dub Echo, Noise, Crush, Jet), headphone cue, VU meters, crossfader curves, master limiter, auto-gain
-- 10 beat-synced effects per channel (Echo, Ping Pong, Reverb, Flanger, Phaser, Auto Filter, Trans, Bit Crusher, Distortion, Noise Sweep) and pad FX (brake, tape stop, backspin, echo out, filter sweep, rolls)
-- 8-slot sampler with a **16-step sequencer** locked to the master deck, microphone / aux input with **talkover**, MIDI clock out
+- 10 beat-synced effects per channel (Echo, Ping Pong, Reverb, Flanger, Phaser, Auto Filter, Trans, Bit Crusher, Distortion, Noise Sweep) with **post-fader tails** (echo and reverb keep ringing when you close the fader, for echo-outs; switchable to pre-fader in Settings → Audio) and pad FX (brake, tape stop, backspin, echo out, filter sweep, rolls)
+- 8-slot sampler with a bank of synthesised DJ FX (air horn single blast and "ba-ba-baaah" triplet, dub siren, laser, rewind, vinyl stop, riser, downlifter, impact, noise sweep, clap, kick), rendered with Web Audio and loudness-matched; per pad: choose a sound, load your own sample, pad volume, **sync to beat**. Plus a **16-step sequencer** locked to the master deck, microphone / aux input with **talkover**, MIDI clock out
 - Headphone cueing on a second sound card, on channels 3-4 of a 4-channel controller interface, or as split cue on one stereo jack
 
 ### AI stems
@@ -63,7 +63,7 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 <img src="docs/images/library.jpg" alt="Library browser with smart playlists, play history, playlist folders, colours, tags and ratings" width="100%">
 
 - Folders on any drive; **USB sticks and NAS shares** (SMB/NFS/AFP/SSHFS mounts) are detected and added with one click
-- **Media servers**: Plex, Jellyfin, Emby, Subsonic-compatible (Navidrome, Airsonic, Gonic…) and MediaMax (including its DJ analysis). Remote playlists are imported; tracks stream through a local proxy with seeking, or **download** them for offline use.
+- **Media servers**: Plex, Jellyfin, Emby, Subsonic-compatible (Navidrome, Airsonic, Gonic…) and MediaMax (including its DJ analysis). Each server's **playlists** show up live under it in the sidebar: open one, automix / shuffle & mix / smart mix it, import it as a local playlist or download it all. Tracks stream through a local proxy with seeking, or **download** them for offline use.
 - Automatic analysis: BPM + beat grid, key (Camelot), energy, loudness, silence trimming, **phrases** and automatic cues. New tracks are analysed **in the background** after a scan or upload, one at a time and paused while a deck loads (progress and a stop button in the library toolbar; *⋯ Library → Analyse all tracks* or right-click → *Analyse* to start it by hand; *Settings → Library* turns it off). Tracks with a locked BPM or an imported beat grid keep it; streaming-only media-server tracks are analysed when loaded or when you ask. Files that can't be decoded are flagged ⚠ in the list.
 - Playlists with folders, **smart playlists** (rules for BPM, key compatibility, genre, tags, colour, rating, energy, dates…), track **colours**, **My Tags**, ratings, **play history sessions** with setlist export (TXT/CSV/M3U)
 - Track info editor (single and multi-track), duplicate finder, missing-file relocate, library backup / restore
@@ -75,8 +75,9 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 <img src="docs/images/automix.png" alt="Automix dialog with smart ordering, energy curve and transition options" width="60%">
 
 - Non-stop mixing of any playlist or library view on decks 1 and 2
-- Beat-matched, **phrase-aligned** transitions: bass swap, crossfade, filter fade or echo out; afterwards the new track eases back to its original tempo over 8 bars (can be turned off), so tempo drift doesn't build up over a set
-- **Smart ordering** by key, tempo and an energy curve (harmonic, build up, peak, waves), optional Key Sync to fix key clashes, skip to next, queue tracks from the browser
+- Beat-matched, **phrase-aligned** transitions in 10 **mixing styles** that drive the real EQ, filter and FX: smooth blend (bass swap on the phrase), quick bass swap, crossfade, filter sweep, echo out, cut on the downbeat, backspin, vinyl brake, loop out (rolling loop) and reverb wash, or **Auto**, which picks one per transition from the BPM jump, energy change, key and genre. Length 4–32 bars, "vary styles", and a per-transition override in the **queue panel**, which also shows the next transition's style and when it starts. Afterwards the new track eases back to its original tempo over 8 bars (can be turned off)
+- **Smart mix**: orders a playlist, crate, media-server playlist, search result or the whole library by how well tracks go together (Camelot compatibility, BPM incl. half/double time, energy flow toward a set shape such as warm-up → peak → cool-down, genre/tags, no repeated artists or recently played tracks, intro phrases), or picks each next track live while playing; each transition is explained ("8A → 9A, 124 → 126 BPM, energy +1, same genre"). Presets plus harmonic / energy / variety sliders. **Shuffle & mix** plays a random order, still beat-matched
+- Loading a track on a deck while automix runs works like a pro DJ app: on the next deck it becomes the next track, on the playing deck automix asks (play next / stop and load), during a transition it is queued; optional Key Sync fixes key clashes
 
 ### Controllers, DVS & Ableton Link
 
@@ -160,6 +161,8 @@ Get the latest version from **[GitHub Releases](https://github.com/Bucifer6/Open
 
 Each release has a `SHA256SUMS.txt` so you can check a download wasn't tampered with (`sha256sum -c SHA256SUMS.txt --ignore-missing`). To report a security problem privately, see [SECURITY.md](SECURITY.md).
 
+**Updates:** OpenDJ checks GitHub for a newer release at startup and every 12 hours and offers it with *What's new*, **Update now** and **Later** (never while you're playing, recording or automixing). *Update now* downloads and verifies the installer (Windows, Linux AppImage) or disk image (macOS) against `SHA256SUMS.txt`, opens the matching package for `.deb` / `.rpm` / `.tar.gz` installs and the APK on Android, and shows the Docker commands on a self-hosted server. Turn the check off or run it by hand in *Settings → About*. Privacy: the only request goes to `api.github.com` with the User-Agent `OpenDJ/<version>` (made by the OpenDJ server on the desktop and web app, by the app itself on phones); nothing about you or your library is sent.
+
 Installers are built by GitHub Actions ([`build.yml`](.github/workflows/build.yml)) on Windows, macOS and Linux; pushing a tag like `v0.2.0` publishes a release, and every branch build has the installers under the run's *Artifacts*.
 
 ## Quick start
@@ -193,6 +196,17 @@ docker logs opendj   # prints the one-time setup code for choosing the password 
 ```
 
 Then open `http://<server-address>:7380`. Details in [Run as a web app](#run-as-a-web-app--on-a-nas).
+
+## Mobile apps
+
+OpenDJ also runs as a **standalone iOS and Android app** (phase 1, built with Capacitor from the same UI): no computer
+or server needed. Import music from the Files app / Android storage (it is copied into the app, so it plays offline),
+let it analyse in the background, mix on two decks (phones) or two/four decks (tablets), make playlists, record your
+mix, stream or download from Plex / Jellyfin / Emby / Subsonic, bring cues and playlists over with rekordbox XML, and
+export through the share sheet. Playback continues with the screen locked. Lighting, Ableton Link, DVS, MIDI
+controllers, CDJ USB export and broadcasting stay desktop-only for now. CI builds the Android APK/AAB and an iOS build
+(`.github/workflows/mobile.yml`); try the mobile mode in a browser with `npm run web` and `http://localhost:7380/?local=1`.
+Details, build steps and the CI secrets: [docs/MOBILE.md](docs/MOBILE.md).
 
 ## Supported formats
 
@@ -337,10 +351,10 @@ Tests:
 
 ```bash
 npm test            # unit tests: analysis, media-server clients against mock servers, rekordbox round trip, CDJ export, DVS, Link…
-npm run test:e2e    # end-to-end checks in headless Chromium (smoke, performance, controllers, lighting, video, web app, DVS, Link/lyrics, recording, stems)
+npm run test:e2e    # end-to-end checks in headless Chromium (smoke, performance, controllers, lighting, video, web app, DVS, Link/lyrics, recording, stems, analysis, sampler, automix)
 ```
 
-The smoke test covers scan → load → analyse → play → sync → FX → record → automix; `node scripts/e2e-performance.mjs` measures pitch for key shift and key lock and checks key sync, quantized cues, saved loops, slicer, instant doubles, stems, Color FX, mic/talkover and the sequencer.
+The smoke test covers scan → load → analyse → play → sync → FX → record → automix; `scripts/e2e-automix.mjs` checks every mixing style on the master output (dropouts, level, clipping, clicks), smart mix, loading tracks while automix runs and media-server playlists; `scripts/e2e-sampler.mjs [outDir]` renders the sampler bank, measures loudness / spectrum and writes WAVs plus spectrogram PNGs; `node scripts/e2e-performance.mjs` measures pitch for key shift and key lock and checks key sync, quantized cues, saved loops, slicer, instant doubles, stems, Color FX, mic/talkover and the sequencer. `scripts/e2e-update.mjs [shotsDir]` runs the update prompt against a fake GitHub API (`OPENDJ_UPDATE_URL`, tests only, loopback URLs only): newer / same / older versions, *What's new*, Later / Skip, deferral during playback, desktop (mocked IPC and real Electron), hosted and phone modes.
 
 README screenshots are reproducible: `node scripts/demo/make-demo-library.mjs` synthesises the fictional demo library and `node scripts/demo/screenshots.mjs` captures everything in `docs/images/`.
 
@@ -359,13 +373,16 @@ server/             Node backend (127.0.0.1 by default; password login when host
   stems.js recorder.js broadcast.js lyrics.js transcode.js
   cdj/ lighting/ link/   CDJ device-library export, lighting outputs, Ableton Link
   rekordbox.js m3u.js aiff.js
-public/             UI (vanilla ES modules, no build step)
+public/             UI (vanilla ES modules, no build step) - the same UI runs in the desktop app, the web app and the mobile app
+  js/local/           on-device backend for the mobile app (the API inside the page: IndexedDB + app file storage)
+  js/shared/          logic shared by server/ and js/local/ (library model, smart playlists, media-server clients…)
   js/audio/           engine (mixer graph, routing), deck, AudioWorklets, effects, sampler, sequencer, analysis
   js/ui/              deck, mixer, waveform, library, dialogs, controls, controllers panel
   js/midi/            MIDI learn/mapping engine, presets, Mixxx import, wizard
   js/stems/ js/dvs/ js/video/ js/lighting/ js/recording/ js/cdj/ js/link/ js/lyrics/
   js/automix.js
-scripts/            end-to-end tests (e2e-*.mjs) and README demo tooling (demo/)
+mobile/             Capacitor iOS / Android projects (see docs/MOBILE.md)
+scripts/            end-to-end tests (e2e-*.mjs), README demo tooling (demo/), mobile build helpers
 ```
 
 Library data lives in your OS app-data folder, or in `OPENDJ_DATA` if set (desktop app and web server alike). Web server (`npm run web`): `%APPDATA%\OpenDJ`, `~/Library/Application Support/OpenDJ`, `~/.config/opendj`. Desktop app: the `library` folder inside Electron's app-data folder (`%APPDATA%\OpenDJ\library`, `~/Library/Application Support/OpenDJ/library`, `~/.config/OpenDJ/library`).

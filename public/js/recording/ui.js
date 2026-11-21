@@ -1,10 +1,12 @@
 // Recording & broadcasting UI: topbar additions (size readout, settings ▾, LIVE button) and the
 // "Record & stream" panel with Record / Recordings / Broadcast tabs.
 import { el } from '../util.js';
+import { icon } from '../ui/icons.js';
 import { MixRecorder } from './recorder.js';
 import { Broadcaster } from './broadcaster.js';
 import { recApi, castApi } from './http.js';
 import { hms, liveDetail } from './status.js';
+import { platform, unavailable } from '../platform.js';
 
 const mb = (n) => (n >= 1073741824 ? `${(n / 1073741824).toFixed(2)} GB` : `${(n / 1048576).toFixed(1)} MB`);
 const fill = (node, ...kids) => node.replaceChildren(...kids.flat().filter((k) => k != null && k !== false));
@@ -31,21 +33,23 @@ export function setupRecording(app) {
 
   // ---- topbar ----
   const sizeEl = el('span', { class: 'rec-size', title: 'Recording size on disk' });
-  const moreBtn = el('button', { class: 'btn sm rec-more', title: 'Recording format, folder, recordings and live streaming', onclick: () => ctl.openPanel('record') }, '▾');
-  const liveBtn = el('button', { class: 'btn sm live-btn', title: 'Broadcast live (Icecast, Shoutcast, Twitch / YouTube via RTMP)', onclick: () => ctl.toggleBroadcast() }, '📡 LIVE');
+  const moreBtn = el('button', { class: 'btn sm rec-more', title: 'Recording format, folder, recordings and live streaming', onclick: () => ctl.openPanel('record'), 'aria-label': 'Recording options' }, icon('chevron-down'));
+  const liveBtn = el('button', { class: 'btn sm live-btn', title: 'Broadcast live (Icecast, Shoutcast, Twitch / YouTube via RTMP)', onclick: () => ctl.toggleBroadcast() }, icon('live'), el('span', { class: 'lbl' }, 'LIVE'));
+  const liveLbl = liveBtn.lastChild;
   const anchor = app.recTime || app.recBtn;
-  if (anchor?.parentNode) anchor.after(sizeEl, moreBtn, liveBtn);
+  if (anchor?.parentNode) anchor.after(sizeEl, moreBtn, ...(unavailable('broadcast') ? [] : [liveBtn])); // mobile: no live streaming
   if (app.recBtn) app.recBtn.title = 'Record your mix to disk (WAV / FLAC / MP3 / AAC / Opus). R = start / stop';
   let lastCastError = null;
   const topbarTick = setInterval(() => {
-    sizeEl.textContent = recorder.recording ? mb(recorder.bytes) : '';
     const outs = broadcaster.status?.outputs || [];
     liveBtn.classList.toggle('active', broadcaster.live);
     liveBtn.classList.toggle('warn', broadcaster.live && outs.some((o) => o.state !== 'live'));
     const listeners = outs.reduce((s, o) => s + (o.listeners || 0), 0);
     // ON AIR only once at least one output really is live; until then say what is happening
     const onAir = outs.some((o) => o.state === 'live');
-    liveBtn.textContent = !broadcaster.live ? '📡 LIVE' : onAir ? `📡 ON AIR${listeners ? ` · ${listeners}` : ''}` : outs.some((o) => o.state === 'reconnecting' || o.state === 'error') ? '📡 RECONNECTING…' : '📡 CONNECTING…';
+    const liveTxt = !broadcaster.live ? 'LIVE' : onAir ? `ON AIR${listeners ? ` · ${listeners}` : ''}` : outs.some((o) => o.state === 'reconnecting' || o.state === 'error') ? 'RECONNECTING…' : 'CONNECTING…';
+    if (liveLbl.textContent !== liveTxt) liveLbl.textContent = liveTxt;
+    if (sizeEl.textContent !== (recorder.recording ? mb(recorder.bytes) : '')) sizeEl.textContent = recorder.recording ? mb(recorder.bytes) : '';
     if (broadcaster.live && !onAir && outs[0]?.error && outs[0].error !== lastCastError) { lastCastError = outs[0].error; toast(`⚠ Broadcast: ${outs[0].error}`); }
     if (onAir) lastCastError = null;
   }, 500);
@@ -87,7 +91,8 @@ export function setupRecording(app) {
 
 function openPanel(app, ctl, tab = 'record') {
   const { recorder, broadcaster } = ctl;
-  const tabs = { record: 'Record', recordings: 'Recordings', broadcast: 'Broadcast' };
+  const tabs = unavailable('broadcast') ? { record: 'Record', recordings: 'Recordings' } : { record: 'Record', recordings: 'Recordings', broadcast: 'Broadcast' };
+  if (!tabs[tab]) tab = 'record';
   const tabBar = el('div', { class: 'tabs' });
   const pane = el('div', { class: 'tab-pane rec-panel' });
   let timer = null;
@@ -123,12 +128,13 @@ function openPanel(app, ctl, tab = 'record') {
       const meterL = el('div', { class: 'rec-meter-bar' }), meterR = el('div', { class: 'rec-meter-bar' });
       fill(pane, 
         el('div', { class: 'rec-grid' },
-          field('Format', fmtSel, info.ffmpeg ? null : 'FFmpeg was not found: only WAV is available.'),
+          field('Format', fmtSel, info.local ? 'AAC / Opus where this device can encode them.' : info.ffmpeg ? null : 'FFmpeg was not found: only WAV is available.'),
           brWrap,
-          field('Split into a new file every', el('div', { class: 'row' }, inp(cfg.splitMinutes || '', (v) => save({ splitMinutes: v }), { type: 'number', min: 0, max: 1440, placeholder: 'off', style: { width: '90px' } }), el('span', { class: 'hint' }, 'minutes (empty = one file)'))),
+          info.local ? null : field('Split into a new file every', el('div', { class: 'row' }, inp(cfg.splitMinutes || '', (v) => save({ splitMinutes: v }), { type: 'number', min: 0, max: 1440, placeholder: 'off', style: { width: '90px' } }), el('span', { class: 'hint' }, 'minutes (empty = one file)'))),
           field('Artist name (cue sheet / tags)', inp(cfg.artist, (v) => save({ artist: v }), { placeholder: 'DJ name' })),
         ),
-        field('Save recordings to', el('div', { class: 'row' }, folderIn, browse), info.folder === info.defaultFolder ? null : `Default: ${info.defaultFolder}`),
+        info.local ? el('p', { class: 'hint' }, 'Recordings are saved in the app. Share or save them from the Recordings tab (⬇).')
+          : field('Save recordings to', el('div', { class: 'row' }, folderIn, browse), info.folder === info.defaultFolder ? null : `Default: ${info.defaultFolder}`),
         el('div', { class: 'row rec-opts' },
           chk('Write a cue sheet + tracklist (.cue / .txt) from the tracks you play', cfg.cue, (v) => save({ cue: v })),
           field('Log a track after it is audible for', el('div', { class: 'row' }, inp(cfg.minTrackSeconds, (v) => save({ minTrackSeconds: v }), { type: 'number', min: 0, max: 120, style: { width: '70px' } }), el('span', { class: 'hint' }, 's')))),
@@ -161,7 +167,7 @@ function openPanel(app, ctl, tab = 'record') {
           el('div', { class: 'hint' }, [x.recording ? '● recording now' : hms(x.duration), mb(x.size), new Date(x.mtime).toLocaleString()].join(' · '),
             x.cue ? el('a', { href: recApi.fileUrl(x.cue, true), class: 'rec-link' }, ' .cue') : null, x.txt ? el('a', { href: recApi.fileUrl(x.txt), target: '_blank', class: 'rec-link' }, ' .txt') : null)),
         el('button', { class: 'btn sm', title: 'Play', disabled: x.recording, onclick: () => { audio.src = recApi.fileUrl(x.name); audio.play().catch(() => {}); } }, '▶'),
-        el('a', { class: 'btn sm', title: 'Download', href: recApi.fileUrl(x.name, true) }, '⬇'),
+        el('a', { class: 'btn sm rec-dl', title: platform.local ? 'Share / save to Files' : 'Download', href: recApi.fileUrl(x.name, true) }, platform.native ? '⇪' : '⬇'),
         window.opendjNative?.reveal ? el('button', { class: 'btn sm', title: 'Show in folder', onclick: () => window.opendjNative.reveal(x.path) }, '📂') : null,
         el('button', { class: 'btn sm danger', title: 'Delete (with its .cue / .txt)', disabled: x.recording, onclick: async () => {
           if (!(await (app.dialogs?.confirm(`Delete "${x.name}"? This cannot be undone.`) ?? confirm(`Delete "${x.name}"?`)))) return;
@@ -217,7 +223,7 @@ function openPanel(app, ctl, tab = 'record') {
       chk('', t.enabled !== false, set('enabled')),
       inp(t.name, set('name'), { style: { flex: 1 } }),
       el('span', { class: 'bc-type' }, t.type === 'rtmp' ? 'RTMP' : t.type === 'shoutcast' ? 'Shoutcast' : 'Icecast'),
-      el('button', { class: 'btn sm danger', onclick: remove, title: 'Remove' }, '✕'));
+      el('button', { class: 'btn sm danger', onclick: remove, title: 'Remove' }, icon('x')));
     let body;
     if (t.type === 'rtmp') {
       const urlIn = inp(t.rtmpUrl, set('rtmpUrl'), { placeholder: 'rtmp://…' });

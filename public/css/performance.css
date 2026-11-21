@@ -128,7 +128,7 @@
 :root.h860 .mic-box { flex-direction: row; flex-wrap: wrap; justify-content: center; }
 :root.h800 .deck-left .jog { max-width: 130px; }
 :root.h800 .fx-unit { padding: 3px; gap: 4px; }
-:root.h800 .fx-unit .knob-label { display: none; }
+:root.h800 .fx-unit .knob-label { font-size: 7.5px; margin-top: 2px; letter-spacing: .02em; }
 :root.h800 .fx-unit .fx-col select:nth-child(2) { display: none; }
 
 /* 4 decks: give the title room; extra-compact on short screens */
@@ -191,7 +191,7 @@
 :root.h920 body:not(.four-decks) .pad-mode { padding: 2px 0; }
 :root.h920 body:not(.four-decks) .fx-unit { padding: 3px; gap: 4px; }
 :root.h920 body:not(.four-decks) .fx-unit .fx-col { flex-direction: row; }
-:root.h920 body:not(.four-decks) .fx-unit .knob-label { display: none; }
+:root.h920 body:not(.four-decks) .fx-unit .knob-label { font-size: 7.5px; margin-top: 2px; letter-spacing: .02em; } /* compact labels: MIX / PARAM / P2 stay readable (QA m2) */
 :root.h920 body:not(.four-decks) .deck-stems { padding: 1px 0; gap: 2px; }
 .deck-mid { scrollbar-width: thin; }
 :root.h800 .deck-mid > .pad-modes { order: 1; }
@@ -221,3 +221,302 @@
 /* narrow decks: the four stem cells wrap two per line so each button + knob stays readable */
 :root.w1300 .deck-stems .stems-row:first-child { flex-wrap: wrap; row-gap: 2px; }
 :root.w1300 .deck-stems .stem-cell { flex: 1 1 45%; }
+
+/* ---- knob value rings sit 4 px outside the cap: keep the labels clear of them ---- */
+.knob-wrap > .knob + .knob-label { margin-top: 3px; margin-bottom: 1px; line-height: 1.1; }
+
+/* =====================================================================================================
+   Second pass: calm, spacious layout. Waveforms are the hero; decks show only what matters, the rest lives
+   in switchable panels (.panel-tabs / .deck-panel). Layout modes: body.layout-classic | layout-performance |
+   layout-waveform, and .four-decks.
+   ===================================================================================================== */
+:root { --wave-h: 84px; }
+:root.h920 { --wave-h: 70px; }
+:root.h860 { --wave-h: 56px; }
+:root.h800 { --wave-h: 50px; }
+.four-decks { --wave-h: 44px; }
+.wave-row { transition: none; }
+
+/* deck colour carried through: header tint, waveform label, platter ring, strip bar, panel tab */
+.deck { background: linear-gradient(180deg, color-mix(in srgb, var(--deck-color) 7%, var(--panel-2)), var(--panel) 34%); }
+.deck-header { padding-bottom: 2px; }
+.deck-cover { width: 44px; height: 44px; border-radius: var(--radius); }
+.deck-header { grid-template-columns: 26px 44px minmax(0, 1fr) auto auto; }
+.deck-title { font-size: 16px; }
+.wave-row { position: relative; }
+.wave-label { color: var(--deck-color) !important; background: color-mix(in srgb, var(--deck-color) 10%, var(--deep)); }
+
+/* compact toggles row: KEY LOCK · QUANT · SLIP · REV · VINYL as small chips */
+.deck-toggles { gap: 3px; }
+.deck-toggles .btn.sm { padding-top: 2px; padding-bottom: 2px; font-size: 9.5px; letter-spacing: .06em; min-height: 22px; border-radius: 11px; }
+.deck-toggles .btn:not(.active) { background: transparent; box-shadow: none; color: var(--text-3); border-color: var(--line); }
+.deck-toggles .btn:not(.active):hover { color: var(--text); border-color: var(--line-2); }
+
+/* panel switcher */
+.panel-tabs { display: flex; gap: 2px; padding: 2px; background: var(--inset); border: 1px solid var(--line); border-radius: var(--radius); flex: none; }
+.panel-tab { flex: 1; min-width: 0; background: transparent; border: 0; border-radius: var(--r-sm); padding: 3px 0; font-size: var(--fs-2xs); font-weight: 750; letter-spacing: .07em; text-transform: uppercase; color: var(--text-3); cursor: pointer; transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease); white-space: nowrap; overflow: hidden; }
+.panel-tab:hover { color: var(--text); }
+.panel-tab.active { background: var(--panel-3); color: var(--text); box-shadow: inset 0 -2px 0 var(--deck-color), 0 1px 2px rgba(0,0,0,.35); }
+.panel-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.deck-panels { display: flex; flex-direction: column; gap: 5px; min-height: 0; }
+.deck-panel { display: none; flex-direction: column; gap: 5px; min-width: 0; }
+.deck-panel.shown { display: flex; animation: panel-in 120ms var(--ease); }
+@keyframes panel-in { from { opacity: 0; } }
+.deck-panel[data-panel="fx"] .fx-unit { flex-wrap: wrap; }
+.deck-panel[data-panel="key"] .key-row { padding: 4px 0; }
+html.odj-local .panel-tab[data-panel="stems"] { display: none; }
+@media (prefers-reduced-motion: reduce) { .deck-panel.shown { animation: none; } }
+
+/* bigger, calmer pads */
+.pads { gap: 5px; }
+.pad { height: 38px; }
+:root.h920 body:not(.four-decks) .pad { height: 30px; }
+
+/* empty / loading / error deck states */
+.overview-wrap { position: relative; }
+.deck.empty .overview-wrap { border-style: dashed; border-color: var(--line-2); background: color-mix(in srgb, var(--deck-color) 4%, var(--wave-bg)); }
+.deck.empty .overview-wrap::after { content: 'Drag a track here from the library — or select one and press Shift + ← / →'; position: absolute; inset: 0; display: grid; place-items: center; font-size: var(--fs-sm); color: var(--text-3); pointer-events: none; }
+.deck.empty .deck-title { color: var(--text-3); font-weight: 500; }
+.deck.empty .deck-cover { background: var(--inset) no-repeat center / 20px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236a7584' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Ccircle cx='12' cy='12' r='2'/%3E%3C/svg%3E"); box-shadow: inset 0 0 0 1px var(--line-2); }
+.deck.empty .deck-bpm { color: var(--text-3); }
+.deck.loading .overview-wrap::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--deck-color) 30%, transparent), transparent); width: 40%; animation: shimmer 1.1s linear infinite; }
+@keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+.deck.failed .deck-title { color: var(--red); }
+.deck.failed .overview-wrap { border-color: color-mix(in srgb, var(--red) 50%, var(--line)); }
+@media (prefers-reduced-motion: reduce) { .deck.loading .overview-wrap::after { animation: none; opacity: .5; } }
+
+/* mixer: compact, prominent crossfader */
+.xfader-row { padding: 6px 6px 2px; border-top: 1px solid var(--line); }
+.crossfader { --cap: 26px; }
+.crossfader .fader-track { height: 34px; }
+.crossfader .fader-slot { height: 6px; margin-top: -3px; }
+.crossfader .fader-thumb { top: 1px; bottom: 1px; }
+.xf-l { font-size: 12px; }
+
+/* ---------------- layout modes (2 decks, not on phones) ---------------- */
+@media (min-width: 700px) and (min-height: 561px) {
+  /* Performance: no platter, CUE/PLAY stacked, loops + pads always visible and larger */
+  body.layout-performance:not(.four-decks) .deck-left { justify-content: center; }
+  body.layout-performance:not(.four-decks) .jog { display: none; }
+  body.layout-performance:not(.four-decks) .transport { grid-template-columns: 1fr; }
+  body.layout-performance:not(.four-decks) .deck-body { grid-template-columns: 74px minmax(0, 1fr) 62px; }
+  body.layout-performance:not(.four-decks) .deck-panel[data-panel="loops"],
+  body.layout-performance:not(.four-decks) .deck-panel[data-panel="cues"] { display: flex; }
+  body.layout-performance:not(.four-decks) .deck-panel[data-panel="loops"] { order: -1; }
+  body.layout-performance:not(.four-decks) .panel-tab[data-panel="cues"],
+  body.layout-performance:not(.four-decks) .panel-tab[data-panel="loops"] { display: none; }
+  body.layout-performance:not(.four-decks) .pad { height: 52px; }
+  :root.h920 body.layout-performance:not(.four-decks) .pads { grid-template-columns: repeat(4, 1fr); }
+  :root.h920 body.layout-performance:not(.four-decks) .pad { height: 40px; }
+  :root.h800 body.layout-performance:not(.four-decks) .pad { height: 32px; }
+  body.layout-performance:not(.four-decks) .pad-label { font-size: 11px; }
+  body.layout-performance:not(.four-decks) .btn.big { height: 56px; max-width: 56px; }
+
+  /* Waveform focus: tall waveforms, compact decks (no platter, pads in one row) */
+  body.layout-waveform:not(.four-decks) { --wave-h: 150px; }
+  :root.h920 body.layout-waveform:not(.four-decks) { --wave-h: 118px; }
+  :root.h800 body.layout-waveform:not(.four-decks) { --wave-h: 92px; }
+  body.layout-waveform:not(.four-decks) .jog { display: none; }
+  body.layout-waveform:not(.four-decks) .deck-left { justify-content: center; }
+  body.layout-waveform:not(.four-decks) .transport { grid-template-columns: 1fr; }
+  body.layout-waveform:not(.four-decks) .deck-body { grid-template-columns: 70px minmax(0, 1fr) 54px; }
+  body.layout-waveform:not(.four-decks) .pads { grid-template-columns: repeat(8, 1fr); }
+  body.layout-waveform:not(.four-decks) .pad { height: 30px; }
+  body.layout-waveform:not(.four-decks) .phase-meter { display: none; }
+  body.layout-waveform:not(.four-decks) .overview-wrap { height: 26px; }
+}
+
+/* 4 decks: the panel switcher is compact */
+.four-decks .panel-tab { padding: 1px 0; font-size: 8px; }
+.four-decks .deck-toggles { display: none; }
+
+/* touch: 44 px targets for the new controls */
+@media (max-width: 699px), (max-height: 560px) {
+  .panel-tab { min-height: 44px; font-size: 11px; }
+  .deck-toggles .btn.sm { min-height: 44px; font-size: 11px; border-radius: var(--radius); }
+}
+
+/* ---------------- library: chips, suggestions, artwork rows, collapse ---------------- */
+.lib-tools { gap: 8px; padding: 8px 10px; }
+.lib-search { min-height: 30px; font-size: 12.5px; }
+.lib-chips { display: flex; align-items: center; gap: 6px; padding: 0 10px 6px; min-height: 52px; flex-wrap: nowrap; overflow: hidden; background: var(--panel); border-bottom: 1px solid var(--line); }
+.chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; border-radius: 12px; border: 1px solid var(--line-2); background: transparent; color: var(--text-2); font-size: var(--fs-sm); font-weight: 600; cursor: pointer; white-space: nowrap; flex: none; transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+.chip .ico { width: 13px; height: 13px; }
+.chip:hover { color: var(--text); border-color: color-mix(in srgb, var(--line-2) 60%, var(--text) 25%); }
+.chip.on { background: color-mix(in srgb, var(--accent) 18%, transparent); border-color: color-mix(in srgb, var(--accent) 70%, transparent); color: var(--text); }
+.chip.on .ico { color: var(--accent); }
+.chip-sel { padding: 0 8px; appearance: auto; background: var(--panel); }
+.chip-spacer { flex: 1; }
+.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lib-suggest { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; margin-left: 6px; padding-left: 10px; border-left: 1px solid var(--line); overflow: hidden; }
+.sg-title { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; max-width: 220px; font-size: var(--fs-sm); color: var(--text-3); white-space: nowrap; overflow: hidden; }
+.sg-title b { color: var(--text-2); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.sg-title .ico { color: var(--accent); width: 14px; height: 14px; flex: none; }
+.sg-cards { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; padding: 2px 0; }
+.sg-card { display: grid; grid-template-columns: 36px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 8px; align-items: center; flex: 0 0 200px; height: 44px; padding: 4px 8px 4px 4px; border-radius: var(--radius); border: 1px solid var(--line); background: linear-gradient(180deg, var(--panel-2), color-mix(in srgb, var(--panel-2) 60%, var(--panel))); color: var(--text); cursor: pointer; text-align: left; transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease), transform var(--dur) var(--ease); }
+.sg-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.sg-card:active { transform: none; }
+.sg-art { grid-row: 1 / 3; width: 36px; height: 36px; border-radius: var(--r-sm); background: var(--panel-3) center / cover; box-shadow: 0 0 0 1px rgba(255,255,255,.05); }
+.sg-text { display: flex; flex-direction: column; min-width: 0; }
+.sg-t { font-weight: 600; font-size: var(--fs-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sg-a { font-size: var(--fs-xs); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sg-meta { display: flex; gap: 8px; font: 600 10px var(--mono); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.sg-key.match::after { content: ' ✓'; color: var(--green); }
+.sg-empty { color: var(--text-3); font-size: var(--fs-sm); padding: 0 4px; white-space: nowrap; }
+.library.rows-art .lr { height: 44px; }
+.library.rows-art .lr .art { width: 30px; height: 30px; margin: 7px 0; }
+.library.rows-art .lr .c-title { font-size: 13px; }
+.lib-collapse-btn { margin-left: auto; flex: none; }
+:root.lib-collapsed { --browser-h: 46px !important; }
+:root.lib-collapsed .lib-chips, :root.lib-collapsed .lib-suggest, :root.lib-collapsed .lib-header, :root.lib-collapsed .lib-scroll, :root.lib-collapsed .lib-tree { visibility: hidden; }
+:root.lib-anim #app { transition: grid-template-rows 180ms var(--ease); }
+@media (prefers-reduced-motion: reduce) { :root.lib-anim #app { transition: none; } }
+@media (max-width: 699px), (max-height: 560px) {
+  .chip { min-height: 40px; font-size: 12px; }
+  .sg-card { min-height: 52px; }
+  :root.lib-collapsed .library { height: auto; }
+}
+
+/* deck: the cues panel fills the free height with bigger pads (capped so they stay pad-shaped); not on phones */
+@media (min-width: 700px) and (min-height: 561px) {
+  .deck-mid > .deck-panels { flex: 1 1 auto; }
+  body:not(.four-decks) .deck-panel[data-panel="cues"].shown { flex: 1 1 auto; min-height: 0; }
+  body:not(.four-decks) .deck-panel[data-panel="cues"] .pads { flex: 1 1 auto; grid-auto-rows: minmax(30px, 1fr); max-height: 132px; }
+  body:not(.four-decks) .deck-panel[data-panel="cues"] .pad { height: auto; min-height: 30px; }
+  :root.h920 body:not(.four-decks) .deck-panel[data-panel="cues"] .pads { grid-auto-rows: minmax(24px, 1fr); max-height: 64px; }
+  :root.h920 body:not(.four-decks) .deck-panel[data-panel="cues"] .pad { min-height: 24px; }
+}
+/* waveform focus on laptop screens: keep room for the mixer */
+@media (min-width: 700px) and (min-height: 561px) {
+  :root.h800 body.layout-waveform:not(.four-decks) { --wave-h: 74px; --browser-h: clamp(140px, calc(24vh / var(--ui-zoom, 1)), 260px); }
+}
+
+/* zoom buttons: top-left of the waveforms (the lyrics buttons sit bottom-right of each row) */
+.wave-zoom { right: auto; left: 30px; top: 3px; }
+
+/* ---------------- mixer adapts to its own height (layout modes change it, not just the window) ---------------- */
+/* .mx-short / .mx-tiny are set from the mixer's own height by a ResizeObserver (mixer-ui.js). A CSS size container
+   query did the same but re-ran style for the mixer on every layout (20+ ms/s of style recalcs while playing). */
+.strip .fader-v .fader-track { min-height: 30px; }
+.mixer.mx-short .strip { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; align-content: start; row-gap: 2px; grid-template-rows: auto auto auto auto auto auto minmax(30px, 1fr) auto; }
+.mixer.mx-short .strip > .strip-num, .mixer.mx-short .strip > .stem-knobs, .mixer.mx-short .strip > .btn-pfl, .mixer.mx-short .strip > .fader-row, .mixer.mx-short .strip > .xf-assign { grid-column: span 2; }
+.mixer.mx-short .strip > .fader-row { height: 100%; min-height: 30px; }
+.mixer.mx-short .strip .knob-label { font-size: 7.5px; }
+.mixer.mx-short .strip .knob-sm { width: 20px; height: 20px; }
+.mixer.mx-short .strip .knob-md { width: 24px; height: 24px; }
+body:not(.four-decks) .mixer.mx-short .mixer-master { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; align-content: start; gap: 3px; }
+body:not(.four-decks) .mixer.mx-short .mixer-master > .strip-num, body:not(.four-decks) .mixer.mx-short .mixer-master > .master-vu, body:not(.four-decks) .mixer.mx-short .mixer-master > .mic-box { grid-column: span 2; }
+.mixer.mx-short .mixer-master .knob-md { width: 24px; height: 24px; }
+.mixer.mx-short .master-vu { height: 44px; min-height: 30px; }
+.mixer.mx-short .mic-box { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 3px; }
+.mixer.mx-tiny .strip { row-gap: 0; padding-top: 2px; }
+.mixer.mx-tiny .strip .knob-sm, .mixer.mx-tiny .strip .knob-md { width: 18px; height: 18px; }
+.mixer.mx-tiny .strip .knob-label { font-size: 7px; margin-top: 2px; }
+.mixer.mx-tiny .strip .stem-knobs .knob-label { display: none; }
+.mixer.mx-tiny .btn-pfl { padding: 1px 0; font-size: 9px; }
+.mixer.mx-tiny .mixer-master .knob-md, .mixer.mx-tiny .mixer-master .knob-sm { width: 18px; height: 18px; }
+.mixer.mx-tiny .mixer-master .knob-label { font-size: 7px; }
+.mixer.mx-tiny .master-vu { height: 28px; }
+.mixer.mx-tiny .xfader-row { padding-top: 3px; }
+.mixer.mx-tiny .crossfader .fader-track { height: 28px; }
+:root body.four-decks .mixer.mx-short .mixer-master { gap: 2px; }
+:root body.four-decks .mixer.mx-short .mixer-master .knob-md, :root body.four-decks .mixer.mx-short .mixer-master .knob-sm { width: 20px; height: 20px; }
+:root body.four-decks .mixer.mx-short .mixer-master > .master-vu { height: 28px; min-height: 20px; }
+:root body.four-decks .mixer.mx-short .mic-box { gap: 2px; }
+:root body.four-decks .mixer.mx-400 .mixer-master .knob-label { display: none; }
+/* waveform focus on short windows: the tempo column fits (double-click the fader also resets) */
+@media (min-width: 700px) and (min-height: 561px) {
+  body.layout-waveform:not(.four-decks) .tempo-fader { min-height: 36px; }
+  body.layout-waveform:not(.four-decks) .tempo-fader .fader-track { min-height: 36px; }
+  body.layout-waveform:not(.four-decks) .deck-tempo { gap: 2px; }
+}
+
+/* top bar on phones: secondary buttons collapse into the "More" menu (app.topbarMore) */
+.topbar .tb-more { display: none; }
+@media (max-width: 699px) {
+  .topbar .tb-more { display: inline-flex; }
+  .topbar .live-btn, .topbar .link-wrap, .topbar .dvs-btn, .topbar .video-btn, .topbar .light-btn, .topbar .rec-more, .topbar .signout-btn { display: none !important; }
+  .ctx-menu.tb-menu .ctx-item { min-height: 44px; }
+  .ctx-menu.tb-menu .ico { width: 16px; height: 16px; }
+}
+
+/* ---- the window width is a hard limit: the top bar never pushes the decks off the right edge ----
+   (#app's single grid column used to size to the top bar's min-content, so at ≤ 1300 effective px — 1280×720, or
+   150 % on 1366–1920 px screens — the whole deck row grew past the window and the right deck was cut off) */
+#app { grid-template-columns: minmax(0, 1fr); }
+.topbar { min-width: 0; overflow: hidden; }
+.topbar > .tb-group { flex-shrink: 0; }
+:root .topbar > .am-info { min-width: 0; flex: 0 1 auto; } /* only the automix info text gives way (ellipsis): buttons never overlap */
+/* ≤ 1400 effective px: LIVE / LINK / DVS / VIDEO / LIGHTS / recording options / Sign out fold into "More" */
+:root.w1400:not(.compact) .topbar .tb-more { display: inline-flex; }
+:root.w1400:not(.compact) .topbar :is(.live-btn, .link-wrap, .dvs-btn, .video-btn, .light-btn, .rec-more, .signout-btn) { display: none !important; }
+/* hosted mode's Sign out needs ~90 px more: there everything folds from 1500 px down */
+:root.w1500:not(.compact) .topbar:has(.signout-btn:not([hidden])) .tb-more { display: inline-flex; }
+:root.w1500:not(.compact) .topbar:has(.signout-btn:not([hidden])) :is(.live-btn, .link-wrap, .dvs-btn, .video-btn, .light-btn, .rec-more, .signout-btn) { display: none !important; }
+/* narrow effective width: icon-only secondary buttons (their titles still name them), tighter spacing */
+:root.w1300 .topbar { gap: 5px; padding: 0 8px; }
+:root.w1300 .topbar .logo { margin-right: 2px; }
+:root.w1300 .topbar .btn.sm { padding: 0 7px; }
+:root.w1300 .topbar .seg-btn { padding: 0 7px; }
+:root.w1300 .topbar .tb-spacer ~ .btn .ico + .lbl, :root.w1300 .topbar .tb-spacer ~ * .btn .ico + .lbl { display: none; }
+:root.w1200 .topbar .logo-word { display: none; }
+
+/* ---- Performance layout: loops + pads + the chosen panel (FX / stems / key) always fit without scrolling ----
+   The pads share the free height (pad-shaped at most, 24 px at least) instead of fixed 52 / 40 / 32 px rows, so
+   opening the FX, stems or key panel no longer pushes the bottom row out of the deck. The chosen panel takes the
+   loop rows' place (loops + pads + a third panel did not fit at 1600x960); the LOOPS tab switches back to them. */
+@media (min-width: 700px) and (min-height: 561px) {
+  :root body.layout-performance:not(.four-decks) .deck-panel[data-panel="cues"] { flex: 1 1 auto; min-height: auto; }
+  :root body.layout-performance:not(.four-decks) .deck-panel[data-panel="cues"] .pads { flex: 1 1 auto; min-height: auto; grid-auto-rows: minmax(24px, 1fr); max-height: 112px; }
+  :root body.layout-performance:not(.four-decks) .deck-panel[data-panel="cues"] .pad { height: auto; min-height: 24px; }
+  :root.h800 body.layout-performance:not(.four-decks) .deck-panel[data-panel="cues"] .pads { gap: 3px; grid-auto-rows: minmax(18px, 1fr); }
+  :root.h800 body.layout-performance:not(.four-decks) .deck-panel[data-panel="cues"] .pad { min-height: 18px; }
+  :root.h800 body.layout-performance:not(.four-decks) .deck-toggles .btn.sm { min-height: 18px; padding-top: 1px; padding-bottom: 1px; }
+  :root.h800 body.layout-performance:not(.four-decks) .deck-mid { gap: 3px; }
+  :root.h800 body.layout-performance:not(.four-decks) .sync-row .btn { padding-top: 2px; padding-bottom: 2px; }
+  :root body.layout-performance:not(.four-decks) .deck:is([data-panel="fx"], [data-panel="stems"], [data-panel="key"]) .deck-panel[data-panel="loops"] { display: none; }
+  :root body.layout-performance:not(.four-decks) .panel-tab[data-panel="loops"] { display: block; }
+}
+/* 4 decks and Performance on narrow windows: the four stem cells stay on one line and the macro row does not wrap
+   (two lines of cells plus the macro row did not fit the short deck) */
+:root :is(.four-decks, body.layout-performance) .deck-stems .stems-row:first-child { flex-wrap: nowrap; gap: 2px; padding-right: 4px; }
+:root :is(.four-decks, body.layout-performance) .deck-stems .stem-cell { flex: 1 1 0; gap: 1px; }
+:root :is(.four-decks, body.layout-performance) .deck-stems .stem-btn { padding-left: 1px; padding-right: 1px; text-overflow: clip; }
+:root :is(.four-decks, body.layout-performance) .deck-stems .stems-row:last-child { flex-wrap: nowrap; }
+:root :is(.four-decks, body.layout-performance) .deck-stems .stems-row:last-child > .btn { min-width: 0; overflow: hidden; text-overflow: clip; padding-left: 2px; padding-right: 2px; }
+:root :is(.four-decks, body.layout-performance) .deck-stems .stems-prep { flex: 0 1 auto; }
+/* the 7 pad-mode buttons share the row evenly and clip their label rather than widen the deck (1100 px windows) */
+.pad-modes { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.pad-mode { min-width: 0; overflow: hidden; white-space: nowrap; }
+:root.w1200 .pad-mode { letter-spacing: 0; font-size: 7.5px; }
+/* waveform focus keeps its single row of 8 pads on narrow windows too (two rows overflowed the short deck) */
+@media (min-width: 700px) and (min-height: 561px) { :root.w1200.h920 body.layout-waveform:not(.four-decks) .pads { grid-template-columns: repeat(8, minmax(0, 1fr)); } }
+
+/* automix queue rows: title + style / reason on the left, the two action buttons on the right (QA m7) */
+.am-q-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.am-q-title { grid-column: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.am-q-meta { grid-column: 1; display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.am-q-acts { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 4px; }
+.btn.icon-only { padding-left: 6px; padding-right: 6px; }
+/* menus: a fixed slot for the check icon of toggle / radio items */
+.ctx-check { display: inline-flex; width: 16px; margin-right: 6px; vertical-align: -2px; }
+.ctx-check .ico { width: 13px; height: 13px; }
+.lyr-kara .ico, .lyr-edit .ico { width: 13px; height: 13px; }
+.deck-load-note { font: 600 10.5px var(--mono); color: var(--accent); white-space: nowrap; }
+.deck-load-note:empty { display: none; }
+/* deck labels with a short form: shown only when the full word would be clipped (deck-ui fitLabels, QA p1) */
+.lbl-dual .ls { display: none; }
+.deck.short-labels .lbl-dual .lf { display: none; }
+.deck.short-labels .lbl-dual .ls { display: inline; }
+
+/* ---- tall windows (>= 1250 effective px, e.g. 2560x1440 at 100 %): the extra height goes to the waveforms,
+   the library and bigger pads / platter instead of leaving half of each deck empty (QA p2) ---- */
+:root.h1250 { --wave-h: 128px; --browser-h: clamp(300px, calc(33vh / var(--ui-zoom, 1)), 520px); }
+:root.h1250 body.layout-waveform:not(.four-decks) { --wave-h: 210px; }
+:root.h1250 .four-decks { --wave-h: 72px; }
+:root.h1250 body:not(.four-decks) .deck-panel[data-panel="cues"] .pads { max-height: 200px; grid-auto-rows: minmax(44px, 1fr); }
+:root.h1250 .deck-mid .btn.sm { min-height: 30px; }
+:root.h1250 .sync-row .btn { min-height: 38px; }
+:root.h1250 body:not(.four-decks) .deck-body { grid-template-columns: minmax(190px, 0.9fr) minmax(0, 1.6fr) 62px; }
+:root.h1250 .jog { max-width: 300px; }
+:root.h1250 .btn.big { height: 60px; max-width: 72px; }

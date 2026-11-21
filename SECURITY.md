@@ -32,6 +32,16 @@ and you are credited unless you ask not to be.
 - Media sources (Plex, Jellyfin, Subsonic…) and lighting outputs (Art-Net, WLED, Hue) connect to whatever
   address you enter, LAN and local addresses included, because that is what they are for.
 
+- **Update checks** (Settings → About, on by default) contact `api.github.com` only: a GET of the latest
+  release with the User-Agent `OpenDJ/<version>`, no cookies and no user data, a timeout and a 1 MB response cap.
+  On the desktop and web app the OpenDJ server makes the request (the page keeps `connect-src 'self'` for it);
+  in hosted mode only signed-in users can trigger it. Release notes are rendered as a small Markdown subset built
+  from DOM nodes (no HTML, `http(s)` links only). The desktop app's *Update now* runs entirely in the main process:
+  it only downloads `https://github.com/Bucifer6/OpenDJ/releases/download/...` files with allow-listed names
+  (redirects only to GitHub's release storage hosts), verifies each against the release's `SHA256SUMS.txt`
+  (a missing entry or mismatch is refused), re-checks the hash before starting an installer, and only after the
+  user clicks *Restart to update*. The builds are not code-signed, so the checksum list on the release is the trust anchor.
+
 ## Verifying downloads
 
 Each release includes `SHA256SUMS.txt`. Check a download before running it:

@@ -1,5 +1,6 @@
 // Video panel: live preview of the video mix + controls (transitions, per-deck FX, overlay, YouTube, outputs).
 // setupVideo(app) → { openPanel, openOutputWindow, toggleMixer }
+import { icon } from '../ui/icons.js';
 import { el, uiZoom } from '../util.js';
 import { VideoMixer, RESOLUTIONS } from './mixer.js';
 import { TRANSITIONS, FX, parseYouTube } from './video-core.js';
@@ -68,7 +69,7 @@ export function setupVideo(app) {
     const popBtn = el('button', { class: 'btn xs', title: 'Pop-out output window (projector / second screen)', onclick: () => openOutputWindow() }, '⧉ OUT');
     const head = el('div', { class: 'vid-head' },
       el('b', {}, 'VIDEO'), fpsEl, el('span', { class: 'tb-spacer' }), popBtn, dockBtn, colBtn,
-      el('button', { class: 'btn xs', title: 'Close', 'aria-label': 'Close video panel', onclick: closePanel }, '✕'));
+      el('button', { class: 'btn xs', title: 'Close', 'aria-label': 'Close video panel', onclick: closePanel }, icon('x')));
     const tabsDef = { mix: ['Mix', mixTab], fx: ['FX', fxTab], overlay: ['Overlay', overlayTab], youtube: ['YouTube', ytTab], output: ['Output', outputTab] };
     const tabBar = el('div', { class: 'tabs' });
     const pane = el('div', { class: 'vid-pane' });

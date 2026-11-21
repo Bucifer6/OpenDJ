@@ -1,7 +1,9 @@
 // Library & prep dialogs: track info editor, smart playlist builder, importers, relocate, duplicates, backup/restore.
 import { el } from '../util.js';
+import { icon } from './icons.js';
 import { openCdjExport } from '../cdj/export-dialog.js';
 import { api } from '../api.js';
+import { platform, unavailable } from '../platform.js';
 
 // rekordbox's 8 track colour labels (tracks store the hex value).
 export const TRACK_COLORS = [
@@ -189,7 +191,7 @@ export class LibraryDialogs {
         fieldSel.addEventListener('change', () => { const nf = F.get(fieldSel.value); r.field = nf.id; if (nf.type !== f.type) { r.value = ''; delete r.value2; } render(); preview(); });
         opSel.addEventListener('change', () => { r.op = opSel.value; render(); preview(); });
         return el('div', { class: 'sm-rule' }, fieldSel, opSel, valueCtrl(r),
-          el('button', { class: 'btn xs', title: 'Remove rule', type: 'button', onclick: () => { smart.rules.splice(i, 1); render(); preview(); } }, '✕'));
+          el('button', { class: 'btn xs', title: 'Remove rule', type: 'button', onclick: () => { smart.rules.splice(i, 1); render(); preview(); } }, icon('x')));
       }));
     };
     matchSel.addEventListener('change', preview); limitIn.addEventListener('input', preview);
@@ -221,17 +223,18 @@ export class LibraryDialogs {
   // ---------------------------------------------------------------- importers
   importInfo(kind) {
     return {
-      rekordbox: { title: 'Import rekordbox XML', label: 'rekordbox.xml', accept: '.xml', ext: ['xml'], hint: 'In rekordbox choose File → Export Collection in xml format. Imports tracks, hot cues, memory cues, beat grids, colours and playlists.', run: (b) => api.importRekordbox(b), content: 'xml' },
+      rekordbox: { title: 'Import rekordbox XML', label: 'rekordbox.xml', accept: '.xml', ext: ['xml'], hint: platform.local ? 'In rekordbox choose File → Export Collection in xml format, and import the music into OpenDJ first. Hot cues, memory cues, beat grids, colours and playlists are applied to the tracks it matches (by file name, then artist and title).' : 'In rekordbox choose File → Export Collection in xml format. Imports tracks, hot cues, memory cues, beat grids, colours and playlists.', run: (b) => api.importRekordbox(b), content: 'xml' },
       traktor: { title: 'Import Traktor collection', label: 'collection.nml', accept: '.nml', ext: ['nml'], hint: 'Usually in Documents/Native Instruments/Traktor <version>/collection.nml. Imports BPM, key, rating, hot cues, loops, beat grid and playlists.', run: (b) => api.importTraktor(b), content: 'xml' },
       virtualdj: { title: 'Import VirtualDJ database', label: 'database.xml', accept: '.xml', ext: ['xml'], hint: 'Usually in Documents/VirtualDJ/database.xml (external drives have their own VirtualDJ/database.xml). Imports BPM, key, cues and beat grid.', run: (b) => api.importVirtualDJ(b), content: 'xml' },
-      m3u: { title: 'Import M3U playlist', label: '.m3u / .m3u8 playlist', accept: '.m3u,.m3u8', ext: ['m3u', 'm3u8'], hint: 'Tracks that exist on disk are added to the library and to a new playlist.', run: (b) => api.importM3U(b), content: 'content' },
+      m3u: { title: 'Import M3U playlist', label: '.m3u / .m3u8 playlist', accept: '.m3u,.m3u8', ext: ['m3u', 'm3u8'], hint: platform.local ? 'Entries are matched to music you already imported into OpenDJ (by file name, then artist and title) and saved as a new playlist.' : 'Tracks that exist on disk are added to the library and to a new playlist.', run: (b) => api.importM3U(b), content: 'content' },
       serato: { title: 'Import Serato crates', label: '_Serato_ folder', folder: true, hint: 'Pick the _Serato_ folder (in your Music folder, or at the root of an external drive). Imports crates only: every crate becomes a playlist and subcrates become folders. Serato cues, beat grids and BPMs (stored in the files) are not imported; OpenDJ analyses the tracks itself.', run: (b) => api.importSerato(b) },
     }[kind];
   }
 
   async importFrom(kind) {
     const info = this.importInfo(kind);
-    const pathIn = el('input', { class: 'inp', placeholder: `Path to ${info.label}` });
+    if (platform.local && (info.folder || unavailable('otherImports') && !['rekordbox', 'm3u'].includes(kind))) return this.toast(unavailable('otherImports'));
+    const pathIn = el('input', { class: 'inp', placeholder: `Path to ${info.label}`, ...(platform.local ? { readonly: true, placeholder: `Choose your ${info.label}` } : {}) });
     let fileContent = null;
     const fileIn = el('input', { type: 'file', accept: info.accept, style: { display: 'none' } });
     fileIn.addEventListener('change', async () => {
@@ -244,6 +247,11 @@ export class LibraryDialogs {
       class: 'btn', type: 'button', onclick: async () => {
         if (info.folder) { const p = await this.dialogs.pickFolder(info.title); if (p) pathIn.value = p; return; }
         if (window.opendjNative?.pickFiles) { const [p] = await window.opendjNative.pickFiles([{ name: info.label, extensions: info.ext }]); if (p) { pathIn.value = p; fileContent = null; } return; }
+        const nativePick = api.local?.backend?.pickText;
+        if (nativePick) { // mobile app: the system document picker
+          try { const f = await nativePick({ types: ['application/xml', 'text/xml', 'audio/x-mpegurl', 'audio/mpegurl', 'application/vnd.apple.mpegurl', 'text/plain', 'application/octet-stream'] }); if (f) { fileContent = f.text; pathIn.value = f.name; pathIn.dataset.fromFile = f.name; } } catch (e) { if (!/cancel/i.test(e?.message || '')) status.textContent = `✕ ${e.message}`; }
+          return;
+        }
         fileIn.click();
       },
     }, info.folder ? 'Browse…' : 'Choose file…');
@@ -351,20 +359,22 @@ export class LibraryDialogs {
       { label: 'Analyse selected tracks', action: () => { const n = this.app.analyser.request(this.lib.selectedTracks()); this.app.toast(n ? `Analysing ${n} track(s)` : 'Select tracks that are not analysed yet'); } },
       '-',
       { label: 'Import', sub: [
+        ...(platform.local ? [{ label: 'Music files…', action: () => this.app.upload?.pick?.() }] : []),
         { label: 'rekordbox XML…', action: () => this.importFrom('rekordbox') },
-        { label: 'Traktor collection (NML)…', action: () => this.importFrom('traktor') },
-        { label: 'Serato crates…', action: () => this.importFrom('serato') },
-        { label: 'VirtualDJ database…', action: () => this.importFrom('virtualdj') },
+        ...(unavailable('otherImports') ? [] : [
+          { label: 'Traktor collection (NML)…', action: () => this.importFrom('traktor') },
+          { label: 'Serato crates…', action: () => this.importFrom('serato') },
+          { label: 'VirtualDJ database…', action: () => this.importFrom('virtualdj') }]),
         { label: 'M3U / M3U8 playlist…', action: () => this.importFrom('m3u') },
       ] },
       { label: 'Export', sub: [
-        { label: 'Playlists to CDJ USB (rekordbox device library)…', action: () => openCdjExport(this.app, []) },
+        ...(unavailable('cdj') ? [] : [{ label: 'Playlists to CDJ USB (rekordbox device library)…', action: () => openCdjExport(this.app, []) }]),
         { label: 'Collection as rekordbox XML', action: () => download(api.rekordboxExportUrl()) },
-        { label: 'Playlists to USB / folder…', action: () => this.dialogs.exportUsb([]) },
+        ...(unavailable('usbExport') ? [] : [{ label: 'Playlists to USB / folder…', action: () => this.dialogs.exportUsb([]) }]),
       ] },
       '-',
       { label: `Missing files${missing ? ` (${missing})` : ''}`, action: () => this.lib.setView({ kind: 'missing' }, 'Missing files') },
-      { label: 'Relocate missing files…', action: () => this.relocate() },
+      ...(platform.local ? [] : [{ label: 'Relocate missing files…', action: () => this.relocate() }]),
       { label: 'Find duplicates', action: () => this.lib.setView({ kind: 'duplicates' }, 'Duplicates') },
       '-',
       { label: 'Back up library…', action: () => this.backup() },

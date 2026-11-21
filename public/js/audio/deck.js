@@ -6,8 +6,29 @@ import { effectiveGains, LOADED_STEMS } from '../stems/stem-mix.js';
 import { floatToInt16 } from '../stems/stem-dsp.js';
 import { StemEcho } from '../stems/stem-fx.js';
 
+/** Tempo fader ranges (±%), as offered in the deck and Settings. */
+export const TEMPO_RANGES = [6, 8, 10, 16, 25, 50, 100];
+
 export const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'];
 export const stemUrl = (id, stem) => `/api/stems/${encodeURIComponent(id)}/${stem}`;
+
+/** Tracks longer than this get a warning on load (decoding a one-hour file takes seconds and ~1 GB of memory). */
+const LONG_TRACK_SEC = 30 * 60;
+/** Read a fetch response body, reporting progress (0..100) when the size is known. */
+async function readWithProgress(res, onPct) {
+  const total = Number(res.headers.get('content-length')) || 0;
+  if (!total || !res.body?.getReader) return res.arrayBuffer();
+  const reader = res.body.getReader();
+  let buf = new Uint8Array(total), got = 0, last = -1;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (got + value.length > buf.length) { const b = new Uint8Array(Math.max(buf.length * 2, got + value.length)); b.set(buf.subarray(0, got)); buf = b; } // longer than announced
+    buf.set(value, got); got += value.length;
+    const pct = Math.min(100, Math.floor(got / total * 100)); if (pct !== last) { last = pct; onPct(pct); }
+  }
+  return got === buf.length ? buf.buffer : buf.slice(0, got).buffer;
+}
 
 export class Deck extends Emitter {
   constructor(engine, index) {
@@ -59,9 +80,11 @@ export class Deck extends Emitter {
   }
 
   // ---------- derived state ----------
-  get position() {
+  get position() { return this.positionAt(this.ctx.currentTime); }
+  /** Track position at audio-clock time `t` (the UI passes a frame-smoothed clock so waveforms scroll evenly). */
+  positionAt(t) {
     if (!this.track) return 0;
-    const p = this._pos + (this.ctx.currentTime - this._t) * this._rate;
+    const p = this._pos + (t - this._t) * this._rate;
     if (this.loop?.active && p > this.loop.end && this._rate > 0) return this.loop.start + ((p - this.loop.start) % (this.loop.end - this.loop.start));
     if (this.loop?.active && p < this.loop.start && this._rate < 0 && this._pos >= this.loop.start) { const L = this.loop.end - this.loop.start; return this.loop.end - ((this.loop.start - p) % L); }
     return clamp(p, 0, this.duration);
@@ -90,10 +113,15 @@ export class Deck extends Emitter {
     const stale = () => tok !== this._loadSeq;
     this.emit('load', track); this.emit('state');
     try {
+      // load progress for the deck (a one-hour file takes many seconds): reading x %, decoding, analysing
+      const phase = (name, pct = null) => { this.loadPhase = { name, pct }; this.emit('load-progress', this.loadPhase); };
+      phase('Loading', 0);
+      if ((Number(track.duration) || 0) > LONG_TRACK_SEC) this.engine.emit('warning', `"${track.title || 'This track'}" is ${Math.round(track.duration / 60)} minutes long: loading takes a while and needs a lot of memory`);
       const res = await fetch(api.streamUrl(track.id));
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
-      const ab = await res.arrayBuffer();
+      const ab = await readWithProgress(res, (p) => { if (!stale()) phase('Loading', p); });
       if (stale()) return false; // another load superseded this one
+      phase('Decoding');
       const buf = await this.ctx.decodeAudioData(ab);
       if (stale()) return false;
       this.sr = buf.sampleRate; this.duration = buf.duration;
@@ -105,6 +133,7 @@ export class Deck extends Emitter {
         const c0 = buf.getChannelData(0), c1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : null;
         const mono = new Float32Array(c0.length);
         if (c1) for (let i = 0; i < mono.length; i++) mono[i] = (c0[i] + c1[i]) * 0.5; else mono.set(c0);
+        phase('Analysing');
         const r = await this.engine.analyze(mono, buf.sampleRate);
         if (stale()) return false;
         wave = decodeWaveform(r.wave.buffer);
@@ -121,10 +150,13 @@ export class Deck extends Emitter {
       const ch0 = buf.getChannelData(0), ch1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : null;
       // 16-bit decks: material above 0 dBFS (float files, inter-sample overs of loud lossy masters) is stored
       // peak-normalised and scaled back in the worklet, so it never clips before the channel / auto gain.
-      const scale = hiPrec ? 1 : Math.max(1, peakAbs(ch0), ch1 ? peakAbs(ch1) : 0);
+      // time-sliced (yields to the event loop every few ms) so a load never freezes the UI or the other deck's waveform
+      const scale = hiPrec ? 1 : Math.max(1, await peakAbsSliced(ch0), ch1 ? await peakAbsSliced(ch1) : 0);
+      if (stale()) return false;
       this.audioScale = scale;
-      const left = deckChannel(ch0, hiPrec, scale);
-      const right = ch1 ? deckChannel(ch1, hiPrec, scale) : null;
+      const left = await deckChannelSliced(ch0, hiPrec, scale);
+      const right = ch1 ? await deckChannelSliced(ch1, hiPrec, scale) : null;
+      if (stale()) return false;
       this.frames = left.length;
       this.node.port.postMessage({ type: 'load', left, right, sampleRate: buf.sampleRate, scale }, right ? [left.buffer, right.buffer] : [left.buffer]);
       this.resetStemControls(); this.postStemGains();
@@ -136,7 +168,7 @@ export class Deck extends Emitter {
       if (this.cuePoint < 0) this.cuePoint += this.beatLen;
       this.seek(this.cuePoint);
       this.engine.channels[this.index].setAutoGain(this.engine.settings.autoGain ? (track.gain || 0) : 0);
-      this.loading = false;
+      this.loading = false; this.loadPhase = null;
       if (this.syncOn) this.matchTempo();
       this.emit('loaded', track); this.emit('state');
       // AI stems prepared for this track: attach them in the background (the deck already plays the original)
@@ -144,7 +176,7 @@ export class Deck extends Emitter {
       return true;
     } catch (e) {
       if (stale()) return false;
-      this.loading = false; this.error = e.message; this.track = null; this.failedTrack = track; // keep the name for the deck title
+      this.loading = false; this.loadPhase = null; this.error = e.message; this.track = null; this.failedTrack = track; // keep the name for the deck title
       this.emit('error', e); this.emit('state');
       throw e;
     }
@@ -192,7 +224,7 @@ export class Deck extends Emitter {
   get hotCues() { return (this.track?.cues || []).filter((c) => c.index >= 0); }
   hotCue(i) { return this.hotCues.find((c) => c.index === i); }
   hotCueDown(i) {
-    if (!this.track) return;
+    if (!this.track || this.loading) return; // (still loading: no grid, no position yet)
     const c = this.hotCue(i);
     if (!c && this.loop?.active) { this.saveLoopToHotCue(i); return; }
     if (!c) {
@@ -242,13 +274,16 @@ export class Deck extends Emitter {
     if (end <= start) return;
     this.loop = { start, end, active };
     this.post('loop', { value: active ? { start: start * this.sr, end: end * this.sr } : null });
-    if (active && this.position > end) this.seek(start);
+    if (active && this.position > end) this.seek(start + ((this.position - start) % (end - start))); // keep the phase in the loop
     this.emit('loop');
   }
   autoLoop(beats) {
-    if (!this.track) return;
+    if (!this.track || this.loading) return; // a loop set now would use the 0.5 s fallback beat at 0:00
     if (this.loop?.active && Math.abs((this.loop.end - this.loop.start) - beats * this.beatLen) < 1e-3) return this.exitLoop();
-    const start = this.loop?.active ? this.loop.start : (this.quantize ? this.floorBeat(this.position) : this.position);
+    // sub-beat loops start on their own grid (a 1/4-beat loop on the 1/4-beat grid, like rolls), so the play head is
+    // already inside the loop: no jump back when ½ / ¼ is pressed late in the beat
+    const g = Math.min(beats, 1) * this.beatLen;
+    const start = this.loop?.active ? this.loop.start : !this.quantize ? this.position : beats < 1 && this.bpm ? this.gridOffset + Math.floor((this.position - this.gridOffset) / g + 1e-6) * g : this.floorBeat(this.position);
     this.setLoop(start, start + beats * this.beatLen);
   }
   loopInPress() { this.loopIn = this.snap(this.position); if (this.loop?.active) this.exitLoop(); this.emit('loop'); }
@@ -264,7 +299,13 @@ export class Deck extends Emitter {
     if (this.loop.active) return this.exitLoop();
     this.setLoop(this.loop.start, this.loop.end); this.seek(this.loop.start);
   }
-  loopHalve() { if (this.loop) this.setLoop(this.loop.start, this.loop.start + (this.loop.end - this.loop.start) / 2, this.loop.active); }
+  /** Halve the loop, down to 1/8 beat (shorter loops are a buzz, not a loop). */
+  loopHalve() {
+    if (!this.loop) return;
+    const len = (this.loop.end - this.loop.start) / 2;
+    if (len < (this.bpm ? this.beatLen / 8 : 0.03) - 1e-6) return;
+    this.setLoop(this.loop.start, this.loop.start + len, this.loop.active);
+  }
   loopDouble() { if (this.loop) this.setLoop(this.loop.start, this.loop.start + (this.loop.end - this.loop.start) * 2, this.loop.active); }
   get loopBeats() { return this.loop ? Math.round(((this.loop.end - this.loop.start) / this.beatLen) * 1000) / 1000 : 0; } // rounded: no 3.999999999
 
@@ -272,13 +313,17 @@ export class Deck extends Emitter {
   rollOn(beats) {
     if (!this.track || !this.playing) return;
     this._rollPrevSlip = this.slip; this.setSlip(true);
-    const start = this.floorBeat(this.position);
+    this._rollSavedLoop = this.loop && !this.loop.active ? { ...this.loop } : null; // the user's saved (inactive) loop
+    // quantised to the roll size's own grid (1/8 beat roll -> 1/8 beat grid), so the play head is already inside the
+    // loop: no jump on press, the repeat starts on the grid, the worklet cross-fades each wrap
+    const pos = this.position, g = Math.min(beats, 1) * this.beatLen;
+    const start = this.bpm ? this.gridOffset + Math.floor((pos - this.gridOffset) / g + 1e-6) * g : pos;
     this.setLoop(start, start + beats * this.beatLen);
     this.rolling = true;
   }
   rollOff() {
     if (!this.rolling) return;
-    this.rolling = false; this.exitLoop(); this.loop = null; this.setSlip(this._rollPrevSlip); this.emit('loop');
+    this.rolling = false; this.exitLoop(); this.loop = this._rollSavedLoop || null; this._rollSavedLoop = null; this.setSlip(this._rollPrevSlip); this.emit('loop');
   }
 
   beatJump(beats) {
@@ -289,12 +334,27 @@ export class Deck extends Emitter {
   }
 
   // ---------- tempo / sync ----------
+  /**
+   * Tempo in % (never outside the selected tempo range). A programmatic value beyond the range (sync to a far-away
+   * BPM, instant doubles, DVS, Link) widens the range to the next standard step instead of pushing the tempo fader
+   * cap off its track; user input (fader, MIDI, keys) is clamped to the range by its callers.
+   */
   setTempo(pct) {
-    this.tempo = clamp(pct, -100, 100); this.post('rate', { value: this.rate }); this.emit('tempo'); this.engine.onTempoChange(this);
+    pct = clamp(Number(pct) || 0, -100, 100);
+    if (Math.abs(pct) > this.tempoRange + 1e-9) { this.tempoRange = TEMPO_RANGES.find((r) => r >= Math.abs(pct) - 1e-9) || 100; this.emit('tempo-range', this.tempoRange); }
+    this.tempo = pct; this.post('rate', { value: this.rate }); this.emit('tempo'); this.engine.onTempoChange(this);
     if (this.stemFxOn && this.effectiveBpm) this.stemFx?.setBeat(60 / this.effectiveBpm);
   }
-  setTempoFader(v) { this.setTempo(v * this.tempoRange); if (this.syncOn && !this.isMaster) { this.syncOn = false; this.emit('state'); } } // -1..1
-  setTempoRange(r) { const f = this.tempo / this.tempoRange; this.tempoRange = r; this.emit('tempo'); return f; }
+  setTempoFader(v) { this.setTempo(clamp(Number(v) || 0, -1, 1) * this.tempoRange); if (this.syncOn && !this.isMaster) { this.syncOn = false; this.emit('state'); } } // -1..1
+  /** Pick the tempo range. The tempo keeps its value when it fits the new range, otherwise it is clamped to the range. */
+  setTempoRange(r) {
+    r = TEMPO_RANGES.includes(Number(r)) ? Number(r) : clamp(Number(r) || 8, 1, 100);
+    this.tempoRange = r; this.emit('tempo-range', r);
+    if (Math.abs(this.tempo) > r) { this.setTempo(Math.sign(this.tempo) * r); if (this.syncOn && !this.isMaster) { this.syncOn = false; this.emit('state'); } } else this.emit('tempo');
+    return this.tempo / r;
+  }
+  /** Step the tempo by `pct` (MIDI tempo +/- buttons), staying inside the tempo range. */
+  stepTempo(pct) { this.setTempo(clamp(this.tempo + pct, -this.tempoRange, this.tempoRange)); }
   resetTempo() { this.setTempo(0); }
   setBend(b) { this.bend = b; this.post('rate', { value: this.rate }); }
   setKeyLock(v) { this.keyLock = v; this.post('keylock', { value: v }); this.emit('state'); }
@@ -324,7 +384,7 @@ export class Deck extends Emitter {
     this.seek(t);
   }
   sync() {
-    if (!this.track) return;
+    if (!this.track || this.loading) return;
     if (this.syncOn) { this.syncOn = false; this.emit('state'); return; }
     this.syncOn = true;
     if (this.matchTempo() && this.playing) this.alignPhase();
@@ -443,15 +503,10 @@ export class Deck extends Emitter {
 
   // ---------- performance effects ----------
   brake(seconds = 1.2) { if (!this.playing) return; this.post('brake', { value: 1 / (seconds * this.ctx.sampleRate) }); }
-  backspin(seconds = 1.0) {
+  /** Backspin: the record is thrown backwards and spins down (worklet-timed, sample accurate), then the deck stops. */
+  backspin(seconds = 1.0, speed = 4.5) {
     if (!this.track) return;
-    let v = -6; const t0 = performance.now();
-    this.post('scratch', { value: { velocity: v } });
-    const iv = setInterval(() => {
-      const k = (performance.now() - t0) / 1000 / seconds;
-      if (k >= 1) { clearInterval(iv); this.post('scratch', { value: null }); this.pause(); return; }
-      this.post('scratch', { value: { velocity: v * (1 - k) } });
-    }, 20);
+    this.post('backspin', { seconds, speed });
   }
   censorOn() { this._censorSlip = this.slip; this.setSlip(true); this.setReverse(true); }
   censorOff() { this.setReverse(false); this.setSlip(this._censorSlip); }
@@ -518,6 +573,7 @@ export class Deck extends Emitter {
     if (!this.track || !this.bpm) return;
     const b = this.beatLen;
     if (this._sliceStart == null || this.position > this._sliceStart + 8 * b || this.position < this._sliceStart) this._sliceStart = this.floorBeat(this.position - ((this.beatIndex() % 8) + 8) % 8 * b);
+    if (!this._slicing) this._sliceSavedLoop = this.loop && !this.loop.active ? { ...this.loop } : null; // the user's saved (inactive) loop
     this._slicePrevSlip = this._slicing ? this._slicePrevSlip : this.slip;
     this._slicing = true; this.setSlip(true);
     const start = this._sliceStart + n * b;
@@ -525,7 +581,7 @@ export class Deck extends Emitter {
   }
   sliceUp() {
     if (!this._slicing) return;
-    this._slicing = false; this.exitLoop(); this.loop = null; this.setSlip(this._slicePrevSlip); this.emit('loop');
+    this._slicing = false; this.exitLoop(); this.loop = this._sliceSavedLoop || null; this._sliceSavedLoop = null; this.setSlip(this._slicePrevSlip); this.emit('loop');
   }
 
   // ---------- instant doubles ----------
@@ -562,6 +618,37 @@ export function deckChannel(src, highPrecision = false, scale = 1) {
     out[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
   }
   return out;
+}
+
+// ---- time-sliced versions for the UI thread: same results, but they hand control back every ~6 ms ----
+const SLICE = 1 << 17;
+const yieldTask = () => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => { c.port1.close(); r(); }; c.port2.postMessage(0); });
+/** deckChannel() in slices (identical output, including the dither sequence). */
+export async function deckChannelSliced(src, highPrecision = false, scale = 1) {
+  if (highPrecision) return new Float32Array(src);
+  const out = new Int16Array(src.length);
+  const g = 32767 / (scale > 1 ? scale : 1);
+  let seed = 22222;
+  for (let a = 0; a < src.length; a += SLICE) {
+    const b = Math.min(src.length, a + SLICE);
+    for (let i = a; i < b; i++) {
+      seed = (seed * 1664525 + 1013904223) >>> 0; const r1 = seed / 4294967296;
+      seed = (seed * 1664525 + 1013904223) >>> 0; const r2 = seed / 4294967296;
+      const v = Math.round(src[i] * g + (r1 - r2));
+      out[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
+    }
+    if (b < src.length) await yieldTask();
+  }
+  return out;
+}
+export async function peakAbsSliced(src) {
+  let p = 0;
+  for (let a = 0; a < src.length; a += SLICE * 4) {
+    const b = Math.min(src.length, a + SLICE * 4);
+    for (let i = a; i < b; i++) { const x = src[i] < 0 ? -src[i] : src[i]; if (x > p) p = x; }
+    if (b < src.length) await yieldTask();
+  }
+  return p;
 }
 
 /** Largest absolute sample value of a channel. */

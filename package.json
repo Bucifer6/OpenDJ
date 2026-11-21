@@ -1,7 +1,7 @@
 {
   "name": "opendj",
   "productName": "OpenDJ",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Free, open-source DJ software: decks, mixer, effects, auto-mix, MIDI controllers, and a library that pulls from local/USB/NAS folders, Plex, Jellyfin, Emby and Subsonic.",
   "license": "MIT",
   "type": "module",
@@ -13,12 +13,17 @@
     "start": "electron .",
     "web": "node server/cli.js",
     "test": "node --test test/*.test.js",
-    "test:e2e": "node scripts/e2e-smoke.mjs && node scripts/e2e-performance.mjs && node scripts/e2e-regressions.mjs && node scripts/e2e-controllers.mjs && node scripts/e2e-lighting.mjs && node scripts/e2e-video.mjs && node scripts/e2e-webapp.mjs && node scripts/e2e-dvs.mjs && node scripts/e2e-link-lyrics.mjs && node scripts/e2e-recording.mjs && node scripts/e2e-stems.mjs && node scripts/e2e-analysis.mjs",
+    "test:e2e": "node scripts/e2e-smoke.mjs && node scripts/e2e-fx.mjs && node scripts/e2e-performance.mjs && node scripts/e2e-regressions.mjs && node scripts/e2e-controllers.mjs && node scripts/e2e-lighting.mjs && node scripts/e2e-video.mjs && node scripts/e2e-webapp.mjs && node scripts/e2e-dvs.mjs && node scripts/e2e-link-lyrics.mjs && node scripts/e2e-recording.mjs && node scripts/e2e-stems.mjs && node scripts/e2e-analysis.mjs && node scripts/e2e-mobile.mjs && node scripts/e2e-sampler.mjs && node scripts/e2e-automix.mjs && node scripts/e2e-ui-sweep.mjs && node scripts/e2e-update.mjs",
     "dist": "electron-builder --publish never",
     "dist:win": "electron-builder --win --publish never",
     "dist:mac": "electron-builder --mac --publish never",
     "dist:linux": "electron-builder --linux --publish never",
-    "test:webapp": "node scripts/e2e-webapp.mjs"
+    "test:webapp": "node scripts/e2e-webapp.mjs",
+    "test:mobile": "node scripts/e2e-mobile.mjs",
+    "mobile:vendor": "node scripts/build-vendor.mjs",
+    "mobile:sync": "node scripts/mobile-sync.mjs",
+    "mobile:android": "node scripts/mobile-sync.mjs android && npx cap open android",
+    "mobile:ios": "node scripts/mobile-sync.mjs ios && npx cap open ios"
   },
   "dependencies": {
     "fast-xml-parser": "^5.12.1",
@@ -26,8 +31,19 @@
     "onnxruntime-web": "1.31.1"
   },
   "devDependencies": {
+    "@capacitor-community/keep-awake": "^8.0.1",
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/cli": "^8.6.2",
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/file-transfer": "^2.0.6",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/ios": "^8.6.2",
+    "@capacitor/share": "^8.0.3",
+    "@capawesome/capacitor-file-picker": "^8.1.1",
     "electron": "^45.4.1",
-    "electron-builder": "^26.18.0"
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2"
   },
   "build": {
     "appId": "org.opendj.app",

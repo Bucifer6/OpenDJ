@@ -1,13 +1,15 @@
-import { el, fmtTime } from '../util.js';
+import { el, fmtTime, uiZoom } from '../util.js';
 import { knob, fader, button, jogWheel } from './controls.js';
 import { OverviewWaveform } from './waveform.js';
-import { EFFECTS, BEAT_DIVISIONS } from '../audio/effects.js';
+import { EFFECTS, BEAT_DIVISIONS, effectParams, effectBeats } from '../audio/effects.js';
 import { api } from '../api.js';
 import { cssVar } from './themes.js';
+import { icon } from './icons.js';
 import { dvsModeIndicator } from '../dvs/dvs-ui.js';
 import { buildStemControls } from '../stems/stems-ui.js';
-import { HOTCUE_COLORS } from '../audio/deck.js';
+import { HOTCUE_COLORS, TEMPO_RANGES } from '../audio/deck.js';
 import { camelotCompatible, toCamelot } from '../audio/analysis-core.js';
+import { smoothTime } from './clock.js';
 
 export const DECK_COLORS = ['var(--deck1)', 'var(--deck2)', 'var(--deck3)', 'var(--deck4)'];
 const LOOP_SIZES = [1 / 4, 1 / 2, 1, 2, 4, 8, 16, 32];
@@ -15,6 +17,9 @@ const fmtBeats = (b) => (b = Math.round(b * 1000) / 1000, b >= 1 ? String(b) : b
 
 export function buildDeck(app, deck) {
   const i = deck.index, ch = app.engine.channels[i];
+  // labels with a short form for narrow decks (KEY LOCK -> KEY ...): the deck switches to them only when a full
+  // label would be clipped (checked when the control column resizes or the panel changes), so wide decks keep words
+  const dual = (full, short) => el('span', { class: 'lbl-dual' }, el('span', { class: 'lf' }, full), el('span', { class: 'ls' }, short));
   const renderers = [];
   const R = (c) => { if (c?.render) renderers.push(c); return c; };
   const shift = () => app.shift;
@@ -23,6 +28,7 @@ export function buildDeck(app, deck) {
   const cover = el('div', { class: 'deck-cover' });
   const title = el('div', { class: 'deck-title' }, 'Drop a track here');
   const artist = el('div', { class: 'deck-artist' }, '');
+  const artistNote = el('span', { class: 'deck-load-note', 'aria-live': 'polite' }); // load progress: Loading 42 % / Decoding… / Analysing…
   const keyBadge = el('span', { class: 'key-badge' });
   const bpmBig = el('div', { class: 'deck-bpm' }, '--');
   const bpmSub = el('div', { class: 'deck-bpm-sub' }, '');
@@ -32,7 +38,7 @@ export function buildDeck(app, deck) {
   const header = el('div', { class: 'deck-header' },
     el('div', { class: 'deck-num' }, String(i + 1)),
     cover,
-    el('div', { class: 'deck-meta' }, title, el('div', { class: 'deck-sub' }, artist, keyBadge, masterBadge, dvsModeIndicator(app, i))),
+    el('div', { class: 'deck-meta' }, title, el('div', { class: 'deck-sub' }, artist, artistNote, keyBadge, masterBadge, dvsModeIndicator(app, i))),
     el('div', { class: 'deck-times' }, elapsed, remain),
     el('div', { class: 'deck-bpmbox' }, bpmBig, bpmSub),
   );
@@ -40,12 +46,12 @@ export function buildDeck(app, deck) {
 
   // ---------- transport ----------
   const cueBtn = R(button('CUE', { cls: 'btn-cue big', down: () => deck.cueDown(), up: () => deck.cueUp(), active: () => deck.cuePreview || (!deck.playing && deck.track && Math.abs(deck.position - deck.cuePoint) < 0.02) }));
-  const playBtn = R(button('▶❚❚', { cls: 'btn-play big', down: () => { app.engine.resume(); deck.togglePlay(); }, active: () => deck.playing }));
+  const playBtn = R(button(el('span', { class: 'play-glyph' }, icon('play'), icon('pause')), { cls: 'btn-play big', title: 'Play / pause', down: () => { app.engine.resume(); deck.togglePlay(); }, active: () => deck.playing }));
   const syncBtn = R(button('SYNC', { cls: 'btn-sync', click: () => deck.sync(), active: () => deck.syncOn }));
   const masterBtn = R(button('MASTER', { cls: 'btn-master', click: () => deck.setMaster(), active: () => deck.isMaster }));
   const toggles = el('div', { class: 'deck-toggles' },
-    R(button('KEY LOCK', { cls: 'sm', click: () => deck.setKeyLock(!deck.keyLock), active: () => deck.keyLock, title: 'Master tempo: change tempo without changing pitch' })),
-    R(button('QUANT', { cls: 'sm', click: () => deck.setQuantize(!deck.quantize), active: () => deck.quantize, title: 'Snap cues, loops and jumps to the beat grid' })),
+    R(button(dual('KEY LOCK', 'KEY'), { cls: 'sm', click: () => deck.setKeyLock(!deck.keyLock), active: () => deck.keyLock, title: 'Master tempo: change tempo without changing pitch' })),
+    R(button(dual('QUANT', 'QNT'), { cls: 'sm', click: () => deck.setQuantize(!deck.quantize), active: () => deck.quantize, title: 'Snap cues, loops and jumps to the beat grid' })),
     R(button('SLIP', { cls: 'sm', click: () => deck.setSlip(!deck.slip), active: () => deck.slip, title: 'Slip mode: track continues silently under loops, scratches and reverse' })),
     R(button('REV', { cls: 'sm', click: () => deck.setReverse(!deck.reverse), active: () => deck.reverse })),
     R(button('VINYL', { cls: 'sm', click: () => { deck.vinylMode = !deck.vinylMode; }, active: () => deck.vinylMode, title: 'Vinyl mode: touching the platter scratches' })),
@@ -67,7 +73,7 @@ export function buildDeck(app, deck) {
   jog.style.setProperty('--deck-color', DECK_COLORS[i]);
 
   // ---------- tempo ----------
-  const rangeSel = el('select', { class: 'sel tiny', title: 'Tempo range' }, ...[6, 8, 10, 16, 25, 50, 100].map((r) => el('option', { value: r }, `±${r}%`)));
+  const rangeSel = el('select', { class: 'sel tiny', title: 'Tempo range' }, ...TEMPO_RANGES.map((r) => el('option', { value: r }, `±${r}%`)));
   rangeSel.value = String(deck.tempoRange);
   rangeSel.addEventListener('change', () => { deck.setTempoRange(Number(rangeSel.value)); tempoFader.render(); });
   const tempoFader = R(fader({ min: -1, max: 1, def: 0, get: () => deck.tempo / deck.tempoRange, set: (v) => deck.setTempoFader(v), invert: true, cls: 'tempo-fader', title: 'Tempo (double-click to reset)' }));
@@ -85,20 +91,20 @@ export function buildDeck(app, deck) {
   const loopRow = el('div', { class: 'loop-row' },
     R(button('IN', { cls: 'sm', click: () => deck.loopInPress(), active: () => deck.loopIn != null && !deck.loop?.active })),
     R(button('OUT', { cls: 'sm', click: () => deck.loopOutPress() })),
-    R(button('RELOOP', { cls: 'sm', click: () => deck.reloop(), active: () => deck.loop?.active })),
-    button('½', { cls: 'sm', click: () => { if (deck.loop) deck.loopHalve(); else { autoLoopBeats = Math.max(1 / 8, autoLoopBeats / 2); } } }),
+    R(button(dual('RELOOP', icon('repeat')), { cls: 'sm', click: () => deck.reloop(), active: () => deck.loop?.active, title: 'Reloop / exit loop' })),
+    button('½', { cls: 'sm', click: () => { if (deck.loop?.active) deck.loopHalve(); else { autoLoopBeats = Math.max(1 / 8, autoLoopBeats / 2); } } }),
     R(button(loopSize, { cls: 'sm loop-btn', click: () => deck.autoLoop(autoLoopBeats), active: () => deck.loop?.active, title: 'Auto beat loop' })),
-    button('×2', { cls: 'sm', click: () => { if (deck.loop) deck.loopDouble(); else { autoLoopBeats = Math.min(64, autoLoopBeats * 2); } } }),
+    button('×2', { cls: 'sm', click: () => { if (deck.loop?.active) deck.loopDouble(); else { autoLoopBeats = Math.min(64, autoLoopBeats * 2); } } }),
   );
   let jumpBeats = 4;
   const jumpLabel = el('span', {}, '4');
   const jumpRow = el('div', { class: 'loop-row jump-row' },
-    button('◀◀', { cls: 'sm', click: () => deck.beatJump(-jumpBeats), title: 'Beat jump back' }),
-    button(el('span', {}, 'JUMP ', jumpLabel), { cls: 'sm', click: () => { jumpBeats = jumpBeats >= 32 ? 1 : jumpBeats * 2; jumpLabel.textContent = jumpBeats; } }),
-    button('▶▶', { cls: 'sm', click: () => deck.beatJump(jumpBeats), title: 'Beat jump forward' }),
+    button(icon('rewind'), { cls: 'sm', click: () => deck.beatJump(-jumpBeats), title: 'Beat jump back' }),
+    button(el('span', {}, dual('JUMP ', 'J'), jumpLabel), { cls: 'sm', title: 'Beat jump size (beats)', click: () => { jumpBeats = jumpBeats >= 32 ? 1 : jumpBeats * 2; jumpLabel.textContent = jumpBeats; } }),
+    button(icon('fast-forward'), { cls: 'sm', click: () => deck.beatJump(jumpBeats), title: 'Beat jump forward' }),
     button('MEM', { cls: 'sm', click: () => deck.addMemoryCue(), title: 'Add memory cue' }),
     button('GRID', { cls: 'sm', click: () => app.dialogs.gridEditor(deck), title: 'Edit beat grid' }),
-    button('⏏', { cls: 'sm', click: () => deck.eject(), title: 'Eject' }),
+    button(icon('eject'), { cls: 'sm', click: () => deck.eject(), title: 'Eject' }),
   );
 
   // ---------- performance pads ----------
@@ -156,7 +162,7 @@ export function buildDeck(app, deck) {
       p.classList.toggle('lit', !!color);
     });
   };
-  deck.padMode = (m) => setPadMode(m);
+  deck.padMode = (m) => { setPadMode(m); deck.showPanel?.('cues'); };
   deck.padPress = (n, down) => padAction(n, down);
   setPadMode('hotcue');
 
@@ -164,36 +170,85 @@ export function buildDeck(app, deck) {
   const fxSel = el('select', { class: 'sel' }, ...EFFECTS.map((e) => el('option', { value: e.id }, e.label)));
   fxSel.value = ch.state.fxType;
   fxSel.addEventListener('change', () => ch.set('fxType', fxSel.value));
-  const beatSel = el('select', { class: 'sel tiny' }, ...BEAT_DIVISIONS.map((b) => el('option', { value: b }, `${fmtBeats(b)} beat`)));
+  // beat division: the echo time, or the LFO cycle for modulation effects (labels show what it means for the effect)
+  const beatSel = el('select', { class: 'sel tiny', title: 'Beat division: echo time / LFO cycle' }, ...BEAT_DIVISIONS.map((b) => el('option', { value: b }, `${fmtBeats(b)} beat`)));
   beatSel.value = String(ch.state.fxBeats);
   beatSel.addEventListener('change', () => ch.set('fxBeats', Number(beatSel.value)));
   const fxOn = R(button('FX ON', { cls: 'sm fx-on', click: () => ch.set('fxOn', !ch.state.fxOn), active: () => ch.state.fxOn }));
-  const fxMix = R(knob({ label: 'MIX', min: 0, max: 1, def: 0.5, get: () => ch.state.fxMix, set: (v) => ch.set('fxMix', v), size: 'sm' }));
+  const fxMix = R(knob({ label: 'MIX', min: 0, max: 1, def: 0.5, get: () => ch.state.fxMix, set: (v) => ch.set('fxMix', v), size: 'sm', title: 'FX wet/dry' }));
   const fxParam = R(knob({ label: 'PARAM', min: 0, max: 1, def: 0.5, get: () => ch.state.fxParam, set: (v) => ch.set('fxParam', v), size: 'sm' }));
-  ch.on('change', (k) => { if (k === 'fxType') fxSel.value = ch.state.fxType; if (k === 'fxBeats') beatSel.value = String(ch.state.fxBeats); });
-  const fxUnit = el('div', { class: 'fx-unit' }, el('div', { class: 'fx-col' }, fxSel, beatSel), fxMix, fxParam, fxOn);
+  const fxParam2 = R(knob({ label: 'P2', min: 0, max: 1, def: 0.5, get: () => ch.state.fxParam2 ?? 0.5, set: (v) => ch.set('fxParam2', v), size: 'sm' }));
+  fxParam2.classList.add('fx-p2');
+  const fxLabels = () => {
+    const [p1, p2] = effectParams(ch.state.fxType);
+    fxParam.querySelector('.knob')?.setAttribute('title', `FX parameter: ${p1}`);
+    fxParam2.querySelector('.knob')?.setAttribute('title', `FX parameter 2: ${p2}`);
+    const l2 = fxParam2.querySelector('.knob-label'); if (l2) l2.textContent = p2.slice(0, 5).toUpperCase();
+    beatSel.querySelectorAll('option').forEach((o) => { const b = Number(o.value), e = effectBeats(ch.state.fxType, b); o.textContent = `${fmtBeats(e)} beat${e > 1 ? 's' : ''}`; });
+  };
+  fxLabels();
+  ch.on('change', (k) => { if (k === 'fxType') { fxSel.value = ch.state.fxType; fxLabels(); } if (k === 'fxBeats') beatSel.value = String(ch.state.fxBeats); });
+  const fxUnit = el('div', { class: 'fx-unit' }, el('div', { class: 'fx-col' }, fxSel, beatSel), fxMix, fxParam, fxParam2, fxOn);
 
   // ---------- phase meter (beat position in the bar + offset vs master) ----------
   const phase = el('canvas', { class: 'phase-meter', height: 12 });
+  let phaseW = 0, phaseSig = '';
+  new ResizeObserver((es) => { phaseW = es.at(-1).contentRect.width * uiZoom(); }).observe(phase);
+  window.addEventListener('opendj-theme', () => { phaseSig = ''; });
   const drawPhase = () => {
-    const dpr = devicePixelRatio || 1, W = Math.round(phase.clientWidth * dpr) || 1, H = Math.round(12 * dpr);
-    if (phase.width !== W) { phase.width = W; phase.height = H; }
+    const dpr = devicePixelRatio || 1;
+    if (!phaseW) phaseW = phase.getBoundingClientRect().width || 1;
+    const W = Math.round(phaseW * dpr) || 1, H = Math.round(12 * dpr);
+    if (phase.width !== W || phase.height !== H) { phase.width = W; phase.height = H; phaseSig = ''; }
+    const m0 = app.engine.masterDeck(deck);
+    const beat0 = deck.bpm && deck.track ? ((deck.beatIndex() % 4) + 4) % 4 : -1;
+    let d0 = 0; if (m0 && m0.bpm && m0.playing && deck.playing && beat0 >= 0) { d0 = deck.beatPhase() - m0.beatPhase(); if (d0 > 0.5) d0 -= 1; if (d0 < -0.5) d0 += 1; }
+    const sigNow = `${W}|${beat0}|${deck.playing}|${m0 && m0.playing && deck.playing ? Math.round(d0 * 200) : 'x'}`;
+    if (sigNow === phaseSig) return;
+    phaseSig = sigNow;
     const g = phase.getContext('2d'); g.clearRect(0, 0, W, H);
     if (!deck.bpm || !deck.track) return;
-    const beat = ((deck.beatIndex() % 4) + 4) % 4, seg = W / 4;
-    for (let k = 0; k < 4; k++) { g.fillStyle = k === beat && deck.playing ? cssVar(`--deck${i + 1}`) : k === beat ? cssVar('--line-2') : cssVar('--panel-3'); g.fillRect(k * seg + 1, 0, seg - 2, H * 0.45); }
+    const beat = beat0, seg = W / 4;
+    for (let k = 0; k < 4; k++) { g.fillStyle = k === beat && deck.playing ? cssVar(`--deck${i + 1}`) : k === beat ? cssVar('--line-2') : cssVar('--panel-3'); g.fillRect(Math.round(k * seg + dpr), 0, Math.round(seg - 2 * dpr), Math.round(H * 0.42)); }
     const m = app.engine.masterDeck(deck);
     if (m && m.bpm && m.playing && deck.playing) {
       let d = deck.beatPhase() - m.beatPhase(); if (d > 0.5) d -= 1; if (d < -0.5) d += 1;
       const x = W / 2 + d * W / 2; const ok = Math.abs(d) < 0.03;
-      g.fillStyle = '#2a313b'; g.fillRect(W / 2 - dpr / 2, H * 0.55, dpr, H * 0.45);
-      g.fillStyle = ok ? '#2ed47a' : Math.abs(d) < 0.1 ? '#ffb020' : '#ff3b4d';
+      g.fillStyle = cssVar('--line-2'); g.fillRect(Math.round(W / 2 - dpr / 2), H * 0.55, Math.max(1, Math.round(dpr)), H * 0.45);
+      g.fillStyle = ok ? cssVar('--green') : Math.abs(d) < 0.1 ? cssVar('--amber') : cssVar('--red');
       g.fillRect(Math.min(x, W / 2), H * 0.6, Math.max(2 * dpr, Math.abs(x - W / 2)), H * 0.35);
     }
   };
 
+  // ---------- secondary controls: switchable panels ----------
+  // Only what matters stays on the deck face (platter, transport, sync, tempo, hot cues). Loops, FX, stems and key
+  // live in panels picked with a segmented control; the Performance layout shows cues and loops side by side.
+  // Panels keep their own class names (.loop-row, .fx-unit, .deck-stems, .key-row…) as mount points.
+  const PANELS = [['cues', 'Cues'], ['loops', 'Loops'], ['fx', 'FX'], ['stems', 'Stems'], ['key', 'Key']];
+  const panelBodies = {
+    cues: el('div', { class: 'deck-panel', 'data-panel': 'cues', role: 'tabpanel' }, modeBar, padGrid),
+    loops: el('div', { class: 'deck-panel', 'data-panel': 'loops', role: 'tabpanel' }, loopRow, jumpRow),
+    fx: el('div', { class: 'deck-panel', 'data-panel': 'fx', role: 'tabpanel' }, fxUnit),
+    stems: el('div', { class: 'deck-panel', 'data-panel': 'stems', role: 'tabpanel' }, buildStemControls(app, deck)),
+    key: el('div', { class: 'deck-panel', 'data-panel': 'key', role: 'tabpanel' }, keyRow),
+  };
+  const panelTabs = el('div', { class: 'panel-tabs', role: 'tablist', 'aria-label': `Deck ${i + 1} panels` },
+    ...PANELS.map(([id, label]) => el('button', { class: 'panel-tab', role: 'tab', 'data-panel': id, onclick: () => showPanel(id) }, label)));
+  const showPanel = (id) => {
+    root.dataset.panel = id;
+    for (const b of panelTabs.children) { const on = b.dataset.panel === id; b.classList.toggle('active', on); b.setAttribute('aria-selected', String(on)); }
+    for (const [k, p] of Object.entries(panelBodies)) p.classList.toggle('shown', k === id);
+  };
+  deck.showPanel = showPanel;
+  const fitLabels = () => {
+    root.classList.remove('short-labels');
+    const over = [...root.querySelectorAll('.lbl-dual')].some((x) => { const b = x.closest('.btn'); return b && b.offsetParent && b.scrollWidth > b.clientWidth + 1; });
+    root.classList.toggle('short-labels', over);
+  };
+  let fitRaf = 0; const fitSoon = () => { if (!fitRaf) fitRaf = requestAnimationFrame(() => { fitRaf = 0; fitLabels(); }); };
+
   // ---------- assemble ----------
-  const root = el('section', { class: 'deck', 'data-deck': i, style: { '--deck-color': DECK_COLORS[i] } },
+  const root = el('section', { class: 'deck empty', 'data-deck': i, style: { '--deck-color': DECK_COLORS[i] } },
     header,
     el('div', { class: 'overview-wrap' }, overview.canvas),
     phase,
@@ -204,14 +259,15 @@ export function buildDeck(app, deck) {
       ),
       el('div', { class: 'deck-mid' },
         el('div', { class: 'sync-row' }, syncBtn, masterBtn),
-        toggles, keyRow, buildStemControls(app, deck),
-        loopRow, jumpRow,
-        modeBar, padGrid,
-        fxUnit,
+        toggles,
+        panelTabs,
+        el('div', { class: 'deck-panels' }, ...Object.values(panelBodies)),
       ),
       tempo,
     ),
   );
+  showPanel('cues');
+  { const mid = root.querySelector('.deck-mid'); new ResizeObserver(fitSoon).observe(mid); for (const t of panelTabs.children) t.addEventListener('click', fitSoon); window.addEventListener('opendj-theme', () => requestAnimationFrame(fitSoon)); }
 
   // drag & drop tracks onto a deck
   root.addEventListener('dragover', (e) => { e.preventDefault(); root.classList.add('drop'); });
@@ -237,6 +293,8 @@ export function buildDeck(app, deck) {
     const t = deck.track;
     const f = !t && deck.error ? deck.failedTrack : null; // failed load: keep the track's name, show the error under it
     title.textContent = t ? t.title || 'Untitled' : f ? `⚠ ${f.title || 'Untitled'}` : (deck.error ? `⚠ ${deck.error}` : 'Drop a track here');
+    const lp = deck.loading && deck.loadPhase;
+    artistNote.textContent = lp ? `${lp.name}${lp.pct != null ? ` ${lp.pct} %` : '…'}` : '';
     title.title = t ? `${t.title || ''}${t.artist ? ' — ' + t.artist : ''}` : f ? `Could not load ${f.path || f.title}: ${deck.error}` : '';
     artist.textContent = t ? t.artist || '' : f ? `Could not load: ${deck.error}` : '';
     cover.style.backgroundImage = t ? `url(${api.coverUrl(t.id)})` : '';
@@ -244,30 +302,37 @@ export function buildDeck(app, deck) {
     const playing = deck.playingCamelot || cam;
     const sh = Math.round(deck.pitchSemis);
     keyBadge.textContent = t?.key ? `${playing || ''}${sh ? ` (${sh > 0 ? '+' : ''}${sh})` : ''} ${t.key !== cam ? t.key : ''}`.trim() : '';
-    keyBadge.className = 'key-badge' + (playing ? ` cam-${playing.replace(/\D/g, '')}` : '');
+    keyBadge.className = 'key-badge' + (playing ? ` cam-${playing.replace(/\D/g, '')}` : ''); keyBadge._ccompatible = undefined;
+    root.classList.toggle('empty', !t && !deck.loading);
+    root.classList.toggle('loading', !!deck.loading);
+    root.classList.toggle('failed', !t && !!deck.error);
     renderPads();
   };
   deck.on('key', () => { keyVal.textContent = `${deck.keyShift > 0 ? '+' : ''}${deck.keyShift}`; updateMeta(); renderPads(); });
+  deck.on('load-progress', () => { const lp = deck.loadPhase; artistNote.textContent = lp ? `${lp.name}${lp.pct != null ? ` ${lp.pct} %` : '…'}` : ''; });
   deck.on('load', updateMeta); deck.on('loaded', updateMeta); deck.on('error', updateMeta); deck.on('cues', renderPads);
-  const renderState = () => { for (const r of renderers) r.render(); masterBadge.style.display = deck.isMaster ? '' : 'none'; };
-  deck.on('state', renderState); deck.on('loop', () => { loopSize.textContent = deck.loop?.active ? fmtBeats(deck.loopBeats) : fmtBeats(autoLoopBeats); });
+  const renderState = () => { for (const r of renderers) r.render(); if (masterBadge.hidden === !!deck.isMaster) masterBadge.hidden = !deck.isMaster; };
+  deck.on('state', renderState); deck.on('loop', () => { loopSize._t = loopSize.textContent = deck.loop?.active ? fmtBeats(deck.loopBeats) : fmtBeats(autoLoopBeats); });
   deck.on('tempo', () => tempoFader.render());
+  deck.on('tempo-range', () => { rangeSel.value = String(deck.tempoRange); tempoFader.render(); });
 
   let lastFrame = 0;
+  const setText = (node, txt) => { if (node._t !== txt) { node._t = txt; node.textContent = txt; } };
+  const setClass = (node, cls, on) => { on = !!on; if (node['_c' + cls] !== on) { node['_c' + cls] = on; node.classList.toggle(cls, on); } };
   root.frame = (now) => {
-    jog.draw(); overview.draw(); drawPhase();
+    jog.draw(now); overview.draw(now); drawPhase();
     if (now - lastFrame < 50) return; lastFrame = now;
-    const pos = deck.position;
-    elapsed.textContent = fmtTime(pos);
-    remain.textContent = deck.track && deck.duration > 0 ? fmtTime(deck.duration - pos, true) : '00:00.0'; // no "-00:00.0" on empty decks
-    remain.classList.toggle('warn', deck.duration > 0 && deck.duration - pos < 30 && deck.playing);
-    bpmBig.textContent = deck.effectiveBpm ? deck.effectiveBpm.toFixed(2) : '--';
-    bpmSub.textContent = deck.bpm ? `${deck.tempo >= 0 ? '+' : ''}${deck.tempo.toFixed(2)}%  ·  ${deck.bpm.toFixed(2)}` : '';
-    tempoVal.textContent = `${deck.tempo >= 0 ? '+' : ''}${deck.tempo.toFixed(2)}%`;
-    if (!deck.loop?.active) loopSize.textContent = fmtBeats(autoLoopBeats);
+    const pos = deck.positionAt(smoothTime(deck.ctx, now));
+    setText(elapsed, fmtTime(pos));
+    setText(remain, deck.track && deck.duration > 0 ? fmtTime(deck.duration - pos, true) : '00:00.0'); // no "-00:00.0" on empty decks
+    setClass(remain, 'warn', deck.duration > 0 && deck.duration - pos < 30 && deck.playing);
+    setText(bpmBig, deck.effectiveBpm ? deck.effectiveBpm.toFixed(2) : '--');
+    setText(bpmSub, deck.bpm ? `${deck.tempo >= 0 ? '+' : ''}${deck.tempo.toFixed(2)}%  ·  ${deck.bpm.toFixed(2)}` : '');
+    setText(tempoVal, `${deck.tempo >= 0 ? '+' : ''}${deck.tempo.toFixed(2)}%`);
+    if (!deck.loop?.active) setText(loopSize, fmtBeats(autoLoopBeats));
     // harmonic hint vs. master deck
     const m = app.engine.masterDeck(deck);
-    keyBadge.classList.toggle('compatible', !!(m && deck.playingCamelot && m.playingCamelot && camelotCompatible(deck.playingCamelot, m.playingCamelot)));
+    setClass(keyBadge, 'compatible', m && deck.playingCamelot && m.playingCamelot && camelotCompatible(deck.playingCamelot, m.playingCamelot));
     if (!deck.keyLock && deck.tempo !== deck._lastKeyTempo) { deck._lastKeyTempo = deck.tempo; updateMeta(); }
     renderState();
   };

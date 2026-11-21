@@ -12,6 +12,7 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 | Linux, any distro | `OpenDJ-<version>-linux-x86_64.AppImage` (or `-arm64.AppImage`) |
 | Debian / Ubuntu / Mint | `OpenDJ-<version>-linux-amd64.deb` (or `-arm64.deb`) |
 | Fedora / openSUSE | `OpenDJ-<version>-linux-x86_64.rpm` (when present) |
+| Android phone / tablet | `OpenDJ-<version>-android-debug-signed.apk` (test build, see below) |
 | NAS / server | Docker: see *Run as a web app* in the README |
 
 **First launch:**
@@ -21,6 +22,62 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **Linux AppImage:** `chmod +x` the file, then run it.
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
+
+### New in 0.4
+**Phone and tablet app (preview)**
+- OpenDJ now runs as a standalone app on Android and iOS: no computer or server needed.
+- Import music from your files, then mix on 1–2 decks (phones) or 2–4 decks (tablets) with sync, hot cues, loops, effects, sampler and automix.
+- Playlists, smart playlists, rekordbox XML / M3U, recording, and Plex / Jellyfin / Emby / Subsonic / MediaMax with offline downloads all work on the device.
+- **Android:** install the attached `.apk`. It's a test build, so allow installing from your browser or file manager when asked. Store releases follow.
+- **iPhone / iPad:** TestFlight and App Store builds follow once signing is set up.
+- **Not on phones yet:** MIDI controllers, DVS, lighting, Ableton Link, broadcasting, CDJ USB export and AI stems.
+
+**New look, inspired by djay Pro**
+- **Calmer decks:** Cues / Loops / FX / Stems / Key panels, plus big pads.
+- **Layout modes:** Classic, Perform, Waves and 4 Decks.
+- **Waveforms:** larger and sharper, scrolling smoothly at 60 fps.
+- **New controls:** knobs, faders, meters and platters, with real icons and fonts.
+- **Library:** filter chips (key match, BPM ±6 %, genre), a "Next" suggestion strip, and an artwork view.
+- **Smoother everywhere:** steady 60 fps for 2 and 4 decks, no freeze when loading a track, smooth scrolling through big libraries. Fits windows down to 1024 px, and tablets get their own layout.
+
+**Pro-sounding effects**
+- **Echo:** exact to the beat, with dub-style repeats.
+- **New reverb.**
+- **Stereo flanger / phaser / chorus,** locked to the beat.
+- **Second effect knob (P2)** for each effect.
+- **Tails ring out after the fader closes,** so echo-outs work.
+- **Isolator EQ** with true kills.
+- **Resonant filter.**
+- **Clean limiter.**
+- **Turntable-style brake and backspin.**
+- **No clicks** on play, cue jumps, loops, nudges or key-lock tempo changes.
+
+**Sampler**
+- A new bank of 12 real DJ sounds, including a proper air horn and the classic "ba-ba-baaah".
+- Pick a sound or load your own sample per pad.
+- Pad volume and sync-to-beat.
+
+**Automix and smart mix**
+- **10 transition styles:** Smooth blend, Bass swap, Crossfade, Filter sweep, Echo out, Cut, Backspin, Vinyl brake, Loop out and Reverb wash.
+- **Auto** picks one for each pair of tracks and shows why.
+- **Smart mix** orders tracks by key, BPM, energy flow and genre, and explains each choice. Shuffle & mix is there too.
+- **QUEUE panel** with a countdown and per-transition style overrides.
+- **Loading tracks yourself** while automix runs now works: your pick plays next.
+
+**Media-server playlists**
+- Your Plex, Jellyfin, Emby, Subsonic and MediaMax playlists appear in the library.
+- Open, automix, shuffle-mix, smart-mix, import or download them.
+
+**Fixes**
+- The tempo fader stays within its range.
+- Automix no longer bends tempo across big BPM gaps.
+- Loop ½ / ×2 work after exiting a loop.
+- The Echo Out pad restores your effect.
+- Load progress is shown for long tracks.
+- Many smaller layout and touch fixes.
+
+**Update prompt**
+- OpenDJ tells you when a newer version is out, with *What's new* and **Update now** / **Later** (Later waits 3 days; never during a set). Windows and Linux AppImage download, verify (SHA-256) and install after "Restart to update"; macOS opens the verified disk image; phones, packages and servers get the right download or instructions. Settings → About: turn automatic checks off or *Check now*.
 
 ### New in 0.3
 This release follows a full security audit, an in-depth QA pass and end-to-end testing with six kinds of users.
@@ -79,7 +136,7 @@ This release follows a full security audit, an in-depth QA pass and end-to-end t
 - **Mixer:**
   - 3-band EQ with kill, filter
   - Color FX (Space, Dub Echo, Noise, Crush, Jet) and quick vocal/instrumental stems
-  - 10 beat FX
+  - 10 beat FX, with post-fader echo / reverb tails (echo-outs)
   - crossfader curves, master limiter
   - mic input with talkover
   - headphone cue via a second sound card, 4-channel interface or split mode

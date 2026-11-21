@@ -1,5 +1,6 @@
 // Lighting panel: Live pads + preview, fixture patch, outputs, show settings.
 import { el } from '../util.js';
+import { icon } from '../ui/icons.js';
 import { api } from '../api.js';
 
 const SWATCHES = ['#ff0000', '#ff7a00', '#ffd400', '#00ff3c', '#00e5ff', '#0040ff', '#a000ff', '#ff00b4', '#ffffff'];
@@ -172,7 +173,7 @@ export function openLightingPanel(L, tab = 'live') {
             : f.type === 'wled-strip' ? el('div', { class: 'lt-inline' }, input(f.host, (v) => { f.host = v.trim(); save(); }, { placeholder: 'WLED IP' }), input(f.pixels, (v) => { f.pixels = Math.max(1, v | 0); save(); }, { type: 'number', min: 1, class: 'inp lt-num', title: 'LED count' }))
               : input(f.hueId, (v) => { f.hueId = v.trim(); save(); }, { placeholder: 'Hue light id' })),
           el('td', {}, select(f.group, meta.groups.map((g) => [g, g]), (v) => { f.group = v; save(); })),
-          el('td', {}, el('button', { class: 'btn sm', title: 'Remove', onclick: () => { cfg.fixtures.splice(i, 1); save(); render(); } }, '✕')));
+          el('td', {}, el('button', { class: 'btn sm', title: 'Remove', onclick: () => { cfg.fixtures.splice(i, 1); save(); render(); } }, icon('x'))));
       });
       const tpl = select(meta.templates[0]?.id, meta.templates.map((t) => [t.id, t.name]), () => {});
       const count = el('input', { class: 'inp lt-num', type: 'number', min: 1, max: 64, value: 1 });

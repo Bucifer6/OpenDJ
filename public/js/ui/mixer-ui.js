@@ -1,27 +1,48 @@
-import { el } from '../util.js';
+import { el, uiZoom } from '../util.js';
 import { knob, fader, button } from './controls.js';
 import { DECK_COLORS } from './deck-ui.js';
 import { cssVar } from './themes.js';
 
+/**
+ * Segmented LED meter. Meter ballistics like hardware: instant attack, ~24 dB/s release, a peak-hold segment that
+ * stays 1 s then falls. Sized from a ResizeObserver (no layout reads per frame) and redrawn only when a lit
+ * segment changes, so idle channels cost nothing.
+ */
 function vuMeter() {
   const c = el('canvas', { class: 'vu', width: 8, height: 120 });
   const g = c.getContext('2d');
-  let held = 0, heldT = 0;
-  c.draw = (peak) => {
-    const H = c.height, W = c.width;
+  const SEGS = 20;
+  let level = 0, held = 0, heldT = 0, lastT = 0, sig = '', dirty = true;
+  let box = null;
+  const ro = new ResizeObserver((es) => { const r = es.at(-1).contentRect, z = uiZoom(); box = { width: r.width * z, height: r.height * z }; dirty = true; });
+  ro.observe(c);
+  window.addEventListener('opendj-theme', () => { sig = ''; });
+  c.draw = (peak, now = performance.now()) => {
+    if (dirty) {
+      dirty = false;
+      const r = box || c.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+      const W = Math.max(2, Math.round(r.width * dpr)), H = Math.max(10, Math.round(r.height * dpr));
+      if (c.width !== W || c.height !== H) { c.width = W; c.height = H; sig = ''; }
+    }
+    const dt = Math.min(0.1, lastT ? (now - lastT) / 1000 : 0); lastT = now;
     const db = 20 * Math.log10(peak + 1e-9);
     const k = Math.max(0, Math.min(1, (db + 48) / 51)); // -48..+3 dB
-    if (k > held || performance.now() - heldT > 900) { held = k; heldT = performance.now(); }
-    g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, W, H);
-    const segs = 24;
-    for (let s = 0; s < segs; s++) {
-      const on = s / segs < k;
-      const y = H - (s + 1) * (H / segs);
-      const col = s >= segs - 2 ? '#ff3b4d' : s >= segs - 6 ? '#ffb020' : '#2ed47a';
-      g.fillStyle = on ? col : 'rgba(255,255,255,0.05)';
-      g.fillRect(0, y + 1, W, H / segs - 1.5);
+    level = k >= level ? k : Math.max(k, level - dt * 24 / 51);
+    if (level >= held) { held = level; heldT = now; } else if (now - heldT > 1000) held = Math.max(level, held - dt * 0.6);
+    const lit = Math.round(level * SEGS), pk = Math.min(SEGS - 1, Math.floor(held * SEGS - 1e-6));
+    const s = `${lit}|${pk}|${c.width}x${c.height}`;
+    if (s === sig) return;
+    sig = s;
+    const W = c.width, H = c.height, gap = Math.max(1, Math.round(H / SEGS * 0.22)), sh = (H - gap * (SEGS - 1)) / SEGS;
+    g.clearRect(0, 0, W, H);
+    for (let i = 0; i < SEGS; i++) {
+      const col = i >= SEGS - 2 ? cssVar('--meter-clip') : i >= SEGS - 6 ? cssVar('--meter-hot') : cssVar('--meter-ok');
+      const y = Math.round(H - (i + 1) * sh - i * gap);
+      g.fillStyle = col;
+      g.globalAlpha = i < lit ? 1 : i === pk && held > 0.02 ? 0.95 : 0.12;
+      g.fillRect(0, y, W, Math.max(1, Math.round(sh)));
     }
-    g.fillStyle = '#fff'; g.fillRect(0, H - held * H, W, 1.5);
+    g.globalAlpha = 1;
   };
   return c;
 }
@@ -95,6 +116,12 @@ export function buildMixer(app) {
   eng.on('mixer', (i) => { for (const r of byCh[i] || renderers) r.render(); });
   eng.on('master', () => { for (const r of renderers) r.render(); });
   eng.on('mic', () => { for (const r of renderers) r.render(); });
+  // compact strips when the layout leaves the mixer little height (.mx-short / .mx-400 / .mx-tiny in performance.css);
+  // phones stack the mixer at its natural height, so only desktop / tablet grids use this
+  const desk = matchMedia('(min-width: 700px) and (min-height: 561px)');
+  const fit = (h) => { const on = desk.matches; root.classList.toggle('mx-short', on && h <= 470); root.classList.toggle('mx-400', on && h <= 400); root.classList.toggle('mx-tiny', on && h <= 330); };
+  new ResizeObserver((ents) => fit(ents[0].contentBoxSize?.[0]?.blockSize ?? ents[0].contentRect.height)).observe(root);
+  desk.addEventListener?.('change', () => fit(root.getBoundingClientRect().height / (parseFloat(document.documentElement.style.zoom) || 1)));
   root.setDeckCount = (n) => { for (const s of strips) s.style.display = s.idx < n ? '' : 'none'; };
   root.frame = () => {
     for (const s of strips) if (s.style.display !== 'none') s.vu.draw(s.ch.level());

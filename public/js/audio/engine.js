@@ -1,23 +1,50 @@
 // Audio engine: AudioContext, mixer channel strips, crossfader, master/headphone routing, recorder, analysis worker.
 import { Emitter, clamp, dbToGain } from '../util.js';
 import { Deck } from './deck.js';
-import { FxUnit, createEffect } from './effects.js';
+import { FxUnit, createColorFx, loadEffectWorklets } from './effects.js';
 import { Sampler } from './sampler.js';
 
-const knobToDb = (v) => (v >= 0 ? v * 6 : v <= -0.98 ? -60 : v * 26); // EQ knob -1..1: kill .. 0 .. +6 dB
+const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+/** EQ knob -1..1 -> band gain: +6 dB at the right, 0 dB at 12 o'clock, -26 dB at 8 o'clock fading to a full kill. */
+export const eqKnobGain = (v) => (v >= 0 ? dbToGain(v * 6) : dbToGain(v * 26) * (1 - smoothstep(-0.8, -1, v)));
+const BUTTER_Q = 20 * Math.log10(Math.SQRT1_2); // lowpass/highpass BiquadFilter Q is in dB
+/** EQ crossover points (Hz): isolator bands low < 200 < mid < 2500 < high. */
+export const EQ_XOVER = [200, 2500];
+/** Filter knob dead zone around 12 o'clock. */
+const FILTER_DEAD = 0.03;
 
-class Channel extends Emitter {
+/** Value range of each continuous channel control (knobs, faders, MIDI, automation are clamped to it). */
+const CHANNEL_LIMITS = { trim: [-1, 1], eqHigh: [-1, 1], eqMid: [-1, 1], eqLow: [-1, 1], filter: [-1, 1], volume: [0, 1], fxMix: [0, 1], fxParam: [0, 1], fxParam2: [0, 1], vocal: [0, 1], inst: [0, 1] };
+
+export class Channel extends Emitter {
   constructor(engine, index) {
     super();
     const ctx = this.ctx = engine.ctx; this.engine = engine; this.index = index;
     this.trimNode = ctx.createGain();
-    this.low = ctx.createBiquadFilter(); this.low.type = 'lowshelf'; this.low.frequency.value = 220;
-    this.mid = ctx.createBiquadFilter(); this.mid.type = 'peaking'; this.mid.frequency.value = 1100; this.mid.Q.value = 0.65;
-    this.high = ctx.createBiquadFilter(); this.high.type = 'highshelf'; this.high.frequency.value = 4500;
-    this.lpf = ctx.createBiquadFilter(); this.lpf.type = 'lowpass'; this.lpf.frequency.value = 22000; this.lpf.Q.value = 0.9;
-    this.hpf = ctx.createBiquadFilter(); this.hpf.type = 'highpass'; this.hpf.frequency.value = 10; this.hpf.Q.value = 0.9;
-    this.fx = new FxUnit(ctx);
+    const bq = (type, f, q) => { const n = ctx.createBiquadFilter(); n.type = type; n.frequency.value = f; n.Q.value = q; return n; };
+    const chain = (...n) => { n.reduce((a, b) => { a.connect(b); return b; }); return n; };
+    // 3-band isolator EQ: Linkwitz-Riley 48 dB/oct crossovers (LR8 = two cascaded 4th-order Butterworths). The low
+    // band goes through the matching all-pass of the upper crossover, so at 12 o'clock the bands sum to a flat
+    // all-pass (no level ripple), every channel has the same phase (blending two decks never thins the bass) and each
+    // kill is a true band kill (> 40 dB across the band).
+    const [x1, x2] = EQ_XOVER, BW4 = [-5.333, 2.323]; // 4th-order Butterworth stage Qs (0.5412, 1.3066) in dB
+    const lr8 = (type, f) => [...BW4, ...BW4].map((q) => bq(type, f, q));
+    const ap4 = (f) => [0.5412, 1.3066].map((q) => bq('allpass', f, q)); // LP8 + HP8 of the upper crossover
+    this.eqIn = ctx.createGain(); this.eqOut = ctx.createGain();
+    this.low = ctx.createGain(); this.mid = ctx.createGain(); this.high = ctx.createGain();
+    chain(this.eqIn, ...lr8('lowpass', x1), ...ap4(x2), this.low, this.eqOut);
+    const upper = chain(this.eqIn, ...lr8('highpass', x1)).at(-1);
+    chain(upper, ...lr8('lowpass', x2), this.mid, this.eqOut);
+    chain(upper, ...lr8('highpass', x2), this.high, this.eqOut);
+    // one-knob filter: 24 dB/oct resonant low-pass (left) / high-pass (right); parked at 0.98 x Nyquist / 3 Hz
+    this.parkLp = ctx.sampleRate * 0.49;
+    // (parked just inside the range: the special-case formulas at exactly Nyquist / 0 Hz would click on the way out)
+    this.lpf = [bq('lowpass', this.parkLp, -5.33), bq('lowpass', this.parkLp, 2.32)];
+    this.hpf = [bq('highpass', 3, -5.33), bq('highpass', 3, 2.32)];
+    this.fx = new FxUnit(ctx, { postFader: engine.settings.fxPostFader !== false });
     this.fader = ctx.createGain(); this.xf = ctx.createGain();
+    // post-fader FX feed: mirrors of the channel fader and crossfader gains (set together in apply() / setXfGain())
+    this.postFader = ctx.createGain(); this.postXf = ctx.createGain();
     this.cueSend = ctx.createGain(); this.cueSend.gain.value = 0;
     this.meter = ctx.createAnalyser(); this.meter.fftSize = 512;
     this.meterBuf = new Float32Array(this.meter.fftSize);
@@ -45,19 +72,25 @@ class Channel extends Emitter {
     this.sideGain.connect(merge, 0, 0); sideNeg.connect(merge, 0, 1);
     this.stemOut = ctx.createGain(); merge.connect(this.stemOut);
     // Color FX: a sound-colour effect whose amount follows the filter knob (rekordbox-style)
-    this.colorIn = ctx.createGain(); this.colorSend = ctx.createGain(); this.colorWet = ctx.createGain();
+    this.colorIn = ctx.createGain(); this.colorDry = ctx.createGain(); this.colorSend = ctx.createGain(); this.colorWet = ctx.createGain();
     this.colorSend.gain.value = 0; this.colorWet.gain.value = 0;
-    this.colorIn.connect(this.fx.input); this.colorIn.connect(this.colorSend); this.colorWet.connect(this.fx.input);
-    this.colorType = 'filter'; this.colorFx = null;
-    this.trimNode.connect(this.stemIn); this.stemOut.connect(this.low); this.low.connect(this.mid); this.mid.connect(this.high);
-    this.high.connect(this.hpf); this.hpf.connect(this.lpf); this.lpf.connect(this.colorIn);
+    this.colorOut = ctx.createGain();
+    this.colorIn.connect(this.colorDry); this.colorDry.connect(this.colorOut); this.colorIn.connect(this.colorSend); this.colorWet.connect(this.colorOut);
+    this.colorOut.connect(this.fx.input); this.colorOut.connect(this.postFader); this.postFader.connect(this.postXf); this.postXf.connect(this.fx.postIn);
+    this.colorType = 'filter'; this.colorFx = null; this.colorFade = null;
+    this.trimNode.connect(this.stemIn); this.stemOut.connect(this.eqIn);
+    chain(this.eqOut, this.hpf[0], this.hpf[1], this.lpf[0], this.lpf[1], this.colorIn);
     this.fx.output.connect(this.fader); this.fx.output.connect(this.cueSend); this.fx.output.connect(this.meter);
     this.fader.connect(this.xf); this.xf.connect(engine.musicBus); this.cueSend.connect(engine.cueBus);
-    this.state = { trim: 0, autoGain: 0, eqHigh: 0, eqMid: 0, eqLow: 0, filter: 0, volume: 0.8, cue: false, xfAssign: index % 2 === 0 ? 'A' : 'B', fxOn: false, fxType: 'echo', fxMix: 0.5, fxParam: 0.5, fxBeats: 0.5, vocal: 1, inst: 1, colorFx: engine.settings.colorFx || 'filter' };
+    // post-fader FX tails: the wet signal is summed after the faders (silent in pre-fader mode)
+    this.fx.wetOut.connect(engine.musicBus); this.fx.wetOut.connect(this.cueSend); this.fx.wetOut.connect(this.meter);
+    this.state = { trim: 0, autoGain: 0, eqHigh: 0, eqMid: 0, eqLow: 0, filter: 0, volume: 0.8, cue: false, xfAssign: index % 2 === 0 ? 'A' : 'B', fxOn: false, fxType: 'echo', fxMix: 0.5, fxParam: 0.5, fxParam2: 0.5, fxBeats: 0.5, vocal: 1, inst: 1, colorFx: engine.settings.colorFx || 'filter' };
     this.setColorFx(this.state.colorFx);
     this.apply();
   }
   set(key, value) {
+    const lim = CHANNEL_LIMITS[key];
+    if (lim) { value = Number(value); if (!Number.isFinite(value)) return; value = clamp(value, lim[0], lim[1]); } // knobs/MIDI/automation can't overshoot
     if (this.state[key] === value) return;
     this.state[key] = value;
     switch (key) {
@@ -65,6 +98,7 @@ class Channel extends Emitter {
       case 'fxType': this.fx.setType(value); break;
       case 'fxMix': this.fx.setMix(value); break;
       case 'fxParam': this.fx.setParam(value); break;
+      case 'fxParam2': this.fx.setParam2(value); break;
       case 'fxBeats': this.fx.setBeats(value); break;
       case 'colorFx': this.setColorFx(value); break;
       default: this.apply();
@@ -74,26 +108,38 @@ class Channel extends Emitter {
     this.engine.emit('mixer', this.index, key, value);
   }
   setColorFx(type) {
-    if (this.colorFx) { const old = this.colorFx; this.colorSend.disconnect(); old.output.disconnect(); setTimeout(() => old.dispose(), 50); this.colorFx = null; }
+    const t = this.ctx.currentTime;
+    if (this.colorFx) { // fade the old Color FX out, then free it
+      const old = this.colorFx, fade = this.colorFade, send = this.colorSend;
+      fade.gain.setTargetAtTime(0, t, 0.012);
+      setTimeout(() => { try { send.disconnect(old.input); } catch { /* */ } try { fade.disconnect(); } catch { /* */ } old.dispose(); }, 150);
+      this.colorFx = null;
+    }
     this.colorType = type;
-    const map = { space: 'reverb', dubecho: 'echo', noise: 'noise', crush: 'bitcrush', pitch: 'flanger' };
-    if (map[type]) {
-      this.colorFx = createEffect(this.ctx, map[type]);
-      this.colorSend.connect(this.colorFx.input); this.colorFx.output.connect(this.colorWet);
-      this.colorFx.setBeatTime?.(type === 'dubecho' ? 0.375 : 0.5);
-      this.colorFx.setParam?.(0.7);
+    this.colorFx = createColorFx(this.ctx, type);
+    if (this.colorFx) {
+      this.colorFade = this.ctx.createGain();
+      this.colorSend.connect(this.colorFx.input); this.colorFx.output.connect(this.colorFade); this.colorFade.connect(this.colorWet);
+      this.colorFx.setTempo?.(this.beatSec || 0.5);
     }
     this.apply();
   }
+  /** Tempo / beat grid of this channel's deck, for the beat FX and tempo-synced Color FX. */
+  setBeatSec(s) { this.beatSec = s; this.fx.setBeatSec(s); this.colorFx?.setTempo?.(s); }
+  setClock(beat, at, beatSec) { this.fx.setClock(beat, at, beatSec); this.colorFx?.setClock?.(beat, at, beatSec); }
   setAutoGain(db) { this.state.autoGain = db; this.apply(); }
+  /** Crossfader gain of this channel (engine.applyCrossfader), mirrored on the post-fader FX feed. */
+  setXfGain(g) { const t = this.ctx.currentTime; this.xf.gain.setTargetAtTime(g, t, 0.004); this.postXf.gain.setTargetAtTime(g, t, 0.004); }
+  /** Beat FX tails after the channel fader (default) or the whole FX unit before it. */
+  setFxPostFader(on) { this.fx.setPostFader(on); }
   /** AI stems loaded on this channel's deck: VOC / INST then drive the stems and the DSP quick-stems chain is bypassed. */
   setAiStems(on) { if (this.aiStems === !!on) return; this.aiStems = !!on; this.apply(); this.emit('change', 'aiStems', this.aiStems); }
   apply() {
     const s = this.state, t = this.ctx.currentTime, k = 0.012;
     this.trimNode.gain.setTargetAtTime(dbToGain(s.trim * 12 + s.autoGain), t, k);
-    this.high.gain.setTargetAtTime(knobToDb(s.eqHigh), t, k);
-    this.mid.gain.setTargetAtTime(knobToDb(s.eqMid), t, k);
-    this.low.gain.setTargetAtTime(knobToDb(s.eqLow), t, k);
+    this.high.gain.setTargetAtTime(eqKnobGain(s.eqHigh), t, k);
+    this.mid.gain.setTargetAtTime(eqKnobGain(s.eqMid), t, k);
+    this.low.gain.setTargetAtTime(eqKnobGain(s.eqLow), t, k);
     const db = (v) => 20 * Math.log10(Math.max(0.01, v));
     // AI stems (deck worklet) when the track has them, else the DSP "quick stems" approximation (fallback)
     const ai = !!this.aiStems, vocal = ai ? 1 : s.vocal, inst = ai ? 1 : s.inst;
@@ -102,29 +148,63 @@ class Channel extends Emitter {
     this.instLow.gain.setTargetAtTime(db(inst), t, k);
     this.instHigh.gain.setTargetAtTime(db(inst), t, k);
     this.sideGain.gain.setTargetAtTime(inst, t, k);
-    // Color FX amount follows the filter knob; the filter itself is gentler in colour modes
-    const amt = Math.abs(s.filter) < 0.03 ? 0 : Math.abs(s.filter);
-    if (this.colorFx) {
-      this.colorFx.setActive?.(amt > 0);
-      this.colorSend.gain.setTargetAtTime(amt > 0 ? 1 : 0, t, k);
-      this.colorWet.gain.setTargetAtTime(amt * (this.colorType === 'noise' ? 0.6 : 1.1), t, k);
-      if (this.colorType === 'crush' || this.colorType === 'pitch') this.colorFx.setParam?.(amt);
-    }
-    // one-knob filter: left = low-pass, right = high-pass
-    const f = this.colorFx ? s.filter * 0.6 : s.filter;
-    const dead = Math.abs(f) < 0.03;
-    this.lpf.frequency.setTargetAtTime(dead || f > 0 ? 22000 : 20000 * Math.pow(60 / 20000, -f), t, k);
-    this.hpf.frequency.setTargetAtTime(dead || f < 0 ? 10 : 20 * Math.pow(9000 / 20, f), t, k);
-    const res = dead ? 0.7 : 0.7 + Math.abs(f) * 4;
-    this.lpf.Q.setTargetAtTime(res, t, k); this.hpf.Q.setTargetAtTime(res, t, k);
+    // Color FX amount follows the filter knob (dead zone at 12 o'clock); the channel filter is gentler in colour modes
+    const side = s.filter < 0 ? -1 : 1, x = Math.max(0, (Math.abs(s.filter) - FILTER_DEAD) / (1 - FILTER_DEAD));
+    const cfx = this.colorFx;
+    if (cfx) {
+      cfx.setColor(x, side);
+      if (cfx.kind === 'send') { this.colorSend.gain.setTargetAtTime(cfx.sendAmount(x), t, k); this.colorWet.gain.setTargetAtTime(1, t, k); this.colorDry.gain.setTargetAtTime(1, t, k); }
+      else if (cfx.kind === 'insert') { const w = x > 0 ? cfx.wetAmount(x) : 0; this.colorSend.gain.setTargetAtTime(1, t, k); this.colorWet.gain.setTargetAtTime(w, t, k); this.colorDry.gain.setTargetAtTime(1 - w, t, k); }
+      else { this.colorSend.gain.setTargetAtTime(0, t, k); this.colorWet.gain.setTargetAtTime(1, t, k); this.colorDry.gain.setTargetAtTime(1, t, k); }
+      this.colorFade?.gain.setTargetAtTime(1, t, 0.012);
+    } else { this.colorDry.gain.setTargetAtTime(1, t, k); this.colorWet.gain.setTargetAtTime(0, t, k); this.colorSend.gain.setTargetAtTime(0, t, k); }
+    this.applyFilter(x * (cfx ? cfx.dryFilter : 1), side, t);
     this.fader.gain.setTargetAtTime(s.volume * s.volume, t, 0.005);
+    this.postFader.gain.setTargetAtTime(s.volume * s.volume, t, 0.005);
     this.cueSend.gain.setTargetAtTime(s.cue ? 1 : 0, t, 0.005);
+  }
+  /** One-knob filter: amount x (0..1, dead zone removed), side -1 = low-pass, +1 = high-pass. */
+  applyFilter(x, side, t) {
+    const k = 0.012;
+    const lpOn = x > 0 && side < 0, hpOn = x > 0 && side > 0;
+    // exponential sweeps: LPF 18 kHz -> 70 Hz (1.1 kHz half way), HPF 20 Hz -> 8 kHz (400 Hz half way); parked
+    // filters are inaudible (flat to < 0.01 dB)
+    const lpF = lpOn ? Math.min(this.parkLp, 18000 * Math.pow(70 / 18000, x)) : this.parkLp;
+    const hpF = hpOn ? 20 * Math.pow(8000 / 20, x) : 3;
+    // resonance fades in over the first 20 % of travel (no jump out of the dead zone), eases off at the extremes
+    const res = smoothstep(0, 0.2, x) * (1 - 0.35 * smoothstep(0.8, 1, x));
+    const q2 = 2.32 + 4.2 * res; // dB: Butterworth 2nd stage (+2.3 dB) up to ~+6.5 dB resonant peak
+    for (const f of this.lpf) f.frequency.setTargetAtTime(lpF, t, k);
+    for (const f of this.hpf) f.frequency.setTargetAtTime(hpF, t, k);
+    this.lpf[1].Q.setTargetAtTime(lpOn ? q2 : 2.32, t, k); this.hpf[1].Q.setTargetAtTime(hpOn ? q2 : 2.32, t, k);
   }
   level() {
     this.meter.getFloatTimeDomainData(this.meterBuf);
     let p = 0; for (const v of this.meterBuf) { const a = Math.abs(v); if (a > p) p = a; }
     return p;
   }
+}
+
+/**
+ * Master limiter: look-ahead brickwall (fx-worklets.js opendj-limiter), -1 dBFS ceiling, transparent below it.
+ * Falls back to a DynamicsCompressor + hard clip where AudioWorklets are missing.
+ */
+export function createLimiter(ctx, { ceiling = -1 } = {}) {
+  if (ctx.__opendjFx) {
+    const node = new AudioWorkletNode(ctx, 'opendj-limiter', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
+    node.parameters.get('ceiling').value = ceiling;
+    const lim = { input: node, output: node, node, gainReduction: 1, setEnabled: (on) => { node.parameters.get('enabled').value = on ? 1 : 0; } };
+    node.port.onmessage = (e) => { lim.gainReduction = e.data.gr; };
+    return lim;
+  }
+  const c = ctx.createDynamicsCompressor();
+  c.threshold.value = ceiling - 2; c.knee.value = 2; c.ratio.value = 20; c.attack.value = 0.001; c.release.value = 0.1;
+  const clip = ctx.createWaveShaper(); const cv = new Float32Array(1025), m = dbToGain(ceiling);
+  for (let i = 0; i < cv.length; i++) { const x = (i / 1024) * 2 - 1; cv[i] = Math.max(-m, Math.min(m, x)); }
+  clip.curve = cv; c.connect(clip);
+  const out = ctx.createGain(), bypass = ctx.createGain(), wet = ctx.createGain(), input = ctx.createGain();
+  input.connect(c); clip.connect(wet); wet.connect(out); input.connect(bypass); bypass.connect(out); bypass.gain.value = 0;
+  return { input, output: out, setEnabled: (on) => { wet.gain.setTargetAtTime(on ? 1 : 0, ctx.currentTime, 0.01); bypass.gain.setTargetAtTime(on ? 0 : 1, ctx.currentTime, 0.01); } };
 }
 
 export class Engine extends Emitter {
@@ -142,21 +222,19 @@ export class Engine extends Emitter {
     try { this.ctx = new AudioContext({ latencyHint: /^\d/.test(lh) ? Number(lh) / 1000 : lh }); }
     catch (e) { console.warn(`Invalid audio latency setting (${lh}); using the default`, e); this.ctx = new AudioContext(); } // never brick startup
     await this.ctx.audioWorklet.addModule(new URL('./worklets.js', import.meta.url));
+    await loadEffectWorklets(this.ctx).catch((e) => console.warn('Effect worklets unavailable', e));
     const ctx = this.ctx;
     this.masterBus = ctx.createGain();
     this.musicBus = ctx.createGain(); this.duck = ctx.createGain();
     this.musicBus.connect(this.duck); this.duck.connect(this.masterBus);
     this.cueBus = ctx.createGain();
     this.masterGain = ctx.createGain(); this.masterGain.gain.value = 0.8;
-    this.limiter = ctx.createDynamicsCompressor();
-    Object.assign(this.limiter, {});
-    this.limiter.threshold.value = -1.5; this.limiter.knee.value = 0; this.limiter.ratio.value = 20;
-    this.limiter.attack.value = 0.002; this.limiter.release.value = 0.12;
+    this.limiter = createLimiter(ctx);
     this.masterOut = ctx.createGain();
     this.masterMeterL = ctx.createAnalyser(); this.masterMeterR = ctx.createAnalyser();
     this.masterMeterL.fftSize = this.masterMeterR.fftSize = 512;
     const split = ctx.createChannelSplitter(2);
-    this.masterBus.connect(this.masterGain);
+    this.masterBus.connect(this.masterGain); this.masterGain.connect(this.limiter.input); this.limiter.output.connect(this.masterOut);
     this.setLimiter(this.settings.limiter !== false);
     this.masterOut.connect(split); split.connect(this.masterMeterL, 0); split.connect(this.masterMeterR, 1);
     // headphones: blend of cue bus and master
@@ -165,7 +243,15 @@ export class Engine extends Emitter {
     this.hpCue.connect(this.hpOut); this.hpMaster.connect(this.hpOut);
     this.setCueMix(0); this.hpOut.gain.value = 0.8;
     // sampler -> master
-    this.sampler = new Sampler(ctx, this.masterBus);
+    this.sampler = new Sampler(ctx, this.masterBus, this.settings.sampler || {});
+    // pads set to "sync to beat" start on the master deck's next beat
+    this.sampler.nextBeat = () => {
+      const m = this.masterDeck();
+      if (!m?.playing || !m.bpm || !m.rate) return null;
+      const ph = m.beatPhase();
+      if (ph < 0.04) return null; // just on the beat: play now
+      return this.ctx.currentTime + ((1 - ph) * m.beatLen) / m.rate;
+    };
 
     for (let i = 0; i < 4; i++) {
       const ch = new Channel(this, i); this.channels.push(ch);
@@ -208,7 +294,7 @@ export class Engine extends Emitter {
     this.micSrc.connect(this.micGain);
     this.micOn = true; this.emit('mic');
   }
-  setMicVolume(v) { this.micVolume = v; if (this.micGain) this.micGain.gain.setTargetAtTime(v * v * 1.5, this.ctx.currentTime, 0.02); this.emit('master', 'micVolume', v); }
+  setMicVolume(v) { v = clamp(Number(v) || 0, 0, 1); this.micVolume = v; if (this.micGain) this.micGain.gain.setTargetAtTime(v * v * 1.5, this.ctx.currentTime, 0.02); this.emit('master', 'micVolume', v); }
   setMicEq(band, v) { const n = band === 'high' ? this.micHigh : this.micLow; if (n) n.gain.setTargetAtTime(v * 12, this.ctx.currentTime, 0.02); }
   setTalkover(on) {
     this.talkover = on;
@@ -229,14 +315,13 @@ export class Engine extends Emitter {
   }
 
   // ---------- master / outputs ----------
-  setLimiter(on) {
-    this.masterGain.disconnect();
-    if (on) { this.masterGain.connect(this.limiter); this.limiter.connect(this.masterOut); }
-    else { try { this.limiter.disconnect(); } catch { /* */ } this.masterGain.connect(this.masterOut); }
-  }
-  setMasterVolume(v) { this.masterVolume = v; this.masterGain.gain.setTargetAtTime(v * v * 1.25, this.ctx.currentTime, 0.01); this.emit('master', 'volume', v); }
-  setCueMix(v) { this.cueMix = v; this.hpCue.gain.value = Math.cos(v * Math.PI / 2); this.hpMaster.gain.value = Math.sin(v * Math.PI / 2); this.emit('master', 'cueMix', v); }
-  setHeadphoneVolume(v) { this.hpVolume = v; this.hpOut.gain.setTargetAtTime(v * v * 1.25, this.ctx.currentTime, 0.01); this.emit('master', 'hpVolume', v); }
+  /** The limiter stays in the signal path (constant latency); off = unity gain, so toggling never clicks. */
+  setLimiter(on) { this.limiter.setEnabled(on); }
+  /** Post-fader beat FX tails (settings.fxPostFader, default on) for every channel. */
+  setFxPostFader(on) { for (const ch of this.channels) ch.setFxPostFader(on); }
+  setMasterVolume(v) { v = clamp(Number(v) || 0, 0, 1); this.masterVolume = v; this.masterGain.gain.setTargetAtTime(v * v * 1.25, this.ctx.currentTime, 0.01); this.emit('master', 'volume', v); }
+  setCueMix(v) { v = clamp(Number(v) || 0, 0, 1); this.cueMix = v; this.hpCue.gain.value = Math.cos(v * Math.PI / 2); this.hpMaster.gain.value = Math.sin(v * Math.PI / 2); this.emit('master', 'cueMix', v); }
+  setHeadphoneVolume(v) { v = clamp(Number(v) || 0, 0, 1); this.hpVolume = v; this.hpOut.gain.setTargetAtTime(v * v * 1.25, this.ctx.currentTime, 0.01); this.emit('master', 'hpVolume', v); }
 
   async listOutputs() {
     try {
@@ -299,7 +384,7 @@ export class Engine extends Emitter {
     };
     for (const ch of this.channels) {
       const a = ch.state.xfAssign;
-      ch.xf.gain.setTargetAtTime(a === 'THRU' ? 1 : gainFor(a), this.ctx.currentTime, 0.004);
+      ch.setXfGain(a === 'THRU' ? 1 : gainFor(a));
     }
   }
 
@@ -324,10 +409,17 @@ export class Engine extends Emitter {
 
   tick() {
     // keep beat-synced FX in time with each deck's tempo
+    const now = this.ctx.currentTime;
     for (let i = 0; i < 4; i++) {
-      const d = this.decks[i];
-      const bpm = d.effectiveBpm || this.master?.effectiveBpm || 120;
-      this.channels[i].fx.setBeatSec(60 / bpm);
+      const d = this.decks[i], ch = this.channels[i];
+      const bpm = d.effectiveBpm || this.master?.effectiveBpm || 120, beatSec = 60 / bpm;
+      ch.setBeatSec(beatSec);
+      // beat grid for the beat-locked LFOs (Trans, Flanger, ...): refreshed ~8x a second and on tempo changes
+      const live = d.playing && d.bpm > 0 && !d.scratching;
+      if (now - (ch._clockAt || 0) > 0.12 || ch._clockSec !== beatSec || ch._clockLive !== live) {
+        ch._clockAt = now; ch._clockSec = beatSec; ch._clockLive = live;
+        ch.setClock(live ? (d.position - d.gridOffset) / d.beatLen : null, now, beatSec);
+      }
     }
     if (this.master && !this.master.playing) {
       const other = this.decks.find((d) => d.playing && d.track && d !== this.master);

@@ -2,6 +2,7 @@
 // settings pane. Wiring (done by the app): setupStems(app) once after the layout exists,
 // buildStemControls(app, deck) inside each deck, stemsMenuItems(app, tracks) in the track context menu.
 import { el } from '../util.js';
+import { icon } from '../ui/icons.js';
 import { button, knob } from '../ui/controls.js';
 import { StemsManager, stemsApi } from './stems.js';
 
@@ -19,7 +20,7 @@ export function setupStems(app) {
   const label = el('div', { class: 'stems-panel-label' });
   const queued = el('div', { class: 'stems-panel-queue' });
   const panel = el('div', { class: 'stems-panel', role: 'status', 'aria-live': 'polite', hidden: true },
-    el('div', { class: 'stems-panel-row' }, label, button('✕', { cls: 'xs', title: 'Cancel stem preparation (Shift: cancel the whole queue)', click: (e) => (e.shiftKey ? stems.cancelAll() : stems.cancel()) })),
+    el('div', { class: 'stems-panel-row' }, label, button(icon('x'), { cls: 'xs', title: 'Cancel stem preparation (Shift: cancel the whole queue)', click: (e) => (e.shiftKey ? stems.cancelAll() : stems.cancel()) })),
     el('div', { class: 'stems-bar' }, bar), queued);
   document.body.append(panel);
   let modelMsg = null;

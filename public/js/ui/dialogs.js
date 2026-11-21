@@ -1,12 +1,49 @@
+import { icon, glyphIcon } from './icons.js';
 import { el, uiZoom } from '../util.js';
 import { api } from '../api.js';
 import { THEMES, applyTheme } from './themes.js';
 import { controllersPanel } from './controllers-panel.js';
+import { platform, MOBILE_UNAVAILABLE, APP_VERSION } from '../platform.js';
+import { STYLES, normStyle } from '../automix.js';
+import { SET_SHAPES, PRESETS } from '../smartmix.js';
+
+/** Automix modes offered in the start dialog. */
+export const AUTOMIX_MODES = [
+  ['order', 'Play in this order'],
+  ['shuffle', 'Shuffle & mix (random order, still beat-matched)'],
+  ['smart', 'Smart mix (order by how well tracks go together)'],
+  ['live', 'Smart mix live (pick each next track while playing)'],
+];
+const BAR_CHOICES = [4, 8, 16, 32];
+const styleValue = (s) => (s === 'auto' ? 'auto' : normStyle(s));
+let modalSeq = 0;
+
+/** Smart-mix weight controls: preset select + harmonic / energy / variety sliders. Returns { el, value() }. */
+function smartControls(am, onChange) {
+  const sliders = { ...PRESETS.balanced, ...(am.sliders || {}) };
+  const preset = el('select', { class: 'sel', 'data-smart': 'preset' }, ...[['balanced', 'Balanced'], ['harmonic', 'Harmonic first'], ['energy', 'Energy flow first'], ['variety', 'Variety first'], ['custom', 'Custom']].map(([v, l]) => el('option', { value: v }, l)));
+  preset.value = am.preset || 'balanced';
+  const inputs = {};
+  const row = (k, label) => {
+    const i = el('input', { type: 'range', min: 0, max: 1, step: 0.05, value: sliders[k], 'data-smart': k });
+    i.addEventListener('input', () => { sliders[k] = Number(i.value); preset.value = 'custom'; onChange?.(); });
+    inputs[k] = i;
+    return el('label', { class: 'field' }, el('span', {}, label), i);
+  };
+  preset.addEventListener('change', () => { const p = PRESETS[preset.value]; if (p) for (const k of Object.keys(p)) { sliders[k] = p[k]; inputs[k].value = p[k]; } onChange?.(); });
+  const node = el('div', { class: 'form' }, el('label', { class: 'field' }, el('span', {}, 'Smart mix priorities'), preset),
+    row('harmonic', 'Harmonic (key compatibility)'), row('energy', 'Energy flow (follow the set shape)'), row('variety', 'Variety (no repeated artists / genres)'));
+  return { el: node, value: () => ({ preset: preset.value, sliders: { ...sliders } }) };
+}
 
 export class Dialogs {
   constructor(app) { this.app = app; }
 
-  modal(title, body, buttons = [], { wide = false } = {}) {
+  /**
+   * A dialog. buttons: [{ label, value, primary, danger, cls, action }] (action returning false keeps it open).
+   * opts.cls: extra class on the box; opts.footStart: a node at the start of the footer; opts.onOpen({ close, box }).
+   */
+  modal(title, body, buttons = [], { wide = false, cls = '', footStart = null, onOpen = null } = {}) {
     return new Promise((resolve) => {
       const close = (v) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
       // only the top-most dialog reacts to Escape
@@ -20,13 +57,15 @@ export class Dialogs {
           if (e.shiftKey && (i <= 0)) { e.preventDefault(); f.at(-1).focus(); } else if (!e.shiftKey && (i === -1 || i === f.length - 1)) { e.preventDefault(); f[0].focus(); }
         }
       };
-      const foot = el('div', { class: 'modal-foot' }, ...buttons.map((b) => el('button', { class: `btn ${b.primary ? 'primary' : ''} ${b.danger ? 'danger' : ''}`, onclick: async () => { if (b.action) { const r = await b.action(); if (r === false) return; close(r ?? b.value); } else close(b.value); } }, b.label)));
-      const box = el('div', { class: `modal ${wide ? 'wide' : ''}`, role: 'dialog', 'aria-label': title },
-        el('div', { class: 'modal-head' }, el('h2', {}, title), el('button', { class: 'modal-x', onclick: () => close(null), 'aria-label': 'Close' }, '✕')),
+      const foot = el('div', { class: 'modal-foot' }, footStart, ...buttons.map((b) => el('button', { class: `btn ${b.primary ? 'primary' : ''} ${b.danger ? 'danger' : ''} ${b.cls || ''}`, onclick: async () => { if (b.action) { const r = await b.action(); if (r === false) return; close(r ?? b.value); } else close(b.value); } }, b.label)));
+      const titleId = `modal-title-${++modalSeq}`;
+      const box = el('div', { class: `modal ${wide ? 'wide' : ''} ${cls}`, role: 'dialog', 'aria-modal': 'true', 'aria-label': title, 'aria-labelledby': titleId },
+        el('div', { class: 'modal-head' }, el('h2', { id: titleId }, title), el('button', { class: 'modal-x', onclick: () => close(null), 'aria-label': 'Close', title: 'Close' }, icon('x'))),
         el('div', { class: 'modal-body' }, body), buttons.length ? foot : null);
       const overlay = el('div', { class: 'overlay', onmousedown: (e) => { if (e.target === overlay) close(null); } }, box);
       document.body.append(overlay);
       document.addEventListener('keydown', onKey);
+      onOpen?.({ close, box });
       setTimeout(() => (box.querySelector('.modal-body input:not([type=checkbox]):not([type=color]), .modal-body select, .modal-body textarea') || box.querySelector('.modal-foot .btn.primary') || box.querySelector('.modal-x'))?.focus(), 30);
     });
   }
@@ -35,7 +74,9 @@ export class Dialogs {
     document.querySelector('.ctx-menu')?.remove();
     const build = (list) => el('div', { class: 'ctx-menu' }, ...list.map((it) => {
       if (it === '-') return el('div', { class: 'ctx-sep' });
-      const row = el('div', { class: `ctx-item ${it.danger ? 'danger' : ''} ${it.sub ? 'has-sub' : ''}` }, it.label);
+      // `checked` (true / false): a check icon slot in front of the label (radio / toggle items)
+      const row = el('div', { class: `ctx-item ${it.danger ? 'danger' : ''} ${it.sub ? 'has-sub' : ''}`, role: it.checked !== undefined ? 'menuitemcheckbox' : null, 'aria-checked': it.checked !== undefined ? String(!!it.checked) : null },
+        it.checked !== undefined ? el('span', { class: 'ctx-check' }, it.checked ? icon('check') : '') : null, it.label);
       if (it.sub) {
         const sub = build(it.sub); sub.classList.add('ctx-sub'); row.append(sub);
         // keep submenus inside the window (flip left / shift up when they would overflow)
@@ -82,7 +123,7 @@ export class Dialogs {
     const render = () => {
       pathEl.value = cur.path ?? '';
       list.replaceChildren(
-        cur.parent ? el('div', { class: 'browse-item', onclick: async () => { cur = await api.browse(cur.parent); render(); } }, '⬑ ..') : null,
+        cur.parent ? el('div', { class: 'browse-item', onclick: async () => { cur = await api.browse(cur.parent); render(); } }, '.. (up)') : null,
         ...cur.entries.map((e) => el('div', { class: 'browse-item', onclick: async () => { try { cur = await api.browse(e.path); render(); } catch (err) { this.app.toast(err.message); } } }, '🗀 ' + e.name)));
     };
     pathEl.addEventListener('change', async () => { try { cur = await api.browse(pathEl.value); render(); } catch (e) { this.app.toast(e.message); } });
@@ -91,13 +132,14 @@ export class Dialogs {
   }
 
   async addFolder() {
+    if (platform.local) { this.app.toast(MOBILE_UNAVAILABLE.folders); return this.app.upload?.pick?.(); } // phones: import instead
     const drives = await api.drives().catch(() => []);
     const pathIn = el('input', { class: 'inp', placeholder: '/media/usb  ·  /Volumes/NAS/Music  ·  \\\\nas\\music  ·  D:\\Music' });
     const nameIn = el('input', { class: 'inp', placeholder: 'Display name (optional)' });
     const body = el('div', { class: 'form' },
       el('p', { class: 'hint' }, 'Add any folder: internal disk, USB stick, external drive or a NAS share. NAS shares must be mounted by your operating system (SMB/NFS/AFP) or reachable by a network path. The folder is scanned now and can be rescanned anytime.'),
       drives.length ? el('div', { class: 'drive-grid' }, ...drives.map((d) => el('button', { class: 'drive-card', onclick: () => { pathIn.value = d.path; nameIn.value = d.name; } },
-        el('div', { class: 'drive-icon' }, d.kind === 'network' ? '🖧' : d.kind === 'home' ? '⌂' : '⛁'), el('div', {}, d.name), el('small', {}, d.kind === 'network' ? `NAS · ${d.fs}` : d.kind === 'home' ? 'Home' : 'Drive')))) : null,
+        el('div', { class: 'drive-icon' }, glyphIcon(d.kind === 'network' ? '🖧' : d.kind === 'home' ? '⌂' : '⛁')), el('div', {}, d.name), el('small', {}, d.kind === 'network' ? `NAS · ${d.fs}` : d.kind === 'home' ? 'Home' : 'Drive')))) : null,
       el('div', { class: 'row' }, pathIn, el('button', { class: 'btn', onclick: async () => { const p = await this.pickFolder(); if (p) pathIn.value = p; } }, 'Browse…')),
       nameIn,
     );
@@ -157,7 +199,7 @@ export class Dialogs {
     const body = el('div', { class: 'form' },
       el('p', { class: 'hint' }, 'Copies the audio files plus an .m3u8 per playlist and a rekordbox.xml into an "OpenDJ" folder on the target. Streaming-only tracks must be downloaded first.'),
       el('div', { class: 'check-list' }, ...checks),
-      el('div', { class: 'drive-grid' }, ...drives.filter((d) => d.kind !== 'home').map((d) => el('button', { class: 'drive-card', onclick: () => { target.value = d.path; } }, el('div', { class: 'drive-icon' }, '⛁'), el('div', {}, d.name)))),
+      el('div', { class: 'drive-grid' }, ...drives.filter((d) => d.kind !== 'home').map((d) => el('button', { class: 'drive-card', onclick: () => { target.value = d.path; } }, el('div', { class: 'drive-icon' }, glyphIcon('⛁')), el('div', {}, d.name)))),
       el('div', { class: 'row' }, target, el('button', { class: 'btn', onclick: async () => { const p = await this.pickFolder('Export target'); if (p) target.value = p; } }, 'Browse…')));
     const r = await this.modal('Export to USB', body, [{ label: 'Cancel', value: null }, {
       label: 'Export', primary: true, action: async () => {
@@ -170,28 +212,43 @@ export class Dialogs {
     if (r) this.app.toast(`Exported ${r.files} files to ${r.target}`);
   }
 
-  async automixQueue(tracks) {
+  /**
+   * Start automix on a list of tracks. opts.mode preselects 'order' | 'shuffle' | 'smart' | 'live'; opts.title names
+   * the source (playlist name). Smart modes analyse unanalysed tracks first where possible.
+   */
+  async automixQueue(tracks, { mode, title } = {}) {
     if (!tracks?.length) return this.app.toast('No tracks in this view');
-    const smart = el('input', { type: 'checkbox', checked: true });
     const o = this.app.settings.automix;
-    const style = el('select', { class: 'sel' }, ...[['phrase', 'Phrase-aligned bass swap'], ['eqswap', 'EQ swap (bass swap)'], ['crossfade', 'Smooth crossfade'], ['filter', 'Filter fade'], ['echo', 'Echo out']].map(([v, l]) => el('option', { value: v }, l)));
-    style.value = o.style;
-    const order = el('select', { class: 'sel' }, ...[['harmonic', 'Harmonic (key + tempo)'], ['build', 'Build up (rising energy)'], ['peak', 'Peak (rise, then cool down)'], ['wave', 'Waves (up and down)']].map(([v, l]) => el('option', { value: v }, l)));
-    order.value = o.order || 'harmonic';
+    const modeSel = el('select', { class: 'sel', 'data-am': 'mode' }, ...AUTOMIX_MODES.map(([v, l]) => el('option', { value: v }, l)));
+    modeSel.value = mode || (o.shuffle ? 'shuffle' : 'smart');
+    const style = el('select', { class: 'sel', 'data-am': 'style' }, ...STYLES.map(([v, l]) => el('option', { value: v }, l)));
+    style.value = styleValue(o.style);
+    const shape = el('select', { class: 'sel', 'data-am': 'shape' }, ...SET_SHAPES.map(([v, l]) => el('option', { value: v }, l)));
+    shape.value = o.shape || 'warmup';
     const keySync = el('input', { type: 'checkbox', checked: !!o.keySync });
-    const beats = el('select', { class: 'sel' }, ...[8, 16, 32, 64].map((b) => el('option', { value: b }, `${b} beats`)));
-    beats.value = String(o.transitionBeats);
+    const vary = el('input', { type: 'checkbox', checked: !!o.varyStyles, 'data-am': 'vary' });
+    const bars = el('select', { class: 'sel', 'data-am': 'bars' }, ...BAR_CHOICES.map((b) => el('option', { value: b }, `${b} bars`)));
+    bars.value = String(BAR_CHOICES.reduce((a, b) => (Math.abs(b * 4 - o.transitionBeats) < Math.abs(a * 4 - o.transitionBeats) ? b : a), 8));
+    const big = tracks.length > 200;
+    const limit = el('input', { class: 'inp', type: 'number', min: 2, max: tracks.length, value: big ? 40 : tracks.length, 'data-am': 'limit' });
+    const smartBox = smartControls(o);
+    const smartPart = el('div', { class: 'form' }, el('label', { class: 'field' }, el('span', {}, 'Set shape (energy)'), shape),
+      el('label', { class: 'field' }, el('span', {}, 'Tracks in the set'), limit), smartBox.el);
+    const showSmart = () => { smartPart.hidden = !['smart', 'live'].includes(modeSel.value); };
+    modeSel.addEventListener('change', showSmart); showSmart();
     const body = el('div', { class: 'form' },
-      el('p', {}, `Auto-mix ${tracks.length} tracks on decks 1 & 2 with beat-matched transitions.`),
-      el('label', { class: 'check' }, smart, ' Smart order'),
-      el('label', { class: 'field' }, el('span', {}, 'Energy curve'), order),
-      el('label', { class: 'check' }, keySync, ' Fix key clashes with Key Sync'),
+      el('p', {}, `Auto-mix ${tracks.length} tracks${title ? ` from "${title}"` : ''} on decks 1 & 2 with beat-matched transitions.`),
+      el('label', { class: 'field' }, el('span', {}, 'Order'), modeSel),
+      smartPart,
       el('label', { class: 'field' }, el('span', {}, 'Transition style'), style),
-      el('label', { class: 'field' }, el('span', {}, 'Transition length'), beats));
+      el('label', { class: 'field' }, el('span', {}, 'Transition length'), bars),
+      el('label', { class: 'check' }, vary, ' Vary styles'),
+      el('label', { class: 'check' }, keySync, ' Fix key clashes with Key Sync'));
     const r = await this.modal('Automix', body, [{ label: 'Cancel', value: null }, { label: 'Start automix', primary: true, value: true }]);
     if (!r) return;
-    this.app.setSetting('automix', { ...o, style: style.value, transitionBeats: Number(beats.value), order: order.value, keySync: keySync.checked });
-    try { await this.app.automix.start(tracks, { smart: smart.checked, order: order.value }); } catch (e) { this.app.toast(e.message); }
+    const sm = smartBox.value();
+    await this.app.setSetting('automix', { ...o, style: style.value, transitionBeats: Number(bars.value) * 4, keySync: keySync.checked, varyStyles: vary.checked, shape: shape.value, preset: sm.preset, sliders: sm.sliders, shuffle: modeSel.value === 'shuffle' });
+    return this.app.startAutomix(tracks, { mode: modeSel.value, shape: shape.value, sliders: sm.sliders, limit: Number(limit.value) || undefined });
   }
 
   gridEditor(deck) {
@@ -228,17 +285,21 @@ export class Dialogs {
     const outputs = await app.engine.listOutputs();
     const inputs = await navigator.mediaDevices?.enumerateDevices?.().then((ds) => ds.filter((d) => d.kind === 'audioinput' && d.deviceId !== 'default').map((d) => ({ id: d.deviceId, label: d.label || `Input ${d.deviceId.slice(0, 6)}` }))).catch(() => []) || [];
     const outOpts = [['default', 'System default'], ...outputs.filter((o) => o.id !== 'default').map((o) => [o.id, o.label])];
+    // phones / tablets: no output device choice in the WebView (the system routes to speaker, headphones, Bluetooth, USB)
+    const sinks = !platform.native && ('setSinkId' in (window.AudioContext?.prototype || {}) || 'setSinkId' in HTMLMediaElement.prototype);
     const audio = el('div', { class: 'form' },
-      field('Master output', sel(s.masterDeviceId || 'default', outOpts, async (v) => { await set('masterDeviceId', v); app.engine.applyOutputs(); })),
+      sinks ? null : el('p', { class: 'hint' }, 'Audio plays through the output the system uses (speaker, headphones, Bluetooth or a USB audio interface). For a headphone cue on one jack, use "Split cue" with a Y splitter cable.'),
+      !sinks ? null : field('Master output', sel(s.masterDeviceId || 'default', outOpts, async (v) => { await set('masterDeviceId', v); app.engine.applyOutputs(); })),
       field('Headphone (cue) routing', sel(s.cueMode, [['device', 'Separate sound card / output'], ['channels34', 'Same interface, channels 3-4 (DJ controller sound card)'], ['split', 'Split cue: master mono left, cue mono right (single stereo jack)']], async (v) => { await set('cueMode', v); app.engine.applyOutputs(); }),
         'Most DJ controllers with a built-in sound card expose 4 channels: choose "channels 3-4" and select the controller as master output.'),
-      field('Headphone output (separate device mode)', sel(s.cueDeviceId || '', [['', '— none —'], ...outOpts.filter(([v]) => v !== 'default')], async (v) => { await set('cueDeviceId', v); app.engine.applyOutputs(); })),
-      el('button', { class: 'btn sm', onclick: async () => { try { const st = await navigator.mediaDevices.getUserMedia({ audio: true }); st.getTracks().forEach((t) => t.stop()); this.app.toast('Device names unlocked — reopen settings'); } catch (e) { this.app.toast(e.message); } } }, 'Show device names (asks for permission)'),
+      !sinks ? null : field('Headphone output (separate device mode)', sel(s.cueDeviceId || '', [['', '— none —'], ...outOpts.filter(([v]) => v !== 'default')], async (v) => { await set('cueDeviceId', v); app.engine.applyOutputs(); })),
+      !sinks ? null : el('button', { class: 'btn sm', onclick: async () => { try { const st = await navigator.mediaDevices.getUserMedia({ audio: true }); st.getTracks().forEach((t) => t.stop()); this.app.toast('Device names unlocked — reopen settings'); } catch (e) { this.app.toast(e.message); } } }, 'Show device names (asks for permission)'),
       field('Microphone / aux input', sel(s.micDeviceId || '', [['', 'System default input'], ...inputs.map((d) => [d.id, d.label])], async (v) => { await set('micDeviceId', v); if (app.engine.micOn) { await app.engine.setMic(false); await app.engine.setMic(true); } })),
       field('Talkover ducking', sel(s.talkoverDb ?? -12, [[-6, '−6 dB'], [-12, '−12 dB'], [-18, '−18 dB'], [-24, '−24 dB']], (v) => set('talkoverDb', Number(v)))),
       field('Audio latency', sel(s.latencyHint || 'interactive', [['interactive', 'Lowest (interactive)'], ['10', '10 ms'], ['20', '20 ms'], ['balanced', 'Balanced'], ['playback', 'Safe (high latency, no dropouts)']], (v) => { set('latencyHint', v); this.app.toast('Restart OpenDJ to apply the new latency'); }),
         'Raise this if you hear crackles; lower it for tighter scratching and cueing.'),
       el('label', { class: 'check' }, chk(s.limiter, (v) => { set('limiter', v); app.engine.setLimiter(v); }), ' Master limiter (prevents clipping)'),
+      el('label', { class: 'check', title: 'On: echo and reverb tails keep ringing when you pull the channel fader down or crossfade away (echo-outs), like a club mixer. Off: the beat FX sit before the fader, so the fader cuts the tail too.' }, chk(s.fxPostFader !== false, (v) => { set('fxPostFader', v); app.engine.setFxPostFader(v); }), ' Beat FX tails ring out after the channel fader closes (post-fader FX)'),
       el('label', { class: 'check' }, chk(s.highPrecisionAudio, (v) => { set('highPrecisionAudio', v); this.app.toast('Applies to tracks loaded from now on'); }), ' High-precision deck audio (32-bit float; uses twice the memory per loaded track)'),
       el('label', { class: 'check' }, chk(s.autoGain, (v) => set('autoGain', v)), ' Auto gain (level-match tracks on load)'),
       el('p', { class: 'hint' }, `Sample rate ${app.engine.ctx.sampleRate} Hz · output latency ≈ ${Math.round(((app.engine.ctx.outputLatency || 0) + (app.engine.ctx.baseLatency || 0)) * 1000)} ms`),
@@ -251,21 +312,26 @@ export class Dialogs {
       el('label', { class: 'check' }, chk(s.quantize, (v) => { set('quantize', v); for (const d of app.engine.decks) d.setQuantize(v); }), ' Quantize'),
     );
     const am = s.automix;
+    const amSet = (patch) => set('automix', { ...app.settings.automix, ...patch });
+    const amSmart = smartControls(am, () => amSet(amSmart.value()));
     const automix = el('div', { class: 'form' },
-      field('Transition style', sel(am.style, [['phrase', 'Phrase-aligned bass swap'], ['eqswap', 'EQ swap (bass swap)'], ['crossfade', 'Smooth crossfade'], ['filter', 'Filter fade'], ['echo', 'Echo out']], (v) => set('automix', { ...app.settings.automix, style: v }))),
-      field('Transition length', sel(am.transitionBeats, [8, 16, 32, 64].map((b) => [b, `${b} beats`]), (v) => set('automix', { ...app.settings.automix, transitionBeats: Number(v) }))),
-      el('label', { class: 'check' }, chk(am.keepSync, (v) => set('automix', { ...app.settings.automix, keepSync: v })), ' Beat-match transitions'),
-      el('label', { class: 'check' }, chk(am.skipSilence, (v) => set('automix', { ...app.settings.automix, skipSilence: v })), ' Skip silence at track ends'),
-      el('label', { class: 'check' }, chk(am.shuffle, (v) => set('automix', { ...app.settings.automix, shuffle: v })), ' Shuffle'),
-      el('label', { class: 'check' }, chk(am.keySync, (v) => set('automix', { ...app.settings.automix, keySync: v })), ' Fix key clashes with Key Sync'),
-      el('label', { class: 'check' }, chk(am.restoreTempo !== false, (v) => set('automix', { ...app.settings.automix, restoreTempo: v })), ' Ease each track back to its original tempo after the transition'),
-      field('Smart order energy curve', sel(am.order || 'harmonic', [['harmonic', 'Harmonic'], ['build', 'Build up'], ['peak', 'Peak'], ['wave', 'Waves']], (v) => set('automix', { ...app.settings.automix, order: v }))),
+      field('Default transition style', sel(styleValue(am.style), STYLES, (v) => amSet({ style: v })), 'Auto picks a style per transition from the BPM difference, energy change, key and genre. You can override single transitions in the automix queue.'),
+      field('Transition length', sel(BAR_CHOICES.reduce((a, b) => (Math.abs(b * 4 - am.transitionBeats) < Math.abs(a * 4 - am.transitionBeats) ? b : a), 8), BAR_CHOICES.map((b) => [b, `${b} bars`]), (v) => amSet({ transitionBeats: Number(v) * 4 }))),
+      el('label', { class: 'check' }, chk(am.varyStyles, (v) => amSet({ varyStyles: v })), ' Vary styles (alternate between styles that suit each transition)'),
+      el('label', { class: 'check' }, chk(am.keepSync, (v) => amSet({ keepSync: v })), ' Beat-match transitions'),
+      el('label', { class: 'check' }, chk(am.skipSilence, (v) => amSet({ skipSilence: v })), ' Skip silence at track ends'),
+      el('label', { class: 'check' }, chk(am.shuffle, (v) => amSet({ shuffle: v })), ' Shuffle'),
+      el('label', { class: 'check' }, chk(am.keySync, (v) => amSet({ keySync: v })), ' Fix key clashes with Key Sync'),
+      el('label', { class: 'check' }, chk(am.restoreTempo !== false, (v) => amSet({ restoreTempo: v })), ' Ease each track back to its original tempo after the transition'),
+      field('Loading a track on the deck automix is playing', sel(am.onAirLoad || 'ask', [['ask', 'Ask'], ['queue', 'Play it next'], ['stop', 'Stop automix and load it']], (v) => amSet({ onAirLoad: v })), 'Loading on the other deck always makes the track the next one; during a transition it is queued next.'),
+      field('Smart mix set shape', sel(am.shape || 'warmup', SET_SHAPES, (v) => amSet({ shape: v }))),
+      amSmart.el,
     );
     const dlIn = el('input', { class: 'inp', value: s.downloadDir });
     dlIn.addEventListener('change', () => set('downloadDir', dlIn.value));
     const rbIn = el('input', { class: 'inp', placeholder: 'Path to rekordbox.xml (File → Export Collection in xml format)' });
     const m3uIn = el('input', { class: 'inp', placeholder: 'Path to .m3u / .m3u8 playlist' });
-    const library = el('div', { class: 'form' },
+    const library = platform.local ? this.localLibrarySettings(chk) : el('div', { class: 'form' },
       field('Download folder (for tracks from media servers)', el('div', { class: 'row' }, dlIn, el('button', { class: 'btn', onclick: async () => { const p = await this.pickFolder('Download folder'); if (p) { dlIn.value = p; set('downloadDir', p); } } }, 'Browse…'))),
       el('label', { class: 'check' }, chk(s.autoAnalyse !== false, (v) => { set('autoAnalyse', v); if (v) app.analyser?.autoQueue({ afterScan: true }); else app.analyser?.cancel(); }), ' Analyse new tracks in the background (BPM, key, waveform, cues)'),
       (() => { // hosted web app: sign out
@@ -287,7 +353,7 @@ export class Dialogs {
         el('button', { class: 'btn', onclick: () => this.exportUsb([]) }, 'Export playlists to USB…')),
       el('p', { class: 'hint' }, 'The rekordbox XML export (cues, loops, beat grids, playlists) can be imported into rekordbox, Serato (via plugins), Traktor or Mixxx.'),
     );
-    const controllers = controllersPanel(app);
+    const controllers = platform.local ? null : controllersPanel(app);
     const shortcuts = el('div', { class: 'form shortcuts' }, el('table', {}, ...[
       ['Space', 'Play/pause deck 1'], ['Z / X / C', 'Deck 1 cue / play / sync'], ['M / , / .', 'Deck 2 cue / play / sync'],
       ['1 – 4', 'Deck 1 hot cues A–D (Shift = delete)'], ['7 – 0', 'Deck 2 hot cues A–D'], ['Q / W', 'Deck 1 loop 4 / exit'], ['O / P', 'Deck 2 loop 4 / exit'],
@@ -317,7 +383,11 @@ export class Dialogs {
       field('Waveform colours', sel(s.waveformColors, [['rgb', '3-band RGB'], ['blue', 'Blue'], ['mono', 'Monochrome']], (v) => set('waveformColors', v))),
     );
     const dvsTab = el('div', { class: 'form' }, el('p', { class: 'hint' }, 'Control decks with Serato or Traktor timecode vinyl / CDs through your audio interface inputs.'), el('button', { class: 'btn', onclick: () => import('../dvs/dvs-ui.js').then((m) => m.openDvsPanel(app)) }, 'Open DVS setup…'));
-    const tabs = { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], dvs: ['DVS', dvsTab], keys: ['Shortcuts', shortcuts] };
+    const about = this.aboutPane(chk);
+    const tabs = platform.local
+      ? { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], mobile: ['Mobile', this.mobileInfo()], about: ['About', about] }
+      : { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], dvs: ['DVS', dvsTab], keys: ['Shortcuts', shortcuts], about: ['About', about] };
+    if (!tabs[tab]) tab = 'audio';
     const tabBar = el('div', { class: 'tabs' });
     const pane = el('div', { class: 'tab-pane' });
     const show = (k) => { pane.replaceChildren(tabs[k][1]); for (const b of tabBar.children) b.classList.toggle('active', b.dataset.k === k); };
@@ -325,7 +395,60 @@ export class Dialogs {
     show(tab);
     await this.modal('Settings', el('div', {}, tabBar, pane), [{ label: 'Close', primary: true, value: true }], { wide: true });
     app.midi.cancelLearn();
-    controllers.destroy?.();
+    controllers?.destroy?.();
+  }
+
+  /** Settings → Library in the mobile app (no folders: import, rekordbox / M3U, exports through the share sheet). */
+  localLibrarySettings(chk) {
+    const app = this.app, s = app.settings;
+    const storage = el('p', { class: 'hint' });
+    api.capabilities().then((c) => { const st = c.storage; if (st?.used != null) storage.textContent = `App storage: ${(st.used / 1048576).toFixed(0)} MB used${st.quota ? ` of ${(st.quota / 1073741824).toFixed(1)} GB available to OpenDJ` : ''}.`; }).catch(() => {});
+    return el('div', { class: 'form' },
+      el('label', { class: 'check' }, chk(s.autoAnalyse !== false, (v) => { app.setSetting('autoAnalyse', v); if (v) app.analyser?.autoQueue({ afterScan: true }); else app.analyser?.cancel(); }), ' Analyse new tracks in the background (BPM, key, waveform, cues)'),
+      el('h3', {}, 'Import'),
+      el('p', { class: 'hint' }, 'Import copies music into OpenDJ, so it plays offline. The originals stay where they are.'),
+      el('div', { class: 'row' },
+        el('button', { class: 'btn sm', onclick: () => app.upload?.pick?.() }, '＋ Import music…'),
+        el('button', { class: 'btn sm', onclick: () => app.library.dlg.importFrom('rekordbox') }, 'Import rekordbox XML…'),
+        el('button', { class: 'btn sm', onclick: () => app.library.dlg.importFrom('m3u') }, 'Import M3U…')),
+      el('h3', {}, 'Export'),
+      el('div', { class: 'row' },
+        el('a', { class: 'btn sm', href: api.rekordboxExportUrl(), download: 'opendj-rekordbox.xml' }, 'Collection as rekordbox XML'),
+        el('button', { class: 'btn sm', onclick: () => app.library.dlg.backup() }, 'Back up library')),
+      el('p', { class: 'hint' }, platform.native ? 'Exports open the share sheet: save to Files, send to your computer or a cloud drive.' : 'Exports are downloaded.'),
+      storage);
+  }
+
+  /** Settings → About: version, automatic update checks and "Check now". */
+  aboutPane(chk) {
+    const app = this.app;
+    const status = el('span', { class: 'hint upd-check-status', role: 'status', 'aria-live': 'polite' });
+    const btn = el('button', { class: 'btn sm upd-check-now', onclick: async () => {
+      btn.disabled = true; status.textContent = 'Checking…';
+      const r = await app.updates?.check({ manual: true });
+      btn.disabled = false;
+      if (!r || r.error) status.textContent = r?.error === 'rate-limited' ? 'GitHub is limiting requests right now. Try again later.' : 'Couldn’t check for updates. Check your internet connection and try again.';
+      else if (r.available && r.latest) status.textContent = `OpenDJ ${r.latest.version} is available.`;
+      else status.textContent = `You’re up to date (${r.current || APP_VERSION}).`;
+    } }, icon('refresh'), 'Check now');
+    const who = platform.local ? 'OpenDJ' : 'The OpenDJ server';
+    return el('div', { class: 'form about-pane' },
+      el('div', { class: 'about-head' }, el('b', {}, 'OpenDJ'), el('span', { class: 'about-ver' }, APP_VERSION)),
+      el('p', { class: 'hint' }, 'Free, open-source DJ software.'),
+      el('h3', {}, 'Updates'),
+      el('label', { class: 'check' }, chk(app.settings.updateCheck !== false, (v) => { app.setSetting('updateCheck', v); app.updates?.setAuto(v); }), ' Check for updates automatically'),
+      el('div', { class: 'row upd-check-row' }, btn, status),
+      el('p', { class: 'hint' }, `${who} asks GitHub (api.github.com) for the latest OpenDJ release at startup and every 12 hours. The request only says “OpenDJ/${APP_VERSION}”: nothing about you, your music or your settings is sent. Nothing is installed without your OK.`));
+  }
+
+  /** Settings → Mobile: what the mobile app does differently, and why some features are hidden. */
+  mobileInfo() {
+    const names = { folders: 'Library folders', midi: 'MIDI controllers', dvs: 'DVS (timecode vinyl)', lighting: 'Lighting (DMX / Art-Net / sACN / OSC)', link: 'Ableton Link', broadcast: 'Live streaming', cdj: 'CDJ USB export', stems: 'AI stems', video: 'Video mixer', otherImports: 'Traktor / Serato / VirtualDJ import' };
+    return el('div', { class: 'form mobile-info' },
+      el('p', {}, 'OpenDJ runs completely on this device: your library, analysis, mixing, playlists and recordings need no computer or server.'),
+      el('h3', {}, 'Not available in the mobile app yet'),
+      el('ul', { class: 'unavail-list' }, ...Object.entries(names).map(([k, n]) => el('li', {}, el('b', {}, n), ' — ', MOBILE_UNAVAILABLE[k]))),
+      el('p', { class: 'hint' }, `OpenDJ ${APP_VERSION}${platform.native ? ` (${platform.os})` : ' (browser, on-device mode)'}`));
   }
 
 
