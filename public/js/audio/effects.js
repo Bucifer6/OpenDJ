@@ -163,7 +163,7 @@ const FX = {
   },
   flanger: {
     label: 'Flanger', kind: 'insert', params: ['Feedback', 'Depth'], cycle: 8,
-    create(ctx) { return modDelay(ctx, { base: 0.0006, depth: 0.004, fb: 0.6, dry: 0.62, wet: 0.62, spread: 0.25, shape: 1, cycle: 8, p1: (p) => ({ fb: -0.2 + 1.1 * p }), p2: (p) => ({ depth: 0.0008 + 0.0072 * p }) }); },
+    create(ctx) { return modDelay(ctx, { base: 0.0006, depth: 0.004, fb: 0.6, dry: 0.7, wet: 0.7, spread: 0.25, shape: 1, cycle: 8, p1: (p) => ({ fb: -0.2 + 1.1 * p }), p2: (p) => ({ depth: 0.0008 + 0.0072 * p }) }); },
   },
   phaser: {
     label: 'Phaser', kind: 'insert', params: ['Depth', 'Resonance'], cycle: 4,
@@ -396,7 +396,7 @@ const COLOR = {
   pitch: { // "Jet": a flanger swept by hand with the knob, high feedback (left: negative, right: positive)
     kind: 'insert', dryFilter: 0,
     create(ctx) {
-      const m = modDelay(ctx, { base: 0.006, depth: 0.0003, fb: 0, dry: 0.5, wet: 0.5, spread: 0.2, shape: 0, cycle: 16, p1: () => ({}), p2: () => ({}) });
+      const m = modDelay(ctx, { base: 0.006, depth: 0.0003, fb: 0, dry: 0.7, wet: 0.7, spread: 0.2, shape: 0, cycle: 16, p1: () => ({}), p2: () => ({}) });
       return {
         input: m.input, output: m.output,
         wetAmount: (x) => smoothstep(0, 0.12, x),
