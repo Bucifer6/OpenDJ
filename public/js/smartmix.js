@@ -115,8 +115,9 @@ export function scoreTransition(cur, cand, ctx = {}) {
   // variety: no artist repeats within the window, no recently played tracks, not the same album twice
   let v = 0;
   const ak = artistKey(cand);
-  const recent = ctx.recentArtists || [];
-  if (ak && recent.slice(-(W.artistWindow ?? 3)).includes(ak)) v -= 3;
+  const recent = ctx.recentArtists || (cur ? [artistKey(cur)] : []);
+  const win = W.artistWindow ?? 3, at = ak ? recent.slice(-win).lastIndexOf(ak) : -1;
+  if (at >= 0) { const dist = Math.min(win, recent.length) - at; v -= 3 * (win - dist + 1) / win; } // the closer the repeat, the worse
   if (ctx.playedIds?.has(cand.id)) v -= 3;
   else if (cand.lastPlayed && (ctx.now ?? Date.now()) - cand.lastPlayed < (W.recentHours ?? 4) * 3600e3) v -= 1;
   if (cur && cand.album && cur.album === cand.album && artistKey(cur) === ak) v -= 0.3;
