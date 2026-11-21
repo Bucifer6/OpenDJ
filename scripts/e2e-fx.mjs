@@ -19,7 +19,8 @@ let cpuMs = 0, cpuSec = 0;
 
 try {
   // ---------------------------------------------------------------- beat FX: clicks, zipper, level
-  const NOISY = new Set(['bitcrush', 'noise', 'distortion']); // these make steps / noise by design: compare to their own steady state
+  if (argv.includes('--mixer-only')) { const { mixerChecks } = await import('./fx/mixer-checks.mjs'); const M = await mixerChecks(lab, check, f); const j = argv.find((a) => a.startsWith('--mixer-json='))?.slice(13); if (j) (await import('node:fs')).writeFileSync(j, JSON.stringify(M, null, 1)); throw Object.assign(new Error('done'), { done: true }); }
+  const NOISY = new Set(['bitcrush', 'noise', 'distortion', 'spiral']); // spiral: repeats climb in pitch (higher frequencies by design) // these make steps / noise by design: compare to their own steady state
   for (const { id, label, kind } of lab.effects) {
     const init = [{ call: 'setBeatSec', args: [0.5] }, { call: 'setType', args: [id] }, { call: 'setMix', args: [0.5] }, { call: 'setParam', args: [0.5] }, { call: 'setParam2', args: [0.5] }, { call: 'setBeats', args: [0.5] }, { call: 'setClock', args: [0, 0, 0.5] }];
     const s = await lab.render({ chain: 'fx', ...SINE, secs: 3, init, events: [{ t: 1, call: 'setOn', args: [true] }, { t: 2, call: 'setOn', args: [false] }] });
@@ -147,14 +148,14 @@ try {
   }
 
   // ---------------------------------------------------------------- filter + Color FX
-  for (const color of ['filter', 'space', 'dubecho', 'noise', 'crush', 'pitch']) {
+  for (const color of (lab.page ? await lab.page.evaluate(() => window.fxlab.colorFx.map(([id]) => id)) : ['filter', 'space', 'dubecho', 'noise', 'crush', 'pitch'])) {
     const p = await lab.render({ chain: 'channel', settings: { colorFx: color }, signal: 'multitone', signalOpts: { freqs: [30, 100, 1000, 5000, 12000, 18000], amp: 0.05 }, secs: 1.5 });
     const lv0 = [30, 100, 1000, 5000, 12000, 18000].map((q) => db(bandLevel(p.L, p.sr, q, 0.5, 1.5) / 0.05 / 0.64));
     check(Math.max(...lv0.map(Math.abs)) < 0.05, `${color}: knob at 12 o'clock leaves the sound untouched (30 Hz–18 kHz within ${f(Math.max(...lv0.map(Math.abs)), 3)} dB)`);
     const ev = [...sweep(0.8, 1.8, 0, -1, (v) => ({ call: 'set', args: ['filter', v] })), ...sweep(1.8, 2.2, -1, 0, (v) => ({ call: 'set', args: ['filter', v] })), ...sweep(2.2, 3.2, 0, 1, (v) => ({ call: 'set', args: ['filter', v] })), ...sweep(3.2, 3.6, 1, 0, (v) => ({ call: 'set', args: ['filter', v] }))];
     const s = await lab.render({ chain: 'channel', settings: { colorFx: color }, ...SINE, secs: 4, events: ev });
     const j = stepRatio(s.L, s.sr, 0.8, 3.9);
-    const lim = color === 'crush' || color === 'noise' ? 2 : SINE_RATIO * 1.6;
+    const lim = color === 'crush' || color === 'noise' || color === 'crunch' ? 2 : color === 'pitchshift' ? SINE_RATIO * 3.2 : SINE_RATIO * 1.6; // (crunch distorts, pitch doubles the frequency by design)
     check(j <= lim, `${color}: knob sweep without clicks / zipper (step ratio ${f(j, 3)} ≤ ${f(lim, 3)})`);
     const m = await lab.render({ chain: 'channel', settings: { colorFx: color }, signal: 'drums', secs: 6, events: sweep(1, 2.5, 0, -0.7, (v) => ({ call: 'set', args: ['filter', v] })).concat(sweep(2.5, 3.5, -0.7, 0.7, (v) => ({ call: 'set', args: ['filter', v] }))) });
     const lv = db(rms(m.L, m.sr, 2.5, 3.5) / rms(m.L, m.sr, 0.2, 1));
@@ -214,8 +215,15 @@ try {
     check(Math.max(peak(busy.L, busy.sr), peak(busy.R, busy.sr)) <= Math.pow(10, -1 / 20) + 1e-6, 'and the master stays under the limiter ceiling');
   }
   console.log(`# offline render cost of the beat FX: ${f(cpuMs / cpuSec / 10, 2)} % of one core per FX unit (incl. test signal)`);
+  // ---------------------------------------------------------------- mixer v2 (plan §4 M1-M17 acceptance checks)
+  if (!argv.includes('--no-mixer')) {
+    const { mixerChecks } = await import('./fx/mixer-checks.mjs');
+    const only = argv.find((a) => a.startsWith('--mixer-json='))?.slice(13);
+    const M = await mixerChecks(lab, check, f);
+    if (only) { const fs = await import('node:fs'); fs.writeFileSync(only, JSON.stringify(M, null, 1)); }
+  }
 } catch (e) {
-  console.error(e); failed = true;
+  if (!e.done) { console.error(e); failed = true; }
 } finally {
   if (lab.errors.length) { console.log('page errors:', lab.errors); failed = true; }
   await lab.close();
