@@ -115,6 +115,12 @@ export function buildMixer(app) {
   eng.on('mixer', (i) => { for (const r of byCh[i] || renderers) r.render(); });
   eng.on('master', () => { for (const r of renderers) r.render(); });
   eng.on('mic', () => { for (const r of renderers) r.render(); });
+  // compact strips when the layout leaves the mixer little height (.mx-short / .mx-400 / .mx-tiny in performance.css);
+  // phones stack the mixer at its natural height, so only desktop / tablet grids use this
+  const desk = matchMedia('(min-width: 700px) and (min-height: 561px)');
+  const fit = (h) => { const on = desk.matches; root.classList.toggle('mx-short', on && h <= 470); root.classList.toggle('mx-400', on && h <= 400); root.classList.toggle('mx-tiny', on && h <= 330); };
+  new ResizeObserver((ents) => fit(ents[0].contentBoxSize?.[0]?.blockSize ?? ents[0].contentRect.height)).observe(root);
+  desk.addEventListener?.('change', () => fit(root.getBoundingClientRect().height / (parseFloat(document.documentElement.style.zoom) || 1)));
   root.setDeckCount = (n) => { for (const s of strips) s.style.display = s.idx < n ? '' : 'none'; };
   root.frame = () => {
     for (const s of strips) if (s.style.display !== 'none') s.vu.draw(s.ch.level());

@@ -67,15 +67,19 @@ const TILE = 256; // css px per tile (times devicePixelRatio)
 const MAX_TILES = 48;
 
 export class DetailWaveform {
+  static all = new Set();
   constructor(deck, getSettings) {
     this.deck = deck; this.getSettings = getSettings;
     this.canvas = el('canvas', { class: 'wf-detail' });
     this.g = this.canvas.getContext('2d', { alpha: false });
-    this.zoom = 8; // seconds across the view at normal speed
+    this.zoom = 8; // seconds across the view at normal speed (target; viewZoom eases towards it)
+    this.viewZoom = 8; this.lastNow = 0; this.deckColor = null;
+    DetailWaveform.all.add(this);
     this.tiles = new Map(); this.tileKey = ''; this.sig = ''; this.cw = 0; this.ch = 0;
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
-      if (e.ctrlKey || e.metaKey) this.zoom = clamp(this.zoom * (e.deltaY > 0 ? 1.15 : 0.87), 2, 60);
+      // zoom all decks together so synced tracks keep the same beat spacing (beat alignment at a glance)
+      if (e.ctrlKey || e.metaKey) { const z = clamp(this.zoom * (e.deltaY > 0 ? 1.15 : 0.87), 2, 60); for (const w of DetailWaveform.all) w.zoom = z; }
       else this.deck.jogNudge(-e.deltaY / 1500);
     }, { passive: false });
     // drag to scratch / seek on the waveform
@@ -123,11 +127,14 @@ export class DetailWaveform {
     const s = this.getSettings();
     const w = deck.waveform;
     const pos = deck.positionAt(smoothTime(deck.ctx, now));
+    // smooth zoom: ease the displayed zoom towards the target (tiles are rendered once at the target and scaled)
+    const dt = this.lastNow ? Math.min(0.1, (now - this.lastNow) / 1000) : 1; this.lastNow = now;
+    if (Math.abs(this.viewZoom - this.zoom) > this.zoom * 0.002) this.viewZoom += (this.zoom - this.viewZoom) * Math.min(1, dt * 14); else this.viewZoom = this.zoom;
     const rate = deck.rate || 1;
     const cues = deck.track?.cues || [];
     const loop = deck.loop;
     // nothing moved and nothing changed: keep the last frame
-    const sig = `${pos.toFixed(5)}|${rate}|${W}x${H}|${this.zoom}|${themeRev}|${s.waveformColors}|${deck.track?.id}|${!!w}|${deck.loading}|${deck.playing}|${loop ? `${loop.start},${loop.end},${loop.active}` : ''}|${cues.length}:${cues.reduce((a, c) => a + c.position + (c.index + 1) * 7, 0)}|${deck.cuePoint}|${deck.bpm}|${deck.gridOffset}|${(deck.track?.phrases || []).length}`;
+    const sig = `${pos.toFixed(5)}|${rate}|${W}x${H}|${this.viewZoom}|${themeRev}|${s.waveformColors}|${deck.track?.id}|${!!w}|${deck.loading}|${deck.playing}|${loop ? `${loop.start},${loop.end},${loop.active}` : ''}|${cues.length}:${cues.reduce((a, c) => a + c.position + (c.index + 1) * 7, 0)}|${deck.cuePoint}|${deck.bpm}|${deck.gridOffset}|${(deck.track?.phrases || []).length}`;
     if (sig === this.sig) return;
     this.sig = sig;
 
@@ -135,7 +142,7 @@ export class DetailWaveform {
     const bg = cssVar('--wave-bg'), font = cssVar('--font');
     g.fillStyle = bg; g.fillRect(0, 0, W, H);
     const base = W / this.zoom;               // device px per second at rate 1 (tile resolution)
-    const pxPerSec = base / rate;              // displayed: keep beat spacing stable when tempo changes
+    const pxPerSec = W / this.viewZoom / rate; // displayed: keep beat spacing stable when tempo changes
     const t0 = pos - (W / 2) / pxPerSec;
     const X = (t) => (t - t0) * pxPerSec;
     g.fillStyle = cssVar('--wf-axis'); g.fillRect(0, Math.round(mid), W, Math.max(1, Math.round(dpr / 2)));
@@ -149,7 +156,7 @@ export class DetailWaveform {
       const key = `${deck.track?.id}|${H}|${base.toFixed(3)}|${s.waveformColors}|${themeRev}|${w.peak.length}`;
       if (key !== this.tileKey) { this.tiles.clear(); this.tileKey = key; }
       const pal = palette(s.waveformColors);
-      const TW = Math.round(TILE * dpr), tileSecs = TW / base, scale = 1 / rate, dur = w.peak.length / w.rate;
+      const TW = Math.round(TILE * dpr), tileSecs = TW / base, scale = pxPerSec / base, dur = w.peak.length / w.rate;
       const first = Math.max(0, Math.floor(t0 / tileSecs)), last = Math.min(Math.floor(dur / tileSecs), Math.floor((t0 + W / pxPerSec) / tileSecs));
       const exact = Math.abs(scale - 1) < 1e-6;
       for (let i = first; i <= last; i++) {
@@ -204,6 +211,8 @@ export class DetailWaveform {
     const cx = Math.round(W / 2);
     g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(cx - 2 * dpr, 0, 4 * dpr, H);
     g.fillStyle = cssVar('--playhead'); g.fillRect(cx - Math.round(dpr / 2), 0, Math.max(1, Math.round(dpr * 1.5)), H);
+    if (themeRev !== this.colorRev) { this.colorRev = themeRev; this.deckColor = getComputedStyle(canvas).getPropertyValue('--deck-color').trim() || null; }
+    g.fillStyle = this.deckColor || cssVar('--playhead');
     g.beginPath(); g.moveTo(cx - 5 * dpr, 0); g.lineTo(cx + 5 * dpr, 0); g.lineTo(cx, 6 * dpr); g.fill();
     g.beginPath(); g.moveTo(cx - 5 * dpr, H); g.lineTo(cx + 5 * dpr, H); g.lineTo(cx, H - 6 * dpr); g.fill();
   }

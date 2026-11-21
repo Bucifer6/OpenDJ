@@ -22,6 +22,7 @@ const opt = (k, d) => { const a = argv.find((x) => x.startsWith(`--${k}=`)); ret
 const OUT = path.resolve(opt('out', path.join(os.tmpdir(), 'opendj-ui-bench')));
 const THEMES = opt('themes', 'midnight,light,neon').split(',');
 const SECS = Number(opt('secs', 6));
+const LAYOUTS = opt('layouts', 'classic').split(',');
 fs.mkdirSync(OUT, { recursive: true });
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'opendj-bench-'));
@@ -50,9 +51,10 @@ const titles = ['Pressure Index', 'Copper Skyline', 'Static Bloom', 'Midnight Tr
 for (let i = 0; i < 4; i++) await loadDeck(i, titles[i]);
 // let the background analyser finish first (measured separately with --analysis)
 if (!argv.includes('--analysis')) await page.waitForFunction(() => !window.opendj.analyser.running, null, { timeout: 180000 }).catch(() => console.warn('analyser still running'));
-async function playState(n) {
-  await ev(([n, fx]) => {
+async function playState(n, layout = 'classic') {
+  await ev(async ([n, layout, fx]) => {
     const a = window.opendj, E = a.engine;
+    if (a.setLayout) { E.decks.forEach((d) => d.pause()); await a.setLayout(layout, false); }
     E.decks.forEach((d, i) => { d.pause(); d.exitLoop?.(); d.seek(d.beatLen * 4 * [46, 8, 24, 56][i]); });
     a.setDeckCount(n, false);
     E.channels[1].set('eqLow', -0.75); E.channels[0].set('fxType', 'echo'); E.channels[0].set('fxOn', true); E.channels[0].set('fxMix', 0.35);
@@ -63,7 +65,7 @@ async function playState(n) {
       E.channels.forEach((ch, i) => { ch.set('colorFx', i % 2 ? 'pitch' : 'space'); ch.set('filter', i % 2 ? 0.35 : -0.4); });
     }
     a.mixer.renderAll?.();
-  }, [n, argv.includes('--fx')]);
+  }, [n, layout, argv.includes('--fx')]);
   await sleep(600);
 }
 const setTheme = (id) => ev(async (id) => { const { applyTheme } = await import('/js/ui/themes.js'); await window.opendj.setSetting('theme', id); applyTheme(window.opendj.settings); }, id);
@@ -73,10 +75,10 @@ if (argv.includes('--shots')) {
     await setTheme(theme);
     for (const [w, h] of [[1920, 1080], [1366, 768]]) {
       await page.setViewportSize({ width: w, height: h });
-      for (const n of [2, 4]) {
-        await playState(n);
+      for (const [n, layout] of [...LAYOUTS.map((l) => [2, l]), [4, 'classic']]) {
+        await playState(n, layout);
         await sleep(700);
-        const f = path.join(OUT, `${theme}-${w}-${n}deck.png`);
+        const f = path.join(OUT, `${theme}-${w}-${n}deck${n === 2 && layout !== 'classic' ? '-' + layout : ''}.png`);
         await page.screenshot({ path: f });
         console.log('[shot]', f);
       }
@@ -123,6 +125,31 @@ if (argv.includes('--perf')) {
   }
   console.table(results);
   fs.writeFileSync(path.join(OUT, 'perf.json'), JSON.stringify(results, null, 2));
+}
+
+if (argv.includes('--latency')) {
+  // pointer down -> next rendered frame (double rAF after the event's timestamp), for the controls you hit live
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await playState(2, LAYOUTS[0]);
+  await ev(() => { window._lat = []; document.addEventListener('pointerdown', (e) => { const t0 = e.timeStamp; requestAnimationFrame(() => requestAnimationFrame((t2) => window._lat.push({ el: e.target.closest('button, .pad, .knob')?.className || e.target.className, ms: t2 - t0 }))); }, true); });
+  const targets = ['.deck[data-deck="0"] .pad >> nth=4', '.deck[data-deck="0"] .panel-tab >> nth=1', '.deck[data-deck="0"] .panel-tab >> nth=0', '.deck[data-deck="0"] .btn-sync', '.strip[data-ch="0"] .btn-pfl', '.layout-seg .seg-btn >> nth=0'];
+  for (let k = 0; k < 4; k++) for (const t of targets) { await page.locator(t).click(); await sleep(60); }
+  const lat = await ev(() => window._lat.map((x) => x.ms).sort((a, b) => a - b));
+  const res = { samples: lat.length, p50: +lat[Math.floor(lat.length / 2)].toFixed(1), p95: +lat[Math.floor(lat.length * 0.95)].toFixed(1), max: +lat.at(-1).toFixed(1) };
+  console.log('[latency] pointerdown -> next frame (ms):', JSON.stringify(res));
+  // long tasks while a track loads onto deck 1 and while the background analyser works, deck 2 playing
+  const measure = (fn) => ev(async (src) => {
+    const longs = []; const po = new PerformanceObserver((l) => { for (const e of l.getEntries()) longs.push(e.duration); }); po.observe({ type: 'longtask' });
+    const frames = []; let last = performance.now(), run = true; const tick = (t) => { frames.push(t - last); last = t; if (run) requestAnimationFrame(tick); }; requestAnimationFrame(tick);
+    await (0, eval)(src)();
+    run = false; po.disconnect();
+    const f = frames.slice(1);
+    return { longTasks: longs.length, longest: Math.round(Math.max(0, ...longs)), droppedFrames: f.filter((x) => x > 25).length, frames: f.length, worstFrame: Math.round(Math.max(...f)) };
+  }, fn);
+  const load = await measure(`async () => { const a = window.opendj, E = a.engine; E.decks[1].play(); E.decks[0].pause(); const id = [...a.library.tracks.values()].find((t) => t.title === 'Glass Horizon').id; await a.loadTrack(0, id); await new Promise((r) => setTimeout(r, 500)); }`);
+  console.log('[load] track load while a deck plays:', JSON.stringify(load));
+  const ana = await measure(`async () => { const a = window.opendj; a.engine.decks[1].play(); a.analyser.request([...a.library.tracks.values()].slice(0, 3), { force: true }); await new Promise((r) => setTimeout(r, 400)); for (let i = 0; i < 300 && a.analyser.running; i++) await new Promise((r) => setTimeout(r, 100)); }`);
+  console.log('[analysis] background analysis of 3 tracks while a deck plays:', JSON.stringify(ana));
 }
 
 await browser.close();

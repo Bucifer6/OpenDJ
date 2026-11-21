@@ -126,10 +126,13 @@ export class Deck extends Emitter {
       const ch0 = buf.getChannelData(0), ch1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : null;
       // 16-bit decks: material above 0 dBFS (float files, inter-sample overs of loud lossy masters) is stored
       // peak-normalised and scaled back in the worklet, so it never clips before the channel / auto gain.
-      const scale = hiPrec ? 1 : Math.max(1, peakAbs(ch0), ch1 ? peakAbs(ch1) : 0);
+      // time-sliced (yields to the event loop every few ms) so a load never freezes the UI or the other deck's waveform
+      const scale = hiPrec ? 1 : Math.max(1, await peakAbsSliced(ch0), ch1 ? await peakAbsSliced(ch1) : 0);
+      if (stale()) return false;
       this.audioScale = scale;
-      const left = deckChannel(ch0, hiPrec, scale);
-      const right = ch1 ? deckChannel(ch1, hiPrec, scale) : null;
+      const left = await deckChannelSliced(ch0, hiPrec, scale);
+      const right = ch1 ? await deckChannelSliced(ch1, hiPrec, scale) : null;
+      if (stale()) return false;
       this.frames = left.length;
       this.node.port.postMessage({ type: 'load', left, right, sampleRate: buf.sampleRate, scale }, right ? [left.buffer, right.buffer] : [left.buffer]);
       this.resetStemControls(); this.postStemGains();
@@ -580,6 +583,37 @@ export function deckChannel(src, highPrecision = false, scale = 1) {
     out[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
   }
   return out;
+}
+
+// ---- time-sliced versions for the UI thread: same results, but they hand control back every ~6 ms ----
+const SLICE = 1 << 17;
+const yieldTask = () => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => { c.port1.close(); r(); }; c.port2.postMessage(0); });
+/** deckChannel() in slices (identical output, including the dither sequence). */
+export async function deckChannelSliced(src, highPrecision = false, scale = 1) {
+  if (highPrecision) return new Float32Array(src);
+  const out = new Int16Array(src.length);
+  const g = 32767 / (scale > 1 ? scale : 1);
+  let seed = 22222;
+  for (let a = 0; a < src.length; a += SLICE) {
+    const b = Math.min(src.length, a + SLICE);
+    for (let i = a; i < b; i++) {
+      seed = (seed * 1664525 + 1013904223) >>> 0; const r1 = seed / 4294967296;
+      seed = (seed * 1664525 + 1013904223) >>> 0; const r2 = seed / 4294967296;
+      const v = Math.round(src[i] * g + (r1 - r2));
+      out[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
+    }
+    if (b < src.length) await yieldTask();
+  }
+  return out;
+}
+export async function peakAbsSliced(src) {
+  let p = 0;
+  for (let a = 0; a < src.length; a += SLICE * 4) {
+    const b = Math.min(src.length, a + SLICE * 4);
+    for (let i = a; i < b; i++) { const x = src[i] < 0 ? -src[i] : src[i]; if (x > p) p = x; }
+    if (b < src.length) await yieldTask();
+  }
+  return p;
 }
 
 /** Largest absolute sample value of a channel. */

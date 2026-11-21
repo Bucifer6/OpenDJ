@@ -218,3 +218,12 @@ test('m12: no BPM is invented for digital silence or a steady tone; beats are st
   const clicks = gen((t) => { const tb = (t - 0.1) % beat; let v = 0.25 * Math.sin(2 * Math.PI * 220 * t); if (t > 0.1 && tb < 0.15) v += 0.8 * Math.sin(2 * Math.PI * (50 + 100 * Math.exp(-tb * 40)) * tb) * Math.exp(-tb * 18); return v * 0.7; });
   assert.equal(detectBpm(clicks, sr).bpm, 124);
 });
+
+test('time-sliced deck channel conversion matches the synchronous one (UI never blocks on track load)', async () => {
+  const { deckChannelSliced, peakAbsSliced } = await import('../public/js/audio/deck.js');
+  const src = new Float32Array(300000); for (let i = 0; i < src.length; i++) src[i] = Math.sin(i / 7) * 1.3;
+  assert.equal(await peakAbsSliced(src), peakAbs(src));
+  const a = deckChannel(src, false, peakAbs(src)), b = await deckChannelSliced(src, false, peakAbs(src));
+  assert.equal(a.length, b.length);
+  assert.ok(a.every((v, i) => v === b[i]));
+});

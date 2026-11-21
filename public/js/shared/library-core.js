@@ -10,6 +10,8 @@ export const DEFAULT_SETTINGS = {
   theme: 'midnight',
   accentColor: '',
   uiScale: 100,
+  layoutMode: 'classic',      // 'classic' | 'performance' | 'waveform' (decks view; 4 decks is deckCount)
+  libraryRows: 'compact',     // 'compact' | 'art' (larger artwork rows)
   masterDeviceId: 'default',
   cueDeviceId: '',            // '' = no separate headphone device
   cueMode: 'device',          // 'device' | 'split' (mono master L / mono cue R) | 'channels34'

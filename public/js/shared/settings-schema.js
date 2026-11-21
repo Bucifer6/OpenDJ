@@ -31,6 +31,8 @@ const SCHEMA = {
   theme: oneOf(...THEME_IDS),
   accentColor: (v) => (v === '' || v == null ? '' : typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : undefined),
   uiScale: num(50, 200),
+  layoutMode: oneOf('classic', 'performance', 'waveform'),
+  libraryRows: oneOf('compact', 'art'),
   masterDeviceId: str(512), cueDeviceId: str(512), micDeviceId: str(512), midiClockOutput: str(512),
   cueMode: oneOf('device', 'split', 'channels34'),
   crossfaderCurve: oneOf('smooth', 'sharp', 'constant'),

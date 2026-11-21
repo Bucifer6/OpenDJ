@@ -158,7 +158,7 @@ export function buildDeck(app, deck) {
       p.classList.toggle('lit', !!color);
     });
   };
-  deck.padMode = (m) => setPadMode(m);
+  deck.padMode = (m) => { setPadMode(m); deck.showPanel?.('cues'); };
   deck.padPress = (n, down) => padAction(n, down);
   setPadMode('hotcue');
 
@@ -216,8 +216,29 @@ export function buildDeck(app, deck) {
     }
   };
 
+  // ---------- secondary controls: switchable panels ----------
+  // Only what matters stays on the deck face (platter, transport, sync, tempo, hot cues). Loops, FX, stems and key
+  // live in panels picked with a segmented control; the Performance layout shows cues and loops side by side.
+  // Panels keep their own class names (.loop-row, .fx-unit, .deck-stems, .key-row…) as mount points.
+  const PANELS = [['cues', 'Cues'], ['loops', 'Loops'], ['fx', 'FX'], ['stems', 'Stems'], ['key', 'Key']];
+  const panelBodies = {
+    cues: el('div', { class: 'deck-panel', 'data-panel': 'cues', role: 'tabpanel' }, modeBar, padGrid),
+    loops: el('div', { class: 'deck-panel', 'data-panel': 'loops', role: 'tabpanel' }, loopRow, jumpRow),
+    fx: el('div', { class: 'deck-panel', 'data-panel': 'fx', role: 'tabpanel' }, fxUnit),
+    stems: el('div', { class: 'deck-panel', 'data-panel': 'stems', role: 'tabpanel' }, buildStemControls(app, deck)),
+    key: el('div', { class: 'deck-panel', 'data-panel': 'key', role: 'tabpanel' }, keyRow),
+  };
+  const panelTabs = el('div', { class: 'panel-tabs', role: 'tablist', 'aria-label': `Deck ${i + 1} panels` },
+    ...PANELS.map(([id, label]) => el('button', { class: 'panel-tab', role: 'tab', 'data-panel': id, onclick: () => showPanel(id) }, label)));
+  const showPanel = (id) => {
+    root.dataset.panel = id;
+    for (const b of panelTabs.children) { const on = b.dataset.panel === id; b.classList.toggle('active', on); b.setAttribute('aria-selected', String(on)); }
+    for (const [k, p] of Object.entries(panelBodies)) p.classList.toggle('shown', k === id);
+  };
+  deck.showPanel = showPanel;
+
   // ---------- assemble ----------
-  const root = el('section', { class: 'deck', 'data-deck': i, style: { '--deck-color': DECK_COLORS[i] } },
+  const root = el('section', { class: 'deck empty', 'data-deck': i, style: { '--deck-color': DECK_COLORS[i] } },
     header,
     el('div', { class: 'overview-wrap' }, overview.canvas),
     phase,
@@ -228,14 +249,14 @@ export function buildDeck(app, deck) {
       ),
       el('div', { class: 'deck-mid' },
         el('div', { class: 'sync-row' }, syncBtn, masterBtn),
-        toggles, keyRow, buildStemControls(app, deck),
-        loopRow, jumpRow,
-        modeBar, padGrid,
-        fxUnit,
+        toggles,
+        panelTabs,
+        el('div', { class: 'deck-panels' }, ...Object.values(panelBodies)),
       ),
       tempo,
     ),
   );
+  showPanel('cues');
 
   // drag & drop tracks onto a deck
   root.addEventListener('dragover', (e) => { e.preventDefault(); root.classList.add('drop'); });
@@ -269,6 +290,9 @@ export function buildDeck(app, deck) {
     const sh = Math.round(deck.pitchSemis);
     keyBadge.textContent = t?.key ? `${playing || ''}${sh ? ` (${sh > 0 ? '+' : ''}${sh})` : ''} ${t.key !== cam ? t.key : ''}`.trim() : '';
     keyBadge.className = 'key-badge' + (playing ? ` cam-${playing.replace(/\D/g, '')}` : ''); keyBadge._ccompatible = undefined;
+    root.classList.toggle('empty', !t && !deck.loading);
+    root.classList.toggle('loading', !!deck.loading);
+    root.classList.toggle('failed', !t && !!deck.error);
     renderPads();
   };
   deck.on('key', () => { keyVal.textContent = `${deck.keyShift > 0 ? '+' : ''}${deck.keyShift}`; updateMeta(); renderPads(); });
