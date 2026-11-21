@@ -139,10 +139,10 @@ export function stemsSettingsPane(app) {
       const st = await stems.status(), m = st.model;
       info.replaceChildren(
         el('div', {}, `Model: ${m.name} — ${m.ready ? `downloaded (${MB(m.bytes)}${m.verified ? ', SHA-256 verified' : ''})` : m.downloading ? 'downloading…' : `not downloaded (${MB(m.downloadBytes || m.bytes)})`}`),
-        el('div', { class: 'muted' }, `Runtime: ${st.ort ? `ONNX Runtime Web ${st.ortVersion || ''}` : 'onnxruntime-web is not installed'} · stems saved as ${st.format.toUpperCase()} · ${globalThis.crossOriginIsolated ? 'multi-threaded' : 'single-threaded'} WASM, WebGPU ${'gpu' in navigator ? 'available' : 'not available'}`),
+        el('div', { class: 'muted' }, `Runtime: ${st.ort ? `ONNX Runtime Web ${st.ortVersion || ''}` : 'AI stems engine is missing from this app build — update or reinstall OpenDJ'} · stems saved as ${st.format.toUpperCase()} · ${globalThis.crossOriginIsolated ? 'multi-threaded' : 'single-threaded'} WASM, WebGPU ${'gpu' in navigator ? 'available' : 'not available'}`),
         el('div', { class: 'stems-settings-actions' },
           m.ready ? el('button', { class: 'btn sm', onclick: async () => { await fetch('/api/stems/model', { method: 'DELETE', credentials: 'same-origin' }); refresh(); } }, 'Delete model')
-            : el('button', { class: 'btn sm', onclick: async () => { try { await stems.ensureModel(); } catch (e) { app.toast(`⚠ ${e.message}`); } refresh(); } }, 'Download model…')),
+            : el('button', { class: 'btn sm', onclick: async () => { try { await stems.ensureModel(); } catch (e) { app.toast(`⚠ ${e.message}`); } refresh(); } }, 'Install AI stems')),
       );
     } catch (e) { info.textContent = `⚠ ${e.message}`; }
   };
