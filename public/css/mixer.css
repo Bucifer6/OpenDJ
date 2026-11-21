@@ -164,7 +164,7 @@
 :root body .mixer.mx2 .mixer-master { grid-template-rows: min-content min-content min-content min-content min-content min-content min-content 1fr; }
 :root body .mixer.mx2 .mixer-master > .m-meter { grid-row: 2 / 6; }
 :root body .mixer.mx2 .mixer-master > .mic-box, :root body .mixer.mx2 .mixer-master > .m-setup { grid-column: 1 / -1; }
-:root body .mixer.mx2 .mixer-master .mic-box { flex-wrap: nowrap; }
+:root body .mixer.mx2 .mixer-master .mic-box { flex-wrap: wrap; } /* MIC / TALK / MC wrap in a narrow master column */
 /* 4 decks: narrower MASTER and assign buttons so four columns fit */
 :root body.four-decks .mixer.mx2 .mixer-master { flex-basis: 76px; width: 76px; grid-template-columns: 1fr 1fr 14px; }
 :root body.four-decks .mixer.mx2 .mixer-master .knob-xs { width: 19px; height: 19px; }

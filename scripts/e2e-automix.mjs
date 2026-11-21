@@ -403,6 +403,7 @@ try {
   await page.waitForFunction(() => window.opendj.library.view.kind === 'playlist' && window.opendj.library.rows.length === 3, null, { timeout: 15000 });
   const rows = await page.evaluate(() => window.opendj.library.rows.map((t) => t.title));
   check(rows.join(',') === 'Remote 2,Remote 1,Remote 3', `opened: tracks in playlist order (${rows.join(', ')})`);
+  await page.locator('.tree-item[data-remote-pl="p1"]').hover(); // row actions open on hover
   await page.locator('.tree-item[data-remote-pl="p1"] .ti-act').click();
   await page.locator('.ctx-menu .ctx-item', { hasText: 'Smart mix' }).click();
   await page.locator('.overlay select[data-am="mode"]').waitFor({ timeout: 10000 });
@@ -418,6 +419,7 @@ try {
   check(true, 'transition between streamed media-server tracks');
   await page.evaluate(() => window.opendj.automix.stop());
   // "Shuffle & mix" from the same menu
+  await page.locator('.tree-item[data-remote-pl="p1"]').hover(); // row actions open on hover
   await page.locator('.tree-item[data-remote-pl="p1"] .ti-act').click();
   await page.locator('.ctx-menu .ctx-item', { hasText: 'Shuffle & mix' }).click();
   await page.locator('.overlay button', { hasText: 'Start automix' }).click();
@@ -458,6 +460,7 @@ try {
   check(ladd.source?.id, 'local mode: media server connected from the page');
   await lp.evaluate(() => window.opendj.library.refresh());
   await lp.waitForSelector('.tree-item[data-remote-pl="p1"]', { timeout: 20000 });
+  await lp.locator('.tree-item[data-remote-pl="p1"]').hover(); // row actions open on hover
   await lp.locator('.tree-item[data-remote-pl="p1"] .ti-act').click();
   await lp.locator('.ctx-menu .ctx-item', { hasText: 'Shuffle & mix' }).click();
   await lp.locator('.overlay button', { hasText: 'Start automix' }).click();
