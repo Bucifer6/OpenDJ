@@ -875,3 +875,62 @@ A personality is a **named preset of the settings above**, not a separate engine
 8. Provenance and licence of classic scratch phrases ("ahh", "fresh"). Assumed uncleared; never bundle.
 9. All CPU figures (pitch shift about 0.3 % per channel, meter about 0.2 %) are estimates. Measure with `scripts/perf/ui-bench.mjs` and an audio-thread load probe.
 10. Haptic feel values (rates, styles) and slip-mat and inertia parameters need tuning with real DJs.
+
+---
+
+## 9. Mixer half: implementation notes (0.5)
+
+### 9.1 EQ presets (M3, user request "resemble the real deal")
+
+Each preset is in `public/js/audio/eq.js` (`EQ_PRESETS`). Generic names only. The frequency response of every preset is measured in `scripts/fx/mixer-checks.mjs`.
+
+| Preset (UI) | Reference behaviour | Band type | Frequencies | Range and knob law | Character |
+|---|---|---|---|---|---|
+| Club Isolator (default) | club 4-channel mixers in isolator mode | LR8 isolator, bands sum to an all-pass | 200 Hz / 2.5 kHz | +6 dB … -26 dB at 8 o'clock, then a full kill | clean |
+| Club Classic | 900-class club EQ ⚠ (spec sheets list +6 / -26 dB at 70 Hz / 1 kHz / 13 kHz) | low shelf, peak (Q 0.7), high shelf | 70 Hz / 1 kHz / 13 kHz | +6 / -26 dB at 8 o'clock; the last tenth of the travel slides into a kill (shelves -50 dB, corners glide to 180 Hz / 5 kHz) | overlapping analogue-style bands |
+| 4-Band Club | flagship 6-channel mixer ⚠ (frequencies not verified) | LR8 isolator, 4 bands | 150 Hz / 1 kHz / 5 kHz | Hi and Low +6 / kill; Mid-Hi and Mid-Lo +6 / -26 dB | clean |
+| Rotary Isolator | boutique rotary and 4th-order isolator mixers ⚠ (+12 / -inf) | LR4 isolator (24 dB/oct) | 300 Hz / 4 kHz | +12 dB … -inf, long log taper (kill from 10 o'clock) | gentle tanh colour |
+| Battle | scratch mixers | LR8 isolator | 250 Hz / 3 kHz | +6 dB; steep kill, silent from 9 o'clock | clean |
+| Vintage Warm | classic analogue EQ | low shelf, peak (Q 0.5), high shelf | 100 Hz / 800 Hz / 8 kHz | +10 / -20 dB, kill at the end | mild tanh colour |
+| Sculpt | one-band sweep EQ with HP / LP ⚠ (70 Hz – 7 kHz on the 1.4 model) | HP + peak (Q 0.35) + LP | peak 70 Hz – 7 kHz (FREQ) | +8 / -20 dB; LOW left sweeps the HP up to 400 Hz (bass kill), HIGH left sweeps the LP down | clean |
+
+Measured (offline render, `e2e-fx`): every preset is flat at noon within 0.02 dB and the automix bass swap (LOW at -1) removes 43–97 dB at 60 Hz. The shelving presets match their RBJ target curves within 0.01–0.03 dB. The centre detent is the knob's existing 2 % detent for every preset.
+
+Personalities pick a preset: Club → Club Isolator, Classic → Club Classic, Rotary → Rotary Isolator, Battle → Battle.
+
+### 9.2 Deviations from the plan text
+
+- **Smooth crossfader (curve 0.5)** is kept identical to today's "Smooth": each side follows the √2·cos (constant-power) law, normalised to unity at the centre. It is not a strict |A|² + |B|² = 1 sum, because changing it would change Club's sound.
+- **Legacy "Scratch"** migrates to curve 0.9 with no cut-in, which gives identical gains. Curve 1 with cut-in 2 % is the Battle setting.
+- **Classic EQ** uses a kill on the last tenth of the knob, so the automix bass swap still removes more than 30 dB.
+- **Compressor** has a 2 ms look-ahead, so the drum transients are caught (crest -5.4 dB, loudness +0.2 LU at -14 LUFS). Until it is first turned up it is not in the path. When it first engages, the look-ahead glides in over 300 ms, so there is no comb filter and no click.
+- **Warmth** adds only the 2nd and 3rd harmonics (polynomial, no oversampling, no latency), so at 0 the output is the input exactly.
+- **Pitch shift** (Color FX, Spiral, Shimmer, mic pitch) is a two-tap delay-line shifter (`opendj-pitch`), not the deck's WSOLA.
+- **Booth EQ** shelves sit at 150 Hz and 5 kHz, so the full ±12 dB arrives by 50 Hz and 12 kHz.
+- **Null tests across offline renders** have a floor of about 4e-4 (-68 dBFS) in Chromium. Even two identical channels in one render differ by that much at random. Where a null cannot be done inside a single deterministic path, the checks allow that floor.
+
+### 9.3 Not done (mixer half)
+
+- **VCF units (M4, P2):** an LFO-driven filter.
+- **Per-preset centre-detent widths.**
+- **Mobius beat FX (P2):** its behaviour is unverified.
+- **Triplet Roll:** it needs deck rolls.
+- **External send/return latency** is only an estimate (`externalReturnLatency()`). There is no loopback measurement.
+- **The suggestion chip** reads the automix queue's genre tags. This stands in until `automix/context.js` (automix P2) exists.
+
+### 9.4 Voice bus (for the MC / text-to-speech voice)
+
+```js
+const v = engine.voiceInput();         // GainNode: connect any AudioNode to it
+const off = engine.connectVoice(node); // same, returns a disconnect function
+engine.setVoiceLevel(1);               // 0..1.5
+engine.setVoiceFx(true);               // send the voice through the mic FX (echo / reverb / megaphone)
+```
+
+The voice joins the **mic bus**, so it goes everywhere the mic does:
+- the master: after the master isolator and warmth, before the master volume and limiter
+- the booth, when "mic in booth" is on
+- the recording, unless "mic in recording" is off (`engine.recTap` is the record tap that `recording/pcm-tap.js` reads)
+- auto talkover, which it triggers (`talkoverMode` `auto` / `advanced`)
+
+Manual ducking is `engine.setTalkover(true)`.

@@ -212,3 +212,38 @@ test('M8: auto talkover reaches -depth ± 1 dB within 15 ms of a -20 dBFS voice 
   const b = runProc('opendj-ducker', v, v, { threshold: -36, depth: -12, auto: 1, manual: 0, band: 1, hold: 0.12 });
   assert.equal(Math.max(...b.L.map(Math.abs)), 0); assert.ok(Math.min(...b.R) < -0.7);
 });
+
+// ---------------------------------------------------------------- §5 personalities, settings migration
+const { PERSONALITIES, personalityState, suggestPersonality } = await import('../public/js/audio/personalities.js');
+const { normalizeMixer, MIXER_DEFAULTS } = await import('../public/js/audio/mixer-config.js');
+const { sanitizeSetting } = await import('../public/js/shared/settings-schema.js');
+test('§5: each personality maps to the plan table (snapshot)', () => {
+  const pick = (id) => { const m = PERSONALITIES[id].mixer; return { eq: m.eqType, filter: m.filterMode, centerLock: m.centerLock, xf: [m.xfCurve, m.xfCutIn, m.xfCutTime, m.hideXfader], fader: m.rotary ? 'rotary' : m.faderCurve, iso: m.showMasterIso, booth: m.showBooth, comp: m.showComp, rev: m.revVisible, color: !m.colorHidden }; };
+  assert.deepEqual(pick('club'), { eq: 'isolator', filter: 'oneKnob', centerLock: false, xf: [0.5, 0, 5, false], fader: 'log', iso: false, booth: false, comp: false, rev: false, color: true });
+  assert.deepEqual(pick('classic'), { eq: 'classic', filter: 'oneKnob', centerLock: true, xf: [0.5, 0, 5, false], fader: 'log', iso: false, booth: true, comp: true, rev: false, color: true });
+  assert.deepEqual(pick('rotary'), { eq: 'rotaryIso', filter: 'dual', centerLock: false, xf: [0.5, 0, 5, true], fader: 'rotary', iso: true, booth: false, comp: false, rev: false, color: false });
+  assert.deepEqual(pick('battle'), { eq: 'battle', filter: 'oneKnob', centerLock: false, xf: [1, 0.02, 1, false], fader: 'cut', iso: false, booth: false, comp: false, rev: true, color: true });
+  assert.equal(PERSONALITIES.rotary.knobs.warmth, 0.25);
+  // the defaults are Club: a fresh install shows "Club", a changed curve "Custom (based on Club)"
+  const fresh = normalizeMixer({});
+  assert.equal(personalityState(fresh).label, 'Club');
+  assert.equal(personalityState({ ...fresh, xfCurve: 0.8 }).label, 'Custom (based on Club)');
+});
+test('§5: suggestion chip: Rotary for a minimal queue, Battle for hip-hop, none for house; needs 70 % and 3 tracks', () => {
+  const q = (...g) => g.map((genre, i) => ({ id: `t${i}`, genre }));
+  assert.equal(suggestPersonality(q('Minimal', 'Rominimal', 'Minimal Techno', 'Micro House'))?.id, 'rotary');
+  assert.equal(suggestPersonality(q('Hip-Hop', 'Hip Hop', 'Turntablism', 'House'))?.id, 'battle');
+  assert.equal(suggestPersonality(q('House', 'Tech House', 'Techno')), null);
+  assert.equal(suggestPersonality(q('Minimal', 'Minimal')), null, 'too few tracks');
+  assert.equal(suggestPersonality(q('Minimal', 'Minimal', 'House', 'House')), null, 'below 70 %');
+  assert.equal(suggestPersonality(q('Minimal', 'Minimal', 'Minimal'), 'rotary'), null, 'already active');
+});
+test('settings: crossfaderCurve migrates into the continuous crossfader; settings.mixer is validated', () => {
+  assert.equal(normalizeMixer({ crossfaderCurve: 'sharp' }).xfCurve, 0.9);
+  assert.equal(normalizeMixer({ crossfaderCurve: 'constant' }).xfCurve, 0);
+  assert.equal(normalizeMixer({ crossfaderCurve: 'sharp', mixer: { xfCurve: 0.3 } }).xfCurve, 0.3, 'a stored continuous curve wins');
+  assert.equal(normalizeMixer({}).eqType, MIXER_DEFAULTS.eqType);
+  const r = sanitizeSetting('mixer', { eqType: 'rotaryIso', xfCutTime: 100, personality: 'battle', fx1: { assign: 'bogus', quantize: true } });
+  assert.deepEqual(r.value, { eqType: 'rotaryIso', personality: 'battle', fx1: { quantize: true } });
+  assert.equal(sanitizeSetting('theme', 'booth').ok, true);
+});

@@ -6,7 +6,7 @@ import { xfSettings } from './curves.js';
 export const MIXER_DEFAULTS = Object.freeze({
   personality: 'club',
   // M1 / M2 crossfader and faders (xfCurve / xfCutIn fall back to the legacy settings.crossfaderCurve)
-  xfReverse: false, xfCutTime: 5, faderCurve: 'log', rotary: false, hideXfader: false,
+  xfReverse: false, xfCutTime: 5, faderCurve: 'log', rotary: false, hideXfader: false, revVisible: false,
   // M3 / M4 / M5 EQ, filter, Color FX
   eqType: 'isolator', eqXover: [200, 2500], classicKill: true, filterMode: 'oneKnob', centerLock: false, colorPerChannel: false, colorHidden: false,
   // M12 / M13 / M16 master

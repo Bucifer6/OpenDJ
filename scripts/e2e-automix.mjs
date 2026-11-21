@@ -63,6 +63,13 @@ try {
   await page.goto(app.url);
   await page.waitForFunction(() => window.opendj?.ready, null, { timeout: 20000 });
   await page.evaluate(() => window.opendj.engine.resume());
+  // OPENDJ_MIXER=<personality> or eq:<preset>: run the whole suite on another mixer personality / EQ preset
+  // (the automix writes logical controls; each personality and EQ preset translates them)
+  if (process.env.OPENDJ_MIXER) {
+    const mode = process.env.OPENDJ_MIXER;
+    const ok = await page.evaluate((m) => { const a = window.opendj; if (m.startsWith('eq:')) { const mx = { ...(a.settings.mixer || {}), eqType: m.slice(3) }; a.setSetting('mixer', mx); a.engine.settings.mixer = mx; a.engine.applyMixerConfig(); return a.engine.mx.eqType === m.slice(3); } return window.opendjMixer.setPersonality(m) && a.engine.mx.personality === m; }, mode);
+    check(ok, `mixer set to ${mode}`);
+  }
   await page.locator('.overlay.start button').click({ timeout: 1000 }).catch(() => {});
   await page.evaluate(async (dir) => (await fetch('/api/folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: dir }) })).json(), music);
   await page.waitForFunction((n) => window.opendj.library.tracks.size === n, DEMO.length, { timeout: 30000 });
