@@ -37,6 +37,9 @@ export function buildDrawer(app, mixerRoot) {
   // ---------- Channel ----------
   const chRows = eng.channels.map((ch, i) => el('div', { class: 'adv-ch', 'data-ch': i },
     el('span', { class: 'adv-chn' }, String(i + 1)),
+    kn({ label: 'TRIM', size: 'xs', title: `Channel ${i + 1} trim (±12 dB)`, get: () => ch.state.trim, set: (v) => ch.set('trim', v) }),
+    kn({ label: 'VOC', min: 0, max: 1, def: 1, bipolar: false, size: 'xs', title: `Channel ${i + 1} quick stems: vocal`, get: () => ch.state.vocal, set: (v) => ch.set('vocal', v) }),
+    kn({ label: 'INST', min: 0, max: 1, def: 1, bipolar: false, size: 'xs', title: `Channel ${i + 1} quick stems: instrumental`, get: () => ch.state.inst, set: (v) => ch.set('inst', v) }),
     select(COLOR_FX, () => ch.state.colorFx, (v) => ch.set('colorFx', v), `Channel ${i + 1} Color FX`),
     kn({ label: 'COMP', min: 0, max: 1, def: 0, bipolar: false, size: 'xs', title: `Channel ${i + 1} one-knob compressor`, get: () => ch.state.comp, set: (v) => ch.set('comp', v) }),
     kn({ label: 'SEND', min: 0, max: 1, def: 0, bipolar: false, size: 'xs', title: `Channel ${i + 1} send to the send / return FX`, get: () => ch.state.send, set: (v) => ch.set('send', v) }),

@@ -80,6 +80,7 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     const S = (k) => ({ get: () => ch.state[k], set: (v) => ch.set(k, v) });
     const vu = vuMeter();
     // Center Lock (M4): a drag from one side stops at 12 o'clock; the next drag can cross
+    let cueBtn, faderRow, foot;
     const lock = centerLock({ mode: 'drag' });
     const filterKnob = R(knob({ label: 'FILTER', get: () => ch.state.filter, set: (x) => ch.controlSet('filter', x, lock), def: 0, size: 'md', title: 'Filter / Color FX amount. Left: low-pass, right: high-pass' }));
     filterKnob.addEventListener('pointerdown', () => lock.reset(), true);
@@ -89,7 +90,7 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     }));
     const strip = el('div', { class: 'strip', 'data-ch': i, style: { '--deck-color': DECK_COLORS[i] } },
       el('div', { class: 'strip-num' }, String(i + 1)),
-      R(knob({ label: 'TRIM', ...S('trim'), def: 0, size: 'sm', format: (v) => `${v >= 0 ? '+' : ''}${(v * 12).toFixed(1)}dB` })),
+      v('v-trim', R(knob({ label: 'TRIM', ...S('trim'), def: 0, size: 'sm', format: (v) => `${v >= 0 ? '+' : ''}${(v * 12).toFixed(1)}dB` }))),
       R(knob({ label: 'HI', ...S('eqHigh'), def: 0, size: 'sm', title: 'High EQ (fully left = kill)' })),
       v('v-mid', R(knob({ label: 'MID', ...S('eqMid'), def: 0, size: 'sm' }))),
       v('v-eq4', R(knob({ label: 'MID-HI', ...S('eqMidHigh'), def: 0, size: 'sm', title: '4-band EQ: mid-high' }))),
@@ -103,37 +104,39 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
       el('div', { class: 'stem-knobs' },
         R(knob({ label: 'VOC', min: 0, max: 1, def: 1, bipolar: false, ...S('vocal'), size: 'xs', title: 'Quick stems: vocal level (DSP centre-channel estimate)' })),
         R(knob({ label: 'INST', min: 0, max: 1, def: 1, bipolar: false, ...S('inst'), size: 'xs', title: 'Quick stems: instrumental level' }))),
-      R(button('CUE', { cls: 'btn-pfl', click: () => ch.set('cue', !ch.state.cue), active: () => ch.state.cue, title: 'Headphone cue (PFL)' })),
-      el('div', { class: 'fader-row' }, v('v-fader', R(fader({ ...S('volume'), def: 0.8, cls: 'ch-fader' }))), v('v-rotary', R(knob({ label: 'LEVEL', min: 0, max: 1, def: 0.8, bipolar: false, ...S('volume'), size: 'lg', title: 'Channel level (rotary: -inf .. +6 dB)' }))), vu),
-      xf,
+      (cueBtn = R(button('CUE', { cls: 'btn-pfl', click: () => ch.set('cue', !ch.state.cue), active: () => ch.state.cue, title: 'Headphone cue (PFL)' }))),
+      (faderRow = el('div', { class: 'fader-row' }, v('v-fader', R(fader({ ...S('volume'), def: 0.8, cls: 'ch-fader' }))), v('v-rotary', R(knob({ label: 'LEVEL', min: 0, max: 1, def: 0.8, bipolar: false, ...S('volume'), size: 'lg', title: 'Channel level (rotary: -inf .. +6 dB)' }))), vu)),
+      (foot = el('div', { class: 'strip-foot' }, xf)),
     );
-    strip.vu = vu; strip.ch = ch; strip.idx = i;
+    strip.vu = vu; strip.ch = ch; strip.idx = i; strip.cueBtn = cueBtn; strip.faderRow = faderRow; strip.foot = foot;
     strips.push(strip); stripsWrap.append(strip);
     cur = null;
   }
 
-  // master section: RMS bar + peak dot meters, limiter gain-reduction LED
+  // Controller-style layout: a compact top bar (headphones, sampler, mic cluster, setup), identical channel columns
+  // (TRIM / EQ / FILTER, CUE, long fader + meter, crossfader assign), a slim MASTER column (level, booth, stereo
+  // meter) and the full-width crossfader at the bottom. Setup menus live behind the gear (advanced drawer).
   const mvuL = vuMeter(), mvuR = vuMeter();
   const grLed = el('span', { class: 'gr-led', title: 'Limiter gain reduction' });
+  let mcBtnEl = null;
   const master = el('div', { class: 'mixer-master' },
-    el('div', { class: 'strip-num' }, 'MASTER'),
-    el('div', { class: 'master-vu' }, mvuL, mvuR, grLed),
-    v('v-iso', el('div', { class: 'master-iso' },
-      R(knob({ label: 'ISO LO', size: 'sm', title: 'Master isolator low', get: () => eng.iso.low, set: (x) => eng.setMasterIso('low', x) })),
-      R(knob({ label: 'ISO MID', size: 'sm', title: 'Master isolator mid', get: () => eng.iso.mid, set: (x) => eng.setMasterIso('mid', x) })),
-      R(knob({ label: 'ISO HI', size: 'sm', title: 'Master isolator high', get: () => eng.iso.high, set: (x) => eng.setMasterIso('high', x) })))),
-    v('v-warm', R(knob({ label: 'WARMTH', min: 0, max: 1, def: 0, bipolar: false, size: 'sm', title: 'Warmth (2nd-harmonic saturation)', get: () => eng.warmth, set: (x) => eng.setWarmth(x) }))),
-    v('v-booth', R(knob({ label: 'BOOTH', min: 0, max: 1, def: 0.8, bipolar: false, size: 'sm', title: 'Booth level', get: () => eng.boothVolume, set: (x) => { eng.ensureBooth(); eng.setBoothVolume(x); } }))),
-    R(knob({ label: 'MASTER', min: 0, max: 1, def: 0.8, get: () => eng.masterVolume ?? 0.8, set: (v) => eng.setMasterVolume(v) })),
-    R(knob({ label: 'CUE/MST', min: 0, max: 1, def: 0, bipolar: false, get: () => eng.cueMix ?? 0, set: (v) => eng.setCueMix(v), size: 'sm', title: 'Headphone mix: cue ↔ master' })),
-    R(knob({ label: 'PHONES', min: 0, max: 1, def: 0.8, get: () => eng.hpVolume ?? 0.8, set: (v) => eng.setHeadphoneVolume(v), size: 'sm' })),
-    R(knob({ label: 'SAMPLER', min: 0, max: 1, def: 0.8, get: () => eng.sampler.out.gain.value, set: (v) => eng.sampler.setVolume(v), size: 'sm' })),
+    el('div', { class: 'strip-num m-title' }, 'MASTER'),
+    el('div', { class: 'm-meter' }, el('div', { class: 'master-vu' }, mvuL, mvuR), grLed),
+    el('div', { class: 'm-level' }, R(knob({ label: 'LEVEL', min: 0, max: 1, def: 0.8, size: 'sm', title: 'Master level', get: () => eng.masterVolume ?? 0.8, set: (x) => eng.setMasterVolume(x) }))),
+    v('v-booth', el('div', { class: 'm-booth' }, R(knob({ label: 'BOOTH', min: 0, max: 1, def: 0.8, bipolar: false, size: 'xs', title: 'Booth level', get: () => eng.boothVolume, set: (x) => { eng.ensureBooth(); eng.setBoothVolume(x); } })))),
+    el('div', { class: 'm-pair' },
+      R(knob({ label: 'CUE/MST', min: 0, max: 1, def: 0, bipolar: false, size: 'xs', title: 'Headphones: cue ↔ master', get: () => eng.cueMix ?? 0, set: (x) => eng.setCueMix(x) })),
+      R(knob({ label: 'PHONES', min: 0, max: 1, def: 0.8, size: 'xs', bipolar: false, title: 'Headphones level', get: () => eng.hpVolume ?? 0.8, set: (x) => eng.setHeadphoneVolume(x) }))),
+    el('div', { class: 'm-pair' },
+      R(knob({ label: 'SAMPLER', min: 0, max: 1, def: 0.8, size: 'xs', bipolar: false, title: 'Sampler level', get: () => eng.sampler.out.gain.value, set: (x) => eng.sampler.setVolume(x) })),
+      R(knob({ label: 'MIC', min: 0, max: 1, def: 0.7, bipolar: false, get: () => eng.micVolume ?? 0.7, set: (x) => eng.setMicVolume(x), size: 'xs', title: 'Mic level' }))),
     el('div', { class: 'mic-box' },
       R(button('MIC', { cls: 'xs mic-on', click: () => app.toggleMic(), active: () => eng.micOn, title: 'Microphone / aux input on/off' })),
-      R(knob({ label: 'MIC', min: 0, max: 1, def: 0.7, bipolar: false, get: () => eng.micVolume ?? 0.7, set: (v) => eng.setMicVolume(v), size: 'sm' })),
       R(button('TALK', { cls: 'xs talk', click: () => eng.setTalkover(!eng.talkover), active: () => eng.talkover, title: 'Talkover: duck the music while you speak' })),
-      (mcBtn = R(button('MC', { cls: 'xs mc-btn', click: () => app.dedications?.open(), active: () => !!app.dedications?.current, title: 'Dedication: a short message spoken over the mix at the next phrase (English or Romanian), with the music ducked' })))),
+      (mcBtnEl = R(button('MC', { cls: 'xs mc-btn', click: () => app.dedications?.open(), active: () => !!app.dedications?.current, title: 'Dedication: a short message spoken over the mix at the next phrase (English or Romanian), with the music ducked' })))),
+    el('div', { class: 'm-setup' }),
   );
+  mcBtn = mcBtnEl;
   const xfader = R(fader({ min: -1, max: 1, def: 0, get: () => eng.crossfader, set: (x) => eng.setCrossfader(x), horizontal: true, cls: 'crossfader', title: 'Crossfader' }));
   // personality switches wait while a fast-cut crossfader is held mid-scratch
   xfader.addEventListener('pointerdown', () => { eng.xfTouched = true; });
@@ -154,32 +157,32 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     applyingEqPreset = false;
     eqPreset.value = preset.id;
   });
-
-  // crossfader curve presets (the continuous curve, cut-in and cut time live in the advanced drawer)
+  // crossfader curve presets (the continuous curve, cut-in and cut time are next to it in the drawer)
   const CURVES = [['0', 'Linear', { xfCurve: 0, xfCutIn: 0 }], ['0.5', 'Smooth', { xfCurve: 0.5, xfCutIn: 0 }], ['0.9', 'Scratch', { xfCurve: 0.9, xfCutIn: 0 }], ['1', 'Fast cut', { xfCurve: 1, xfCutIn: 0.02 }]];
   const curveSel = el('select', { class: 'sel tiny mixer-curve', title: 'Crossfader curve', 'aria-label': 'Crossfader curve' },
-    ...CURVES.map(([v, l]) => el('option', { value: v }, l)), el('option', { value: 'custom', disabled: true }, 'Custom'));
+    ...CURVES.map(([x, l]) => el('option', { value: x }, l)), el('option', { value: 'custom', disabled: true }, 'Custom'));
   const renderCurve = () => { const m = eng.mx, hit = CURVES.find(([, , p]) => Math.abs(p.xfCurve - m.xfCurve) < 1e-3 && Math.abs(p.xfCutIn - m.xfCutIn) < 1e-3); curveSel.value = hit ? hit[0] : 'custom'; };
   renderCurve();
-  curveSel.addEventListener('change', () => { const c = CURVES.find(([v]) => v === curveSel.value); if (c) updateMixer(app, c[2]); });
-
-  const colorSel = el('select', { class: 'sel tiny mixer-color', title: 'Color FX: what the filter knobs do', 'aria-label': 'Color FX' },
-    ...COLOR_FX.map(([v, l]) => el('option', { value: v }, l)));
+  curveSel.addEventListener('change', () => { const c = CURVES.find(([x]) => x === curveSel.value); if (c) updateMixer(app, c[2]); });
+  const colorSel = el('select', { class: 'sel tiny mixer-color', title: 'Color FX: what the filter knobs do', 'aria-label': 'Color FX (all channels)' },
+    ...COLOR_FX.map(([x, l]) => el('option', { value: x }, l)));
   colorSel.value = app.settings.colorFx || 'filter';
   colorSel.addEventListener('change', () => { for (const ch of eng.channels) ch.set('colorFx', colorSel.value); app.setSetting('colorFx', colorSel.value); });
-  const advBtn = el('button', { class: 'btn xs mixer-adv-btn', title: 'Advanced mixer: EQ type, faders, booth, mic, FX units, loudness', 'aria-label': 'Advanced mixer', 'aria-expanded': 'false', onclick: () => root.toggleDrawer?.() }, '⚙');
-  // setup dropdowns: in the MASTER column's free space, or (when it has none) a compact row above the crossfader
-  // EQ preset: the EQ model (isolator / classic / 4-band / rotary / battle / vintage / sculpt), per personality by default
-  const eqModel = el('select', { class: 'sel tiny mixer-eq-model', title: 'EQ preset: how the channel EQs behave (modelled on club, rotary and battle mixers)', 'aria-label': 'Mixer EQ preset' },
-    ...EQ_MODEL_LIST.map((p) => el('option', { value: p.id }, `EQ: ${p.label}`)));
+  const eqModel = el('select', { class: 'sel tiny mixer-eq-model', title: 'EQ preset: how the channel EQs behave', 'aria-label': 'Mixer EQ preset' },
+    ...EQ_MODEL_LIST.map((p) => el('option', { value: p.id }, p.label)));
   eqModel.value = eng.mx.eqType;
   eqModel.addEventListener('change', () => updateMixer(app, { eqType: eqModel.value }));
-  const tools = el('div', { class: 'mixer-tools' }, el('div', { class: 'mixer-tools-pair' }, eqModel, advBtn), el('div', { class: 'mixer-tools-pair' }, colorSel, curveSel, revBtn));
-  master.append(tools);
-  const toolsRow = el('div', { class: 'mixer-tools-row' });
-  const root = el('section', { class: 'mixer' },
+  const advBtn = el('button', { class: 'btn xs mixer-adv-btn', title: 'Mixer setup: EQ preset, Color FX, curves, booth, mic, FX units, loudness', 'aria-label': 'Mixer setup', 'aria-expanded': 'false', onclick: () => root.toggleDrawer?.() }, '⚙');
+  master.querySelector('.m-setup').append(revBtn, advBtn);
+  // rotary personality: master isolator and warmth in a row at the bottom (where the crossfader it hides would be)
+  const bar2 = el('div', { class: 'mixer-bar mixer-bar2 mxv v-iso' },
+    R(knob({ label: 'ISO LO', size: 'xs', title: 'Master isolator low', get: () => eng.iso.low, set: (x) => eng.setMasterIso('low', x) })),
+    R(knob({ label: 'ISO MID', size: 'xs', title: 'Master isolator mid', get: () => eng.iso.mid, set: (x) => eng.setMasterIso('mid', x) })),
+    R(knob({ label: 'ISO HI', size: 'xs', title: 'Master isolator high', get: () => eng.iso.high, set: (x) => eng.setMasterIso('high', x) })),
+    v('v-warm', R(knob({ label: 'WARMTH', min: 0, max: 1, def: 0, bipolar: false, size: 'xs', title: 'Warmth (2nd-harmonic saturation)', get: () => eng.warmth, set: (x) => eng.setWarmth(x) }))));
+  const root = el('section', { class: 'mixer mx2' },
     el('div', { class: 'mixer-top' }, stripsWrap, master),
-    toolsRow,
+    bar2,
     el('div', { class: 'xfader-row' },
       el('div', { class: 'xfader-control' }, el('span', { class: 'xf-l' }, 'A'), xfader, el('span', { class: 'xf-l' }, 'B')),
     ),
@@ -187,8 +190,11 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   // advanced drawer (closed by default) and the personality suggestion chip
   const drawer = buildDrawer(app, root);
   root.append(drawer.el);
-  // the tone presets (EQ knob starting points for all decks) live in the drawer's Channel tab
-  drawer.panes.channel.querySelector('.adv-sec').append(el('label', { class: 'adv-row' }, el('span', { class: 'adv-lbl' }, 'Tone (EQ knobs, all decks)'), eqPreset));
+  // setup menus behind the gear: EQ preset, Color FX and tone (Channel tab), crossfader curve (Faders tab)
+  const eqSec = drawer.panes.channel.querySelector('.adv-sec'), row = (l, c) => el('label', { class: 'adv-row' }, el('span', { class: 'adv-lbl' }, l), c);
+  eqSec.querySelector('.adv-row')?.replaceWith(row('EQ preset', eqModel));
+  eqSec.append(row('Color FX (all channels)', colorSel), row('Tone (EQ knobs, all decks)', eqPreset));
+  drawer.panes.faders.querySelector('.adv-sec').insertBefore(row('Curve preset', curveSel), drawer.panes.faders.querySelector('.adv-sec .adv-knobs'));
   root.toggleDrawer = (on, tab) => drawer.toggle(on, tab);
   const chip = el('div', { class: 'mixer-chip', hidden: true, role: 'status' });
   root.append(chip);
@@ -228,34 +234,40 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   window.addEventListener('opendj-theme', () => requestAnimationFrame(() => fit(lastH, lastW, true)));
   app.dedications?.on('change', () => { mcBtn?.render?.(); mcBtn?.setAttribute('data-count', String(app.dedications.pending() || '')); });
   eng.on('mic', () => { for (const r of renderers) r.render(); });
-  // compact strips when the layout leaves the mixer little height (.mx-short / .mx-400 / .mx-tiny in performance.css);
-  // phones stack the mixer at its natural height, so only desktop / tablet grids use this
-  const desk = matchMedia('(min-width: 700px) and (min-height: 561px)');
   let lastW = 0, lastH = 0;
-  /** The setup dropdowns go where there is room: MASTER's free space first, else the row above the crossfader. */
-  const placeTools = () => {
-    const toRow = () => { if (tools.parentNode !== toolsRow) toolsRow.append(tools); root.classList.add('tools-row'); };
-    const body = document.body.classList;
-    if (document.documentElement.classList.contains('compact') || master.clientWidth < 104 || body.contains('four-decks')) return toRow();
-    // try MASTER (only moves the node when it is elsewhere), fall back to the row when it overflows
-    if (tools.parentNode !== master) { master.append(tools); root.classList.remove('tools-row'); }
-    if (master.scrollHeight > master.clientHeight + 1) toRow();
+  const shown = (e) => e.style.display !== 'none' && getComputedStyle(e).display !== 'none';
+  /**
+   * Knob size from the strip height: the channel fader keeps at least 42 % of the strip, the knob rows share the rest
+   * (all strips have the same rows, so they stay aligned). VOC / INST only show when there is room (also in the drawer).
+   */
+  const fitKnobs = () => {
+    if (document.documentElement.classList.contains('compact')) { root.style.setProperty('--kn', '26px'); root.classList.remove('mx-nostems'); return; }
+    const s = strips.find((x) => x.style.display !== 'none'); const H = s?.clientHeight; if (!H) return;
+    const rows = [...s.children].filter((c) => c.classList.contains('knob-wrap') && !c.classList.contains('v-trim') && shown(c)).length || 4; // (TRIM counted below)
+    // tight strips: 1 px row gaps, a slimmer CUE; the knob rows get what is left after 45 % for the fader
+    // very short strips: CUE shares the assign row and TRIM moves to the drawer (Channel tab)
+    const tight = H < 360, tiny = H < 290, gap = tight ? 1 : 3, fixed = tiny ? 10 + 18 + 8 : tight ? 10 + 18 + 18 + 8 : 12 + 22 + 20 + 9;
+    const n0 = rows + (tiny ? 0 : 1);
+    const per = (n) => (H - fixed - 0.45 * H - (n + 4) * gap) / n;
+    const stems = per(n0 + 1) >= 24, r = stems ? per(n0 + 1) : per(n0);
+    const max = document.body.classList.contains('four-decks') ? 18 : 20; // the fader gets the rest
+    root.style.setProperty('--kn', `${Math.max(11, Math.min(max, Math.floor(r - 2)))}px`);
+    root.classList.toggle('mx-nostems', !stems); root.classList.toggle('mx-tight', tight); root.classList.toggle('mx-tiny2', tiny);
+    for (const st of strips) { // very short: CUE beside the crossfader assign under the fader
+      if (tiny && st.cueBtn.parentNode !== st.foot) st.foot.prepend(st.cueBtn);
+      else if (!tiny && st.cueBtn.parentNode === st.foot) st.faderRow.before(st.cueBtn);
+    }
   };
   const fit = (h, w = lastW, force = false) => {
     if (!force && Math.abs(h - lastH) < 0.5 && Math.abs(w - lastW) < 0.5) return; // (no re-layout loop from our own moves)
-    const on = desk.matches;
-    root.classList.toggle('mx-short', on && h <= 470); root.classList.toggle('mx-400', on && h <= 400); root.classList.toggle('mx-tiny', on && h <= 330);
-    // strips flex to fill the width; larger knobs, meters and fader caps when a strip is wide
+    // wide strips: wider meters and fader caps
     const vis = strips.filter((x) => x.style.display !== 'none').length || 2;
-    // (a fixed MASTER estimate and hysteresis: the classes change knob / meter sizes, which must not feed back here)
-    const mw = document.documentElement.classList.contains('compact') ? 84 : 118;
-    const sw = (w - 16 - mw - 6 * vis) / vis, has = (c) => root.classList.contains(c);
+    const sw = (w - 16 - 92 - 6 * vis) / vis, has = (c) => root.classList.contains(c);
     root.classList.toggle('mx-w1', has('mx-w1') ? sw >= 80 : sw >= 88); root.classList.toggle('mx-w2', has('mx-w2') ? sw >= 118 : sw >= 128);
     lastW = w; lastH = h;
-    placeTools();
+    fitKnobs();
   };
   new ResizeObserver((ents) => { const e = ents[0], b = e.contentBoxSize?.[0]; fit(b?.blockSize ?? e.contentRect.height, b?.inlineSize ?? e.contentRect.width); }).observe(root);
-  desk.addEventListener?.('change', () => fit(root.getBoundingClientRect().height / (parseFloat(document.documentElement.style.zoom) || 1)));
   root.setDeckCount = (n) => { for (const s of strips) s.style.display = s.idx < n ? '' : 'none'; requestAnimationFrame(() => fit(lastH, lastW, true)); };
   root.frame = () => {
     for (const s of strips) if (s.style.display !== 'none') s.vu.draw(s.ch.level());
