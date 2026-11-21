@@ -110,7 +110,7 @@ const fit = (panels) => ev(async (panels) => {
     if (vis(mx)) {
       const R = mx.getBoundingClientRect(), zr = R.width / mx.offsetWidth || 1, W = R.width, pad = parseFloat(getComputedStyle(mx).paddingLeft) * zr;
       const xf = document.querySelector('.mixer .crossfader .fader-track')?.getBoundingClientRect();
-      if (!mx.classList.contains('mx-noxf') && (!xf || xf.width < Math.min(0.8 * W, 220 * zr) || xf.width < 0.7 * W)) out.push(`crossfader squished: ${Math.round(xf?.width || 0)} of ${Math.round(W)} px mixer`);
+      if (!mx.classList.contains('mx-noxf') && (!xf || xf.width < 0.8 * W - 2 * zr)) out.push(`crossfader squished: ${Math.round(xf?.width || 0)} of ${Math.round(W)} px mixer`);
       const cols = [...mx.querySelectorAll('.mixer-strips > .strip, .mixer-top > .mixer-master')].filter(vis).map((e) => e.getBoundingClientRect()).sort((a, b) => a.left - b.left);
       const edges = [R.left + pad, ...cols.flatMap((c) => [c.left, c.right]), R.right - pad];
       const maxGap = Math.max(16 * zr, 0.03 * W);
@@ -132,6 +132,22 @@ const fit = (panels) => ev(async (panels) => {
   return [...new Set(out)];
 }, panels);
 const PANELS = ['cues', 'loops', 'fx', 'stems', 'key'];
+// Channel faders: never shorter than before the mixer v2 layout (scripts/fixtures-fader-travel.json, measured at
+// 0a5fa16) and at least 35 % of the strip; knob rows line up across the channels (within 2 px), like hardware.
+const FADER_BASE = JSON.parse(fs.readFileSync(new URL('./fixtures-fader-travel.json', import.meta.url), 'utf8')).travel;
+const faderCheck = (key) => ev((base) => {
+  const out = [], strips = [...document.querySelectorAll('.mixer .strip')].filter((e) => e.offsetParent);
+  if (document.querySelector('.mixer.mx-rotary')) return out; // rotary levels are knobs
+  for (const s of strips) {
+    const f = s.querySelector('.ch-fader'), t = f?.querySelector('.fader-track'); if (!t) { out.push('no channel fader'); continue; }
+    const cap = parseFloat(getComputedStyle(f).getPropertyValue('--cap')) || 16, travel = t.offsetHeight - cap;
+    if (base != null && travel < base) out.push(`channel ${s.dataset.ch * 1 + 1} fader travel ${travel} px < ${base} px before`);
+    if (travel < 0.35 * s.offsetHeight) out.push(`channel ${s.dataset.ch * 1 + 1} fader travel ${travel} px < 35 % of a ${s.offsetHeight} px strip`);
+  }
+  const rows = strips.map((s) => [...s.querySelectorAll(':scope > .knob-wrap .knob')].filter((k) => k.offsetParent).map((k) => k.getBoundingClientRect().top));
+  for (let r = 0; rows.length && r < rows[0].length; r++) { const tops = rows.map((x) => x[r]); if (Math.max(...tops) - Math.min(...tops) > 2) out.push(`knob row ${r + 1} not aligned (${tops.map(Math.round).join('/')})`); }
+  return out;
+}, FADER_BASE[key]);
 const summary = (a) => [a.overlap.length && `overlap ${a.overlap.slice(0, 4).join('; ')}`, a.escape.length && `outside ${a.escape.slice(0, 4).join('; ')}`, a.covered.length && `covered ${a.covered.slice(0, 4).join('; ')}`, a.fader.length && `fader ${a.fader.join('; ')}`].filter(Boolean).join(' | ');
 
 const setUi = (o) => ev(async ({ layout, theme, zoom }) => {
@@ -171,6 +187,8 @@ try {
       // every panel fits on every visible deck; then the full audit again with the FX panel open on all decks
       const f = await fit(PANELS);
       check(!f.length, `${w}x${h} ${layout} @${zoom}%: all decks' panels fit, nothing outside the window${f.length ? ' — ' + f.slice(0, 4).join('; ') : ''}`);
+      const fc = await faderCheck(`${w}x${h} ${layout} ${zoom}`);
+      check(!fc.length, `${w}x${h} ${layout} @${zoom}%: long channel faders (>= the old travel, >= 35 % of the strip), knob rows aligned${fc.length ? ' — ' + fc.slice(0, 4).join('; ') : ''}`);
       await fit(['fx']);
       const fa = await audit();
       check(fa.count > 30 && !summary(fa), `${w}x${h} ${layout} @${zoom}% FX panel on both decks: ${fa.count} controls in bounds${summary(fa) ? ' — ' + summary(fa) : ''}`);
@@ -185,6 +203,8 @@ try {
       await page.waitForTimeout(120);
       const f = await fit(PANELS);
       check(!f.length, `${w}x${h} ${layout} @${zoom}%: all decks' panels fit, nothing outside the window${f.length ? ' — ' + f.slice(0, 4).join('; ') : ''}`);
+      const fc = await faderCheck(`${w}x${h} ${layout} ${zoom}`);
+      check(!fc.length, `${w}x${h} ${layout} @${zoom}%: long channel faders, knob rows aligned${fc.length ? ' — ' + fc.slice(0, 4).join('; ') : ''}`);
     }
   }
   // ---------- the personalities ----------

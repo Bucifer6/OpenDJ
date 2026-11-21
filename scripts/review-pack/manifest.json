@@ -1,0 +1,263 @@
+{
+  "$comment": "Sources, licences and hashes of the app-review media pack. Built by scripts/review-pack/build-review-pack.mjs; see docs/APP_REVIEW.md. bpm / key are measured with OpenDJ's own analysis (public/js/audio/analysis-core.js) by the build script (--update-manifest writes them here).",
+  "name": "OpenDJ review pack",
+  "tracks": [
+    {
+      "id": "open-circuit",
+      "kind": "generated",
+      "file": "01 OpenDJ Demo - Open Circuit.mp3",
+      "title": "Open Circuit",
+      "artist": "OpenDJ Demo",
+      "album": "OpenDJ Review Pack",
+      "genre": "House",
+      "year": 2026,
+      "licence": "CC0-1.0",
+      "licenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "credit": "OpenDJ project, CC0",
+      "generator": {
+        "style": "house",
+        "bpm": 124,
+        "key": [
+          9,
+          "minor"
+        ],
+        "seed": 211
+      },
+      "sha256": "4d6f71771b8d696aef7eec71c5073068a5edf66e498103cb834c37ae1fce26a6",
+      "bytes": 6028708,
+      "measured": {
+        "bpm": 124,
+        "key": "Em",
+        "camelot": "9A",
+        "duration": 250.2,
+        "by": "OpenDJ analysis-core.js analyzeTrack()"
+      }
+    },
+    {
+      "id": "iron-lattice",
+      "kind": "generated",
+      "file": "02 OpenDJ Demo - Iron Lattice.mp3",
+      "title": "Iron Lattice",
+      "artist": "OpenDJ Demo",
+      "album": "OpenDJ Review Pack",
+      "genre": "Techno",
+      "year": 2026,
+      "licence": "CC0-1.0",
+      "licenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "credit": "OpenDJ project, CC0",
+      "generator": {
+        "style": "techno",
+        "bpm": 128,
+        "key": [
+          4,
+          "minor"
+        ],
+        "seed": 223
+      },
+      "sha256": "f3f76a9e486bfddbe3fbb6646afcfb17a48e8bd2a8f7f80990374ef51d5b2565",
+      "bytes": 5877550,
+      "measured": {
+        "bpm": 128,
+        "key": "Bm",
+        "camelot": "10A",
+        "duration": 242.5,
+        "by": "OpenDJ analysis-core.js analyzeTrack()"
+      }
+    },
+    {
+      "id": "paper-lanterns",
+      "kind": "generated",
+      "file": "03 OpenDJ Demo - Paper Lanterns.mp3",
+      "title": "Paper Lanterns",
+      "artist": "OpenDJ Demo",
+      "album": "OpenDJ Review Pack",
+      "genre": "Hip-Hop",
+      "year": 2026,
+      "licence": "CC0-1.0",
+      "licenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "credit": "OpenDJ project, CC0",
+      "generator": {
+        "style": "hiphop",
+        "bpm": 100,
+        "key": [
+          0,
+          "minor"
+        ],
+        "seed": 227
+      },
+      "sha256": "6e7d51a0234e89134c8fc9541729d9846d9fe0944e77cc965cb34c1019a131d4",
+      "bytes": 4690771,
+      "measured": {
+        "bpm": 100,
+        "key": "Gm",
+        "camelot": "6A",
+        "duration": 194.5,
+        "by": "OpenDJ analysis-core.js analyzeTrack()"
+      }
+    },
+    {
+      "id": "lfm-after-party",
+      "kind": "cc0",
+      "file": "04 Loyalty Freak Music - After Party.mp3",
+      "title": "After Party",
+      "artist": "Loyalty Freak Music",
+      "album": "ROBOT DANCE !",
+      "genre": "Electronic",
+      "licence": "CC0-1.0",
+      "licenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "credit": "\"After Party\" by Loyalty Freak Music (CC0 1.0), from the Free Music Archive. Credit is not required; it is given as a courtesy.",
+      "pageUrl": "https://freemusicarchive.org/music/Loyalty_Freak_Music/ROBOT_DANCE_/Loyalty_Freak_Music_-_ROBOT_DANCE__-_03_After_Party/",
+      "fileUrl": "https://files.freemusicarchive.org/storage-freemusicarchive-org/music/Music_for_Video/Loyalty_Freak_Music/ROBOT_DANCE_/Loyalty_Freak_Music_-_03_-_After_Party.mp3",
+      "packEdit": "embedded cover art removed (it shows the artist's logo) and the comment tag replaced with the licence and page URL; the audio stream is copied unchanged",
+      "pageCheck": [
+        {
+          "date": "2026-11-21",
+          "result": "CC0 1.0 shown on the track page (\"After Party by Loyalty Freak Music is licensed under a CC0 1.0 Universal License\", rel=license -> creativecommons.org/publicdomain/zero/1.0/); genres Electronic, Techno, Electro-punk, Instrumental"
+        },
+        {
+          "date": "2026-11-21",
+          "result": "CC0 1.0 Universal License shown on the track page; downloaded file SHA-256 06c6ae83d6a2530b1313af7d6ff58a69b7fb043549e2bbad6c3682b2773fd8a1"
+        }
+      ],
+      "sourceSha256": "06c6ae83d6a2530b1313af7d6ff58a69b7fb043549e2bbad6c3682b2773fd8a1",
+      "sha256": "46332e3c396b919c0630d70e001c0a886d06e7277836d2d451dc9536ff587743",
+      "bytes": 7082675,
+      "measured": {
+        "bpm": 120,
+        "key": "Fm",
+        "camelot": "4A",
+        "duration": 177,
+        "by": "OpenDJ analysis-core.js analyzeTrack()"
+      }
+    },
+    {
+      "id": "lfm-roller-fever",
+      "kind": "cc0",
+      "file": "05 Loyalty Freak Music - Roller Fever.mp3",
+      "title": "Roller Fever",
+      "artist": "Loyalty Freak Music",
+      "album": "ROLLER DISCO DANCE DANCE",
+      "genre": "Disco",
+      "licence": "CC0-1.0",
+      "licenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "credit": "\"Roller Fever\" by Loyalty Freak Music (CC0 1.0), from the Free Music Archive. Credit is not required; it is given as a courtesy.",
+      "pageUrl": "https://freemusicarchive.org/music/Loyalty_Freak_Music/ROLLER_DISCO_DANCE_DANCE/Loyalty_Freak_Music_-_ROLLER_DISCO_DANCE_DANCE_-_01_Roller_Fever/",
+      "fileUrl": "https://files.freemusicarchive.org/storage-freemusicarchive-org/music/Music_for_Video/Loyalty_Freak_Music/ROLLER_DISCO_DANCE_DANCE/Loyalty_Freak_Music_-_01_-_Roller_Fever.mp3",
+      "packEdit": "embedded cover art removed (it shows the artist's logo) and the comment tag replaced with the licence and page URL; the audio stream is copied unchanged",
+      "pageCheck": [
+        {
+          "date": "2026-11-21",
+          "result": "CC0 1.0 shown on the track page (\"Roller Fever by Loyalty Freak Music is licensed under a CC0 1.0 Universal License\", rel=license -> creativecommons.org/publicdomain/zero/1.0/); genres Dance, Disco, Rock, Surf"
+        },
+        {
+          "date": "2026-11-21",
+          "result": "CC0 1.0 Universal License shown on the track page; downloaded file SHA-256 fa9986971c76189754b6592b83424b453dcb581fb1394f935f678eb4dba3d98f"
+        }
+      ],
+      "sourceSha256": "fa9986971c76189754b6592b83424b453dcb581fb1394f935f678eb4dba3d98f",
+      "sha256": "850da6ba983bad2055b4da745bb2231fef8c002dc0bce95b3af91ed6b81ff802",
+      "bytes": 5828830,
+      "measured": {
+        "bpm": 113.75,
+        "key": "D",
+        "camelot": "10B",
+        "duration": 145.6,
+        "by": "OpenDJ analysis-core.js analyzeTrack()"
+      }
+    },
+    {
+      "id": "holizna-fire-place",
+      "kind": "cc0",
+      "file": "06 HoliznaCC0 - Fire Place.mp3",
+      "title": "Fire Place",
+      "artist": "HoliznaCC0",
+      "album": "Winter Lofi",
+      "genre": "Lo-fi Hip-Hop",
+      "licence": "CC0-1.0",
+      "licenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "credit": "\"Fire Place\" by HoliznaCC0 (CC0 1.0), from the Free Music Archive. Credit is not required; it is given as a courtesy.",
+      "pageUrl": "https://freemusicarchive.org/music/holiznacc0/winter-lofi/fire-place/",
+      "fileUrl": "https://files.freemusicarchive.org/storage-freemusicarchive-org/tracks/qUQGTyL3bMTaIVqsuZ3dUS2u2ep2ZmVr86sWwZ0j.mp3",
+      "packEdit": "embedded cover art removed (it shows the artist's logo) and the comment tag replaced with the licence and page URL; the audio stream is copied unchanged",
+      "pageCheck": [
+        {
+          "date": "2026-11-21",
+          "result": "CC0 1.0 shown on the track page (\"Fire Place by HoliznaCC0 is licensed under a CC0 1.0 Universal License\", rel=license -> creativecommons.org/publicdomain/zero/1.0/); genres Lo-fi Hip-Hop, Lo-fi Soul/RnB, Chill-out, Hip-Hop, Instrumental, Easy Listening, Pop"
+        },
+        {
+          "date": "2026-11-21",
+          "result": "CC0 1.0 Universal License shown on the track page; downloaded file SHA-256 b26c049d6ac149c678e0f24b68416dc71c6cb2b4da62eb4cf7448432c26fa2a0"
+        }
+      ],
+      "sourceSha256": "b26c049d6ac149c678e0f24b68416dc71c6cb2b4da62eb4cf7448432c26fa2a0",
+      "sha256": "03e700315eac32c71c7031880f1b37b5be1c5c29e2dc4001ff50f9066bfa3eea",
+      "bytes": 6812372,
+      "measured": {
+        "bpm": 110.44,
+        "key": "Em",
+        "camelot": "9A",
+        "duration": 170.3,
+        "by": "OpenDJ analysis-core.js analyzeTrack()"
+      }
+    }
+  ],
+  "alternates": [
+    {
+      "title": "Summer Pride",
+      "artist": "Loyalty Freak Music",
+      "licence": "CC0-1.0",
+      "pageUrl": "https://freemusicarchive.org/music/Loyalty_Freak_Music/INSTRUMENTAL_RB_BEATS_TO_SING_OR_RAP_ON/Loyalty_Freak_Music_-_INSTRUMENTAL_RB_BEATS_TO_SING_OR_RAP_ON_-_17_Summer_Pride/",
+      "note": "CC0 1.0 on the track page (checked 2026-11-21); hip-hop beat."
+    },
+    {
+      "title": "Grab A Partner",
+      "artist": "Loyalty Freak Music",
+      "licence": "CC0-1.0",
+      "pageUrl": "https://freemusicarchive.org/music/Loyalty_Freak_Music/ROLLER_DISCO_DANCE_DANCE/Loyalty_Freak_Music_-_ROLLER_DISCO_DANCE_DANCE_-_05_Grab_A_Partner/",
+      "note": "CC0 1.0 on the track page (checked 2026-11-21); OpenDJ measured 115.6 BPM, Am (8A)."
+    },
+    {
+      "title": "Everyone is so alive",
+      "artist": "Loyalty Freak Music",
+      "licence": "CC0-1.0",
+      "pageUrl": "https://freemusicarchive.org/music/Loyalty_Freak_Music/ROBOT_DANCE_/Loyalty_Freak_Music_-_ROBOT_DANCE__-_01_Everyone_is_so_alive/",
+      "note": "CC0 1.0 on the track page (checked 2026-11-21); OpenDJ measured 106.7 BPM, Am (8A)."
+    },
+    {
+      "title": "High Technologic Beat Explosion",
+      "artist": "Loyalty Freak Music",
+      "licence": "CC0-1.0",
+      "pageUrl": "https://freemusicarchive.org/music/Loyalty_Freak_Music/ROBOT_DANCE_/Loyalty_Freak_Music_-_ROBOT_DANCE__-_02_High_Technologic_Beat_Explosion/",
+      "note": "CC0 1.0 on the track page (checked 2026-11-21); OpenDJ measured 140 BPM (above the 90-128 target)."
+    },
+    {
+      "title": "Winter Blues",
+      "artist": "HoliznaCC0",
+      "licence": "CC0-1.0",
+      "pageUrl": "https://freemusicarchive.org/music/holiznacc0/winter-lofi/winter-blues/",
+      "note": "CC0 1.0 on the track page (checked 2026-11-21); OpenDJ measured 80 BPM. Avoid the separate HoliznaPatreon account (not CC0)."
+    }
+  ],
+  "excluded": [
+    {
+      "what": "Suno or any other AI-service output",
+      "why": "owner's decision: third-party terms"
+    },
+    {
+      "what": "Kevin MacLeod (CC BY 4.0)",
+      "why": "needs attribution; optional only, not in the pack (see docs/RESOURCES_AND_LICENSING.md §2.8)"
+    },
+    {
+      "what": "Komiku",
+      "why": "reported YouTube Content ID claims (docs/RESOURCES_AND_LICENSING.md §2.8)"
+    },
+    {
+      "what": "Tricks & Traps (OpenGameArt)",
+      "why": "licence not verified: opengameart.org unreachable"
+    },
+    {
+      "what": "Embedded cover art of the CC0 downloads",
+      "why": "it shows the artist's logo; the pack copies have it removed (packEdit) so no third-party branding appears in screenshots"
+    }
+  ]
+}
