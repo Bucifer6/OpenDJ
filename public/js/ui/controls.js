@@ -159,10 +159,8 @@ export function jogWheel(deck, opts = {}) {
   const angleOf = (e) => {
     const r = rect || canvas.getBoundingClientRect();
     const cx = ((e.clientX - r.left) / r.width) * canvas.width, cy = ((e.clientY - r.top) / r.height) * canvas.height;
-    // rectangular skins (turntable plinth, media player body) say where their platter is; square ones fill the canvas
-    const p = skin?.platter ? skin.platter(canvas.width, canvas.height) : { cx: canvas.width / 2, cy: canvas.height / 2, r: canvas.width / 2 };
-    const x = cx - p.cx, y = cy - p.cy;
-    return { a: Math.atan2(y, x), d: Math.hypot(x, y) / p.r, cx, cy };
+    const x = cx - canvas.width / 2, y = cy - canvas.height / 2;
+    return { a: Math.atan2(y, x), d: Math.hypot(x, y) / (canvas.width / 2), cx, cy };
   };
   const wrap = (da) => (da > Math.PI ? da - 2 * Math.PI : da < -Math.PI ? da + 2 * Math.PI : da);
   let rot = 0, holding = 0, lastTick = 0, lastBeat = null;
@@ -185,10 +183,9 @@ export function jogWheel(deck, opts = {}) {
     canvas.setPointerCapture(e.pointerId);
     if (!pointers.size) rect = canvas.getBoundingClientRect();
     const { a, d, cx, cy } = angleOf(e);
-    if (skin.hitArm && deck.track && !deck.track.scratchSample && skin.hitArm(cx, cy, canvas.width, frameState, canvas.height) && !pointers.size) {
-      pointers.set(e.pointerId, { kind: 'arm', a }); armK = skin.armProgressAt(cx, cy, canvas.width, canvas.height); sig = ''; e.preventDefault(); return;
+    if (skin.hitArm && deck.track && !deck.track.scratchSample && skin.hitArm(cx, cy, canvas.width, frameState) && !pointers.size) {
+      pointers.set(e.pointerId, { kind: 'arm', a }); armK = skin.armProgressAt(cx, cy, canvas.width); sig = ''; e.preventDefault(); return;
     }
-    if (skin.rect && d > 1.02 && !pointers.size) return; // the plinth / body around the platter
     const s = scratcher();
     if (s || [...pointers.values()].some((p) => p.kind === 'hold')) { // another finger is on the record: hold it still
       pointers.set(e.pointerId, { kind: 'hold', a });
@@ -214,7 +211,7 @@ export function jogWheel(deck, opts = {}) {
         rot += da / (2 * Math.PI);
         deck.jogPosition(rot, ce.timeStamp);
       } else if (p.kind === 'nudge') deck.jogNudge((da / (2 * Math.PI)) * 4);
-      else if (p.kind === 'arm') { armK = skin.armProgressAt(cx, cy, canvas.width, canvas.height); sig = ''; }
+      else if (p.kind === 'arm') { armK = skin.armProgressAt(cx, cy, canvas.width); sig = ''; }
     }
     if (p.kind === 'scratch' && !holding) feel();
   });
@@ -245,27 +242,26 @@ export function jogWheel(deck, opts = {}) {
   // Static layers are rendered once per size / theme / skin (platter-skins.js); a frame draws the moving parts only,
   // and frames whose signature did not change are skipped.
   let touched = false, size = 0, body = null, sig = '', deckColor = null, skinId = '', skin = null, armK = null;
-  let roW = 0, roH = 0; // canvas size from the observer entry (no layout read in the draw)
+  let roW = 0; // platter size from the observer entry (no layout read in the draw)
   let art = null, artKey = '', artFor = null, lastNow = 0;
   const strobe = [0, 0, 0];
   const reducedQ = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
   const frameState = { ang: 0, k: 0, strobe, cues: [] };
-  const ro = new ResizeObserver((es) => { const r = es.at(-1).contentRect; roW = r.width * uiZoom(); roH = r.height * uiZoom(); size = 0; });
+  const ro = new ResizeObserver((es) => { roW = es.at(-1).contentRect.width * uiZoom(); size = 0; });
   ro.observe(canvas);
   window.addEventListener('opendj-theme', () => { body = null; deckColor = null; sig = ''; });
   const pickSkin = () => {
     const id = opts.skin?.() || 'minimal';
-    if (id !== skinId) { skinId = id; skin = makeSkin(id); body = null; sig = ''; size = 0; root.dataset.skin = id; }
+    if (id !== skinId) { skinId = id; skin = makeSkin(id); body = null; sig = ''; root.dataset.skin = id; }
   };
   root.draw = (now = performance.now()) => {
     pickSkin();
     if (!size) {
-      const b = roW && roH ? null : canvas.getBoundingClientRect(), w = roW || b.width, h = roH || b?.height || w, dpr = devicePixelRatio || 1;
-      size = Math.max(64, Math.min(1400, Math.round(w * dpr))) || 360;
-      const hh = skin.rect ? Math.max(48, Math.min(1400, Math.round(h * dpr))) || size : size;
-      if (canvas.width !== size || canvas.height !== hh) { canvas.width = size; canvas.height = hh; body = null; sig = ''; }
+      const w = roW || canvas.getBoundingClientRect().width;
+      size = Math.max(64, Math.min(1024, Math.round(w * (devicePixelRatio || 1)))) || 360;
+      if (canvas.width !== size) { canvas.width = size; canvas.height = size; body = null; sig = ''; }
     }
-    const W = canvas.width, H = canvas.height;
+    const W = canvas.width;
     const dt = lastNow ? Math.min(0.1, (now - lastNow) / 1000) : 0; lastNow = now;
     const t = deck.track;
     // cover art for the skins that show it (decoded once per track, off the frame path)
@@ -281,10 +277,10 @@ export function jogWheel(deck, opts = {}) {
     const warn = deck.duration > 0 && deck.remaining < 30 && deck.playing;
     const blink = warn && Math.floor(now / 400) % 2 === 1;
     const bpm = deck.effectiveBpm ? deck.effectiveBpm.toFixed(1) : '--';
-    if (skinId === 'vinyl' || skinId === 'turntable') { const r = deck.playing || touched ? (deck._rate || 0) : 0; for (let i = 0; i < 3; i++) strobe[i] = reduced ? 0 : (strobe[i] + strobeRate(r, STROBE_ROWS[i], (2 * Math.PI) / STROBE_DOTS) * dt) % (2 * Math.PI); }
+    if (skinId === 'vinyl') { const r = deck.playing || touched ? (deck._rate || 0) : 0; for (let i = 0; i < 3; i++) strobe[i] = reduced ? 0 : (strobe[i] + strobeRate(r, STROBE_ROWS[i], (2 * Math.PI) / STROBE_DOTS) * dt) % (2 * Math.PI); }
     deckColor ||= getComputedStyle(root).getPropertyValue('--deck-color').trim() || '#3ea6ff';
     const st = Object.assign(frameState, { ang, k, warn, blink, bpm, playing: deck.playing, touched, hasTrack: !!t, deckColor, art, artKey, title: t?.title || '', reduced, armK, rpmLabel: deck.vinyl?.rpm === 45 ? '45' : deck.vinyl?.rpm === 78 ? '78' : '33⅓' });
-    if (skinId === 'cdj' || skinId === 'player') {
+    if (skinId === 'cdj') {
       const sh = deck.shadowPosition;
       st.shadowAng = sh != null && Math.abs(sh - pos) > 0.05 ? (sh / spr) * 2 * Math.PI : null;
       const l = deck.loop, D = deck.duration || 1;
@@ -294,12 +290,11 @@ export function jogWheel(deck, opts = {}) {
       st.cueSig = hc.map((c) => c.position.toFixed(2)).join(',');
       st.remaining = Math.max(0, (deck.duration || 0) - pos);
     }
-    if (skinId === 'projog') st.cueAng = deck.track ? (deck.cuePoint / spr) * 2 * Math.PI - (reduced ? 0 : 0) : null;
-    const s = `${W}x${H}|${skinId}|${skin.sig(st)}`;
+    const s = `${W}|${skinId}|${skin.sig(st)}`;
     if (s === sig && body) return;
     sig = s;
-    if (!body) body = skin.body(W, H);
-    skin.draw(g, W, st, body, { H });
+    if (!body) body = skin.body(W);
+    skin.draw(g, W, st, body);
   };
   return root;
 }

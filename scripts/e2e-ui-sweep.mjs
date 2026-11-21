@@ -191,44 +191,7 @@ try {
   await page.keyboard.press('Escape'); await ev(() => { document.querySelector('.tb-menu')?.remove(); const a = window.opendj; a.signOutBtn.hidden = true; a.amInfo.textContent = ''; });
   await page.setViewportSize({ width: 1920, height: 1080 });
 
-  // ---------- 1b. deck looks (Direct-Drive Turntable, Pro Media Player), platter skins, waveform styles ----------
-  const proAudit = () => ev(() => {
-    const out = []; let count = 0;
-    const vis = (e) => e.offsetParent && e.getBoundingClientRect().width > 1 && e.getBoundingClientRect().height > 1;
-    for (const d of document.querySelectorAll('.deck.pro-on')) {
-      const dr = d.getBoundingClientRect(), n = `deck${+d.dataset.deck + 1}`;
-      for (const e of d.querySelectorAll('.pmp button, .pmp .knob, .pmp .fader-track, .pmp .pmp-strip, .pmp .pmp-encoder, .pmp .jog')) {
-        if (!vis(e)) continue; count++;
-        const r = e.getBoundingClientRect();
-        if (r.left < dr.left - 1 || r.right > dr.right + 1 || r.top < dr.top - 1 || r.bottom > dr.bottom + 1) out.push(`${n}: ${e.className} "${e.textContent.trim().slice(0, 12)}" outside the deck`);
-        if (e.matches('button') && e.scrollWidth > e.clientWidth + 2 && !e.querySelector('svg')) out.push(`${n}: "${e.textContent.trim()}" label clipped`);
-      }
-      const pads = [...d.querySelectorAll('.pmp-pad')].filter(vis); if (pads.length !== 8) out.push(`${n}: ${pads.length} hot-cue pads visible`);
-      for (const k of ['.pmp-key.cue', '.pmp-key.play', '.pmp-jog', '.pmp-screen', '.pmp-tempo .fader-track']) if (![...d.querySelectorAll(k)].some(vis)) out.push(`${n}: ${k} missing`);
-    }
-    return { out, count, pro: document.querySelectorAll('.deck.pro-on').length };
-  });
-  for (const theme of ['turntable', 'player']) for (const [w, h] of [[1920, 1080], [1366, 768], [2560, 1440]]) for (const layout of ['classic', 'four']) {
-    await page.setViewportSize({ width: w, height: h });
-    await setUi({ layout, theme, zoom: 100 });
-    await page.waitForTimeout(700); // the deck look is re-checked every 300 ms
-    const a = await audit(), p = await proAudit();
-    check(!summary(a), `${theme} look ${w}x${h} ${layout}: ${a.count} controls in bounds, none overlapping or covered${summary(a) ? ' — ' + summary(a) : ''}`);
-    if (theme === 'player') {
-      check(layout === 'four' ? p.pro === 0 : p.pro === 2, `${theme} ${w}x${h} ${layout}: ${layout === 'four' ? 'compact (standard) decks in 4-deck mode' : 'both decks are media players'} (${p.pro})`);
-      check(!p.out.length, `${theme} ${w}x${h} ${layout}: ${p.count} media-player controls inside their decks, labels unclipped, 8 pads, jog, screen, keys and tempo slider${p.out.length ? ' — ' + p.out.slice(0, 4).join('; ') : ''}`);
-    } else {
-      const tt = await ev(() => [...document.querySelectorAll('.deck.look-turntable.look-full .jog')].filter((j) => j.offsetParent).map((j) => { const r = j.getBoundingClientRect(); return { ar: r.width / r.height, skin: j.dataset.skin }; }));
-      check(layout === 'four' || (tt.length === 2 && tt.every((x) => x.skin === 'turntable' && x.ar > 1.2)), `turntable ${w}x${h} ${layout}: plinth platters (${JSON.stringify(tt)})`);
-    }
-  }
-  // per-deck click sweep of the media player: every control answers without errors
-  await page.setViewportSize({ width: 1920, height: 1080 }); await setUi({ layout: 'classic', theme: 'player', zoom: 100 }); await page.waitForTimeout(700);
-  { const before = errors.length;
-    const n = await ev(async () => { let k = 0; for (const b of document.querySelectorAll('.deck.pro-on .pmp button')) { if (!b.offsetParent || /LOAD|MENU|BROWSE|next/i.test(b.textContent + b.title) || b.querySelector('.ico-flip')) continue; b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); b.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })); b.click(); k++; await new Promise((r) => setTimeout(r, 5)); } document.querySelector('.overlay .btn-close, .overlay [aria-label="Close"]')?.click(); window.opendj.engine.decks.forEach((d) => { d.pause(); d.exitLoop(); d.setReverse(false); }); return k; });
-    check(n > 40 && errors.length === before, `media player: clicked ${n} controls without errors${errors.length > before ? ': ' + errors.slice(before, before + 3).join(' | ') : ''}`);
-  }
-  await ev(() => { document.querySelectorAll('.overlay').forEach((o) => o.remove()); });
+  // ---------- 1b. platter styles and waveform styles ----------
   await setUi({ layout: 'classic', theme: 'midnight', zoom: 100 }); await page.waitForTimeout(500);
   for (const skin of ['minimal', 'vinyl', 'cdj']) {
     await ev((skin) => { window.opendj.settings.deckOptions = { ...(window.opendj.settings.deckOptions || {}), platterSkin: skin }; }, skin);

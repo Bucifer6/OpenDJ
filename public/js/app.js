@@ -570,7 +570,7 @@ class App {
   padFx(deck, fx, down) {
     const ch = this.engine.channels[deck.index];
     switch (fx) {
-      // amounts from the deck's Platter panel (defaults 1.2 s brake, 3 s tape stop, 1 s / 4.5x spin back)
+      // amounts from the deck's Vinyl panel (defaults 1.2 s brake, 3 s tape stop, 1 s / 4.5x spin back)
       case 'brake': if (down) deck.brake(deck.vinyl?.brakeTime || 1.2); break;
       case 'tapeStop': if (down) deck.brake((deck.vinyl?.brakeTime || 1.2) * 2.5); break;
       case 'backspin': if (down) deck.backspin(); break;

@@ -161,22 +161,3 @@ html.theme-switching *, html.theme-switching *::before { transition: none !impor
 :root[data-theme="studio"] .fader-thumb { border-radius: 3px; }
 :root[data-theme="studio"] .deck { border-radius: 6px; border-color: #465158; }
 :root[data-theme="studio"] .automix-btn.active { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 36%, transparent), 0 2px 12px color-mix(in srgb, var(--accent) 18%, transparent); }
-
-/* Deck skins (themes with a `deck` look, see themes.js): colours here, the turntable / media player decks in app.css */
-:root[data-theme="turntable"] {
-  --bg: #0e0e0f; --panel: #1b1c1e; --panel-2: #2a2b2e; --panel-3: #36383c; --line: #3d3f44; --line-2: #55585e;
-  --text: #eef0f2; --text-2: #b6bac0; --text-3: #868a91; --accent: #ff6a3d; --on-accent: #1c0a04;
-  --deck1: #ff6a3d; --deck2: #4fc3f7; --deck3: #a5d86b; --deck4: #d29bff;
-  --inset: #121314; --deep: #151618; --wave-bg: #0a0a0b; --row-alt: #1f2022; --hover: #2a2c2f; --sel: #4a2a1e; --sel-tree: #3a2318;
-  --topbar-1: #2a2b2e; --topbar-2: #151617; --knob-hi: #8a8f96; --knob-lo: #2a2c30; --knob-ring: #45484d;
-  --platter-1: #c9ced4; --platter-2: #6c7178; --platter-3: #141516; --platter-4: #2b2d30; --fader-cap-1: #d5d9de; --fader-cap-2: #6a6f76;
-  --platter-rim-1: #d0d4d9; --platter-rim-2: #5e636a;
-}
-:root[data-theme="player"] {
-  --bg: #07090b; --panel: #12161a; --panel-2: #1a1f24; --panel-3: #242a31; --line: #2c343c; --line-2: #3f4a55;
-  --text: #eaf2f6; --text-2: #a3b2bb; --text-3: #6f8089; --accent: #2fd3ff; --on-accent: #03141a;
-  --deck1: #2fd3ff; --deck2: #ffb02e; --deck3: #7ee081; --deck4: #d58bff;
-  --inset: #0a0d10; --deep: #0d1114; --wave-bg: #05070a; --row-alt: #151a1f; --hover: #1d242b; --sel: #10404d; --sel-tree: #0d323c;
-  --topbar-1: #1a1f24; --topbar-2: #0b0e11; --knob-hi: #4f5a64; --knob-lo: #171c21; --knob-ring: #2c353d;
-  --platter-1: #3a444d; --platter-2: #13181d; --platter-3: #080b0e; --platter-4: #222a31; --fader-cap-1: #a9b4bb; --fader-cap-2: #4f5a64;
-}

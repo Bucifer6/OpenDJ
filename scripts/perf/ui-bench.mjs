@@ -14,8 +14,7 @@
 //              (fails when the 95th-percentile frame is over 20 ms)
 //   * --electron: run all of the above in the desktop app (Electron, Playwright _electron; use xvfb-run -a on Linux)
 //
-//   * --skins=minimal,vinyl,cdj,turntable,player: with --perf, repeat the 2-deck run per platter skin / deck look
-//              (turntable / player are the Direct-Drive Turntable and Pro Media Player deck looks)
+//   * --skins=minimal,vinyl,cdj: with --perf, repeat the 2-deck run per platter style (cdj = the Player jog display)
 //   node scripts/perf/ui-bench.mjs [--shots] [--perf] [--fx] [--latency] [--analysis] [--electron] [--out=<dir>] [--themes=midnight,light,neon] [--secs=6] [--perf-theme=compact-controller]
 import fs from 'node:fs';
 import os from 'node:os';
@@ -120,7 +119,7 @@ if (argv.includes('--perf')) {
   const SKINS = opt('skins', '').split(',').filter(Boolean);
   const runs = SKINS.length ? SKINS.flatMap((skin) => [1, 4].map((throttle) => ({ n: 2, throttle, skin }))) : [2, 4].flatMap((n) => [1, 4].map((throttle) => ({ n, throttle, skin: null })));
   for (const { n, throttle, skin } of runs) {
-    if (skin) await ev((skin) => { const a = window.opendj, look = skin === 'turntable' || skin === 'player'; a.settings.deckOptions = { ...(a.settings.deckOptions || {}), platterSkin: look ? 'minimal' : skin, deckLook: look ? skin : 'standard' }; }, skin);
+    if (skin) await ev((skin) => { const a = window.opendj; a.settings.deckOptions = { ...(a.settings.deckOptions || {}), platterSkin: skin }; }, skin);
     await playState(n);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle });
     await sleep(800);

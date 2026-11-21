@@ -16,12 +16,7 @@ const BUILT_IN_THEMES = [
   // whole-layout controller skins (js/skins/skin-host.js draws the decks + mixer as the hardware)
   { id: 'compact-controller', name: 'Compact Controller', desc: 'The decks and mixer drawn as a compact 2-channel controller', swatch: ['#0d0e10', '#1e1f23', '#ff7a1a', '#37d46e'] },
   { id: 'all-in-one', name: 'All-in-One 4-Channel', desc: 'A standalone 4-channel DJ system with a centre screen', swatch: ['#08090b', '#16181c', '#2f8cff', '#ff9a2a'] },
-  // deck skins: `deck` turns every deck (Deck look "Follow the theme") into a full turntable or media player
-  { id: 'turntable', name: 'Direct-Drive Turntable', desc: 'Every deck as a direct-drive turntable: plinth, platter, strobe, tonearm and a long pitch slider', swatch: ['#0e0e0f', '#2a2b2e', '#c9ced4', '#ff6a3d'], deck: 'turntable' },
-  { id: 'player', name: 'Pro Media Player', desc: 'Every deck as a club media player: colour screen, hot-cue pads, big lit jog, tempo slider (Classic 2 decks: club booth)', swatch: ['#07090b', '#1a1f24', '#2fd3ff', '#ffb02e'], deck: 'player' },
 ];
-/** Deck looks a theme can ask for (themes / catalogue skins with a `deck` field). */
-export const DECK_LOOKS = ['standard', 'turntable', 'player'];
 
 const THEME_CACHE_KEY = 'opendj-skin-catalog-v1';
 const MAX_CATALOG_BYTES = 256 * 1024;
@@ -58,7 +53,6 @@ export function validateSkin(s) {
   const swatch = Array.isArray(s.swatch) ? s.swatch.filter((v) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v)).slice(0, 4) : [];
   return {
     id, name: String(s.name || id).slice(0, 40), desc: String(s.desc || 'Downloadable OpenDJ skin').slice(0, 100),
-    deck: DECK_LOOKS.includes(s.deck) ? s.deck : undefined,
     swatch: swatch.length ? swatch : [vars['--bg'] || '#101318', vars['--panel'] || '#20252c', vars['--accent'] || '#49aaff', vars['--deck2'] || '#f3a74f'],
     vars,
   };
@@ -72,9 +66,8 @@ function installSkinCatalog(list) {
     if (!skin) continue;
     skinVars.set(skin.id, skin.vars);
     const index = THEMES.findIndex((t) => t.id === skin.id);
-    const deck = skin.deck ?? (index >= 0 ? THEMES[index].deck : undefined);
-    if (index >= 0) THEMES[index] = { ...THEMES[index], name: skin.name, desc: skin.desc, swatch: skin.swatch, deck };
-    else THEMES.push({ id: skin.id, name: skin.name, desc: skin.desc, swatch: skin.swatch, deck });
+    if (index >= 0) THEMES[index] = { ...THEMES[index], name: skin.name, desc: skin.desc, swatch: skin.swatch };
+    else THEMES.push({ id: skin.id, name: skin.name, desc: skin.desc, swatch: skin.swatch });
   }
 }
 
@@ -103,9 +96,6 @@ export async function refreshSkinCatalog() {
   } finally { clearTimeout(timeout); }
 }
 
-/** The deck look the current theme asks for ('standard' unless the theme / skin sets one). */
-export const themeDeckLook = (id = document.documentElement.dataset.themeId) => (id === 'booth' ? 'player' : THEMES.find((t) => t.id === id)?.deck || 'standard'); // the Club Booth theme (mixer skin) uses media-player decks
-
 let cache = new Map();
 export function cssVar(name) {
   if (!cache.has(name)) cache.set(name, getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#000');
@@ -117,7 +107,6 @@ export function applyTheme(settings) {
   const theme = THEMES.some((t) => t.id === settings.theme) ? settings.theme : 'midnight';
   root.classList.add('theme-switching');
   root.dataset.theme = BUILT_IN_IDS.has(theme) ? theme : 'midnight';
-  root.dataset.themeId = theme;
   for (const name of appliedSkinVars) root.style.removeProperty(name);
   appliedSkinVars.clear();
   for (const [name, value] of Object.entries(skinVars.get(theme) || {})) {

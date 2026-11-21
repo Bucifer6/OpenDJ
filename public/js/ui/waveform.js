@@ -13,8 +13,7 @@ import { NEEDLE_HOLD_MS } from '../audio/vinyl.js';
 const PALETTES = {
   blue: { low: [24, 92, 214], mid: [70, 160, 255], high: [205, 236, 255] },
   mono: { low: [96, 106, 122], mid: [160, 170, 186], high: [232, 236, 242] },
-  // pro-player styles: "Player Blue" (blue body, white / cyan peaks, like classic club players) and "Player RGB"
-  // (3-band: low dark blue, mid amber, high white, like the newer players)
+  // "Player Blue" (a blue body with white / cyan peaks) and "Player RGB" (3-band: low dark blue, mid amber, high white)
   'player-blue': { low: [18, 84, 230], mid: [60, 150, 255], high: [236, 250, 255], solo: true },
   'player-rgb': { low: [16, 70, 220], mid: [255, 168, 38], high: [252, 252, 255] },
 };
@@ -84,9 +83,8 @@ const waveDpr = () => Math.min(2, devicePixelRatio || 1); // keep dense displays
 
 export class DetailWaveform {
   static all = new Set();
-  /** opts.style: a fixed waveform style for this view (the media-player deck screen), else Settings → Appearance. */
-  constructor(deck, getSettings, opts = {}) {
-    this.deck = deck; this.getSettings = getSettings; this.styleOverride = opts.style || null;
+  constructor(deck, getSettings) {
+    this.deck = deck; this.getSettings = getSettings;
     this.canvas = el('canvas', { class: 'wf-detail' });
     this.g = this.canvas.getContext('2d', { alpha: false });
     this.zoom = 8; // seconds across the view at normal speed (target; viewZoom eases towards it)
@@ -127,7 +125,7 @@ export class DetailWaveform {
     this.ro.observe(this.canvas);
   }
 
-  wfStyle() { return this.styleOverride || this.getSettings().waveformColors || 'rgb'; }
+  wfStyle() { return this.getSettings().waveformColors || 'rgb'; }
   resize() {
     const dpr = waveDpr();
     if (!this.cw) { const r = this.canvas.getBoundingClientRect(); this.cw = r.width || 1; this.ch = r.height || 1; }
@@ -275,7 +273,7 @@ export class DetailWaveform {
 export class OverviewWaveform {
   /** opts: { needleLocked() -> bool, needleHint() } (needle lock, T6) */
   constructor(deck, getSettings, opts = {}) {
-    this.deck = deck; this.getSettings = getSettings; this.opts = opts; this.styleOverride = opts.style || null;
+    this.deck = deck; this.getSettings = getSettings; this.opts = opts;
     this.canvas = el('canvas', { class: 'wf-overview' });
     this.g = this.canvas.getContext('2d', { alpha: false });
     this.cache = null; this.cacheKey = ''; this.sig = ''; this.cw = 0; this.ch = 0;
@@ -303,7 +301,7 @@ export class OverviewWaveform {
     this.ro = new ResizeObserver((es) => { const r = es.at(-1).contentRect, z = uiZoom(); this.cw = r.width * z; this.ch = r.height * z; });
     this.ro.observe(this.canvas);
   }
-  wfStyle() { return this.styleOverride || this.getSettings().waveformColors || 'rgb'; }
+  wfStyle() { return this.getSettings().waveformColors || 'rgb'; }
   renderCache(W, H, played) {
     const w = this.deck.waveform; const s = this.getSettings();
     const off = newCanvas(W, H);
@@ -337,7 +335,7 @@ export class OverviewWaveform {
     if (px < W) g.drawImage(this.cache, px, 0, W - px, H, px, 0, W - px, H);
     if (loop) { g.fillStyle = 'rgba(46,212,122,0.30)'; g.fillRect(loop.start / deck.duration * W, 0, Math.max(2, (loop.end - loop.start) / deck.duration * W), H); }
     // phrase / structure bands (intro, drop, breakdown, outro…): along the top, or a strip along the bottom in the
-    // pro-player styles
+    // the Player styles
     const pro = proStyle(this.wfStyle()), ph = pro ? 4 * dpr : 3 * dpr, py = pro ? H - ph : 0;
     for (const p of deck.track?.phrases || []) {
       g.fillStyle = PHRASE_COLORS[p.type] || '#6b7685';

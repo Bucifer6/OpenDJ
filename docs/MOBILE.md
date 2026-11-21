@@ -210,4 +210,3 @@ Xcode, so these are correct by construction but only CI / a device can prove the
 - **Multitouch:** one finger scratches, a second finger anywhere on the platter holds the record still. Fingers on the platter and the crossfader / CUT work at the same time.
 - **Haptics:** a groove tick while scratching and a bump on hot cues (*Settings → Decks → Haptic feedback*: Off, Subtle, Full). The apps use `@capacitor/haptics`; Android browsers use `navigator.vibrate`; iOS Safari has no vibration API.
 - **Needle lock** is on by default on phones: a playing deck needs a short press-and-hold on the overview waveform before the needle drops.
-- Phones and 4-deck layouts show a simplified version of the Direct-Drive Turntable and Pro Media Player deck skins.
