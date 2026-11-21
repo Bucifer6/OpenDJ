@@ -113,6 +113,15 @@ async function build(ctx, spec, src) {
       src.connect(a.trimNode); src.connect(b.trimNode); fe.musicBus.connect(ctx.destination);
       return { target: { a, b } };
     }
+    case 'mixer4': { // 4 channel strips (EQ, filter, Color FX, FX unit) -> master limiter: whole-mixer CPU cost
+      const fe = fakeEngine(ctx, spec.settings || {});
+      const chans = [0, 1, 2, 3].map((i) => new engine.Channel(fe, i));
+      const lim = engine.createLimiter ? engine.createLimiter(ctx) : { input: ctx.createGain(), output: null };
+      lim.output ||= lim.input;
+      for (const ch of chans) src.connect(ch.trimNode);
+      fe.musicBus.connect(lim.input); lim.output.connect(ctx.destination);
+      return { target: chans };
+    }
     case 'limiter': {
       const pre = ctx.createGain(); pre.gain.value = spec.preGain ?? 1;
       src.connect(pre);

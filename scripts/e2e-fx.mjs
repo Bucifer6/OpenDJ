@@ -146,6 +146,19 @@ try {
     check(after < 1e-5 && rms(s.L, s.sr, 0.9, 1.3) > 0.01, `backspin: spins back, then stops (rms after ${after.toExponential(1)})`);
     save('deck-backspin', s);
   }
+  // ---------------------------------------------------------------- CPU: the whole 4-channel mixer, every channel busy
+  {
+    const heavy = [];
+    [['reverb', 'space', -0.4], ['flanger', 'pitch', 0.35], ['phaser', 'dubecho', -0.5], ['trans', 'crush', 0.3]].forEach(([fx, color, filt], i) => {
+      heavy.push({ on: String(i), call: 'set', args: ['fxType', fx] }, { on: String(i), call: 'set', args: ['fxOn', true] }, { on: String(i), call: 'set', args: ['colorFx', color] }, { on: String(i), call: 'set', args: ['filter', filt] }, { on: String(i), call: 'set', args: ['eqLow', -0.3] });
+    });
+    const plain = await lab.render({ chain: 'mixer4', signal: 'drums', signalOpts: { gain: 0.4 }, secs: 10 });
+    const busy = await lab.render({ chain: 'mixer4', signal: 'drums', signalOpts: { gain: 0.4 }, secs: 10, init: heavy });
+    const load = busy.ms / 10000;
+    console.log(`# 4-channel mixer + limiter offline: ${f(plain.ms / 100, 1)} % of one core with FX off, ${f(load * 100, 1)} % with reverb/flanger/phaser/trans + Space/Jet/Dub Echo/Crush on all four channels`);
+    check(load < 0.35, `whole mixer with every effect busy renders ${f(1 / load, 1)}x faster than real time (no dropouts)`);
+    check(Math.max(peak(busy.L, busy.sr), peak(busy.R, busy.sr)) <= Math.pow(10, -1 / 20) + 1e-6, 'and the master stays under the limiter ceiling');
+  }
   console.log(`# offline render cost of the beat FX: ${f(cpuMs / cpuSec / 10, 2)} % of one core per FX unit (incl. test signal)`);
 } catch (e) {
   console.error(e); failed = true;
