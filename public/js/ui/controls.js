@@ -24,18 +24,26 @@ export function knob({ label, min = -1, max = 1, def = 0, get, set, size = 'md',
     cap.setAttribute('aria-valuenow', String(+v.toFixed(4)));
     if (format) val.textContent = format(v);
   };
-  let startY, startV;
+  let startY, startV, latestPointer = null, moveFrame = 0;
+  const applyPointer = () => {
+    moveFrame = 0;
+    if (startY == null || !latestPointer) return;
+    const { y, fine: fineMode } = latestPointer; latestPointer = null;
+    const fine = fineMode ? 0.2 : 1;
+    let v = startV + (startY - y) / 150 * (max - min) * fine;
+    if (bipolar && Math.abs(v - def) < (max - min) * 0.02 && !fineMode) v = def; // centre detent
+    set(clamp(v, min, max)); render();
+  };
+  const flushPointer = () => { if (moveFrame) cancelAnimationFrame(moveFrame); applyPointer(); };
   cap.addEventListener('pointerdown', (e) => {
     cap.setPointerCapture(e.pointerId); startY = e.clientY; startV = get(); e.preventDefault();
   });
   cap.addEventListener('pointermove', (e) => {
     if (startY == null) return;
-    const fine = e.shiftKey ? 0.2 : 1;
-    let v = startV + (startY - e.clientY) / 150 * (max - min) * fine;
-    if (bipolar && Math.abs(v - def) < (max - min) * 0.02 && !e.shiftKey) v = def; // centre detent
-    set(clamp(v, min, max)); render();
+    latestPointer = { y: e.clientY, fine: e.shiftKey };
+    if (!moveFrame) moveFrame = requestAnimationFrame(applyPointer);
   });
-  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) cap.addEventListener(ev, () => { startY = null; });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) cap.addEventListener(ev, () => { flushPointer(); startY = null; });
   cap.addEventListener('dblclick', () => { set(def); render(); });
   cap.addEventListener('wheel', (e) => { e.preventDefault(); set(clamp(get() - Math.sign(e.deltaY) * (max - min) / 100, min, max)); render(); }, { passive: false });
   cap.addEventListener('keydown', (e) => {
@@ -65,25 +73,39 @@ export function fader({ label, min = 0, max = 1, def = min, get, set, horizontal
     root.style.setProperty('--k', k.toFixed(4));
     root.setAttribute('aria-valuenow', String(+get().toFixed(4)));
   };
-  // pointer -> 0..1 with the same geometry (rects are in window pixels on both sides, so UI zoom cancels out)
-  const posToK = (e) => {
-    const r = track.getBoundingClientRect(), c = thumb.getBoundingClientRect();
-    const cap = horizontal ? c.width : c.height, len = (horizontal ? r.width : r.height) - cap;
+  // Measure once at drag start. Reading layout on every pointermove forces a reflow and makes control motion stutter.
+  const measure = () => {
+    const r = track.getBoundingClientRect(), cap = thumb.getBoundingClientRect();
+    return { left: r.left, top: r.top, width: r.width, height: r.height, capWidth: cap.width, capHeight: cap.height };
+  };
+  const posToK = (e, m) => {
+    const cap = horizontal ? m.capWidth : m.capHeight, len = (horizontal ? m.width : m.height) - cap;
     if (len <= 0) return 0.5;
-    const p = horizontal ? e.clientX - r.left - cap / 2 : e.clientY - r.top - cap / 2;
+    const p = horizontal ? e.clientX - m.left - cap / 2 : e.clientY - m.top - cap / 2;
     return horizontal ? p / len : 1 - p / len;
   };
-  let drag = null;
+  let drag = null, latestPointer = null, moveFrame = 0;
+  const applyPointer = () => {
+    moveFrame = 0;
+    if (!drag || !latestPointer) return;
+    const e = latestPointer; latestPointer = null;
+    set(fromK(posToK(e, drag.metrics) - drag.off)); render();
+  };
+  const flushPointer = () => { if (moveFrame) cancelAnimationFrame(moveFrame); applyPointer(); };
   track.addEventListener('pointerdown', (e) => {
     track.setPointerCapture(e.pointerId);
-    const k0 = clamp(toK(get()), 0, 1), kp = posToK(e);
+    const metrics = measure(), k0 = clamp(toK(get()), 0, 1), kp = posToK(e, metrics);
     const onThumb = e.target === thumb || Math.abs(kp - k0) < 0.06;
-    drag = { off: onThumb ? kp - k0 : 0 };
+    drag = { off: onThumb ? kp - k0 : 0, metrics };
     if (!onThumb) { set(fromK(kp)); render(); }
     e.preventDefault();
   });
-  track.addEventListener('pointermove', (e) => { if (!drag) return; set(fromK(posToK(e) - drag.off)); render(); });
-  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) track.addEventListener(ev, () => { drag = null; });
+  track.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    latestPointer = { clientX: e.clientX, clientY: e.clientY };
+    if (!moveFrame) moveFrame = requestAnimationFrame(applyPointer);
+  });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) track.addEventListener(ev, () => { flushPointer(); drag = null; });
   track.addEventListener('dblclick', () => { set(def); render(); });
   root.addEventListener('wheel', (e) => { e.preventDefault(); const dir = -Math.sign(e.deltaY) * (invert ? -1 : 1); set(clamp(get() + dir * (max - min) / 100, min, max)); render(); }, { passive: false });
   root.addEventListener('keydown', (e) => {

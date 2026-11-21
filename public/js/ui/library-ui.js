@@ -37,6 +37,7 @@ export class LibraryUI {
     this.tracks = new Map(); this.playlists = []; this.folders = []; this.sources = []; this.drives = [];
     this.view = { kind: 'all' }; this.sort = { col: 'addedAt', dir: -1 }; this.query = '';
     this.rows = []; this.selected = new Set(); this.cursor = -1; this.downloads = { queued: [], active: [], done: [] };
+    this._viewWorker = null; this._viewSeq = 0; this._viewPending = null;
     this.sessions = []; this.sessionRows = []; this.dupGroups = []; this.dupIndex = new Map(); this.showAllSessions = false;
     this.remoteLists = new Map(); // source id -> { lists, error, loading } (live media-server playlists)
     this.dlg = new LibraryDialogs(app, this);
@@ -170,9 +171,30 @@ export class LibraryUI {
   applyView() {
     const base = this.viewTracks();
     this.orderOf = new Map(); base.forEach((t, i) => { if (!this.orderOf.has(t)) this.orderOf.set(t, i); });
+    const seq = ++this._viewSeq;
+    if (base.length >= 1200 && typeof Worker !== 'undefined') {
+      this._viewPending = { seq, base };
+      // Let the current frame paint before preparing the worker payload for a large library refresh.
+      setTimeout(() => { if (this._viewPending?.seq === seq) this._applyViewInWorker(base, seq); }, 0);
+      return;
+    }
+    this._applyViewSync(base);
+  }
+
+  _finishView(list, seq = this._viewSeq) {
+    if (seq !== this._viewSeq) return;
+    this._viewPending = null;
+    this.rows = list;
+    this.countEl.textContent = `${list.length.toLocaleString()} tracks`;
+    this.renderRows(true);
+    this.renderViewActions();
+    this.renderEmpty();
+  }
+
+  _applyViewSync(base) {
     let list = this.filter(base);
     const { col, dir } = this.sort;
-    if (col === '#') { if (dir < 0) list = [...list].reverse(); } // the view's own order (playlist / set / history)
+    if (col === '#') { if (dir < 0) list = [...list].reverse(); }
     else if (col && this.view.kind !== 'duplicates') {
       const session = this.view.kind === 'session';
       const val = (t) => (col === 'key' ? (toCamelot(t.key) ? toCamelot(t.key).padStart(3, '0') : '') : col === 'source' ? (t.sourceKind || 'local')
@@ -183,11 +205,40 @@ export class LibraryUI {
         return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true })) * dir;
       });
     }
-    this.rows = list;
-    this.countEl.textContent = `${list.length.toLocaleString()} tracks`;
-    this.renderRows(true);
-    this.renderViewActions();
-    this.renderEmpty();
+    this._finishView(list);
+  }
+
+  _applyViewInWorker(base, seq) {
+    try {
+      if (!this._viewWorker) {
+        this._viewWorker = new Worker(new URL('./library-view-worker.js', import.meta.url), { type: 'module' });
+        this._viewWorker.addEventListener('message', (e) => {
+          const pending = this._viewPending;
+          if (!pending || e.data.seq !== pending.seq) return;
+          this._finishView(e.data.indices.map((i) => pending.base[i]), pending.seq);
+        });
+        this._viewWorker.addEventListener('error', () => {
+          const pending = this._viewPending;
+          this._viewWorker?.terminate(); this._viewWorker = null;
+          if (pending) this._applyViewSync(pending.base);
+        });
+      }
+      const master = this.app.engine.masterDeck?.();
+      const masterBpm = master?.effectiveBpm || 0, masterKey = toCamelot(master?.track?.key) || '';
+      const query = this.query.trim().toLowerCase();
+      const sort = { col: this.sort.col, dir: this.sort.dir, kind: this.view.kind };
+      const items = base.map((t, i) => ({
+        i, title: t.title || '', artist: t.artist || '', album: t.album || '', genre: t.genre || '',
+        key: t.key || '', keyCamelot: toCamelot(t.key) || '', comment: t.comment || '',
+        tags: (t.tags || []).map((x) => String(x).toLowerCase()), colorText: colorName(t.color) || '',
+        bpm: Number(t.bpm) || 0, energy: Number(t.energy) || 0, rating: Number(t.rating) || 0,
+        duration: Number(t.duration) || 0, playCount: Number(t.playCount) || 0, lastPlayed: Number(t.lastPlayed) || 0,
+        sourceKind: t.sourceKind || 'local', addedAt: t.addedAt || 0, playedAt: t._playedAt || 0,
+      }));
+      this._viewWorker.postMessage({ seq, items, query, sort, masterBpm, masterKey });
+    } catch {
+      this._applyViewSync(base);
+    }
   }
 
   /** Why a view is empty: first launch (how to add music), or analysis still running for views that need BPM / key. */

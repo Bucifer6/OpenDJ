@@ -51,7 +51,7 @@ export class StemsManager extends Emitter {
   async ensureModel({ interactive = true } = {}) {
     if (this.stub) return true;
     let st = await this.status();
-    if (!st.ort) throw new Error('AI stems need the onnxruntime-web package on the server (npm install).');
+    if (!st.ort) throw new Error('The AI stems engine is missing from this OpenDJ build. Update or reinstall OpenDJ; no separate runtime installation is needed.');
     if (st.model.error && !st.model.downloading && !st.model.ready && st.model.error !== 'Download cancelled' && !interactive) throw new Error(st.model.error);
     if (st.model.ready) return true;
     if (!st.model.downloading) {

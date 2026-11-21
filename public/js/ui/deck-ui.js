@@ -47,6 +47,12 @@ export function buildDeck(app, deck) {
   // ---------- transport ----------
   const cueBtn = R(button('CUE', { cls: 'btn-cue big', down: () => deck.cueDown(), up: () => deck.cueUp(), active: () => deck.cuePreview || (!deck.playing && deck.track && Math.abs(deck.position - deck.cuePoint) < 0.02) }));
   const playBtn = R(button(el('span', { class: 'play-glyph' }, icon('play'), icon('pause')), { cls: 'btn-play big', title: 'Play / pause', down: () => { app.engine.resume(); deck.togglePlay(); }, active: () => deck.playing }));
+  const mixNowBtn = R(button('MIX NOW', {
+    cls: 'sm deck-mix-now',
+    title: 'Start the queued Automix transition from this deck',
+    click: () => app.automixNow(),
+    disabled: () => !app.automix?.enabled || !!app.automix?.transition || app.automix?.current?.index !== i || !app.automix?.nextTrack?.(),
+  }));
   const syncBtn = R(button('SYNC', { cls: 'btn-sync', click: () => deck.sync(), active: () => deck.syncOn }));
   const masterBtn = R(button('MASTER', { cls: 'btn-master', click: () => deck.setMaster(), active: () => deck.isMaster }));
   const toggles = el('div', { class: 'deck-toggles' },
@@ -255,7 +261,7 @@ export function buildDeck(app, deck) {
     el('div', { class: 'deck-body' },
       el('div', { class: 'deck-left' },
         jog,
-        el('div', { class: 'transport' }, cueBtn, playBtn),
+        el('div', { class: 'transport' }, cueBtn, playBtn, mixNowBtn),
       ),
       el('div', { class: 'deck-mid' },
         el('div', { class: 'sync-row' }, syncBtn, masterBtn),

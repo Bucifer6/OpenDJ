@@ -63,8 +63,9 @@ function paintBands(g, w, pal, x0, x1, H, binAt, opts = {}) {
 }
 
 const newCanvas = (w, h) => (typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h }));
-const TILE = 256; // css px per tile (times devicePixelRatio)
+const TILE = 256; // css px per tile (times render DPR)
 const MAX_TILES = 48;
+const waveDpr = () => Math.min(2, devicePixelRatio || 1); // keep dense displays crisp without multiplying raster cost
 
 export class DetailWaveform {
   static all = new Set();
@@ -76,6 +77,7 @@ export class DetailWaveform {
     this.viewZoom = 8; this.lastNow = 0; this.deckColor = null;
     DetailWaveform.all.add(this);
     this.tiles = new Map(); this.tileKey = ''; this.sig = ''; this.cw = 0; this.ch = 0;
+    this.pendingTiles = new Set(); this.tileQueue = []; this.tileScheduled = false;
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       // zoom all decks together so synced tracks keep the same beat spacing (beat alignment at a glance)
@@ -104,25 +106,50 @@ export class DetailWaveform {
   }
 
   resize() {
-    const dpr = (devicePixelRatio || 1);
+    const dpr = waveDpr();
     if (!this.cw) { const r = this.canvas.getBoundingClientRect(); this.cw = r.width || 1; this.ch = r.height || 1; }
     const w = Math.max(1, Math.round(this.cw * dpr)), h = Math.max(1, Math.round(this.ch * dpr));
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; this.sig = ''; }
   }
 
-  /** Offscreen tile `i` of the waveform at `pps` device px per second (rate 1). */
+  /** Offscreen tile `i`; cache misses are rasterized during browser idle time, away from the audio UI frame. */
   tile(i, pps, H, w, pal) {
     let t = this.tiles.get(i);
     if (t) { this.tiles.delete(i); this.tiles.set(i, t); return t; } // LRU order
-    const TW = Math.round(TILE * (devicePixelRatio || 1));
-    t = newCanvas(TW, H);
-    const x0 = i * TW, binsPerPx = w.rate / pps;
-    paintBands(t.getContext('2d'), w, pal, 0, TW, H, (x) => Math.floor((x0 + x) * binsPerPx), { pad: 2 * (devicePixelRatio || 1) });
-    this.tiles.set(i, t);
-    while (this.tiles.size > MAX_TILES) this.tiles.delete(this.tiles.keys().next().value);
-    return t;
+    const pendingKey = `${this.tileKey}|${i}`;
+    if (!this.pendingTiles.has(pendingKey)) {
+      this.pendingTiles.add(pendingKey);
+      this.tileQueue.push({ i, pps, H, w, pal, cacheKey: this.tileKey, pendingKey });
+      this.scheduleTileRaster();
+    }
+    return null;
   }
 
+  scheduleTileRaster() {
+    if (this.tileScheduled || !this.tileQueue.length) return;
+    this.tileScheduled = true;
+    const run = (deadline = { timeRemaining: () => 0 }) => {
+      this.tileScheduled = false;
+      let made = 0;
+      while (this.tileQueue.length && (made === 0 || (deadline.timeRemaining?.() ?? 0) > 3) && made < 2) {
+        const job = this.tileQueue.shift();
+        this.pendingTiles.delete(job.pendingKey);
+        if (job.cacheKey !== this.tileKey) continue;
+        const dpr = waveDpr(), TW = Math.round(TILE * dpr);
+        const tile = newCanvas(TW, job.H), x0 = job.i * TW, binsPerPx = job.w.rate / job.pps;
+        paintBands(tile.getContext('2d'), job.w, job.pal, 0, TW, job.H,
+          (x) => Math.floor((x0 + x) * binsPerPx), { pad: 2 * dpr });
+        if (job.cacheKey !== this.tileKey) continue;
+        this.tiles.set(job.i, tile);
+        while (this.tiles.size > MAX_TILES) this.tiles.delete(this.tiles.keys().next().value);
+        this.sig = ''; // repaint once the missing tile is ready, even while playback is stopped
+        made++;
+      }
+      if (this.tileQueue.length) this.scheduleTileRaster();
+    };
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 120 });
+    else setTimeout(() => run(), 12);
+  }
   draw(now = performance.now()) {
     this.resize();
     const { g, canvas, deck } = this; const W = canvas.width, H = canvas.height, mid = H / 2;
@@ -140,7 +167,7 @@ export class DetailWaveform {
     if (sig === this.sig) return;
     this.sig = sig;
 
-    const dpr = devicePixelRatio || 1;
+    const dpr = waveDpr();
     const bg = cssVar('--wave-bg'), font = cssVar('--font');
     g.fillStyle = bg; g.fillRect(0, 0, W, H);
     const base = W / this.zoom;               // device px per second at rate 1 (tile resolution)
@@ -156,15 +183,17 @@ export class DetailWaveform {
     }
     if (w) {
       const key = `${deck.track?.id}|${H}|${base.toFixed(3)}|${s.waveformColors}|${themeRev}|${w.peak.length}`;
-      if (key !== this.tileKey) { this.tiles.clear(); this.tileKey = key; }
+      if (key !== this.tileKey) { this.tiles.clear(); this.pendingTiles.clear(); this.tileQueue.length = 0; this.tileKey = key; }
       const pal = palette(s.waveformColors);
       const TW = Math.round(TILE * dpr), tileSecs = TW / base, scale = pxPerSec / base, dur = w.peak.length / w.rate;
       const first = Math.max(0, Math.floor(t0 / tileSecs)), last = Math.min(Math.floor(dur / tileSecs), Math.floor((t0 + W / pxPerSec) / tileSecs));
       const exact = Math.abs(scale - 1) < 1e-6;
       for (let i = first; i <= last; i++) {
         const x = X(i * tileSecs);
-        if (exact) g.drawImage(this.tile(i, base, H, w, pal), Math.round(x), 0); // 1:1 blit, crisp
-        else g.drawImage(this.tile(i, base, H, w, pal), x, 0, TW * scale + 0.5, H);
+        const tile = this.tile(i, base, H, w, pal);
+        if (!tile) continue; // lazy rasterization: keep the animation responsive while the cache fills
+        if (exact) g.drawImage(tile, Math.round(x), 0); // 1:1 blit, crisp
+        else g.drawImage(tile, x, 0, TW * scale + 0.5, H);
       }
       // warm the next tile ahead of the playhead so it is ready before it scrolls in
       const ahead = last + 1; if (!this.tiles.has(ahead) && ahead * tileSecs < dur) this.tile(ahead, base, H, w, pal);
@@ -250,7 +279,7 @@ export class OverviewWaveform {
     return off;
   }
   draw(now = performance.now()) {
-    const dpr = devicePixelRatio || 1;
+    const dpr = waveDpr();
     if (!this.cw) { const r = this.canvas.getBoundingClientRect(); this.cw = r.width || 1; this.ch = r.height || 1; }
     const W = Math.max(1, Math.round(this.cw * dpr)), H = Math.max(1, Math.round(this.ch * dpr));
     if (this.canvas.width !== W || this.canvas.height !== H) { this.canvas.width = W; this.canvas.height = H; this.cacheKey = ''; this.sig = ''; }

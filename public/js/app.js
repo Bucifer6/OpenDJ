@@ -1,6 +1,7 @@
 import { el, fmtTime } from './util.js';
 import { api } from './api.js';
 import { Engine } from './audio/engine.js';
+import { SAMPLE_CATALOG } from './audio/sample-catalog.js';
 import { buildDeck, DECK_COLORS } from './ui/deck-ui.js';
 import { buildMixer } from './ui/mixer-ui.js';
 import { DetailWaveform } from './ui/waveform.js';
@@ -137,6 +138,7 @@ class App {
     this.recBtn = el('button', { class: 'btn rec', onclick: () => this.toggleRecord(), title: 'Record your mix to disk. R = start / stop' }, el('span', { class: 'rec-dot' }), 'REC');
     this.recTime = el('span', { class: 'rec-time' });
     this.amBtn = el('button', { class: 'btn automix-btn', onclick: () => this.toggleAutomix(), title: 'Automix the current library view' }, iconLabel('automix', 'AUTOMIX'));
+    this.amNowBtn = el('button', { class: 'btn am-now-btn', onclick: () => this.automixNow(), title: 'Start automix on the current library view using saved preferences', 'aria-label': 'Automix now' }, iconLabel('automix', 'AUTOMIX NOW'));
     this.amSkip = el('button', { class: 'btn sm icon-only', onclick: () => this.automix.skip(), title: 'Mix to next track now', 'aria-label': 'Mix to next track now' }, icon('next'));
     this.amInfo = el('span', { class: 'am-info' });
     this.amQueueBtn = el('button', { class: 'btn sm am-queue-btn', onclick: () => this.toggleQueuePanel(), title: 'Automix queue: upcoming tracks, transition styles, smart-mix reasons' }, 'QUEUE');
@@ -156,7 +158,7 @@ class App {
     const topbar = el('header', { class: 'topbar' },
       el('div', { class: 'logo' }, logoMark(), el('span', { class: 'logo-word' }, 'Open', el('b', {}, 'DJ'))),
       deckSel, shiftBtn,
-      el('div', { class: 'tb-group' }, this.amBtn, this.amSkip, this.amQueueBtn), this.amInfo,
+      el('div', { class: 'tb-group automix-actions' }, this.amBtn, this.amNowBtn, this.amSkip, this.amQueueBtn), this.amInfo,
       el('div', { class: 'tb-spacer' }),
       el('div', { class: 'tb-group' }, this.recBtn, this.recTime),
       this.midiDot, this.cpu, this.clock,
@@ -253,6 +255,7 @@ class App {
       pads.forEach((b, i) => {
         const slot = s.slots[i];
         b.textContent = slot?.name || '—';
+        b.title = slot?.source ? `${slot.name} — ${slot.creator || 'Source'} · ${slot.license || 'CC0 1.0'} · ${slot.source}` : 'Click: play · Shift-click: stop · Right-click: choose sound, load your own sample, volume, sync to beat';
         b.classList.toggle('synced', !!slot?.sync);
         b.classList.toggle('user', slot && !slot.builtin);
       });
@@ -272,11 +275,52 @@ class App {
     this.dialogs.menu(x, y, [
       { label: 'Built-in sound', sub: s.constructor.bank.map((b) => ({ label: b.name, checked: !!(slot.builtin && slot.sound === b.id), action: async () => { await s.setSound(i, b.id); save(); this.engine.resume(); s.trigger(i); } })) },
       { label: 'Load your own sample…', action: pickFile },
+      { label: 'Browse CC0 sound library…', action: () => this.openSamplerCatalog(i, save) },
       { label: `Pad volume (${vol} %)`, sub: [25, 50, 75, 100, 125, 150].map((v) => ({ label: `${v} %`, checked: vol === v, action: () => { s.setPadVolume(i, v / 100); save(); } })) },
       { label: 'Sync to beat (start on the next beat of the master deck)', checked: !!slot.sync, action: () => { s.setPadSync(i, !slot.sync); save(); } },
       '-',
       { label: 'Preview', action: () => { this.engine.resume(); s.trigger(i); } },
     ]);
+  }
+
+  /** Browse and download licensed one-shots into the selected sampler pad. */
+  openSamplerCatalog(i, save) {
+    const sampler = this.engine.sampler;
+    const categories = ['All sounds', ...new Set(SAMPLE_CATALOG.map((s) => s.category))];
+    const category = el('select', { class: 'sel', 'aria-label': 'Sample category' }, ...categories.map((c) => el('option', { value: c }, c)));
+    const search = el('input', { class: 'inp', type: 'search', placeholder: 'Search sounds…', 'aria-label': 'Search sounds' });
+    const count = el('span', { class: 'hint' }, SAMPLE_CATALOG.length + ' sounds · CC0 1.0 · downloads only when selected');
+    const list = el('div', { class: 'sample-catalog-list', role: 'listbox', 'aria-label': 'Available sounds' });
+    let selected = null;
+    const render = () => {
+      const q = search.value.trim().toLowerCase();
+      const matches = SAMPLE_CATALOG.filter((s) => (category.value === 'All sounds' || s.category === category.value)
+        && (!q || (s.name + ' ' + s.creator + ' ' + s.category).toLowerCase().includes(q)));
+      list.replaceChildren(...matches.map((sound) => {
+        const row = el('button', { type: 'button', class: 'sample-catalog-item' + (selected?.id === sound.id ? ' selected' : ''), role: 'option', 'aria-selected': String(selected?.id === sound.id), title: sound.source },
+          el('span', { class: 'sample-catalog-name' }, sound.name),
+          el('span', { class: 'sample-catalog-credit' }, sound.category + ' · ' + sound.creator + ' · CC0'));
+        row.addEventListener('click', () => { selected = sound; render(); });
+        return row;
+      }));
+      if (!matches.length) list.append(el('div', { class: 'hint' }, 'No sounds match your search.'));
+      count.textContent = matches.length + ' of ' + SAMPLE_CATALOG.length + ' sounds · CC0 1.0';
+    };
+    category.addEventListener('change', render); search.addEventListener('input', render); render();
+    const body = el('div', { class: 'sample-catalog-body' },
+      el('p', { class: 'hint' }, 'Curated from Sonic Pi’s CC0 collection. Every file is downloaded from a pinned source only after you choose it; creator and source details are saved with the pad.'),
+      el('div', { class: 'sample-catalog-filters' }, category, search), count, list);
+    this.dialogs.modal('CC0 sound library', body, [
+      { label: 'Cancel', value: null },
+      { label: 'Download to pad ' + (i + 1), primary: true, action: async () => {
+        if (!selected) { this.toast('Choose a sound first'); return false; }
+        try {
+          this.toast('Downloading ' + selected.name + '…');
+          await sampler.loadCatalogSample(i, selected); save(); this.engine.resume(); sampler.trigger(i);
+          this.toast(selected.name + ' loaded to pad ' + (i + 1));
+        } catch (e) { this.toast('Could not download sample: ' + e.message); return false; }
+      } },
+    ], { wide: true, cls: 'sample-catalog-modal' });
   }
 
   toggleSequencer() {
@@ -363,6 +407,23 @@ class App {
     if (this.automix.enabled) { this.automix.stop(); this.toast('Automix stopped'); }
     else this.dialogs.automixQueue(this.automix.queue.length > this.automix.idx ? this.automix.queue.slice(this.automix.idx) : this.library.rows);
   }
+
+  /** Start a smart automix immediately using the visible library rows and saved preferences. */
+  async automixNow() {
+    if (this.automix.enabled) {
+      const result = this.automix.skip();
+      if (result === 'started') this.toast('Transition started');
+      else if (result === 'preparing') this.toast('Preparing the next track; transition will start as soon as it is ready');
+      else if (this.automix.transition) this.toast('A transition is already in progress');
+      else this.toast(this.automix.nextTrack() ? 'Could not start the transition yet' : 'No upcoming track queued');
+      return;
+    }
+    const tracks = this.library?.rows || [];
+    if (!tracks.length) { this.toast('No tracks in this view'); return; }
+    const opts = this.settings.automix || {};
+    const mode = opts.shuffle ? 'shuffle' : 'smart';
+    await this.startAutomix(tracks, { mode, shape: opts.shape, sliders: opts.sliders });
+  }
   queueAdd(tracks) {
     if (!this.automix.enabled) { this.automix.queue = [...this.automix.queue.slice(this.automix.idx), ...tracks]; this.automix.idx = 0; }
     else if (this.shift) this.automix.insertNext(tracks); // Shift = play next
@@ -374,7 +435,16 @@ class App {
     const a = this.automix;
     this.amBtn.classList.toggle('active', a.enabled);
     const next = a.nextTrack();
-    this.amSkip.disabled = !a.enabled || !!a.transition;
+    this.amSkip.disabled = !a.enabled || !!a.transition || !next;
+    this.amNowBtn.title = a.enabled ? (a.transition ? 'A transition is already in progress' : next ? 'Start the queued transition now' : 'No upcoming track queued') : 'Start automix on the current library view using saved preferences';
+    this.amNowBtn.setAttribute('aria-label', a.enabled ? 'Start transition now' : 'Automix now');
+    for (const [i, deck] of (this.deckEls || []).entries()) {
+      const mixButton = deck.querySelector('.deck-mix-now');
+      if (!mixButton) continue;
+      const available = a.enabled && a.current?.index === i && !a.transition && !!next;
+      mixButton.disabled = !available;
+      mixButton.title = available ? 'Start transition to ' + next.title + ' now' : a.transition ? 'A transition is already in progress' : !a.enabled ? 'Start Automix to enable manual transitions' : !next ? 'No upcoming track queued' : 'Available on the active Automix deck';
+    }
     let info = '';
     if (a.enabled) {
       if (a.transition) info = `Mixing: ${STYLE_LABEL[a.transition.style] || a.transition.style}`;

@@ -490,7 +490,12 @@ export class Sampler {
   }
   async _fill(i, slot) {
     try {
-      const b = await renderSound(slot.sound, this.ctx.sampleRate);
+      let b;
+      if (slot.sound === 'airhorn') {
+        const response = await fetch(new URL('../../samples/air-horn.mp3', import.meta.url));
+        if (!response.ok) throw new Error('Could not load the air horn recording');
+        b = await this.ctx.decodeAudioData(await response.arrayBuffer());
+      } else b = await renderSound(slot.sound, this.ctx.sampleRate);
       if (this.slots[i] === slot) { slot.buffer = b; this.onChange?.(); }
     } catch (e) { console.warn('sampler: could not render', slot.sound, e); }
   }
@@ -507,6 +512,19 @@ export class Sampler {
     idbDo('readwrite', (st) => st.delete(i)).catch(() => {});
     await this._fill(i, s);
   }
+  /** Download a curated CC0 one-shot and assign it to a pad. */
+  async loadCatalogSample(i, sample) {
+    if (!sample?.url || !sample?.name) throw new Error('Invalid sample selection');
+    const response = await fetch(sample.url);
+    if (!response.ok) throw new Error(`Sample download failed (${response.status})`);
+    const bytes = await response.arrayBuffer();
+    const buf = await this.ctx.decodeAudioData(bytes.slice(0));
+    const old = this.slots[i] || {};
+    const metadata = { name: sample.name, creator: sample.creator, source: sample.source, license: sample.license || 'CC0 1.0' };
+    this.slots[i] = { ...old, ...metadata, sound: old.sound, buffer: buf, builtin: false, playing: null, mode: 'oneshot', volume: clampVol(old.volume), sync: !!old.sync };
+    this.onChange?.();
+    idbDo('readwrite', (st) => st.put({ ...metadata, bytes }, i)).catch(() => {});
+  }
   async loadFile(i, file) {
     const bytes = await file.arrayBuffer();
     const buf = await this.ctx.decodeAudioData(bytes.slice(0));
@@ -522,7 +540,7 @@ export class Sampler {
       const r = rows[i]; if (!r?.bytes) continue;
       try {
         const buf = await this.ctx.decodeAudioData(r.bytes.slice(0));
-        this.slots[i] = { ...this.slots[i], name: r.name || 'Sample', buffer: buf, builtin: false, playing: null };
+        this.slots[i] = { ...this.slots[i], name: r.name || 'Sample', creator: r.creator, source: r.source, license: r.license, buffer: buf, builtin: false, playing: null };
       } catch { /* unreadable: keep the built-in sound */ }
     }
     this.onChange?.();

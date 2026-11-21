@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 contextBridge.exposeInMainWorld('opendjNative', {
   isElectron: true,
+  planSet: request => ipcRenderer.invoke('local-dj-plan', request),
   pickFolder: (title) => ipcRenderer.invoke('pick-folder', title),
   pickFiles: (filters) => ipcRenderer.invoke('pick-files', filters),
   reveal: (p) => ipcRenderer.invoke('reveal', p),
