@@ -1,0 +1,902 @@
+<!doctype html>
+<!-- OpenDJ Controller Mapper. Built from tools/controller-mapper/template.html by scripts/build-controller-mapper.mjs: edit the template, not public/controller-mapper.html -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="@@CSP@@">
+<title>OpenDJ Controller Mapper</title>
+<style>
+:root {
+  --bg: #f4f6f9; --panel: #ffffff; --panel-2: #eef1f5; --line: #d9dee6; --text: #141922; --text-2: #556070; --text-3: #8590a0;
+  --accent: #1f7ae0; --on-accent: #ffffff; --green: #138a4a; --red: #d0283a; --amber: #a86400; --flash: #fff1c2; --sel: #dcebff;
+  --font: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; --mono: Consolas, "SF Mono", "JetBrains Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #090b0e; --panel: #111419; --panel-2: #171b21; --line: #2a313b; --text: #e9edf2; --text-2: #9ea8b6; --text-3: #6a7584;
+    --accent: #3d9cff; --on-accent: #03111f; --green: #2fd67b; --red: #ff5a6a; --amber: #ffb224; --flash: #3a3210; --sel: #1b3352;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #090b0e; --panel: #111419; --panel-2: #171b21; --line: #2a313b; --text: #e9edf2; --text-2: #9ea8b6; --text-3: #6a7584;
+  --accent: #3d9cff; --on-accent: #03111f; --green: #2fd67b; --red: #ff5a6a; --amber: #ffb224; --flash: #3a3210; --sel: #1b3352;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 var(--font); }
+button, select, input { font: inherit; color: inherit; }
+button { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+button.small { padding: 2px 8px; font-size: 12px; }
+button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+select, input[type=text], input[type=search] { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 0; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 17px; margin: 0 8px 0 0; white-space: nowrap; }
+header h1 small { color: var(--text-3); font-weight: 400; font-size: 12px; margin-left: 4px; }
+header label { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 13px; }
+header .grow { flex: 1; }
+#status { font-size: 13px; color: var(--text-2); }
+#status.err { color: var(--red); }
+#status.ok { color: var(--green); }
+main { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(260px, 340px); gap: 12px; padding: 12px 16px; align-items: start; }
+@media (max-width: 1100px) { main { grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); } #monitorCard { grid-column: 1 / -1; } }
+@media (max-width: 720px) { main { grid-template-columns: minmax(0, 1fr); padding: 12px 16px; } header { padding: 12px 16px; } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0; }
+.card h2 { font-size: 14px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+.card h2 .grow { flex: 1; }
+.muted { color: var(--text-2); }
+.tiny { font-size: 12px; color: var(--text-3); }
+#funcs { max-height: calc(100vh - 210px); overflow: auto; margin-top: 8px; }
+@media (max-width: 720px) { #funcs { max-height: 50vh; } }
+details.group { border-top: 1px solid var(--line); }
+details.group summary { cursor: pointer; padding: 6px 2px; font-weight: 600; font-size: 13px; display: flex; gap: 6px; }
+details.group summary .count { color: var(--text-3); font-weight: 400; margin-left: auto; }
+.fn { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; background: none; border: 1px solid transparent; border-radius: 5px; padding: 4px 6px; font-size: 13px; }
+.fn:hover { background: var(--panel-2); border-color: var(--line); }
+.fn.mapped .lbl::before { content: "✓ "; color: var(--green); font-weight: 700; }
+.fn .lbl { flex: 1; min-width: 0; }
+.kind { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; white-space: nowrap; }
+#learn { border: 2px solid var(--line); }
+#learn.active { border-color: var(--accent); }
+#learnTitle { font-size: 18px; font-weight: 600; margin: 2px 0; }
+#learnHint { color: var(--text-2); margin: 0 0 10px; }
+#learnResult { min-height: 1.4em; margin-top: 8px; font-size: 13px; }
+#learnResult.ok { color: var(--green); } #learnResult.err { color: var(--red); } #learnResult.warn { color: var(--amber); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.progress { height: 4px; background: var(--panel-2); border-radius: 2px; overflow: hidden; margin: 8px 0 4px; }
+.progress div { height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+.pulse { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite; vertical-align: middle; margin-right: 6px; }
+@keyframes pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } .progress div { transition: none; } }
+.tablewrap { overflow-x: auto; position: relative; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-weight: 600; color: var(--text-2); font-size: 12px; padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+td.key { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+td.val { font-family: var(--mono); font-size: 12px; width: 3.5em; text-align: right; color: var(--text-2); }
+tr.flash td { background: var(--flash); }
+tr.dup td.key { color: var(--amber); }
+td select { padding: 2px 4px; font-size: 12px; }
+#empty { padding: 16px 4px; }
+#monitor { font-family: var(--mono); font-size: 12px; height: calc(100vh - 230px); min-height: 200px; overflow: auto; background: var(--panel-2); border-radius: 6px; padding: 6px; }
+@media (max-width: 1100px) { #monitor { height: 260px; } }
+#monitor div { white-space: nowrap; }
+#monitor .t { color: var(--text-3); }
+#monitor .off { color: var(--text-3); }
+.help { margin-top: 12px; }
+.help summary { cursor: pointer; font-weight: 600; }
+.help ol { padding-left: 20px; margin: 8px 0; }
+.help li { margin: 4px 0; }
+kbd { font-family: var(--mono); font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+#toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity .2s; max-width: calc(100vw - 32px); }
+#toast.show { opacity: 1; }
+.cgrid { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; align-items: center; }
+@media (max-width: 520px) { .cgrid { grid-template-columns: 1fr; gap: 2px; } .cgrid input, .cgrid textarea { margin-bottom: 6px; } }
+.badge { display: inline-block; font-size: 11px; font-weight: 600; border-radius: 10px; padding: 1px 8px; white-space: nowrap; border: 1px solid currentColor; }
+.badge.verified { color: var(--green); } .badge.needs-verification { color: var(--amber); } .badge.wanted { color: var(--accent); } .badge.unknown { color: var(--text-3); }
+#ctlBody p { margin: 4px 0 8px; }
+dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 16px; width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
+dialog::backdrop { background: rgba(0, 0, 0, .45); }
+dialog h3 { margin: 0 0 10px; font-size: 16px; display: flex; gap: 8px; align-items: center; }
+dialog h3 .grow { flex: 1; }
+#listWrap { max-height: 55vh; overflow: auto; margin-top: 8px; position: relative; }
+#listRows td { padding: 6px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<header>
+  <h1>OpenDJ Controller Mapper <small>v@@VERSION@@</small></h1>
+  <label>Controller <select id="device" aria-label="MIDI controller"><option value="">No controller found</option></select></label>
+  <label>Mapping name <input type="text" id="mapName" placeholder="My controller" size="16"></label>
+  <span id="status">Starting…</span>
+  <span class="grow"></span>
+  <button id="btnOpen" title="Open an existing .opendj-midi.json mapping to keep editing it">Open…</button>
+  <button id="btnApply" class="primary" hidden title="Use this mapping in OpenDJ right away">Apply to OpenDJ</button>
+  <button id="btnSave" class="primary" title="Save the mapping as a file you can import in OpenDJ">Save mapping</button>
+  <input type="file" id="file" accept=".json,application/json" hidden>
+</header>
+
+<main>
+  <section class="card" aria-labelledby="fnHead">
+    <h2 id="fnHead">Functions</h2>
+    <input type="search" id="search" placeholder="Search, e.g. play, eq low, hot cue" aria-label="Search functions" style="width:100%">
+    <div class="tiny" style="margin-top:6px">Click a function, then move the control on your controller.</div>
+    <div id="funcs"></div>
+  </section>
+
+  <div style="display:grid; gap:12px; min-width:0">
+    <section class="card" id="ctl" aria-labelledby="ctlHead">
+      <h2 id="ctlHead">Your controller <span class="grow"></span>
+        <button class="small" id="btnList">All controllers</button>
+        <button class="small" id="btnAdd">Add a controller</button></h2>
+      <div id="ctlBody" aria-live="polite"></div>
+      <div class="tiny" id="syncLine"></div>
+    </section>
+
+    <section class="card" id="learn" aria-live="polite">
+      <div class="row">
+        <div style="flex:1; min-width:0">
+          <div class="tiny" id="learnStep">Ready</div>
+          <div id="learnTitle">Pick a function, or start the guided setup</div>
+          <p id="learnHint">The guided setup walks you through the main controls of a 2- or 4-deck controller one by one. You can skip any control it doesn't have.</p>
+        </div>
+      </div>
+      <div class="progress" id="progress" hidden><div></div></div>
+      <div class="row">
+        <button id="btnGuided" class="primary">Start guided setup</button>
+        <label class="muted" style="display:flex; gap:6px; align-items:center">Decks
+          <select id="deckCount" aria-label="Number of decks on the controller"><option>2</option><option>4</option></select></label>
+        <button id="btnBack" hidden>Back</button>
+        <button id="btnSkip" hidden>Skip</button>
+        <button id="btnDone" hidden title="Finish capturing now">Done moving</button>
+        <button id="btnCancel" hidden>Stop</button>
+      </div>
+      <div id="learnResult"></div>
+    </section>
+
+    <section class="card" aria-labelledby="mapHead">
+      <h2 id="mapHead">Mapping <span class="tiny" id="mapCount"></span><span class="grow"></span>
+        <button class="small" id="btnClear" title="Remove every mapped control">Clear all</button></h2>
+      <div class="tiny" style="margin-bottom:6px">Move any mapped control to test it: its row lights up and shows the value.</div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Control</th><th>Function</th><th>Value</th><th>Options</th><th><span class="sr">Actions</span></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div id="empty" class="muted">Nothing mapped yet.</div>
+
+      <details class="help" id="helpUse" open>
+        <summary>Using the mapping in OpenDJ</summary>
+        <ol>
+          <li>Click <b>Save mapping</b>. You get a file ending in <kbd>.opendj-midi.json</kbd>.</li>
+          <li>In OpenDJ open <b>Settings → Controllers</b> and select your controller.</li>
+          <li>Click <b>Import</b> and choose the saved file. The mapping loads automatically every time you plug the controller in.</li>
+        </ol>
+        <div class="tiny">Close OpenDJ (or any other DJ app) while mapping: on Windows only one program can use a MIDI controller at a time.
+          Needs Google Chrome or Microsoft Edge. Everything stays on this computer; nothing is uploaded.
+        </div>
+      </details>
+
+      <details class="help" id="contrib">
+        <summary>Contribute this mapping to OpenDJ</summary>
+        <p class="muted" style="margin:8px 0">Mapped a controller that OpenDJ doesn't support yet? Share it so it works out of the box for everyone.
+          Mappings in the OpenDJ repository are released under CC0 (public domain), so anyone can use and improve them.</p>
+        <div class="cgrid">
+          <label for="cBrand">Brand</label><input type="text" id="cBrand" placeholder="e.g. Pioneer DJ">
+          <label for="cModel">Model</label><input type="text" id="cModel" placeholder="e.g. DDJ-FLX4">
+          <label for="cAuthor">Your name or GitHub user</label><input type="text" id="cAuthor" placeholder="optional">
+          <label for="cOs">Tested on</label><input type="text" id="cOs" placeholder="e.g. Windows 11, OpenDJ 0.4.2">
+          <label for="cNotes" style="align-self:start">Notes</label><textarea id="cNotes" rows="3" placeholder="What works, what doesn't, controls you skipped, firmware mode…" style="font:inherit; background:var(--panel); color:inherit; border:1px solid var(--line); border-radius:6px; padding:6px 8px; min-width:0"></textarea>
+        </div>
+        <label class="muted" style="display:flex; gap:6px; align-items:center; margin:8px 0"><input type="checkbox" id="cCc0"> I agree to release this mapping under CC0 1.0 (public domain)</label>
+        <div class="row">
+          <button id="btnContrib" class="primary">Save files and open the submission form</button>
+        </div>
+        <div class="tiny" style="margin-top:6px">This opens a GitHub form in your browser with the mapping already filled in (needs a free GitHub account): check it and click <b>Create</b>.
+          A bot checks the mapping and opens a pull request; it shows as "needs verification" until someone else with the same controller confirms it.
+          A copy of the mapping and a MIDI log are also saved on this computer. Comfortable with git? See mappings/README.md for pull requests.</div>
+      </details>
+    </section>
+  </div>
+
+  <section class="card" id="monitorCard" aria-labelledby="monHead">
+    <h2 id="monHead">MIDI monitor <span class="grow"></span>
+      <button class="small" id="btnPause" aria-pressed="false">Pause</button>
+      <button class="small" id="btnLog" title="Save the captured messages as a text file (useful for bug reports)">Save log</button></h2>
+    <div id="monitor" role="log" aria-label="Incoming MIDI messages"><div class="muted">Move a control on your controller…</div></div>
+  </section>
+</main>
+<dialog id="listDlg" aria-labelledby="listHead">
+  <h3 id="listHead">Controllers in OpenDJ <span class="grow"></span><button class="small" data-close>Close</button></h3>
+  <div class="row">
+    <input type="search" id="listSearch" placeholder="Search brand or model" aria-label="Search controllers" style="flex:1">
+    <select id="listFilter" aria-label="Filter by status">
+      <option value="">All</option><option value="wanted">Needs a mapping</option><option value="needs-verification">Needs verification</option><option value="verified">Verified</option>
+    </select>
+  </div>
+  <div id="listWrap"><table><thead><tr><th>Controller</th><th>Status</th><th><span class="sr">Actions</span></th></tr></thead><tbody id="listRows"></tbody></table></div>
+  <div class="row" style="margin-top:10px"><span class="tiny" style="flex:1">Not listed? Add it so others can see it is wanted, or map it yourself.</span><button id="btnAdd2">Add a controller</button></div>
+</dialog>
+
+<dialog id="addDlg" aria-labelledby="addHead">
+  <h3 id="addHead">Add a controller <span class="grow"></span><button class="small" data-close>Close</button></h3>
+  <p class="muted" style="margin-top:0">Add a brand and model that isn't in the list yet.</p>
+  <div class="cgrid">
+    <label for="aBrand">Brand</label><input type="text" id="aBrand" placeholder="e.g. Numark">
+    <label for="aModel">Model</label><input type="text" id="aModel" placeholder="e.g. Mixtrack Pro FX">
+    <label for="aMidi">MIDI name</label><input type="text" id="aMidi" placeholder="the name your computer shows for it">
+  </div>
+  <div class="row" style="margin-top:12px">
+    <button class="primary" id="btnAddMap">I'll map it now</button>
+    <button id="btnAddReq" title="Opens a GitHub form so the controller is added to the wanted list">Only request it</button>
+  </div>
+  <div class="tiny" style="margin-top:6px">Mapping it now: run the guided setup, then use <b>Contribute this mapping</b>. Requesting it adds it to the list as "needs a mapping" for someone who owns one.</div>
+</dialog>
+
+<div id="toast" role="status"></div>
+
+<script>
+/*@@WIZARD@@*/
+</script>
+<script>
+'use strict';
+const TARGETS = /*@@TARGETS@@*/;
+const BY_ID = new Map(TARGETS.map((t) => [t.id, t]));
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const hex = (n) => '0x' + n.toString(16).padStart(2, '0').toUpperCase();
+const describeKey = (k) => { const [t, c, n] = k.split(':'); return `${t === 'note' ? 'Note' : t === 'cc' ? 'CC' : 'Pitch'} ${hex(+n)} ch${+c + 1}`; };
+const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
+
+// ---------- state ----------
+let access = null, deviceName = '';
+let mapping = { name: '', entries: [] };
+let learn = null;            // { target, kind, msgs, timer, cap, guided }
+let guided = null;           // { steps, i, assigned:Set }
+let paused = false;
+const log = [];              // full capture for "Save log"
+const lastVal = new Map();   // key -> last value (for the Value column)
+
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), 2600); }
+function status(msg, cls = '') { const s = $('status'); s.textContent = msg; s.className = cls; }
+
+// ---------- function list ----------
+function groupOf(id) {
+  const p = id.split('.')[0];
+  let m;
+  if ((m = /^deck(\d)$/.exec(p))) return `Deck ${m[1]}`;
+  if ((m = /^mixer(\d)$/.exec(p))) return `Mixer channel ${m[1]}`;
+  if (p === 'mixer' || p === 'master') return 'Mixer and master';
+  if (p === 'browser') return 'Library browser';
+  if (p === 'mic' || p === 'sequencer' || p === 'global') return 'Global, mic and sequencer';
+  return 'Other';
+}
+const GROUP_ORDER = ['Deck 1', 'Deck 2', 'Deck 3', 'Deck 4', 'Mixer channel 1', 'Mixer channel 2', 'Mixer channel 3', 'Mixer channel 4', 'Mixer and master', 'Library browser', 'Global, mic and sequencer', 'Other'];
+const KIND_LABEL = { button: 'button', abs: 'fader/knob', rel: 'encoder/jog' };
+
+function renderFuncs() {
+  const q = $('search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const mapped = new Set(mapping.entries.map((e) => e.target));
+  const groups = new Map(GROUP_ORDER.map((g) => [g, []]));
+  for (const t of TARGETS) {
+    const hay = (t.label + ' ' + t.id).toLowerCase();
+    if (q.length && !q.every((w) => hay.includes(w))) continue;
+    groups.get(groupOf(t.id)).push(t);
+  }
+  const open = new Set([...document.querySelectorAll('details.group[open]')].map((d) => d.dataset.g));
+  const html = [];
+  for (const [g, list] of groups) {
+    if (!list.length) continue;
+    const isOpen = q.length || open.has(g) || (!open.size && g === 'Deck 1');
+    html.push(`<details class="group" data-g="${esc(g)}"${isOpen ? ' open' : ''}><summary>${esc(g)}<span class="count">${list.length}</span></summary>`);
+    for (const t of list) html.push(`<button class="fn${mapped.has(t.id) ? ' mapped' : ''}" data-id="${esc(t.id)}"><span class="lbl">${esc(t.label)}</span><span class="kind">${KIND_LABEL[t.kind] || t.kind}</span></button>`);
+    html.push('</details>');
+  }
+  $('funcs').innerHTML = html.join('') || '<div class="muted" style="padding:8px">No matching functions.</div>';
+}
+$('funcs').addEventListener('click', (ev) => {
+  const b = ev.target.closest('.fn'); if (!b) return;
+  stopGuided(false);
+  const t = BY_ID.get(b.dataset.id);
+  startLearn({ target: t.id, kind: t.kind, title: t.label, hint: hintFor(t.kind) });
+});
+$('search').addEventListener('input', renderFuncs);
+const hintFor = (kind) => kind === 'button' ? 'Press the button (or pad) on your controller.'
+  : kind === 'rel' ? 'Turn the encoder or spin the jog wheel a little.'
+  : 'Move the fader or turn the knob from one end to the other.';
+
+// ---------- learning ----------
+function startLearn(step) {
+  if (!deviceName) { setResult('Connect a controller first (and pick it at the top).', 'err'); return; }
+  clearTimeout(learn?.timer); clearTimeout(learn?.cap);
+  learn = { ...step, msgs: [], timer: 0, cap: 0 };
+  $('learn').classList.add('active');
+  $('learnStep').innerHTML = `<span class="pulse"></span>${guided ? `Step ${guided.i + 1} of ${guided.steps.length} · ${esc(step.section)}` : 'Listening'}`;
+  $('learnTitle').textContent = step.title;
+  $('learnHint').textContent = step.hint;
+  if (!guided) setResult('');
+  showButtons();
+}
+function stopLearn() {
+  if (learn) { clearTimeout(learn.timer); clearTimeout(learn.cap); }
+  learn = null;
+  $('learn').classList.remove('active');
+  $('learnStep').textContent = 'Ready';
+  $('learnTitle').textContent = 'Pick a function, or start the guided setup';
+  $('learnHint').textContent = 'Click any function on the left to map it, or run the guided setup again.';
+  showButtons();
+}
+function showButtons() {
+  const on = !!learn;
+  $('btnGuided').hidden = on || !!guided;
+  $('deckCount').parentElement.hidden = on || !!guided;
+  $('btnCancel').hidden = !on;
+  $('btnSkip').hidden = !guided;
+  $('btnBack').hidden = !guided;
+  $('btnBack').disabled = !guided || guided.i === 0;
+  $('btnDone').hidden = !on || learn.kind === 'button';
+  $('btnDone').disabled = !learn?.msgs.length;
+  $('progress').hidden = !guided;
+  if (guided) $('progress').firstElementChild.style.width = `${(guided.i / guided.steps.length) * 100}%`;
+}
+function setResult(msg, cls = '') { const r = $('learnResult'); r.textContent = msg; r.className = cls; }
+
+function captureForLearn(m) {
+  if (!learn.msgs.length && m.isOff) return; // a release left over from the previous control
+  learn.msgs.push(m);
+  $('btnDone').disabled = false;
+  clearTimeout(learn.timer);
+  if (learn.kind === 'button') {
+    learn.timer = setTimeout(finishLearn, 300); // gather the release / LSB that follows the press
+  } else {
+    // keep listening while the control moves; finish shortly after it stops
+    learn.timer = setTimeout(finishLearn, 900);
+    if (!learn.cap) learn.cap = setTimeout(finishLearn, 5000);
+  }
+}
+function finishLearn() {
+  if (!learn) return;
+  const L = learn;
+  clearTimeout(L.timer); clearTimeout(L.cap);
+  // in the guided setup, refuse controls already used for another function (but allow re-learning this one)
+  const own = mapping.entries.filter((e) => e.target === L.target).flatMap((e) => [e.key, e.lsbKey]);
+  const exclude = guided ? new Set([...guided.assigned].filter((k) => !own.includes(k))) : new Set();
+  const det = detectMidiControl(L.msgs, { kind: L.kind, exclude });
+  if (!det) {
+    setResult(L.msgs.length ? 'That control is already used in this setup. Try another, or Skip.' : 'Nothing received. Try again.', 'err');
+    startLearn(L); return;
+  }
+  if (L.kind !== 'button' && det.type === 'note') {
+    setResult(`That was a button (${describeKey(det.key)}), but "${L.title}" needs a ${L.kind === 'rel' ? 'jog wheel or encoder' : 'fader or knob'}. Try again.`, 'err');
+    startLearn(L); return;
+  }
+  const entry = entryFor(det, { target: L.target, kind: L.kind });
+  const replaced = mapping.entries.find((e) => e.target === entry.target);
+  mapping.entries = mapping.entries.filter((e) => e.target !== entry.target);
+  mapping.entries.push(entry);
+  if (guided) { guided.assigned.add(det.key); if (det.lsbKey) guided.assigned.add(det.lsbKey); }
+  const extra = det.lsbKey ? ' (14-bit, high resolution)' : entry.rel ? ` (relative, ${entry.rel === 'twos' ? "two's complement" : entry.rel === 'offset' ? 'centred on 64' : 'wrapping counter'})` : '';
+  const others = mapping.entries.filter((e) => e !== entry && e.key === entry.key).map((e) => BY_ID.get(e.target)?.label || e.target);
+  setResult(`${L.title} → ${describeKey(det.key)}${extra}${replaced ? ' (replaced the old control)' : ''}${others.length ? `. Note: this control is also mapped to ${others.join(', ')}` : ''}`, others.length ? 'warn' : 'ok');
+  changed();
+  if (guided) nextStep(1); else stopLearn();
+}
+
+// ---------- guided setup ----------
+function startGuided() {
+  if (!deviceName) { setResult('Connect a controller first (and pick it at the top).', 'err'); return; }
+  guided = { steps: wizardSteps(+$('deckCount').value), i: 0, assigned: new Set(mapping.entries.flatMap((e) => [e.key, e.lsbKey].filter(Boolean))) };
+  setResult('');
+  startLearn(guided.steps[0]);
+}
+function nextStep(dir) {
+  if (!guided) return;
+  guided.i += dir;
+  if (guided.i < 0) guided.i = 0;
+  if (guided.i >= guided.steps.length) { stopGuided(true); return; }
+  startLearn(guided.steps[guided.i]);
+}
+function stopGuided(done) {
+  if (!guided) return;
+  guided = null;
+  stopLearn();
+  if (done) { setResult(`Guided setup finished: ${mapping.entries.length} controls mapped. Add anything else from the list on the left, then click Save mapping.`, 'ok'); }
+}
+$('btnGuided').onclick = startGuided;
+$('btnSkip').onclick = () => { setResult(''); nextStep(1); };
+$('btnBack').onclick = () => { setResult(''); nextStep(-1); };
+$('btnDone').onclick = () => finishLearn();
+$('btnCancel').onclick = () => { if (guided) stopGuided(false); else stopLearn(); setResult(''); };
+
+// ---------- mapping table ----------
+function renderRows() {
+  const keyCount = new Map();
+  for (const e of mapping.entries) keyCount.set(e.key, (keyCount.get(e.key) || 0) + 1);
+  const html = mapping.entries.map((e, i) => {
+    const t = BY_ID.get(e.target);
+    const kind = t?.kind || 'button';
+    let opts = '';
+    if (kind === 'abs' && !e.rel) opts += `<label><input type="checkbox" data-i="${i}" data-opt="invert"${e.invert ? ' checked' : ''}> Invert</label>`;
+    if (kind === 'rel' || e.rel) {
+      opts += `<select data-i="${i}" data-opt="rel" aria-label="Encoder type">${[['auto', 'Auto'], ['offset', 'Centred (64)'], ['twos', "Two's complement"], ['wrap', 'Wrapping']].map(([v, l]) => `<option value="${v}"${(e.rel || 'auto') === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`;
+    }
+    const keyTxt = describeKey(e.key) + (e.lsbKey ? ` + ${describeKey(e.lsbKey).split(' ')[1]} (14-bit)` : '');
+    return `<tr data-key="${esc(e.key)}" data-lsb="${esc(e.lsbKey || '')}"${keyCount.get(e.key) > 1 ? ' class="dup" title="This control is mapped to more than one function"' : ''}>
+      <td class="key">${esc(keyTxt)}</td><td>${esc(t?.label || e.target)}${t ? '' : ' <span class="tiny">(unknown in this OpenDJ version)</span>'}</td>
+      <td class="val">${lastVal.has(e.key) ? lastVal.get(e.key) : ''}</td><td>${opts}</td>
+      <td style="white-space:nowrap"><button class="small" data-i="${i}" data-act="relearn" title="Map this function to a different control">Re-learn</button>
+      <button class="small" data-i="${i}" data-act="del" aria-label="Remove ${esc(t?.label || e.target)}">✕</button></td></tr>`;
+  });
+  $('rows').innerHTML = html.join('');
+  $('empty').hidden = mapping.entries.length > 0;
+  $('mapCount').textContent = mapping.entries.length ? `${mapping.entries.length} control${mapping.entries.length > 1 ? 's' : ''}` : '';
+  $('btnSave').disabled = !mapping.entries.length;
+  $('btnClear').disabled = !mapping.entries.length;
+}
+$('rows').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-act]'); if (!b) return;
+  const e = mapping.entries[+b.dataset.i]; if (!e) return;
+  if (b.dataset.act === 'del') { mapping.entries.splice(+b.dataset.i, 1); changed(); }
+  else { stopGuided(false); const t = BY_ID.get(e.target); if (t) startLearn({ target: t.id, kind: t.kind, title: t.label, hint: hintFor(t.kind) }); }
+});
+$('rows').addEventListener('change', (ev) => {
+  const x = ev.target, e = mapping.entries[+x.dataset.i]; if (!e) return;
+  if (x.dataset.opt === 'invert') { if (x.checked) e.invert = true; else delete e.invert; }
+  if (x.dataset.opt === 'rel') e.rel = x.value;
+  changed(false);
+});
+$('btnClear').onclick = () => { if (confirm('Remove every mapped control?')) { mapping.entries = []; changed(); } };
+
+function changed(rerender = true) {
+  if (rerender) renderRows();
+  renderFuncs();
+  if (deviceName) store.set('opendj-mapper:' + deviceName, { ...mapping, name: $('mapName').value });
+}
+
+// ---------- monitor ----------
+const monitorRows = [];
+function addMonitor(m) {
+  if (paused) return;
+  const ts = new Date(m.wall).toTimeString().slice(0, 8);
+  const what = m.type === 'note' ? (m.isOff ? 'Note off' : 'Note on ') : m.type === 'cc' ? 'CC      ' : m.type === 'pitch' ? 'Pitch   ' : 'Other   ';
+  const div = document.createElement('div');
+  if (m.isOff) div.className = 'off';
+  div.innerHTML = `<span class="t">${ts}</span> ${esc(what)} ch${m.channel + 1} ${m.type === 'pitch' ? '    ' : hex(m.number)} = ${String(m.value).padStart(m.type === 'pitch' ? 5 : 3)} <span class="t">[${m.raw}]</span>`;
+  const mon = $('monitor');
+  if (!monitorRows.length) mon.textContent = '';
+  const atBottom = mon.scrollTop + mon.clientHeight >= mon.scrollHeight - 4;
+  mon.appendChild(div); monitorRows.push(div);
+  if (monitorRows.length > 400) monitorRows.shift().remove();
+  if (atBottom) mon.scrollTop = mon.scrollHeight;
+}
+$('btnPause').onclick = (ev) => { paused = !paused; ev.target.textContent = paused ? 'Resume' : 'Pause'; ev.target.setAttribute('aria-pressed', String(paused)); };
+$('btnLog').onclick = () => {
+  if (!log.length) { toast('No messages captured yet'); return; }
+  const lines = [`# OpenDJ Controller Mapper ${'@@VERSION@@'} MIDI log`, `# device: ${deviceName}`, `# columns: ms since start, raw bytes (hex), decoded`, ...log];
+  download(`${safeName(deviceName || 'controller')}.midi-log.txt`, lines.join('\n'), 'text/plain');
+};
+
+// ---------- testing mapped controls ----------
+function flashRows(m) {
+  const rows = $('rows').querySelectorAll('tr');
+  for (const tr of rows) {
+    if (tr.dataset.key !== m.key && tr.dataset.lsb !== m.key) continue;
+    if (tr.dataset.key === m.key) tr.querySelector('.val').textContent = m.value;
+    tr.classList.add('flash');
+    clearTimeout(tr._h); tr._h = setTimeout(() => tr.classList.remove('flash'), 350);
+  }
+}
+
+// ---------- MIDI ----------
+const t0 = performance.now();
+function onMidi(input, ev) {
+  const d = ev.data; if (!d || !d.length) return;
+  const status = d[0];
+  if (status >= 0xf0) return; // clock, active sensing, SysEx
+  const cmd = status & 0xf0, channel = status & 0x0f, d1 = d[1] ?? 0, d2 = d[2] ?? 0;
+  let type = 'other', number = d1, value = d2;
+  if (cmd === 0x90 || cmd === 0x80) type = 'note';
+  else if (cmd === 0xb0) type = 'cc';
+  else if (cmd === 0xe0) { type = 'pitch'; number = 0; value = (d2 << 7) | d1; }
+  const isOff = cmd === 0x80 || (cmd === 0x90 && d2 === 0);
+  const raw = [...d].map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+  const m = { device: input.name, key: `${type}:${channel}:${number}`, type, channel, number, value, isOff, raw, wall: Date.now() };
+  if (log.length < 200000) log.push(`${(performance.now() - t0).toFixed(1).padStart(10)}  ${raw.padEnd(9)}  ${input.name}  ${type} ch${channel + 1} ${number} = ${value}${isOff ? ' (off)' : ''}`);
+  addMonitor(m);
+  if (input.name !== deviceName || type === 'other') return;
+  lastVal.set(m.key, value);
+  if (learn) captureForLearn(m); else flashRows(m);
+}
+const NOT_A_CONTROLLER = /through|wavetable|\biac\b|loopmidi|virtual|rtpmidi|network|session \d|microsoft gs|fluid|timidity/i;
+function refreshDevices() {
+  const inputs = access ? [...access.inputs.values()] : [];
+  for (const i of inputs) i.onmidimessage = (ev) => onMidi(i, ev);
+  const sel = $('device');
+  const names = [...new Set(inputs.map((i) => i.name))];
+  const prev = deviceName;
+  sel.innerHTML = names.length ? names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('') : '<option value="">No controller found</option>';
+  let pick = names.includes(prev) ? prev : names.includes(wantDevice) ? wantDevice : (names.find((n) => !NOT_A_CONTROLLER.test(n)) || names[0] || '');
+  sel.value = pick;
+  if (pick !== prev) selectDevice(pick);
+  if (names.length) status(`${names.length} MIDI device${names.length > 1 ? 's' : ''} connected`, 'ok');
+  else status('No MIDI controller found. Plug it in (and close other DJ apps).', 'err');
+}
+function selectDevice(name) {
+  stopGuided(false); stopLearn();
+  deviceName = name;
+  lastVal.clear();
+  const saved = name && store.get('opendj-mapper:' + name);
+  if (saved && Array.isArray(saved.entries) && (saved.entries.length || !mapping.entries.length)) {
+    mapping = { name: saved.name || name, entries: saved.entries };
+    if (saved.entries.length) toast(`Restored your unsaved work for ${name}`);
+  } else if (!mapping.entries.length) mapping = { name, entries: [] };
+  $('mapName').value = mapping.name || name;
+  changed();
+  matchCurrent();
+  askHost();
+}
+$('device').onchange = (ev) => selectDevice(ev.target.value);
+$('mapName').oninput = () => changed(false);
+
+async function initMidi() {
+  if (!navigator.requestMIDIAccess) {
+    status('This browser has no Web MIDI. Open this file in Google Chrome or Microsoft Edge.', 'err');
+    return;
+  }
+  try {
+    access = await navigator.requestMIDIAccess({ sysex: false });
+    access.onstatechange = refreshDevices;
+    refreshDevices();
+  } catch (e) {
+    status(`MIDI access was refused (${e.message || e.name}). Allow MIDI devices for this page and reload.`, 'err');
+  }
+}
+
+// ---------- open / save ----------
+const safeName = (s) => String(s).replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'controller';
+function download(name, text, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+function mappingFile(extra = {}) {
+  const name = $('mapName').value.trim() || deviceName || 'Custom';
+  return { name, json: JSON.stringify({ opendjMidiMapping: 1, device: deviceName, name, ...extra, entries: mapping.entries }, null, 2) };
+}
+$('btnSave').onclick = () => {
+  const f = mappingFile();
+  download(`${safeName(f.name)}.opendj-midi.json`, f.json, 'application/json');
+  toast('Saved. In OpenDJ: Settings → Controllers → Import');
+};
+const CONTRIB = ['cBrand', 'cModel', 'cAuthor', 'cOs', 'cNotes'];
+for (const id of CONTRIB) { const v = store.get('opendj-mapper:' + id); if (typeof v === 'string') $(id).value = v; $(id).addEventListener('input', () => store.set('opendj-mapper:' + id, $(id).value)); }
+$('btnContrib').onclick = () => {
+  if (current?.file || current?.status === 'needs-verification') { submitChange('Improvement'); return; }
+  const brand = $('cBrand').value.trim(), model = $('cModel').value.trim();
+  if (!mapping.entries.length) { toast('Map some controls first'); return; }
+  if (!brand || !model) { toast('Fill in the brand and model'); (brand ? $('cModel') : $('cBrand')).focus(); return; }
+  if (!$('cCc0').checked) { toast('Tick the CC0 box to contribute'); $('cCc0').focus(); return; }
+  const contributed = { brand, model, author: $('cAuthor').value.trim() || undefined, testedOn: $('cOs').value.trim() || undefined,
+    notes: $('cNotes').value.trim() || undefined, license: 'CC0-1.0', tool: 'OpenDJ Controller Mapper @@VERSION@@' };
+  if (!$('mapName').value.trim() || $('mapName').value.trim() === deviceName) $('mapName').value = `${brand} ${model}`;
+  const f = mappingFile({ contributed });
+  const base = safeName(`${brand}-${model}`);
+  download(`${base}.opendj-midi.json`, f.json, 'application/json');
+  if (log.length) setTimeout(() => $('btnLog').click(), 400);
+  lastSaved = JSON.stringify(mapping.entries);
+  const inline = ISSUE({ template: 'controller-mapping.yml', title: `Controller mapping: ${brand} ${model}`,
+    brand, model, 'midi-name': deviceName, 'tested-on': $('cOs').value.trim(), notes: $('cNotes').value.trim() }, f.json);
+  setResult(inline ? 'The GitHub form opened with your mapping filled in: check it and click Create. Thank you!'
+    : `Your mapping is too big to fill in automatically: drag ${base}.opendj-midi.json (just saved) into the Mapping box of the GitHub form. Thank you!`, 'ok');
+};
+$('btnOpen').onclick = () => $('file').click();
+$('file').onchange = async (ev) => {
+  const f = ev.target.files[0]; ev.target.value = '';
+  if (!f) return;
+  const text = (await f.text()).trimStart();
+  if (text.startsWith('<')) { toast('That is a Mixxx mapping: import it directly in OpenDJ (Settings → Controllers → Import)'); return; }
+  try {
+    const m = JSON.parse(text);
+    if (!Array.isArray(m.entries)) throw new Error('no entries');
+    const entries = m.entries.filter((e) => e && typeof e.key === 'string' && typeof e.target === 'string');
+    stopGuided(false); stopLearn();
+    mapping = { name: m.name || f.name.replace(/\.opendj-midi\.json$|\.json$/i, ''), entries };
+    $('mapName').value = mapping.name;
+    const c = m.contributed || {};
+    for (const [id, k] of [['cBrand', 'brand'], ['cModel', 'model'], ['cAuthor', 'author'], ['cOs', 'testedOn'], ['cNotes', 'notes']]) if (typeof c[k] === 'string') $(id).value = c[k];
+    changed();
+    const unknown = entries.filter((e) => !BY_ID.has(e.target)).length;
+    toast(`Opened ${entries.length} controls${unknown ? ` (${unknown} unknown to this version)` : ''}`);
+    if (m.outputs) setResult('This file has custom LED outputs (from a Mixxx import). They are kept only if you import the original file in OpenDJ.', 'warn');
+  } catch { toast('Not an OpenDJ mapping file'); }
+};
+
+// ---------- controller list, synced from the OpenDJ repository ----------
+const REPO = 'Bucifer6/OpenDJ';
+const RAW = `https://raw.githubusercontent.com/${REPO}/main/mappings/`;
+/** Opens a prefilled GitHub issue form. With `json`, the mapping goes into its Mapping box when the link stays short
+ *  enough for GitHub; returns false when it didn't fit (the user then drags the saved file in). */
+function ISSUE(q, json) {
+  const clean = Object.fromEntries(Object.entries(q).filter(([, v]) => v));
+  let url = `https://github.com/${REPO}/issues/new?${new URLSearchParams(clean)}`, inline = false;
+  if (json) {
+    const withMap = `https://github.com/${REPO}/issues/new?${new URLSearchParams({ ...clean, mapping: JSON.stringify(JSON.parse(json)) })}`;
+    if (withMap.length <= 7500) { url = withMap; inline = true; }
+  }
+  window.open(url, '_blank', 'noopener');
+  return inline;
+}
+const SNAPSHOT = /*@@INDEX@@*/;
+let index = SNAPSHOT, indexFrom = 'snapshot';
+let current = null;  // list entry for the connected controller
+let lastFile = '';   // the JSON last saved for a change request
+let base = null;     // { entry, entries }: the community mapping loaded for testing (changes are compared to it)
+const STATUS = { verified: 'Verified', 'needs-verification': 'Needs verification', wanted: 'Needs a mapping', unknown: 'Not in the list' };
+const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const fullName = (c) => `${c.brand} ${c.model}`;
+const badge = (st) => `<span class="badge ${st}">${STATUS[st] || st}</span>`;
+
+async function syncIndex(manual = false) {
+  $('syncLine').textContent = 'Syncing the controller list from GitHub…';
+  try {
+    const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 8000);
+    const r = await fetch(RAW + 'index.json', { cache: 'no-store', signal: ctl.signal }); clearTimeout(to);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    if (j.opendjControllerIndex !== 1 || !Array.isArray(j.controllers)) throw new Error('bad list');
+    index = j; indexFrom = 'github';
+    store.set('opendj-mapper:index', { at: Date.now(), data: j });
+  } catch {
+    const c = store.get('opendj-mapper:index');
+    if (c?.data?.controllers) { index = c.data; indexFrom = `saved copy from ${new Date(c.at).toLocaleDateString()}`; } else { index = SNAPSHOT; indexFrom = 'snapshot'; }
+    if (manual) toast("Couldn't reach GitHub");
+  }
+  const n = index.controllers.length, mapped = index.controllers.filter((c) => c.status !== 'wanted').length;
+  $('syncLine').innerHTML = `${n} controllers in the list, ${mapped} with a mapping · ${indexFrom === 'github' ? 'synced from GitHub just now' : `offline: using the ${esc(indexFrom === 'snapshot' ? 'list built into this file (v@@VERSION@@)' : indexFrom)}`} · <a href="#" id="resync">Refresh</a>`;
+  $('resync').onclick = (ev) => { ev.preventDefault(); syncIndex(true); };
+  matchCurrent(); renderList();
+}
+
+// Brand from the MIDI port name, to prefill the "which controller is this?" question
+const BRANDS = [[/\b(ddj|xdj|djm|cdj)\b|ddj-|pioneer/i, 'Pioneer DJ'], [/mixtrack|party ?mix|numark|\bns\d|dj2go|\bidj/i, 'Numark'],
+  [/djcontrol|inpulse|hercules|\bdjc\b/i, 'Hercules'], [/\bmc\d{3,4}|denon|\bprime\b|\bsc\d{4}/i, 'Denon DJ'], [/traktor|kontrol/i, 'Native Instruments'],
+  [/mixon|reloop|beatmix|beatpad|\bbuddy\b|terminal mix/i, 'Reloop'], [/roland|\bdj-\d{3}/i, 'Roland'], [/behringer|\bcmd\b/i, 'Behringer'],
+  [/novation|launch(pad|control|key)|twitch/i, 'Novation'], [/akai|\bapc|\bmpk|\bamx\b|\bafx\b/i, 'Akai Professional'], [/xone|allen/i, 'Allen & Heath'],
+  [/\brane\b|\bseventy/i, 'Rane'], [/gemini/i, 'Gemini'], [/\bvestax|\bvci/i, 'Vestax'], [/korg|kaoss/i, 'Korg'], [/\bstanton|\bscs\b/i, 'Stanton']];
+function guessController(name) {
+  const brand = BRANDS.find(([re]) => re.test(name))?.[1] || '';
+  let model = String(name).replace(/\b(midi|usb|audio|in|out|input|output|port|controller)\b/gi, ' ').replace(/\d+:\d+/g, ' ')
+    .replace(/(\s+\d+)+\s*$/, '').replace(/\s+/g, ' ').trim();
+  for (const w of brand.split(' ')) model = model.replace(new RegExp(`^${w}\\b\\s*`, 'i'), '');
+  return { brand, model: model.trim() };
+}
+
+function matchCurrent() {
+  current = null;
+  if (deviceName) {
+    const pick = store.get('opendj-mapper:pick:' + deviceName);
+    if (pick) current = index.controllers.find((c) => norm(fullName(c)) === norm(pick.brand + pick.model)) || (pick.custom ? { ...pick, status: 'unknown' } : null);
+    if (!current) {
+      const dn = norm(deviceName); let best = 0;
+      for (const c of index.controllers) for (const m of c.midiNames || []) if (norm(m) && dn.includes(norm(m)) && norm(m).length > best) { best = norm(m).length; current = c; }
+    }
+  }
+  if (base && (!current || norm(fullName(base.entry)) !== norm(fullName(current)))) base = null;
+  renderController();
+}
+
+function renderController() {
+  const b = $('ctlBody');
+  if (!deviceName) { b.innerHTML = '<p class="muted">Plug in your controller to see whether OpenDJ already has a mapping for it.</p>'; return; }
+  const btn = (act, label, primary) => `<button data-act="${act}"${primary ? ' class="primary"' : ''}>${label}</button>`;
+  const st = current ? current.status : 'unknown';
+  let html = `<p><b>${esc(current ? fullName(current) : deviceName)}</b> ${badge(st)}${current ? ` <span class="tiny">MIDI name: ${esc(deviceName)}</span>` : ''}</p>`;
+  if (current?.note) html += `<p class="tiny">${esc(current.note)}</p>`;
+  if (st === 'verified' || (st === 'needs-verification' && current.file)) {
+    html += `<p class="muted">There is already a community mapping for it (${current.controls} controls${current.author ? `, by ${esc(current.author)}` : ''}${current.verifiedBy?.length ? `, verified by ${esc(current.verifiedBy.join(', '))}` : ''}).
+      ${base ? 'It is loaded below: move your controls to test it. Fix anything that is wrong, then submit your changes for review.' : 'Load it to test it on your controller.'}</p>`;
+    html += `<div class="row">${base ? btn('submit', 'Submit my changes for review', true) : btn('load', 'Load the mapping to test it', true)}
+      ${st === 'needs-verification' ? btn('verify', 'It works: verify it') : ''}${btn('report', 'Report a problem')}${btn('pick', 'Not this controller?')}</div>`;
+  } else if (st === 'needs-verification') {
+    html += `<p class="muted">OpenDJ has a built-in best-effort preset for it (Settings → Controllers → Preset). Test it in OpenDJ, then tell us whether it works. To fix controls, map them here and submit the changes.</p>
+      <div class="row">${btn('verify', 'It works: verify it', true)}${btn('report', 'Report a problem')}${btn('mapit', 'Map it here')}${btn('pick', 'Not this controller?')}</div>`;
+  } else if (st === 'wanted') {
+    html += `<p class="muted">Nobody has mapped this controller yet. You can be the first: run the guided setup, then contribute the mapping.</p>
+      <div class="row">${btn('mapit', 'Map it and contribute', true)}${btn('pick', 'Not this controller?')}</div>`;
+  } else if (current) {
+    html += `<p class="muted">You added this controller: it isn't in OpenDJ's list yet. Map it and contribute it, or just ask for it to be added so someone who owns one can map it.</p>
+      <div class="row">${btn('mapit', 'Map it and contribute', true)}${btn('request', 'Only request it')}${btn('rename', 'Change brand or model')}</div>`;
+  } else {
+    const g = guessController(deviceName);
+    html += `<p class="muted">OpenDJ doesn't recognise this controller. Which one is it? (Check the label on the controller or its box.)</p>
+      <div class="cgrid" style="max-width:460px; margin-bottom:8px">
+        <label for="iBrand">Brand</label><input type="text" id="iBrand" value="${esc(g.brand)}" placeholder="e.g. Numark" list="brandList">
+        <label for="iModel">Model</label><input type="text" id="iModel" value="${esc(g.model)}" placeholder="e.g. Mixtrack Pro FX">
+      </div>
+      <datalist id="brandList">${[...new Set([...index.controllers.map((c) => c.brand), ...BRANDS.map((b) => b[1])])].sort().map((b) => `<option value="${esc(b)}">`).join('')}</datalist>
+      <div class="row">${btn('identify', 'This is my controller', true)}${btn('pick', 'Pick from the list')}</div>`;
+  }
+  b.innerHTML = html;
+}
+
+$('ctlBody').addEventListener('click', (ev) => {
+  const a = ev.target.closest('button[data-act]')?.dataset.act; if (!a) return;
+  if (a === 'load') loadCommunity(current);
+  else if (a === 'submit') submitChange('Improvement');
+  else if (a === 'verify') submitChange('Verification');
+  else if (a === 'report') submitChange('Bug');
+  else if (a === 'pick') openList();
+  else if (a === 'add') openAdd();
+  else if (a === 'mapit') mapIt(current);
+  else if (a === 'request') ISSUE({ template: 'controller-request.yml', title: `Add controller: ${fullName(current)}`, brand: current.brand, model: current.model, 'midi-name': deviceName });
+  else if (a === 'rename') { store.set('opendj-mapper:pick:' + deviceName, null); matchCurrent(); }
+  else if (a === 'identify') {
+    const brand = $('iBrand').value.trim().replace(/\s+/g, ' '), model = $('iModel').value.trim().replace(/\s+/g, ' ');
+    if (!brand || !model) { toast('Fill in the brand and model'); (brand ? $('iModel') : $('iBrand')).focus(); return; }
+    const known = index.controllers.find((c) => norm(fullName(c)) === norm(brand + model));
+    store.set('opendj-mapper:pick:' + deviceName, known ? { brand: known.brand, model: known.model } : { brand, model, custom: true });
+    matchCurrent();
+    toast(known ? `Found ${fullName(known)} in the list` : `Saved: ${brand} ${model}`);
+  }
+});
+
+function mapIt(c) {
+  if (c) { $('cBrand').value = c.brand; $('cModel').value = c.model; for (const id of ['cBrand', 'cModel']) store.set('opendj-mapper:' + id, $(id).value); }
+  if (!$('mapName').value.trim() || $('mapName').value.trim() === deviceName) { $('mapName').value = c ? fullName(c) : deviceName; changed(false); }
+  $('contrib').open = true;
+  $('learn').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  setResult('Run the guided setup (or click functions on the left). When you are done, open "Contribute this mapping" below.', 'ok');
+}
+
+async function loadCommunity(c) {
+  if (!c?.file) return;
+  if (mapping.entries.length && !saved() && !confirm('Replace the controls you mapped here with the community mapping?')) return;
+  try {
+    const r = await fetch(RAW + c.file.split('/').map(encodeURIComponent).join('/'), { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const m = await r.json();
+    const entries = (m.entries || []).filter((e) => e && typeof e.key === 'string' && typeof e.target === 'string');
+    stopGuided(false); stopLearn();
+    mapping = { name: m.name || fullName(c), entries: structuredClone(entries) };
+    base = { entry: c, entries, contributed: m.contributed || {} };
+    $('mapName').value = mapping.name;
+    $('cBrand').value = c.brand; $('cModel').value = c.model;
+    lastSaved = JSON.stringify(mapping.entries);
+    changed(); renderController();
+    toast(`Loaded ${entries.length} controls. Move them to test.`);
+  } catch (e) { toast(`Couldn't download the mapping (${e.message}). Check your internet connection.`); }
+}
+
+/** Human-readable differences between the community mapping and the edited one, for reviewers. */
+function diffSummary(before, after) {
+  const lbl = (t) => BY_ID.get(t)?.label || t;
+  const desc = (e) => describeKey(e.key) + (e.lsbKey ? ' (14-bit)' : '') + (e.invert ? ' inverted' : '') + (e.rel ? ` rel:${e.rel}` : '');
+  const A = new Map(before.map((e) => [e.target, e])), B = new Map(after.map((e) => [e.target, e]));
+  const out = [];
+  for (const [t, e] of B) { const o = A.get(t); if (!o) out.push(`+ ${lbl(t)}: ${desc(e)}`); else if (desc(o) !== desc(e)) out.push(`~ ${lbl(t)}: ${desc(o)} → ${desc(e)}`); }
+  for (const [t, e] of A) if (!B.has(t)) out.push(`- ${lbl(t)}: ${desc(e)}`);
+  return out;
+}
+
+function submitChange(kind) {
+  const c = current || { brand: $('cBrand').value.trim(), model: $('cModel').value.trim() };
+  if (!c.brand || !c.model) { toast('Pick your controller from the list first'); openList(); return; }
+  let changes = [];
+  if (kind === 'Improvement') {
+    if (!mapping.entries.length) { toast('Map or load some controls first'); return; }
+    changes = base ? diffSummary(base.entries, mapping.entries) : mapping.entries.map((e) => `+ ${BY_ID.get(e.target)?.label || e.target}: ${describeKey(e.key)}`);
+    if (base && !changes.length) { toast('Nothing changed yet. Re-learn or edit controls first, or use "It works: verify it".'); return; }
+    if (!$('cCc0').checked) { $('contrib').open = true; toast('Tick the CC0 box under "Contribute this mapping" first'); $('cCc0').focus(); return; }
+    const prev = base?.contributed || {};
+    const contributed = { ...prev, brand: c.brand, model: c.model, license: 'CC0-1.0', tool: 'OpenDJ Controller Mapper @@VERSION@@',
+      changedBy: [...(prev.changedBy || []), $('cAuthor').value.trim() || 'anonymous'], verifiedBy: [] };
+    const f = mappingFile({ contributed });
+    lastFile = f.json;
+    download(`${safeName(`${c.brand}-${c.model}`)}.opendj-midi.json`, f.json, 'application/json');
+    if (log.length) setTimeout(() => $('btnLog').click(), 400);
+    lastSaved = JSON.stringify(mapping.entries);
+  }
+  const text = changes.slice(0, 40).join('\n') + (changes.length > 40 ? `\n…and ${changes.length - 40} more` : '');
+  const tested = $('cOs').value.trim();
+  if (kind === 'Verification') { ISSUE({ template: 'controller-verification.yml', title: `Verified mapping: ${fullName(c)}`, brand: c.brand, model: c.model, 'tested-on': tested }); return; }
+  if (kind === 'Bug') { ISSUE({ template: 'controller-mapping-change.yml', title: `Mapping problem: ${fullName(c)}`, brand: c.brand, model: c.model, 'tested-on': tested }); return; }
+  const inline = ISSUE({ template: 'controller-mapping-change.yml', title: `Mapping change: ${fullName(c)}`, brand: c.brand, model: c.model, 'tested-on': tested, changes: text }, lastFile);
+  setResult(inline ? 'The GitHub form opened with your changes filled in: tick the CC0 box and click Create. Someone else with this controller will verify them before they are merged.'
+    : 'Your mapping is too big to fill in automatically: drag the .opendj-midi.json file (just saved) into the Mapping box of the GitHub form.', 'ok');
+}
+
+function renderList() {
+  if (!$('listDlg').open) return;
+  const q = norm($('listSearch').value), f = $('listFilter').value;
+  const rows = index.controllers.filter((c) => (!q || norm(fullName(c)).includes(q)) && (!f || c.status === f));
+  $('listRows').innerHTML = rows.map((c) => {
+    const i = index.controllers.indexOf(c);
+    return `<tr><td><b>${esc(c.brand)}</b> ${esc(c.model)}${c.controls ? ` <span class="tiny">${c.controls} controls</span>` : ''}${c.note ? `<div class="tiny">${esc(c.note)}</div>` : ''}</td><td>${badge(c.status)}</td>
+      <td style="white-space:nowrap">${deviceName ? `<button class="small" data-pick="${i}">This is mine</button>` : ''}</td></tr>`;
+  }).join('') || '<tr><td colspan="3" class="muted">No controllers match. Add it below.</td></tr>';
+}
+function openList() { $('listDlg').showModal(); renderList(); $('listSearch').focus(); }
+$('btnList').onclick = openList;
+$('listSearch').oninput = renderList; $('listFilter').onchange = renderList;
+$('listRows').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-pick]'); if (!b) return;
+  const c = index.controllers[+b.dataset.pick];
+  store.set('opendj-mapper:pick:' + deviceName, { brand: c.brand, model: c.model });
+  $('listDlg').close(); matchCurrent();
+  toast(`${deviceName} is a ${fullName(c)}`);
+});
+function openAdd() {
+  if ($('listDlg').open) $('listDlg').close();
+  if (!$('aMidi').value) $('aMidi').value = deviceName;
+  $('addDlg').showModal(); $('aBrand').focus();
+}
+$('btnAdd').onclick = openAdd; $('btnAdd2').onclick = openAdd;
+const addFields = () => {
+  const brand = $('aBrand').value.trim(), model = $('aModel').value.trim();
+  if (!brand || !model) { toast('Fill in the brand and model'); (brand ? $('aModel') : $('aBrand')).focus(); return null; }
+  const dup = index.controllers.find((c) => norm(fullName(c)) === norm(brand + model));
+  return { brand, model, midi: $('aMidi').value.trim(), dup };
+};
+$('btnAddMap').onclick = () => {
+  const a = addFields(); if (!a) return;
+  if (deviceName) store.set('opendj-mapper:pick:' + deviceName, { brand: a.brand, model: a.model, custom: true, midiNames: [a.midi].filter(Boolean) });
+  $('addDlg').close(); matchCurrent();
+  if (a.dup && a.dup.status !== 'wanted') { toast(`${fullName(a.dup)} is already in the list`); return; }
+  mapIt(a);
+};
+$('btnAddReq').onclick = () => {
+  const a = addFields(); if (!a) return;
+  if (a.dup) { toast(`${fullName(a.dup)} is already in the list (${STATUS[a.dup.status]})`); return; }
+  ISSUE({ template: 'controller-request.yml', title: `Add controller: ${a.brand} ${a.model}`, brand: a.brand, model: a.model, 'midi-name': a.midi });
+  $('addDlg').close();
+};
+for (const d of document.querySelectorAll('dialog')) d.addEventListener('click', (ev) => { if (ev.target.matches('[data-close]') || ev.target === d) d.close(); });
+
+// ---------- inside OpenDJ: opened from Settings → Controllers ----------
+const params = new URLSearchParams(location.search);
+const wantDevice = params.get('device') || '';
+const host = (() => { try { return location.protocol.startsWith('http') && window.opener && window.opener.location.origin === location.origin ? window.opener : null; } catch { return null; } })();
+if (host) {
+  $('btnApply').hidden = false;
+  $('btnSave').classList.remove('primary');
+  $('helpUse').open = false;
+  $('helpUse').querySelector('summary').textContent = 'Using the mapping in OpenDJ (or on another computer)';
+  addEventListener('message', (ev) => {
+    if (ev.origin !== location.origin || ev.source !== host || ev.data?.type !== 'opendj-mapper:mapping') return;
+    const { device, mapping: m } = ev.data;
+    if (!device || device !== deviceName || !Array.isArray(m?.entries)) return;
+    if (!m.entries.length) return;
+    stopGuided(false); stopLearn();
+    mapping = { name: m.name || device, entries: structuredClone(m.entries) };
+    $('mapName').value = mapping.name;
+    lastSaved = JSON.stringify(mapping.entries);
+    changed();
+    toast(`Loaded your current OpenDJ mapping (${m.entries.length} controls)`);
+  });
+}
+const askHost = () => host && deviceName && host.postMessage({ type: 'opendj-mapper:hello', device: deviceName }, location.origin);
+$('btnApply').onclick = () => {
+  if (!host || host.closed) { toast('OpenDJ was closed. Use Save mapping instead.'); return; }
+  if (!deviceName) { toast('No controller selected'); return; }
+  host.postMessage({ type: 'opendj-mapper:apply', device: deviceName, mapping: { name: $('mapName').value.trim() || deviceName, entries: mapping.entries } }, location.origin);
+  lastSaved = JSON.stringify(mapping.entries);
+  toast('Applied in OpenDJ');
+};
+
+addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && learn) { $('btnCancel').click(); }
+});
+addEventListener('beforeunload', (ev) => { if (mapping.entries.length && !saved()) { ev.preventDefault(); } });
+let lastSaved = '';
+const saved = () => lastSaved === JSON.stringify(mapping.entries);
+$('btnSave').addEventListener('click', () => { lastSaved = JSON.stringify(mapping.entries); });
+
+renderFuncs(); renderRows(); renderController(); initMidi(); syncIndex();
+</script>
+</body>
+</html>

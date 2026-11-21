@@ -1,0 +1,47 @@
+name: New controller mapping
+description: Share a mapping for a controller that OpenDJ doesn't have yet (made with the Controller Mapper or MIDI Learn)
+title: "Controller mapping: "
+labels: ["controller-mapping"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for mapping a controller! The **Controller Mapper** (OpenDJ → Settings → Controllers → Controller Mapper,
+        or `OpenDJ-Controller-Mapper.html` from the latest release) fills this form in for you.
+        A bot checks the mapping and opens a pull request. It is marked *needs verification* until someone else with
+        the same controller confirms it works.
+  - type: input
+    id: brand
+    attributes: { label: Brand, placeholder: Pioneer DJ }
+    validations: { required: true }
+  - type: input
+    id: model
+    attributes: { label: Model, placeholder: DDJ-FLX4 }
+    validations: { required: true }
+  - type: input
+    id: midi-name
+    attributes:
+      label: MIDI name
+      description: The name your computer shows for the controller (Settings → Controllers). Used to recognise it automatically.
+  - type: input
+    id: tested-on
+    attributes: { label: Tested on, placeholder: "Windows 11, OpenDJ 0.4.2" }
+  - type: textarea
+    id: mapping
+    attributes:
+      label: Mapping
+      description: The mapping JSON. If the Mapper couldn't fit it here, drag the saved .opendj-midi.json file into this box instead.
+      render: json
+    validations: { required: true }
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: What works, what doesn't, controls you skipped, special modes (e.g. "hold SHIFT + PLAY while plugging in"). You can also drag the MIDI log here.
+  - type: checkboxes
+    id: license
+    attributes:
+      label: Licence
+      options:
+        - label: I made this mapping myself and release it under CC0 1.0 (public domain), so it can be bundled with OpenDJ.
+          required: true

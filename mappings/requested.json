@@ -1,0 +1,20 @@
+{
+  "about": "Controllers people want mapped but that have no community mapping in mappings/ yet. Add one with the Controller Mapper (Add a controller) or a pull request. midiNames are parts of the MIDI port name the controller reports, used to recognise it when it is plugged in.",
+  "controllers": [
+    { "brand": "Pioneer DJ", "model": "DDJ-FLX4", "midiNames": ["DDJ-FLX4"], "status": "needs-verification", "note": "A best-effort preset is built into OpenDJ. Test it and send fixes." },
+    { "brand": "Pioneer DJ", "model": "DDJ-400", "midiNames": ["DDJ-400"], "status": "needs-verification", "note": "A best-effort preset is built into OpenDJ. Test it and send fixes." },
+    { "brand": "Pioneer DJ", "model": "DDJ-200", "midiNames": ["DDJ-200"] },
+    { "brand": "Pioneer DJ", "model": "DDJ-FLX2", "midiNames": ["DDJ-FLX2"] },
+    { "brand": "Pioneer DJ", "model": "DDJ-FLX6", "midiNames": ["DDJ-FLX6"] },
+    { "brand": "Numark", "model": "Mixtrack Platinum FX", "midiNames": ["Mixtrack Platinum FX"] },
+    { "brand": "Numark", "model": "Mixtrack Pro FX", "midiNames": ["Mixtrack Pro FX"] },
+    { "brand": "Numark", "model": "Party Mix", "midiNames": ["Party Mix"] },
+    { "brand": "Hercules", "model": "DJControl Inpulse 200", "midiNames": ["Inpulse 200"] },
+    { "brand": "Hercules", "model": "DJControl Inpulse 300", "midiNames": ["Inpulse 300"] },
+    { "brand": "Hercules", "model": "DJControl Inpulse 500", "midiNames": ["Inpulse 500"] },
+    { "brand": "Hercules", "model": "DJControl Mix", "midiNames": ["DJControl Mix"] },
+    { "brand": "Denon DJ", "model": "MC7000", "midiNames": ["MC7000"] },
+    { "brand": "Reloop", "model": "Mixon 4", "midiNames": ["Mixon 4", "Mixon4"] },
+    { "brand": "Native Instruments", "model": "Traktor Kontrol S2 MK3", "midiNames": ["Traktor Kontrol S2 MK3"], "note": "Uses HID, not MIDI: map it in OpenDJ (Settings → Controllers → Learn)." }
+  ]
+}

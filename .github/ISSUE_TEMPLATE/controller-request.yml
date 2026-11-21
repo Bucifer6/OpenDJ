@@ -1,0 +1,21 @@
+name: Add a controller to the list
+description: Your controller isn't in OpenDJ's controller list yet. Add it so it shows as "needs a mapping"
+title: "Add controller: "
+labels: ["controller-request"]
+body:
+  - type: input
+    id: brand
+    attributes: { label: Brand, placeholder: Numark }
+    validations: { required: true }
+  - type: input
+    id: model
+    attributes: { label: Model, placeholder: Mixtrack Pro FX }
+    validations: { required: true }
+  - type: input
+    id: midi-name
+    attributes:
+      label: MIDI name
+      description: The name your computer shows for the controller (Settings → Controllers in OpenDJ, or the Controller Mapper).
+  - type: textarea
+    id: notes
+    attributes: { label: Notes }

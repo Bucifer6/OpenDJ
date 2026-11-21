@@ -1,0 +1,1010 @@
+<!doctype html>
+<!-- OpenDJ Controller Mapper. Built from tools/controller-mapper/template.html by scripts/build-controller-mapper.mjs: edit the template, not public/controller-mapper.html -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-gZr6/E0d3FG0+Cj4nAq/unYY5tphQTd83Hf53uxHv3s=' 'sha256-hg5XRBLaofYLgIetEQbxZZ0nqiTmp45UMDSScK4oEC8='; style-src 'unsafe-inline'; img-src data:; connect-src https://raw.githubusercontent.com; base-uri 'none'; form-action 'none'">
+<title>OpenDJ Controller Mapper</title>
+<style>
+:root {
+  --bg: #f4f6f9; --panel: #ffffff; --panel-2: #eef1f5; --line: #d9dee6; --text: #141922; --text-2: #556070; --text-3: #8590a0;
+  --accent: #1f7ae0; --on-accent: #ffffff; --green: #138a4a; --red: #d0283a; --amber: #a86400; --flash: #fff1c2; --sel: #dcebff;
+  --font: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; --mono: Consolas, "SF Mono", "JetBrains Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #090b0e; --panel: #111419; --panel-2: #171b21; --line: #2a313b; --text: #e9edf2; --text-2: #9ea8b6; --text-3: #6a7584;
+    --accent: #3d9cff; --on-accent: #03111f; --green: #2fd67b; --red: #ff5a6a; --amber: #ffb224; --flash: #3a3210; --sel: #1b3352;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #090b0e; --panel: #111419; --panel-2: #171b21; --line: #2a313b; --text: #e9edf2; --text-2: #9ea8b6; --text-3: #6a7584;
+  --accent: #3d9cff; --on-accent: #03111f; --green: #2fd67b; --red: #ff5a6a; --amber: #ffb224; --flash: #3a3210; --sel: #1b3352;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 var(--font); }
+button, select, input { font: inherit; color: inherit; }
+button { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+button.small { padding: 2px 8px; font-size: 12px; }
+button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+select, input[type=text], input[type=search] { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 0; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 17px; margin: 0 8px 0 0; white-space: nowrap; }
+header h1 small { color: var(--text-3); font-weight: 400; font-size: 12px; margin-left: 4px; }
+header label { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 13px; }
+header .grow { flex: 1; }
+#status { font-size: 13px; color: var(--text-2); }
+#status.err { color: var(--red); }
+#status.ok { color: var(--green); }
+main { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(260px, 340px); gap: 12px; padding: 12px 16px; align-items: start; }
+@media (max-width: 1100px) { main { grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); } #monitorCard { grid-column: 1 / -1; } }
+@media (max-width: 720px) { main { grid-template-columns: minmax(0, 1fr); padding: 12px 16px; } header { padding: 12px 16px; } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0; }
+.card h2 { font-size: 14px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+.card h2 .grow { flex: 1; }
+.muted { color: var(--text-2); }
+.tiny { font-size: 12px; color: var(--text-3); }
+#funcs { max-height: calc(100vh - 210px); overflow: auto; margin-top: 8px; }
+@media (max-width: 720px) { #funcs { max-height: 50vh; } }
+details.group { border-top: 1px solid var(--line); }
+details.group summary { cursor: pointer; padding: 6px 2px; font-weight: 600; font-size: 13px; display: flex; gap: 6px; }
+details.group summary .count { color: var(--text-3); font-weight: 400; margin-left: auto; }
+.fn { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; background: none; border: 1px solid transparent; border-radius: 5px; padding: 4px 6px; font-size: 13px; }
+.fn:hover { background: var(--panel-2); border-color: var(--line); }
+.fn.mapped .lbl::before { content: "✓ "; color: var(--green); font-weight: 700; }
+.fn .lbl { flex: 1; min-width: 0; }
+.kind { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; white-space: nowrap; }
+#learn { border: 2px solid var(--line); }
+#learn.active { border-color: var(--accent); }
+#learnTitle { font-size: 18px; font-weight: 600; margin: 2px 0; }
+#learnHint { color: var(--text-2); margin: 0 0 10px; }
+#learnResult { min-height: 1.4em; margin-top: 8px; font-size: 13px; }
+#learnResult.ok { color: var(--green); } #learnResult.err { color: var(--red); } #learnResult.warn { color: var(--amber); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.progress { height: 4px; background: var(--panel-2); border-radius: 2px; overflow: hidden; margin: 8px 0 4px; }
+.progress div { height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+.pulse { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite; vertical-align: middle; margin-right: 6px; }
+@keyframes pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } .progress div { transition: none; } }
+.tablewrap { overflow-x: auto; position: relative; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-weight: 600; color: var(--text-2); font-size: 12px; padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+td.key { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+td.val { font-family: var(--mono); font-size: 12px; width: 3.5em; text-align: right; color: var(--text-2); }
+tr.flash td { background: var(--flash); }
+tr.dup td.key { color: var(--amber); }
+td select { padding: 2px 4px; font-size: 12px; }
+#empty { padding: 16px 4px; }
+#monitor { font-family: var(--mono); font-size: 12px; height: calc(100vh - 230px); min-height: 200px; overflow: auto; background: var(--panel-2); border-radius: 6px; padding: 6px; }
+@media (max-width: 1100px) { #monitor { height: 260px; } }
+#monitor div { white-space: nowrap; }
+#monitor .t { color: var(--text-3); }
+#monitor .off { color: var(--text-3); }
+.help { margin-top: 12px; }
+.help summary { cursor: pointer; font-weight: 600; }
+.help ol { padding-left: 20px; margin: 8px 0; }
+.help li { margin: 4px 0; }
+kbd { font-family: var(--mono); font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+#toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity .2s; max-width: calc(100vw - 32px); }
+#toast.show { opacity: 1; }
+.cgrid { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; align-items: center; }
+@media (max-width: 520px) { .cgrid { grid-template-columns: 1fr; gap: 2px; } .cgrid input, .cgrid textarea { margin-bottom: 6px; } }
+.badge { display: inline-block; font-size: 11px; font-weight: 600; border-radius: 10px; padding: 1px 8px; white-space: nowrap; border: 1px solid currentColor; }
+.badge.verified { color: var(--green); } .badge.needs-verification { color: var(--amber); } .badge.wanted { color: var(--accent); } .badge.unknown { color: var(--text-3); }
+#ctlBody p { margin: 4px 0 8px; }
+dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 16px; width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
+dialog::backdrop { background: rgba(0, 0, 0, .45); }
+dialog h3 { margin: 0 0 10px; font-size: 16px; display: flex; gap: 8px; align-items: center; }
+dialog h3 .grow { flex: 1; }
+#listWrap { max-height: 55vh; overflow: auto; margin-top: 8px; position: relative; }
+#listRows td { padding: 6px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<header>
+  <h1>OpenDJ Controller Mapper <small>v0.4.2</small></h1>
+  <label>Controller <select id="device" aria-label="MIDI controller"><option value="">No controller found</option></select></label>
+  <label>Mapping name <input type="text" id="mapName" placeholder="My controller" size="16"></label>
+  <span id="status">Starting…</span>
+  <span class="grow"></span>
+  <button id="btnOpen" title="Open an existing .opendj-midi.json mapping to keep editing it">Open…</button>
+  <button id="btnApply" class="primary" hidden title="Use this mapping in OpenDJ right away">Apply to OpenDJ</button>
+  <button id="btnSave" class="primary" title="Save the mapping as a file you can import in OpenDJ">Save mapping</button>
+  <input type="file" id="file" accept=".json,application/json" hidden>
+</header>
+
+<main>
+  <section class="card" aria-labelledby="fnHead">
+    <h2 id="fnHead">Functions</h2>
+    <input type="search" id="search" placeholder="Search, e.g. play, eq low, hot cue" aria-label="Search functions" style="width:100%">
+    <div class="tiny" style="margin-top:6px">Click a function, then move the control on your controller.</div>
+    <div id="funcs"></div>
+  </section>
+
+  <div style="display:grid; gap:12px; min-width:0">
+    <section class="card" id="ctl" aria-labelledby="ctlHead">
+      <h2 id="ctlHead">Your controller <span class="grow"></span>
+        <button class="small" id="btnList">All controllers</button>
+        <button class="small" id="btnAdd">Add a controller</button></h2>
+      <div id="ctlBody" aria-live="polite"></div>
+      <div class="tiny" id="syncLine"></div>
+    </section>
+
+    <section class="card" id="learn" aria-live="polite">
+      <div class="row">
+        <div style="flex:1; min-width:0">
+          <div class="tiny" id="learnStep">Ready</div>
+          <div id="learnTitle">Pick a function, or start the guided setup</div>
+          <p id="learnHint">The guided setup walks you through the main controls of a 2- or 4-deck controller one by one. You can skip any control it doesn't have.</p>
+        </div>
+      </div>
+      <div class="progress" id="progress" hidden><div></div></div>
+      <div class="row">
+        <button id="btnGuided" class="primary">Start guided setup</button>
+        <label class="muted" style="display:flex; gap:6px; align-items:center">Decks
+          <select id="deckCount" aria-label="Number of decks on the controller"><option>2</option><option>4</option></select></label>
+        <button id="btnBack" hidden>Back</button>
+        <button id="btnSkip" hidden>Skip</button>
+        <button id="btnDone" hidden title="Finish capturing now">Done moving</button>
+        <button id="btnCancel" hidden>Stop</button>
+      </div>
+      <div id="learnResult"></div>
+    </section>
+
+    <section class="card" aria-labelledby="mapHead">
+      <h2 id="mapHead">Mapping <span class="tiny" id="mapCount"></span><span class="grow"></span>
+        <button class="small" id="btnClear" title="Remove every mapped control">Clear all</button></h2>
+      <div class="tiny" style="margin-bottom:6px">Move any mapped control to test it: its row lights up and shows the value.</div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Control</th><th>Function</th><th>Value</th><th>Options</th><th><span class="sr">Actions</span></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div id="empty" class="muted">Nothing mapped yet.</div>
+
+      <details class="help" id="helpUse" open>
+        <summary>Using the mapping in OpenDJ</summary>
+        <ol>
+          <li>Click <b>Save mapping</b>. You get a file ending in <kbd>.opendj-midi.json</kbd>.</li>
+          <li>In OpenDJ open <b>Settings → Controllers</b> and select your controller.</li>
+          <li>Click <b>Import</b> and choose the saved file. The mapping loads automatically every time you plug the controller in.</li>
+        </ol>
+        <div class="tiny">Close OpenDJ (or any other DJ app) while mapping: on Windows only one program can use a MIDI controller at a time.
+          Needs Google Chrome or Microsoft Edge. Everything stays on this computer; nothing is uploaded.
+        </div>
+      </details>
+
+      <details class="help" id="contrib">
+        <summary>Contribute this mapping to OpenDJ</summary>
+        <p class="muted" style="margin:8px 0">Mapped a controller that OpenDJ doesn't support yet? Share it so it works out of the box for everyone.
+          Mappings in the OpenDJ repository are released under CC0 (public domain), so anyone can use and improve them.</p>
+        <div class="cgrid">
+          <label for="cBrand">Brand</label><input type="text" id="cBrand" placeholder="e.g. Pioneer DJ">
+          <label for="cModel">Model</label><input type="text" id="cModel" placeholder="e.g. DDJ-FLX4">
+          <label for="cAuthor">Your name or GitHub user</label><input type="text" id="cAuthor" placeholder="optional">
+          <label for="cOs">Tested on</label><input type="text" id="cOs" placeholder="e.g. Windows 11, OpenDJ 0.4.2">
+          <label for="cNotes" style="align-self:start">Notes</label><textarea id="cNotes" rows="3" placeholder="What works, what doesn't, controls you skipped, firmware mode…" style="font:inherit; background:var(--panel); color:inherit; border:1px solid var(--line); border-radius:6px; padding:6px 8px; min-width:0"></textarea>
+        </div>
+        <label class="muted" style="display:flex; gap:6px; align-items:center; margin:8px 0"><input type="checkbox" id="cCc0"> I agree to release this mapping under CC0 1.0 (public domain)</label>
+        <div class="row">
+          <button id="btnContrib" class="primary">Save files and open the submission form</button>
+        </div>
+        <div class="tiny" style="margin-top:6px">This opens a GitHub form in your browser with the mapping already filled in (needs a free GitHub account): check it and click <b>Create</b>.
+          A bot checks the mapping and opens a pull request; it shows as "needs verification" until someone else with the same controller confirms it.
+          A copy of the mapping and a MIDI log are also saved on this computer. Comfortable with git? See mappings/README.md for pull requests.</div>
+      </details>
+    </section>
+  </div>
+
+  <section class="card" id="monitorCard" aria-labelledby="monHead">
+    <h2 id="monHead">MIDI monitor <span class="grow"></span>
+      <button class="small" id="btnPause" aria-pressed="false">Pause</button>
+      <button class="small" id="btnLog" title="Save the captured messages as a text file (useful for bug reports)">Save log</button></h2>
+    <div id="monitor" role="log" aria-label="Incoming MIDI messages"><div class="muted">Move a control on your controller…</div></div>
+  </section>
+</main>
+<dialog id="listDlg" aria-labelledby="listHead">
+  <h3 id="listHead">Controllers in OpenDJ <span class="grow"></span><button class="small" data-close>Close</button></h3>
+  <div class="row">
+    <input type="search" id="listSearch" placeholder="Search brand or model" aria-label="Search controllers" style="flex:1">
+    <select id="listFilter" aria-label="Filter by status">
+      <option value="">All</option><option value="wanted">Needs a mapping</option><option value="needs-verification">Needs verification</option><option value="verified">Verified</option>
+    </select>
+  </div>
+  <div id="listWrap"><table><thead><tr><th>Controller</th><th>Status</th><th><span class="sr">Actions</span></th></tr></thead><tbody id="listRows"></tbody></table></div>
+  <div class="row" style="margin-top:10px"><span class="tiny" style="flex:1">Not listed? Add it so others can see it is wanted, or map it yourself.</span><button id="btnAdd2">Add a controller</button></div>
+</dialog>
+
+<dialog id="addDlg" aria-labelledby="addHead">
+  <h3 id="addHead">Add a controller <span class="grow"></span><button class="small" data-close>Close</button></h3>
+  <p class="muted" style="margin-top:0">Add a brand and model that isn't in the list yet.</p>
+  <div class="cgrid">
+    <label for="aBrand">Brand</label><input type="text" id="aBrand" placeholder="e.g. Numark">
+    <label for="aModel">Model</label><input type="text" id="aModel" placeholder="e.g. Mixtrack Pro FX">
+    <label for="aMidi">MIDI name</label><input type="text" id="aMidi" placeholder="the name your computer shows for it">
+  </div>
+  <div class="row" style="margin-top:12px">
+    <button class="primary" id="btnAddMap">I'll map it now</button>
+    <button id="btnAddReq" title="Opens a GitHub form so the controller is added to the wanted list">Only request it</button>
+  </div>
+  <div class="tiny" style="margin-top:6px">Mapping it now: run the guided setup, then use <b>Contribute this mapping</b>. Requesting it adds it to the list as "needs a mapping" for someone who owns one.</div>
+</dialog>
+
+<div id="toast" role="status"></div>
+
+<script>
+// Guided mapping: the core controls in a fixed order, plus detection of what kind of MIDI message a control sends.
+
+/** Steps for the guided setup. Each: { target, kind, title, hint, section } */
+function wizardSteps(deckCount = 2) {
+  const S = [];
+  const add = (target, kind, title, hint, section) => S.push({ target, kind, title, hint, section });
+  const side = (n) => (deckCount > 2 ? `deck ${n}` : n === 1 ? 'left deck' : 'right deck');
+  for (let n = 1; n <= Math.min(deckCount, 4); n++) {
+    const P = `deck${n}`, sec = `Deck ${n}`;
+    add(`${P}.play`, 'button', 'Play / Pause', `Press PLAY on the ${side(n)}.`, sec);
+    add(`${P}.cue`, 'button', 'Cue', `Press CUE on the ${side(n)}.`, sec);
+    add(`${P}.sync`, 'button', 'Sync', `Press SYNC on the ${side(n)}.`, sec);
+    add(`${P}.jogTouch`, 'button', 'Jog wheel touch', `Touch the top of the ${side(n)} jog wheel (and let go). Skip if it has no touch sensor.`, sec);
+    add(`${P}.jog`, 'rel', 'Jog wheel', `Spin the ${side(n)} jog wheel a little, in either direction.`, sec);
+    add(`${P}.tempo`, 'abs', 'Tempo fader', `Move the ${side(n)} tempo (pitch) fader from one end to the other.`, sec);
+    for (let p = 1; p <= 8; p++) add(`${P}.pad${p}`, 'button', `Performance pad ${p}`, `Press pad ${p} on the ${side(n)} (top row left to right, then bottom row).`, sec);
+  }
+  for (let n = 1; n <= Math.min(deckCount, 4); n++) {
+    const M = `mixer${n}`, sec = 'Mixer';
+    add(`${M}.volume`, 'abs', `Channel ${n} fader`, `Move the channel ${n} volume fader up and down.`, sec);
+    add(`${M}.eqHigh`, 'abs', `Channel ${n} EQ high`, `Turn the channel ${n} HIGH (treble) EQ knob.`, sec);
+    add(`${M}.eqMid`, 'abs', `Channel ${n} EQ mid`, `Turn the channel ${n} MID EQ knob.`, sec);
+    add(`${M}.eqLow`, 'abs', `Channel ${n} EQ low`, `Turn the channel ${n} LOW (bass) EQ knob.`, sec);
+    add(`${M}.filter`, 'abs', `Channel ${n} filter`, `Turn the channel ${n} FILTER (or Color FX) knob.`, sec);
+  }
+  add('mixer.crossfader', 'abs', 'Crossfader', 'Move the crossfader from side to side.', 'Mixer');
+  add('browser.scroll', 'rel', 'Browse encoder', 'Turn the BROWSE / track select knob a few clicks.', 'Browser');
+  for (let n = 1; n <= Math.min(deckCount, 4); n++) add(`deck${n}.load`, 'button', `Load deck ${n}`, `Press the LOAD button for deck ${n}.`, 'Browser');
+  add('global.shift', 'button', 'Shift', 'Press SHIFT (any one).', 'Global');
+  return S;
+}
+
+/**
+ * Decide how a run of CC (or pitch-bend) values should be read.
+ * Returns { kind: 'abs' } or { kind: 'rel', rel: 'twos'|'offset'|'wrap' }.
+ * Relative encoders repeat the same few values (1/127 or 63/65); faders and knobs sweep through many values.
+ */
+function classifyCcValues(values, expected = null) {
+  const v = values.filter((x) => x != null);
+  if (!v.length) return { kind: expected === 'rel' ? 'rel' : 'abs', ...(expected === 'rel' ? { rel: 'offset' } : {}) };
+  let repeats = 0;
+  for (let i = 1; i < v.length; i++) if (v[i] === v[i - 1]) repeats++;
+  const distinct = new Set(v).size;
+  const twosLike = v.every((x) => (x >= 1 && x <= 20) || (x >= 108 && x <= 127));
+  const offsetLike = v.every((x) => Math.abs(x - 64) <= 20) && !v.every((x) => x === 64);
+  const encoderish = repeats > 0 || distinct <= 3;
+  // a position counter that wraps 127 → 0 (or back): steady one-way movement with one big jump
+  const steps = [];
+  for (let i = 1; i < v.length; i++) { let d = v[i] - v[i - 1]; if (d > 64) d -= 128; if (d < -64) d += 128; steps.push(d); }
+  const jumps = v.some((x, i) => i && Math.abs(x - v[i - 1]) > 64);
+  if (jumps && distinct >= 4 && (steps.every((d) => d > 0) || steps.every((d) => d < 0))) return { kind: 'rel', rel: 'wrap' };
+  if (twosLike && (encoderish || expected === 'rel')) return { kind: 'rel', rel: 'twos' };
+  if (offsetLike && (encoderish || expected === 'rel')) return { kind: 'rel', rel: 'offset' };
+  if (expected === 'rel') {
+    return { kind: 'rel', rel: v.some((x) => x > 64) && v.some((x) => x < 64) && v.every((x) => Math.abs(x - 64) <= 40) ? 'offset' : 'twos' };
+  }
+  return { kind: 'abs' };
+}
+
+/**
+ * Work out which control the user moved from the MIDI messages captured during one wizard step.
+ * msgs: [{ key, type: 'note'|'cc'|'pitch', channel, number, value, isOff }]
+ * opts.kind: what the step expects ('button'|'abs'|'rel'); opts.exclude: keys already assigned in this run.
+ * Returns { key, lsbKey?, kind, rel?, type } or null.
+ */
+function detectMidiControl(msgs, { kind = null, exclude = new Set() } = {}) {
+  const usable = msgs.filter((m) => !exclude.has(m.key));
+  if (!usable.length) return null;
+  const by = new Map();
+  for (const m of usable) { if (!by.has(m.key)) by.set(m.key, []); by.get(m.key).push(m); }
+  const notes = [...by.keys()].filter((k) => k.startsWith('note:') && by.get(k).some((m) => !m.isOff));
+  const ctls = [...by.keys()].filter((k) => !k.startsWith('note:'));
+
+  if (kind === 'button' || (!kind && notes.length && !ctls.length)) {
+    if (notes.length) return { key: notes[0], kind: 'button', type: 'note' };
+    // CC buttons (127 on press, 0 on release)
+    const cc = ctls.find((k) => by.get(k).some((m) => m.value > 0)) || ctls[0];
+    return cc ? { key: cc, kind: 'button', type: by.get(cc)[0].type } : null;
+  }
+  if (!ctls.length) return notes.length ? { key: notes[0], kind: 'button', type: 'note' } : null;
+
+  // pitch bend is already 14-bit
+  const pitch = ctls.find((k) => k.startsWith('pitch:'));
+  if (pitch && kind !== 'rel') return { key: pitch, kind: 'abs', type: 'pitch' };
+
+  // 14-bit: MSB on CC n (0–31) and LSB on CC n+32, arriving together
+  const ccNum = (k) => +k.split(':')[2], ccCh = (k) => +k.split(':')[1];
+  const lsbOf = (k) => ctls.find((x) => x.startsWith('cc:') && ccCh(x) === ccCh(k) && ccNum(x) === ccNum(k) + 32);
+  // choose the busiest controller, preferring an MSB over its LSB
+  const ranked = ctls.slice().sort((a, b) => by.get(b).length - by.get(a).length);
+  let main = ranked[0];
+  const msbOfMain = ctls.find((x) => lsbOf(x) === main);
+  if (msbOfMain) main = msbOfMain;
+  const lsb = main.startsWith('cc:') && ccNum(main) < 32 ? lsbOf(main) : null;
+  const values = by.get(main).map((m) => m.value);
+  if (lsb && kind !== 'rel') return { key: main, lsbKey: lsb, kind: 'abs', type: 'cc' };
+  const c = classifyCcValues(values, kind);
+  return { key: main, kind: c.kind, ...(c.rel ? { rel: c.rel } : {}), type: by.get(main)[0].type };
+}
+
+/** Build the mapping entry for a detected control and the step's target. */
+function entryFor(det, step) {
+  const e = { key: det.key, target: step.target };
+  if (det.lsbKey) e.lsbKey = det.lsbKey;
+  if (step.kind === 'rel') e.rel = det.rel || 'offset';
+  else if (step.kind === 'abs' && det.kind === 'rel') e.rel = det.rel; // endless knob driving a fader target
+  return e;
+}
+
+</script>
+<script>
+'use strict';
+const TARGETS = [{"id":"deck1.play","label":"Deck 1 Play/Pause","kind":"button"},{"id":"deck1.cue","label":"Deck 1 Cue","kind":"button"},{"id":"deck1.sync","label":"Deck 1 Sync","kind":"button"},{"id":"deck1.master","label":"Deck 1 Set Master","kind":"button"},{"id":"deck1.keylock","label":"Deck 1 Key Lock","kind":"button"},{"id":"deck1.slip","label":"Deck 1 Slip","kind":"button"},{"id":"deck1.quantize","label":"Deck 1 Quantize","kind":"button"},{"id":"deck1.censor","label":"Deck 1 Censor (hold)","kind":"button"},{"id":"deck1.reverse","label":"Deck 1 Reverse (hold)","kind":"button"},{"id":"deck1.eject","label":"Deck 1 Eject","kind":"button"},{"id":"deck1.tempo","label":"Deck 1 Tempo fader","kind":"abs"},{"id":"deck1.tempoReset","label":"Deck 1 Tempo reset","kind":"button"},{"id":"deck1.tempoUp","label":"Deck 1 Tempo +0.5 %","kind":"button"},{"id":"deck1.tempoDown","label":"Deck 1 Tempo −0.5 %","kind":"button"},{"id":"deck1.bendUp","label":"Deck 1 Pitch bend +","kind":"button"},{"id":"deck1.bendDown","label":"Deck 1 Pitch bend −","kind":"button"},{"id":"deck1.jogTouch","label":"Deck 1 Jog touch","kind":"button"},{"id":"deck1.jog","label":"Deck 1 Jog platter (scratch when touched)","kind":"rel"},{"id":"deck1.jogRing","label":"Deck 1 Jog outer ring (nudge)","kind":"rel"},{"id":"deck1.jogSearch","label":"Deck 1 Jog search (fast seek)","kind":"rel"},{"id":"deck1.loopIn","label":"Deck 1 Loop in","kind":"button"},{"id":"deck1.loopOut","label":"Deck 1 Loop out","kind":"button"},{"id":"deck1.reloop","label":"Deck 1 Reloop/Exit","kind":"button"},{"id":"deck1.loop4","label":"Deck 1 Auto loop 4 beats","kind":"button"},{"id":"deck1.loopActivate","label":"Deck 1 Auto loop (last size)","kind":"button"},{"id":"deck1.loopHalve","label":"Deck 1 Loop ½","kind":"button"},{"id":"deck1.loopDouble","label":"Deck 1 Loop ×2","kind":"button"},{"id":"deck1.beatloop.0.03125","label":"Deck 1 Auto loop 1/32 beat","kind":"button"},{"id":"deck1.beatloop.0.0625","label":"Deck 1 Auto loop 1/16 beat","kind":"button"},{"id":"deck1.beatloop.0.125","label":"Deck 1 Auto loop 1/8 beat","kind":"button"},{"id":"deck1.beatloop.0.25","label":"Deck 1 Auto loop 1/4 beat","kind":"button"},{"id":"deck1.beatloop.0.5","label":"Deck 1 Auto loop 1/2 beat","kind":"button"},{"id":"deck1.beatloop.1","label":"Deck 1 Auto loop 1 beat","kind":"button"},{"id":"deck1.beatloop.2","label":"Deck 1 Auto loop 2 beats","kind":"button"},{"id":"deck1.beatloop.4","label":"Deck 1 Auto loop 4 beats","kind":"button"},{"id":"deck1.beatloop.8","label":"Deck 1 Auto loop 8 beats","kind":"button"},{"id":"deck1.beatloop.16","label":"Deck 1 Auto loop 16 beats","kind":"button"},{"id":"deck1.beatloop.32","label":"Deck 1 Auto loop 32 beats","kind":"button"},{"id":"deck1.beatloop.64","label":"Deck 1 Auto loop 64 beats","kind":"button"},{"id":"deck1.jumpBack","label":"Deck 1 Beat jump −4","kind":"button"},{"id":"deck1.jumpFwd","label":"Deck 1 Beat jump +4","kind":"button"},{"id":"deck1.jumpBack.0.5","label":"Deck 1 Beat jump −1/2","kind":"button"},{"id":"deck1.jumpFwd.0.5","label":"Deck 1 Beat jump +1/2","kind":"button"},{"id":"deck1.jumpBack.1","label":"Deck 1 Beat jump −1","kind":"button"},{"id":"deck1.jumpFwd.1","label":"Deck 1 Beat jump +1","kind":"button"},{"id":"deck1.jumpBack.2","label":"Deck 1 Beat jump −2","kind":"button"},{"id":"deck1.jumpFwd.2","label":"Deck 1 Beat jump +2","kind":"button"},{"id":"deck1.jumpBack.4","label":"Deck 1 Beat jump −4","kind":"button"},{"id":"deck1.jumpFwd.4","label":"Deck 1 Beat jump +4","kind":"button"},{"id":"deck1.jumpBack.8","label":"Deck 1 Beat jump −8","kind":"button"},{"id":"deck1.jumpFwd.8","label":"Deck 1 Beat jump +8","kind":"button"},{"id":"deck1.jumpBack.16","label":"Deck 1 Beat jump −16","kind":"button"},{"id":"deck1.jumpFwd.16","label":"Deck 1 Beat jump +16","kind":"button"},{"id":"deck1.jumpBack.32","label":"Deck 1 Beat jump −32","kind":"button"},{"id":"deck1.jumpFwd.32","label":"Deck 1 Beat jump +32","kind":"button"},{"id":"deck1.jumpBack.64","label":"Deck 1 Beat jump −64","kind":"button"},{"id":"deck1.jumpFwd.64","label":"Deck 1 Beat jump +64","kind":"button"},{"id":"deck1.load","label":"Deck 1 Load selected track","kind":"button"},{"id":"deck1.pad1","label":"Deck 1 Pad 1 (current pad mode)","kind":"button"},{"id":"deck1.hotcue1","label":"Deck 1 Hot cue A","kind":"button"},{"id":"deck1.hotcueClear1","label":"Deck 1 Delete hot cue A","kind":"button"},{"id":"deck1.roll1","label":"Deck 1 Loop roll 1/16","kind":"button"},{"id":"deck1.sampler1","label":"Sampler 1 (deck 1 pads)","kind":"button"},{"id":"deck1.beatjump1","label":"Deck 1 Beat jump pad 1","kind":"button"},{"id":"deck1.pad2","label":"Deck 1 Pad 2 (current pad mode)","kind":"button"},{"id":"deck1.hotcue2","label":"Deck 1 Hot cue B","kind":"button"},{"id":"deck1.hotcueClear2","label":"Deck 1 Delete hot cue B","kind":"button"},{"id":"deck1.roll2","label":"Deck 1 Loop roll 1/8","kind":"button"},{"id":"deck1.sampler2","label":"Sampler 2 (deck 1 pads)","kind":"button"},{"id":"deck1.beatjump2","label":"Deck 1 Beat jump pad 2","kind":"button"},{"id":"deck1.pad3","label":"Deck 1 Pad 3 (current pad mode)","kind":"button"},{"id":"deck1.hotcue3","label":"Deck 1 Hot cue C","kind":"button"},{"id":"deck1.hotcueClear3","label":"Deck 1 Delete hot cue C","kind":"button"},{"id":"deck1.roll3","label":"Deck 1 Loop roll 1/4","kind":"button"},{"id":"deck1.sampler3","label":"Sampler 3 (deck 1 pads)","kind":"button"},{"id":"deck1.beatjump3","label":"Deck 1 Beat jump pad 3","kind":"button"},{"id":"deck1.pad4","label":"Deck 1 Pad 4 (current pad mode)","kind":"button"},{"id":"deck1.hotcue4","label":"Deck 1 Hot cue D","kind":"button"},{"id":"deck1.hotcueClear4","label":"Deck 1 Delete hot cue D","kind":"button"},{"id":"deck1.roll4","label":"Deck 1 Loop roll 1/2","kind":"button"},{"id":"deck1.sampler4","label":"Sampler 4 (deck 1 pads)","kind":"button"},{"id":"deck1.beatjump4","label":"Deck 1 Beat jump pad 4","kind":"button"},{"id":"deck1.pad5","label":"Deck 1 Pad 5 (current pad mode)","kind":"button"},{"id":"deck1.hotcue5","label":"Deck 1 Hot cue E","kind":"button"},{"id":"deck1.hotcueClear5","label":"Deck 1 Delete hot cue E","kind":"button"},{"id":"deck1.roll5","label":"Deck 1 Loop roll 1","kind":"button"},{"id":"deck1.sampler5","label":"Sampler 5 (deck 1 pads)","kind":"button"},{"id":"deck1.beatjump5","label":"Deck 1 Beat jump pad 5","kind":"button"},{"id":"deck1.pad6","label":"Deck 1 Pad 6 (current pad mode)","kind":"button"},{"id":"deck1.hotcue6","label":"Deck 1 Hot cue F","kind":"button"},{"id":"deck1.hotcueClear6","label":"Deck 1 Delete hot cue F","kind":"button"},{"id":"deck1.roll6","label":"Deck 1 Loop roll 2","kind":"button"},{"id":"deck1.sampler6","label":"Sampler 6 (deck 1 pads)","kind":"button"},{"id":"deck1.beatjump6","label":"Deck 1 Beat jump pad 6","kind":"button"},{"id":"deck1.pad7","label":"Deck 1 Pad 7 (current pad mode)","kind":"button"},{"id":"deck1.hotcue7","label":"Deck 1 Hot cue G","kind":"button"},{"id":"deck1.hotcueClear7","label":"Deck 1 Delete hot cue G","kind":"button"},{"id":"deck1.roll7","label":"Deck 1 Loop roll 4","kind":"button"},{"id":"deck1.sampler7","label":"Sampler 7 (deck 1 pads)","kind":"button"},{"id":"deck1.beatjump7","label":"Deck 1 Beat jump pad 7","kind":"button"},{"id":"deck1.pad8","label":"Deck 1 Pad 8 (current pad mode)","kind":"button"},{"id":"deck1.hotcue8","label":"Deck 1 Hot cue H","kind":"button"},{"id":"deck1.hotcueClear8","label":"Deck 1 Delete hot cue H","kind":"button"},{"id":"deck1.roll8","label":"Deck 1 Loop roll 8","kind":"button"},{"id":"deck1.sampler8","label":"Sampler 8 (deck 1 pads)","kind":"button"},{"id":"deck1.beatjump8","label":"Deck 1 Beat jump pad 8","kind":"button"},{"id":"deck1.padMode.hotcue","label":"Deck 1 Pad mode: hotcue","kind":"button"},{"id":"deck1.padMode.roll","label":"Deck 1 Pad mode: roll","kind":"button"},{"id":"deck1.padMode.jump","label":"Deck 1 Pad mode: jump","kind":"button"},{"id":"deck1.padMode.sampler","label":"Deck 1 Pad mode: sampler","kind":"button"},{"id":"deck1.padMode.fx","label":"Deck 1 Pad mode: fx","kind":"button"},{"id":"deck1.keySync","label":"Deck 1 Key sync","kind":"button"},{"id":"deck1.keyUp","label":"Deck 1 Key +1 semitone","kind":"button"},{"id":"deck1.keyDown","label":"Deck 1 Key −1 semitone","kind":"button"},{"id":"deck1.keyReset","label":"Deck 1 Key reset","kind":"button"},{"id":"deck1.keyKnob","label":"Deck 1 Key knob (±12 semitones)","kind":"abs"},{"id":"deck1.slice1","label":"Deck 1 Slicer pad 1","kind":"button"},{"id":"deck1.slice2","label":"Deck 1 Slicer pad 2","kind":"button"},{"id":"deck1.slice3","label":"Deck 1 Slicer pad 3","kind":"button"},{"id":"deck1.slice4","label":"Deck 1 Slicer pad 4","kind":"button"},{"id":"deck1.slice5","label":"Deck 1 Slicer pad 5","kind":"button"},{"id":"deck1.slice6","label":"Deck 1 Slicer pad 6","kind":"button"},{"id":"deck1.slice7","label":"Deck 1 Slicer pad 7","kind":"button"},{"id":"deck1.slice8","label":"Deck 1 Slicer pad 8","kind":"button"},{"id":"deck1.instantDouble","label":"Deck 1 Instant double from other deck","kind":"button"},{"id":"deck1.stem1Mute","label":"Deck 1 Stem Vocals on/off","kind":"button"},{"id":"deck1.stem1Level","label":"Deck 1 Stem Vocals level","kind":"abs"},{"id":"deck1.stem2Mute","label":"Deck 1 Stem Drums on/off","kind":"button"},{"id":"deck1.stem2Level","label":"Deck 1 Stem Drums level","kind":"abs"},{"id":"deck1.stem3Mute","label":"Deck 1 Stem Bass on/off","kind":"button"},{"id":"deck1.stem3Level","label":"Deck 1 Stem Bass level","kind":"abs"},{"id":"deck1.stem4Mute","label":"Deck 1 Stem Melody on/off","kind":"button"},{"id":"deck1.stem4Level","label":"Deck 1 Stem Melody level","kind":"abs"},{"id":"deck1.stemAcapella","label":"Deck 1 Stems: acapella","kind":"button"},{"id":"deck1.stemInstrumental","label":"Deck 1 Stems: instrumental","kind":"button"},{"id":"deck1.stemFx","label":"Deck 1 Stem FX (vocal echo)","kind":"button"},{"id":"deck1.prepareStems","label":"Deck 1 Prepare AI stems","kind":"button"},{"id":"mixer1.vocal","label":"Channel 1 Vocal level (AI stems or quick stems)","kind":"abs"},{"id":"mixer1.inst","label":"Channel 1 Instrumental level (AI stems or quick stems)","kind":"abs"},{"id":"mixer1.volume","label":"Channel 1 Fader","kind":"abs"},{"id":"mixer1.trim","label":"Channel 1 Trim","kind":"abs"},{"id":"mixer1.eqHigh","label":"Channel 1 EQ High","kind":"abs"},{"id":"mixer1.eqMid","label":"Channel 1 EQ Mid","kind":"abs"},{"id":"mixer1.eqLow","label":"Channel 1 EQ Low","kind":"abs"},{"id":"mixer1.filter","label":"Channel 1 Filter","kind":"abs"},{"id":"mixer1.cue","label":"Channel 1 Headphone cue","kind":"button"},{"id":"mixer1.fxOn","label":"Channel 1 FX on","kind":"button"},{"id":"mixer1.fxMix","label":"Channel 1 FX mix","kind":"abs"},{"id":"mixer1.fxParam","label":"Channel 1 FX parameter","kind":"abs"},{"id":"mixer1.fxParam2","label":"Channel 1 FX parameter 2","kind":"abs"},{"id":"deck2.play","label":"Deck 2 Play/Pause","kind":"button"},{"id":"deck2.cue","label":"Deck 2 Cue","kind":"button"},{"id":"deck2.sync","label":"Deck 2 Sync","kind":"button"},{"id":"deck2.master","label":"Deck 2 Set Master","kind":"button"},{"id":"deck2.keylock","label":"Deck 2 Key Lock","kind":"button"},{"id":"deck2.slip","label":"Deck 2 Slip","kind":"button"},{"id":"deck2.quantize","label":"Deck 2 Quantize","kind":"button"},{"id":"deck2.censor","label":"Deck 2 Censor (hold)","kind":"button"},{"id":"deck2.reverse","label":"Deck 2 Reverse (hold)","kind":"button"},{"id":"deck2.eject","label":"Deck 2 Eject","kind":"button"},{"id":"deck2.tempo","label":"Deck 2 Tempo fader","kind":"abs"},{"id":"deck2.tempoReset","label":"Deck 2 Tempo reset","kind":"button"},{"id":"deck2.tempoUp","label":"Deck 2 Tempo +0.5 %","kind":"button"},{"id":"deck2.tempoDown","label":"Deck 2 Tempo −0.5 %","kind":"button"},{"id":"deck2.bendUp","label":"Deck 2 Pitch bend +","kind":"button"},{"id":"deck2.bendDown","label":"Deck 2 Pitch bend −","kind":"button"},{"id":"deck2.jogTouch","label":"Deck 2 Jog touch","kind":"button"},{"id":"deck2.jog","label":"Deck 2 Jog platter (scratch when touched)","kind":"rel"},{"id":"deck2.jogRing","label":"Deck 2 Jog outer ring (nudge)","kind":"rel"},{"id":"deck2.jogSearch","label":"Deck 2 Jog search (fast seek)","kind":"rel"},{"id":"deck2.loopIn","label":"Deck 2 Loop in","kind":"button"},{"id":"deck2.loopOut","label":"Deck 2 Loop out","kind":"button"},{"id":"deck2.reloop","label":"Deck 2 Reloop/Exit","kind":"button"},{"id":"deck2.loop4","label":"Deck 2 Auto loop 4 beats","kind":"button"},{"id":"deck2.loopActivate","label":"Deck 2 Auto loop (last size)","kind":"button"},{"id":"deck2.loopHalve","label":"Deck 2 Loop ½","kind":"button"},{"id":"deck2.loopDouble","label":"Deck 2 Loop ×2","kind":"button"},{"id":"deck2.beatloop.0.03125","label":"Deck 2 Auto loop 1/32 beat","kind":"button"},{"id":"deck2.beatloop.0.0625","label":"Deck 2 Auto loop 1/16 beat","kind":"button"},{"id":"deck2.beatloop.0.125","label":"Deck 2 Auto loop 1/8 beat","kind":"button"},{"id":"deck2.beatloop.0.25","label":"Deck 2 Auto loop 1/4 beat","kind":"button"},{"id":"deck2.beatloop.0.5","label":"Deck 2 Auto loop 1/2 beat","kind":"button"},{"id":"deck2.beatloop.1","label":"Deck 2 Auto loop 1 beat","kind":"button"},{"id":"deck2.beatloop.2","label":"Deck 2 Auto loop 2 beats","kind":"button"},{"id":"deck2.beatloop.4","label":"Deck 2 Auto loop 4 beats","kind":"button"},{"id":"deck2.beatloop.8","label":"Deck 2 Auto loop 8 beats","kind":"button"},{"id":"deck2.beatloop.16","label":"Deck 2 Auto loop 16 beats","kind":"button"},{"id":"deck2.beatloop.32","label":"Deck 2 Auto loop 32 beats","kind":"button"},{"id":"deck2.beatloop.64","label":"Deck 2 Auto loop 64 beats","kind":"button"},{"id":"deck2.jumpBack","label":"Deck 2 Beat jump −4","kind":"button"},{"id":"deck2.jumpFwd","label":"Deck 2 Beat jump +4","kind":"button"},{"id":"deck2.jumpBack.0.5","label":"Deck 2 Beat jump −1/2","kind":"button"},{"id":"deck2.jumpFwd.0.5","label":"Deck 2 Beat jump +1/2","kind":"button"},{"id":"deck2.jumpBack.1","label":"Deck 2 Beat jump −1","kind":"button"},{"id":"deck2.jumpFwd.1","label":"Deck 2 Beat jump +1","kind":"button"},{"id":"deck2.jumpBack.2","label":"Deck 2 Beat jump −2","kind":"button"},{"id":"deck2.jumpFwd.2","label":"Deck 2 Beat jump +2","kind":"button"},{"id":"deck2.jumpBack.4","label":"Deck 2 Beat jump −4","kind":"button"},{"id":"deck2.jumpFwd.4","label":"Deck 2 Beat jump +4","kind":"button"},{"id":"deck2.jumpBack.8","label":"Deck 2 Beat jump −8","kind":"button"},{"id":"deck2.jumpFwd.8","label":"Deck 2 Beat jump +8","kind":"button"},{"id":"deck2.jumpBack.16","label":"Deck 2 Beat jump −16","kind":"button"},{"id":"deck2.jumpFwd.16","label":"Deck 2 Beat jump +16","kind":"button"},{"id":"deck2.jumpBack.32","label":"Deck 2 Beat jump −32","kind":"button"},{"id":"deck2.jumpFwd.32","label":"Deck 2 Beat jump +32","kind":"button"},{"id":"deck2.jumpBack.64","label":"Deck 2 Beat jump −64","kind":"button"},{"id":"deck2.jumpFwd.64","label":"Deck 2 Beat jump +64","kind":"button"},{"id":"deck2.load","label":"Deck 2 Load selected track","kind":"button"},{"id":"deck2.pad1","label":"Deck 2 Pad 1 (current pad mode)","kind":"button"},{"id":"deck2.hotcue1","label":"Deck 2 Hot cue A","kind":"button"},{"id":"deck2.hotcueClear1","label":"Deck 2 Delete hot cue A","kind":"button"},{"id":"deck2.roll1","label":"Deck 2 Loop roll 1/16","kind":"button"},{"id":"deck2.sampler1","label":"Sampler 1 (deck 2 pads)","kind":"button"},{"id":"deck2.beatjump1","label":"Deck 2 Beat jump pad 1","kind":"button"},{"id":"deck2.pad2","label":"Deck 2 Pad 2 (current pad mode)","kind":"button"},{"id":"deck2.hotcue2","label":"Deck 2 Hot cue B","kind":"button"},{"id":"deck2.hotcueClear2","label":"Deck 2 Delete hot cue B","kind":"button"},{"id":"deck2.roll2","label":"Deck 2 Loop roll 1/8","kind":"button"},{"id":"deck2.sampler2","label":"Sampler 2 (deck 2 pads)","kind":"button"},{"id":"deck2.beatjump2","label":"Deck 2 Beat jump pad 2","kind":"button"},{"id":"deck2.pad3","label":"Deck 2 Pad 3 (current pad mode)","kind":"button"},{"id":"deck2.hotcue3","label":"Deck 2 Hot cue C","kind":"button"},{"id":"deck2.hotcueClear3","label":"Deck 2 Delete hot cue C","kind":"button"},{"id":"deck2.roll3","label":"Deck 2 Loop roll 1/4","kind":"button"},{"id":"deck2.sampler3","label":"Sampler 3 (deck 2 pads)","kind":"button"},{"id":"deck2.beatjump3","label":"Deck 2 Beat jump pad 3","kind":"button"},{"id":"deck2.pad4","label":"Deck 2 Pad 4 (current pad mode)","kind":"button"},{"id":"deck2.hotcue4","label":"Deck 2 Hot cue D","kind":"button"},{"id":"deck2.hotcueClear4","label":"Deck 2 Delete hot cue D","kind":"button"},{"id":"deck2.roll4","label":"Deck 2 Loop roll 1/2","kind":"button"},{"id":"deck2.sampler4","label":"Sampler 4 (deck 2 pads)","kind":"button"},{"id":"deck2.beatjump4","label":"Deck 2 Beat jump pad 4","kind":"button"},{"id":"deck2.pad5","label":"Deck 2 Pad 5 (current pad mode)","kind":"button"},{"id":"deck2.hotcue5","label":"Deck 2 Hot cue E","kind":"button"},{"id":"deck2.hotcueClear5","label":"Deck 2 Delete hot cue E","kind":"button"},{"id":"deck2.roll5","label":"Deck 2 Loop roll 1","kind":"button"},{"id":"deck2.sampler5","label":"Sampler 5 (deck 2 pads)","kind":"button"},{"id":"deck2.beatjump5","label":"Deck 2 Beat jump pad 5","kind":"button"},{"id":"deck2.pad6","label":"Deck 2 Pad 6 (current pad mode)","kind":"button"},{"id":"deck2.hotcue6","label":"Deck 2 Hot cue F","kind":"button"},{"id":"deck2.hotcueClear6","label":"Deck 2 Delete hot cue F","kind":"button"},{"id":"deck2.roll6","label":"Deck 2 Loop roll 2","kind":"button"},{"id":"deck2.sampler6","label":"Sampler 6 (deck 2 pads)","kind":"button"},{"id":"deck2.beatjump6","label":"Deck 2 Beat jump pad 6","kind":"button"},{"id":"deck2.pad7","label":"Deck 2 Pad 7 (current pad mode)","kind":"button"},{"id":"deck2.hotcue7","label":"Deck 2 Hot cue G","kind":"button"},{"id":"deck2.hotcueClear7","label":"Deck 2 Delete hot cue G","kind":"button"},{"id":"deck2.roll7","label":"Deck 2 Loop roll 4","kind":"button"},{"id":"deck2.sampler7","label":"Sampler 7 (deck 2 pads)","kind":"button"},{"id":"deck2.beatjump7","label":"Deck 2 Beat jump pad 7","kind":"button"},{"id":"deck2.pad8","label":"Deck 2 Pad 8 (current pad mode)","kind":"button"},{"id":"deck2.hotcue8","label":"Deck 2 Hot cue H","kind":"button"},{"id":"deck2.hotcueClear8","label":"Deck 2 Delete hot cue H","kind":"button"},{"id":"deck2.roll8","label":"Deck 2 Loop roll 8","kind":"button"},{"id":"deck2.sampler8","label":"Sampler 8 (deck 2 pads)","kind":"button"},{"id":"deck2.beatjump8","label":"Deck 2 Beat jump pad 8","kind":"button"},{"id":"deck2.padMode.hotcue","label":"Deck 2 Pad mode: hotcue","kind":"button"},{"id":"deck2.padMode.roll","label":"Deck 2 Pad mode: roll","kind":"button"},{"id":"deck2.padMode.jump","label":"Deck 2 Pad mode: jump","kind":"button"},{"id":"deck2.padMode.sampler","label":"Deck 2 Pad mode: sampler","kind":"button"},{"id":"deck2.padMode.fx","label":"Deck 2 Pad mode: fx","kind":"button"},{"id":"deck2.keySync","label":"Deck 2 Key sync","kind":"button"},{"id":"deck2.keyUp","label":"Deck 2 Key +1 semitone","kind":"button"},{"id":"deck2.keyDown","label":"Deck 2 Key −1 semitone","kind":"button"},{"id":"deck2.keyReset","label":"Deck 2 Key reset","kind":"button"},{"id":"deck2.keyKnob","label":"Deck 2 Key knob (±12 semitones)","kind":"abs"},{"id":"deck2.slice1","label":"Deck 2 Slicer pad 1","kind":"button"},{"id":"deck2.slice2","label":"Deck 2 Slicer pad 2","kind":"button"},{"id":"deck2.slice3","label":"Deck 2 Slicer pad 3","kind":"button"},{"id":"deck2.slice4","label":"Deck 2 Slicer pad 4","kind":"button"},{"id":"deck2.slice5","label":"Deck 2 Slicer pad 5","kind":"button"},{"id":"deck2.slice6","label":"Deck 2 Slicer pad 6","kind":"button"},{"id":"deck2.slice7","label":"Deck 2 Slicer pad 7","kind":"button"},{"id":"deck2.slice8","label":"Deck 2 Slicer pad 8","kind":"button"},{"id":"deck2.instantDouble","label":"Deck 2 Instant double from other deck","kind":"button"},{"id":"deck2.stem1Mute","label":"Deck 2 Stem Vocals on/off","kind":"button"},{"id":"deck2.stem1Level","label":"Deck 2 Stem Vocals level","kind":"abs"},{"id":"deck2.stem2Mute","label":"Deck 2 Stem Drums on/off","kind":"button"},{"id":"deck2.stem2Level","label":"Deck 2 Stem Drums level","kind":"abs"},{"id":"deck2.stem3Mute","label":"Deck 2 Stem Bass on/off","kind":"button"},{"id":"deck2.stem3Level","label":"Deck 2 Stem Bass level","kind":"abs"},{"id":"deck2.stem4Mute","label":"Deck 2 Stem Melody on/off","kind":"button"},{"id":"deck2.stem4Level","label":"Deck 2 Stem Melody level","kind":"abs"},{"id":"deck2.stemAcapella","label":"Deck 2 Stems: acapella","kind":"button"},{"id":"deck2.stemInstrumental","label":"Deck 2 Stems: instrumental","kind":"button"},{"id":"deck2.stemFx","label":"Deck 2 Stem FX (vocal echo)","kind":"button"},{"id":"deck2.prepareStems","label":"Deck 2 Prepare AI stems","kind":"button"},{"id":"mixer2.vocal","label":"Channel 2 Vocal level (AI stems or quick stems)","kind":"abs"},{"id":"mixer2.inst","label":"Channel 2 Instrumental level (AI stems or quick stems)","kind":"abs"},{"id":"mixer2.volume","label":"Channel 2 Fader","kind":"abs"},{"id":"mixer2.trim","label":"Channel 2 Trim","kind":"abs"},{"id":"mixer2.eqHigh","label":"Channel 2 EQ High","kind":"abs"},{"id":"mixer2.eqMid","label":"Channel 2 EQ Mid","kind":"abs"},{"id":"mixer2.eqLow","label":"Channel 2 EQ Low","kind":"abs"},{"id":"mixer2.filter","label":"Channel 2 Filter","kind":"abs"},{"id":"mixer2.cue","label":"Channel 2 Headphone cue","kind":"button"},{"id":"mixer2.fxOn","label":"Channel 2 FX on","kind":"button"},{"id":"mixer2.fxMix","label":"Channel 2 FX mix","kind":"abs"},{"id":"mixer2.fxParam","label":"Channel 2 FX parameter","kind":"abs"},{"id":"mixer2.fxParam2","label":"Channel 2 FX parameter 2","kind":"abs"},{"id":"deck3.play","label":"Deck 3 Play/Pause","kind":"button"},{"id":"deck3.cue","label":"Deck 3 Cue","kind":"button"},{"id":"deck3.sync","label":"Deck 3 Sync","kind":"button"},{"id":"deck3.master","label":"Deck 3 Set Master","kind":"button"},{"id":"deck3.keylock","label":"Deck 3 Key Lock","kind":"button"},{"id":"deck3.slip","label":"Deck 3 Slip","kind":"button"},{"id":"deck3.quantize","label":"Deck 3 Quantize","kind":"button"},{"id":"deck3.censor","label":"Deck 3 Censor (hold)","kind":"button"},{"id":"deck3.reverse","label":"Deck 3 Reverse (hold)","kind":"button"},{"id":"deck3.eject","label":"Deck 3 Eject","kind":"button"},{"id":"deck3.tempo","label":"Deck 3 Tempo fader","kind":"abs"},{"id":"deck3.tempoReset","label":"Deck 3 Tempo reset","kind":"button"},{"id":"deck3.tempoUp","label":"Deck 3 Tempo +0.5 %","kind":"button"},{"id":"deck3.tempoDown","label":"Deck 3 Tempo −0.5 %","kind":"button"},{"id":"deck3.bendUp","label":"Deck 3 Pitch bend +","kind":"button"},{"id":"deck3.bendDown","label":"Deck 3 Pitch bend −","kind":"button"},{"id":"deck3.jogTouch","label":"Deck 3 Jog touch","kind":"button"},{"id":"deck3.jog","label":"Deck 3 Jog platter (scratch when touched)","kind":"rel"},{"id":"deck3.jogRing","label":"Deck 3 Jog outer ring (nudge)","kind":"rel"},{"id":"deck3.jogSearch","label":"Deck 3 Jog search (fast seek)","kind":"rel"},{"id":"deck3.loopIn","label":"Deck 3 Loop in","kind":"button"},{"id":"deck3.loopOut","label":"Deck 3 Loop out","kind":"button"},{"id":"deck3.reloop","label":"Deck 3 Reloop/Exit","kind":"button"},{"id":"deck3.loop4","label":"Deck 3 Auto loop 4 beats","kind":"button"},{"id":"deck3.loopActivate","label":"Deck 3 Auto loop (last size)","kind":"button"},{"id":"deck3.loopHalve","label":"Deck 3 Loop ½","kind":"button"},{"id":"deck3.loopDouble","label":"Deck 3 Loop ×2","kind":"button"},{"id":"deck3.beatloop.0.03125","label":"Deck 3 Auto loop 1/32 beat","kind":"button"},{"id":"deck3.beatloop.0.0625","label":"Deck 3 Auto loop 1/16 beat","kind":"button"},{"id":"deck3.beatloop.0.125","label":"Deck 3 Auto loop 1/8 beat","kind":"button"},{"id":"deck3.beatloop.0.25","label":"Deck 3 Auto loop 1/4 beat","kind":"button"},{"id":"deck3.beatloop.0.5","label":"Deck 3 Auto loop 1/2 beat","kind":"button"},{"id":"deck3.beatloop.1","label":"Deck 3 Auto loop 1 beat","kind":"button"},{"id":"deck3.beatloop.2","label":"Deck 3 Auto loop 2 beats","kind":"button"},{"id":"deck3.beatloop.4","label":"Deck 3 Auto loop 4 beats","kind":"button"},{"id":"deck3.beatloop.8","label":"Deck 3 Auto loop 8 beats","kind":"button"},{"id":"deck3.beatloop.16","label":"Deck 3 Auto loop 16 beats","kind":"button"},{"id":"deck3.beatloop.32","label":"Deck 3 Auto loop 32 beats","kind":"button"},{"id":"deck3.beatloop.64","label":"Deck 3 Auto loop 64 beats","kind":"button"},{"id":"deck3.jumpBack","label":"Deck 3 Beat jump −4","kind":"button"},{"id":"deck3.jumpFwd","label":"Deck 3 Beat jump +4","kind":"button"},{"id":"deck3.jumpBack.0.5","label":"Deck 3 Beat jump −1/2","kind":"button"},{"id":"deck3.jumpFwd.0.5","label":"Deck 3 Beat jump +1/2","kind":"button"},{"id":"deck3.jumpBack.1","label":"Deck 3 Beat jump −1","kind":"button"},{"id":"deck3.jumpFwd.1","label":"Deck 3 Beat jump +1","kind":"button"},{"id":"deck3.jumpBack.2","label":"Deck 3 Beat jump −2","kind":"button"},{"id":"deck3.jumpFwd.2","label":"Deck 3 Beat jump +2","kind":"button"},{"id":"deck3.jumpBack.4","label":"Deck 3 Beat jump −4","kind":"button"},{"id":"deck3.jumpFwd.4","label":"Deck 3 Beat jump +4","kind":"button"},{"id":"deck3.jumpBack.8","label":"Deck 3 Beat jump −8","kind":"button"},{"id":"deck3.jumpFwd.8","label":"Deck 3 Beat jump +8","kind":"button"},{"id":"deck3.jumpBack.16","label":"Deck 3 Beat jump −16","kind":"button"},{"id":"deck3.jumpFwd.16","label":"Deck 3 Beat jump +16","kind":"button"},{"id":"deck3.jumpBack.32","label":"Deck 3 Beat jump −32","kind":"button"},{"id":"deck3.jumpFwd.32","label":"Deck 3 Beat jump +32","kind":"button"},{"id":"deck3.jumpBack.64","label":"Deck 3 Beat jump −64","kind":"button"},{"id":"deck3.jumpFwd.64","label":"Deck 3 Beat jump +64","kind":"button"},{"id":"deck3.load","label":"Deck 3 Load selected track","kind":"button"},{"id":"deck3.pad1","label":"Deck 3 Pad 1 (current pad mode)","kind":"button"},{"id":"deck3.hotcue1","label":"Deck 3 Hot cue A","kind":"button"},{"id":"deck3.hotcueClear1","label":"Deck 3 Delete hot cue A","kind":"button"},{"id":"deck3.roll1","label":"Deck 3 Loop roll 1/16","kind":"button"},{"id":"deck3.sampler1","label":"Sampler 1 (deck 3 pads)","kind":"button"},{"id":"deck3.beatjump1","label":"Deck 3 Beat jump pad 1","kind":"button"},{"id":"deck3.pad2","label":"Deck 3 Pad 2 (current pad mode)","kind":"button"},{"id":"deck3.hotcue2","label":"Deck 3 Hot cue B","kind":"button"},{"id":"deck3.hotcueClear2","label":"Deck 3 Delete hot cue B","kind":"button"},{"id":"deck3.roll2","label":"Deck 3 Loop roll 1/8","kind":"button"},{"id":"deck3.sampler2","label":"Sampler 2 (deck 3 pads)","kind":"button"},{"id":"deck3.beatjump2","label":"Deck 3 Beat jump pad 2","kind":"button"},{"id":"deck3.pad3","label":"Deck 3 Pad 3 (current pad mode)","kind":"button"},{"id":"deck3.hotcue3","label":"Deck 3 Hot cue C","kind":"button"},{"id":"deck3.hotcueClear3","label":"Deck 3 Delete hot cue C","kind":"button"},{"id":"deck3.roll3","label":"Deck 3 Loop roll 1/4","kind":"button"},{"id":"deck3.sampler3","label":"Sampler 3 (deck 3 pads)","kind":"button"},{"id":"deck3.beatjump3","label":"Deck 3 Beat jump pad 3","kind":"button"},{"id":"deck3.pad4","label":"Deck 3 Pad 4 (current pad mode)","kind":"button"},{"id":"deck3.hotcue4","label":"Deck 3 Hot cue D","kind":"button"},{"id":"deck3.hotcueClear4","label":"Deck 3 Delete hot cue D","kind":"button"},{"id":"deck3.roll4","label":"Deck 3 Loop roll 1/2","kind":"button"},{"id":"deck3.sampler4","label":"Sampler 4 (deck 3 pads)","kind":"button"},{"id":"deck3.beatjump4","label":"Deck 3 Beat jump pad 4","kind":"button"},{"id":"deck3.pad5","label":"Deck 3 Pad 5 (current pad mode)","kind":"button"},{"id":"deck3.hotcue5","label":"Deck 3 Hot cue E","kind":"button"},{"id":"deck3.hotcueClear5","label":"Deck 3 Delete hot cue E","kind":"button"},{"id":"deck3.roll5","label":"Deck 3 Loop roll 1","kind":"button"},{"id":"deck3.sampler5","label":"Sampler 5 (deck 3 pads)","kind":"button"},{"id":"deck3.beatjump5","label":"Deck 3 Beat jump pad 5","kind":"button"},{"id":"deck3.pad6","label":"Deck 3 Pad 6 (current pad mode)","kind":"button"},{"id":"deck3.hotcue6","label":"Deck 3 Hot cue F","kind":"button"},{"id":"deck3.hotcueClear6","label":"Deck 3 Delete hot cue F","kind":"button"},{"id":"deck3.roll6","label":"Deck 3 Loop roll 2","kind":"button"},{"id":"deck3.sampler6","label":"Sampler 6 (deck 3 pads)","kind":"button"},{"id":"deck3.beatjump6","label":"Deck 3 Beat jump pad 6","kind":"button"},{"id":"deck3.pad7","label":"Deck 3 Pad 7 (current pad mode)","kind":"button"},{"id":"deck3.hotcue7","label":"Deck 3 Hot cue G","kind":"button"},{"id":"deck3.hotcueClear7","label":"Deck 3 Delete hot cue G","kind":"button"},{"id":"deck3.roll7","label":"Deck 3 Loop roll 4","kind":"button"},{"id":"deck3.sampler7","label":"Sampler 7 (deck 3 pads)","kind":"button"},{"id":"deck3.beatjump7","label":"Deck 3 Beat jump pad 7","kind":"button"},{"id":"deck3.pad8","label":"Deck 3 Pad 8 (current pad mode)","kind":"button"},{"id":"deck3.hotcue8","label":"Deck 3 Hot cue H","kind":"button"},{"id":"deck3.hotcueClear8","label":"Deck 3 Delete hot cue H","kind":"button"},{"id":"deck3.roll8","label":"Deck 3 Loop roll 8","kind":"button"},{"id":"deck3.sampler8","label":"Sampler 8 (deck 3 pads)","kind":"button"},{"id":"deck3.beatjump8","label":"Deck 3 Beat jump pad 8","kind":"button"},{"id":"deck3.padMode.hotcue","label":"Deck 3 Pad mode: hotcue","kind":"button"},{"id":"deck3.padMode.roll","label":"Deck 3 Pad mode: roll","kind":"button"},{"id":"deck3.padMode.jump","label":"Deck 3 Pad mode: jump","kind":"button"},{"id":"deck3.padMode.sampler","label":"Deck 3 Pad mode: sampler","kind":"button"},{"id":"deck3.padMode.fx","label":"Deck 3 Pad mode: fx","kind":"button"},{"id":"deck3.keySync","label":"Deck 3 Key sync","kind":"button"},{"id":"deck3.keyUp","label":"Deck 3 Key +1 semitone","kind":"button"},{"id":"deck3.keyDown","label":"Deck 3 Key −1 semitone","kind":"button"},{"id":"deck3.keyReset","label":"Deck 3 Key reset","kind":"button"},{"id":"deck3.keyKnob","label":"Deck 3 Key knob (±12 semitones)","kind":"abs"},{"id":"deck3.slice1","label":"Deck 3 Slicer pad 1","kind":"button"},{"id":"deck3.slice2","label":"Deck 3 Slicer pad 2","kind":"button"},{"id":"deck3.slice3","label":"Deck 3 Slicer pad 3","kind":"button"},{"id":"deck3.slice4","label":"Deck 3 Slicer pad 4","kind":"button"},{"id":"deck3.slice5","label":"Deck 3 Slicer pad 5","kind":"button"},{"id":"deck3.slice6","label":"Deck 3 Slicer pad 6","kind":"button"},{"id":"deck3.slice7","label":"Deck 3 Slicer pad 7","kind":"button"},{"id":"deck3.slice8","label":"Deck 3 Slicer pad 8","kind":"button"},{"id":"deck3.instantDouble","label":"Deck 3 Instant double from other deck","kind":"button"},{"id":"deck3.stem1Mute","label":"Deck 3 Stem Vocals on/off","kind":"button"},{"id":"deck3.stem1Level","label":"Deck 3 Stem Vocals level","kind":"abs"},{"id":"deck3.stem2Mute","label":"Deck 3 Stem Drums on/off","kind":"button"},{"id":"deck3.stem2Level","label":"Deck 3 Stem Drums level","kind":"abs"},{"id":"deck3.stem3Mute","label":"Deck 3 Stem Bass on/off","kind":"button"},{"id":"deck3.stem3Level","label":"Deck 3 Stem Bass level","kind":"abs"},{"id":"deck3.stem4Mute","label":"Deck 3 Stem Melody on/off","kind":"button"},{"id":"deck3.stem4Level","label":"Deck 3 Stem Melody level","kind":"abs"},{"id":"deck3.stemAcapella","label":"Deck 3 Stems: acapella","kind":"button"},{"id":"deck3.stemInstrumental","label":"Deck 3 Stems: instrumental","kind":"button"},{"id":"deck3.stemFx","label":"Deck 3 Stem FX (vocal echo)","kind":"button"},{"id":"deck3.prepareStems","label":"Deck 3 Prepare AI stems","kind":"button"},{"id":"mixer3.vocal","label":"Channel 3 Vocal level (AI stems or quick stems)","kind":"abs"},{"id":"mixer3.inst","label":"Channel 3 Instrumental level (AI stems or quick stems)","kind":"abs"},{"id":"mixer3.volume","label":"Channel 3 Fader","kind":"abs"},{"id":"mixer3.trim","label":"Channel 3 Trim","kind":"abs"},{"id":"mixer3.eqHigh","label":"Channel 3 EQ High","kind":"abs"},{"id":"mixer3.eqMid","label":"Channel 3 EQ Mid","kind":"abs"},{"id":"mixer3.eqLow","label":"Channel 3 EQ Low","kind":"abs"},{"id":"mixer3.filter","label":"Channel 3 Filter","kind":"abs"},{"id":"mixer3.cue","label":"Channel 3 Headphone cue","kind":"button"},{"id":"mixer3.fxOn","label":"Channel 3 FX on","kind":"button"},{"id":"mixer3.fxMix","label":"Channel 3 FX mix","kind":"abs"},{"id":"mixer3.fxParam","label":"Channel 3 FX parameter","kind":"abs"},{"id":"mixer3.fxParam2","label":"Channel 3 FX parameter 2","kind":"abs"},{"id":"deck4.play","label":"Deck 4 Play/Pause","kind":"button"},{"id":"deck4.cue","label":"Deck 4 Cue","kind":"button"},{"id":"deck4.sync","label":"Deck 4 Sync","kind":"button"},{"id":"deck4.master","label":"Deck 4 Set Master","kind":"button"},{"id":"deck4.keylock","label":"Deck 4 Key Lock","kind":"button"},{"id":"deck4.slip","label":"Deck 4 Slip","kind":"button"},{"id":"deck4.quantize","label":"Deck 4 Quantize","kind":"button"},{"id":"deck4.censor","label":"Deck 4 Censor (hold)","kind":"button"},{"id":"deck4.reverse","label":"Deck 4 Reverse (hold)","kind":"button"},{"id":"deck4.eject","label":"Deck 4 Eject","kind":"button"},{"id":"deck4.tempo","label":"Deck 4 Tempo fader","kind":"abs"},{"id":"deck4.tempoReset","label":"Deck 4 Tempo reset","kind":"button"},{"id":"deck4.tempoUp","label":"Deck 4 Tempo +0.5 %","kind":"button"},{"id":"deck4.tempoDown","label":"Deck 4 Tempo −0.5 %","kind":"button"},{"id":"deck4.bendUp","label":"Deck 4 Pitch bend +","kind":"button"},{"id":"deck4.bendDown","label":"Deck 4 Pitch bend −","kind":"button"},{"id":"deck4.jogTouch","label":"Deck 4 Jog touch","kind":"button"},{"id":"deck4.jog","label":"Deck 4 Jog platter (scratch when touched)","kind":"rel"},{"id":"deck4.jogRing","label":"Deck 4 Jog outer ring (nudge)","kind":"rel"},{"id":"deck4.jogSearch","label":"Deck 4 Jog search (fast seek)","kind":"rel"},{"id":"deck4.loopIn","label":"Deck 4 Loop in","kind":"button"},{"id":"deck4.loopOut","label":"Deck 4 Loop out","kind":"button"},{"id":"deck4.reloop","label":"Deck 4 Reloop/Exit","kind":"button"},{"id":"deck4.loop4","label":"Deck 4 Auto loop 4 beats","kind":"button"},{"id":"deck4.loopActivate","label":"Deck 4 Auto loop (last size)","kind":"button"},{"id":"deck4.loopHalve","label":"Deck 4 Loop ½","kind":"button"},{"id":"deck4.loopDouble","label":"Deck 4 Loop ×2","kind":"button"},{"id":"deck4.beatloop.0.03125","label":"Deck 4 Auto loop 1/32 beat","kind":"button"},{"id":"deck4.beatloop.0.0625","label":"Deck 4 Auto loop 1/16 beat","kind":"button"},{"id":"deck4.beatloop.0.125","label":"Deck 4 Auto loop 1/8 beat","kind":"button"},{"id":"deck4.beatloop.0.25","label":"Deck 4 Auto loop 1/4 beat","kind":"button"},{"id":"deck4.beatloop.0.5","label":"Deck 4 Auto loop 1/2 beat","kind":"button"},{"id":"deck4.beatloop.1","label":"Deck 4 Auto loop 1 beat","kind":"button"},{"id":"deck4.beatloop.2","label":"Deck 4 Auto loop 2 beats","kind":"button"},{"id":"deck4.beatloop.4","label":"Deck 4 Auto loop 4 beats","kind":"button"},{"id":"deck4.beatloop.8","label":"Deck 4 Auto loop 8 beats","kind":"button"},{"id":"deck4.beatloop.16","label":"Deck 4 Auto loop 16 beats","kind":"button"},{"id":"deck4.beatloop.32","label":"Deck 4 Auto loop 32 beats","kind":"button"},{"id":"deck4.beatloop.64","label":"Deck 4 Auto loop 64 beats","kind":"button"},{"id":"deck4.jumpBack","label":"Deck 4 Beat jump −4","kind":"button"},{"id":"deck4.jumpFwd","label":"Deck 4 Beat jump +4","kind":"button"},{"id":"deck4.jumpBack.0.5","label":"Deck 4 Beat jump −1/2","kind":"button"},{"id":"deck4.jumpFwd.0.5","label":"Deck 4 Beat jump +1/2","kind":"button"},{"id":"deck4.jumpBack.1","label":"Deck 4 Beat jump −1","kind":"button"},{"id":"deck4.jumpFwd.1","label":"Deck 4 Beat jump +1","kind":"button"},{"id":"deck4.jumpBack.2","label":"Deck 4 Beat jump −2","kind":"button"},{"id":"deck4.jumpFwd.2","label":"Deck 4 Beat jump +2","kind":"button"},{"id":"deck4.jumpBack.4","label":"Deck 4 Beat jump −4","kind":"button"},{"id":"deck4.jumpFwd.4","label":"Deck 4 Beat jump +4","kind":"button"},{"id":"deck4.jumpBack.8","label":"Deck 4 Beat jump −8","kind":"button"},{"id":"deck4.jumpFwd.8","label":"Deck 4 Beat jump +8","kind":"button"},{"id":"deck4.jumpBack.16","label":"Deck 4 Beat jump −16","kind":"button"},{"id":"deck4.jumpFwd.16","label":"Deck 4 Beat jump +16","kind":"button"},{"id":"deck4.jumpBack.32","label":"Deck 4 Beat jump −32","kind":"button"},{"id":"deck4.jumpFwd.32","label":"Deck 4 Beat jump +32","kind":"button"},{"id":"deck4.jumpBack.64","label":"Deck 4 Beat jump −64","kind":"button"},{"id":"deck4.jumpFwd.64","label":"Deck 4 Beat jump +64","kind":"button"},{"id":"deck4.load","label":"Deck 4 Load selected track","kind":"button"},{"id":"deck4.pad1","label":"Deck 4 Pad 1 (current pad mode)","kind":"button"},{"id":"deck4.hotcue1","label":"Deck 4 Hot cue A","kind":"button"},{"id":"deck4.hotcueClear1","label":"Deck 4 Delete hot cue A","kind":"button"},{"id":"deck4.roll1","label":"Deck 4 Loop roll 1/16","kind":"button"},{"id":"deck4.sampler1","label":"Sampler 1 (deck 4 pads)","kind":"button"},{"id":"deck4.beatjump1","label":"Deck 4 Beat jump pad 1","kind":"button"},{"id":"deck4.pad2","label":"Deck 4 Pad 2 (current pad mode)","kind":"button"},{"id":"deck4.hotcue2","label":"Deck 4 Hot cue B","kind":"button"},{"id":"deck4.hotcueClear2","label":"Deck 4 Delete hot cue B","kind":"button"},{"id":"deck4.roll2","label":"Deck 4 Loop roll 1/8","kind":"button"},{"id":"deck4.sampler2","label":"Sampler 2 (deck 4 pads)","kind":"button"},{"id":"deck4.beatjump2","label":"Deck 4 Beat jump pad 2","kind":"button"},{"id":"deck4.pad3","label":"Deck 4 Pad 3 (current pad mode)","kind":"button"},{"id":"deck4.hotcue3","label":"Deck 4 Hot cue C","kind":"button"},{"id":"deck4.hotcueClear3","label":"Deck 4 Delete hot cue C","kind":"button"},{"id":"deck4.roll3","label":"Deck 4 Loop roll 1/4","kind":"button"},{"id":"deck4.sampler3","label":"Sampler 3 (deck 4 pads)","kind":"button"},{"id":"deck4.beatjump3","label":"Deck 4 Beat jump pad 3","kind":"button"},{"id":"deck4.pad4","label":"Deck 4 Pad 4 (current pad mode)","kind":"button"},{"id":"deck4.hotcue4","label":"Deck 4 Hot cue D","kind":"button"},{"id":"deck4.hotcueClear4","label":"Deck 4 Delete hot cue D","kind":"button"},{"id":"deck4.roll4","label":"Deck 4 Loop roll 1/2","kind":"button"},{"id":"deck4.sampler4","label":"Sampler 4 (deck 4 pads)","kind":"button"},{"id":"deck4.beatjump4","label":"Deck 4 Beat jump pad 4","kind":"button"},{"id":"deck4.pad5","label":"Deck 4 Pad 5 (current pad mode)","kind":"button"},{"id":"deck4.hotcue5","label":"Deck 4 Hot cue E","kind":"button"},{"id":"deck4.hotcueClear5","label":"Deck 4 Delete hot cue E","kind":"button"},{"id":"deck4.roll5","label":"Deck 4 Loop roll 1","kind":"button"},{"id":"deck4.sampler5","label":"Sampler 5 (deck 4 pads)","kind":"button"},{"id":"deck4.beatjump5","label":"Deck 4 Beat jump pad 5","kind":"button"},{"id":"deck4.pad6","label":"Deck 4 Pad 6 (current pad mode)","kind":"button"},{"id":"deck4.hotcue6","label":"Deck 4 Hot cue F","kind":"button"},{"id":"deck4.hotcueClear6","label":"Deck 4 Delete hot cue F","kind":"button"},{"id":"deck4.roll6","label":"Deck 4 Loop roll 2","kind":"button"},{"id":"deck4.sampler6","label":"Sampler 6 (deck 4 pads)","kind":"button"},{"id":"deck4.beatjump6","label":"Deck 4 Beat jump pad 6","kind":"button"},{"id":"deck4.pad7","label":"Deck 4 Pad 7 (current pad mode)","kind":"button"},{"id":"deck4.hotcue7","label":"Deck 4 Hot cue G","kind":"button"},{"id":"deck4.hotcueClear7","label":"Deck 4 Delete hot cue G","kind":"button"},{"id":"deck4.roll7","label":"Deck 4 Loop roll 4","kind":"button"},{"id":"deck4.sampler7","label":"Sampler 7 (deck 4 pads)","kind":"button"},{"id":"deck4.beatjump7","label":"Deck 4 Beat jump pad 7","kind":"button"},{"id":"deck4.pad8","label":"Deck 4 Pad 8 (current pad mode)","kind":"button"},{"id":"deck4.hotcue8","label":"Deck 4 Hot cue H","kind":"button"},{"id":"deck4.hotcueClear8","label":"Deck 4 Delete hot cue H","kind":"button"},{"id":"deck4.roll8","label":"Deck 4 Loop roll 8","kind":"button"},{"id":"deck4.sampler8","label":"Sampler 8 (deck 4 pads)","kind":"button"},{"id":"deck4.beatjump8","label":"Deck 4 Beat jump pad 8","kind":"button"},{"id":"deck4.padMode.hotcue","label":"Deck 4 Pad mode: hotcue","kind":"button"},{"id":"deck4.padMode.roll","label":"Deck 4 Pad mode: roll","kind":"button"},{"id":"deck4.padMode.jump","label":"Deck 4 Pad mode: jump","kind":"button"},{"id":"deck4.padMode.sampler","label":"Deck 4 Pad mode: sampler","kind":"button"},{"id":"deck4.padMode.fx","label":"Deck 4 Pad mode: fx","kind":"button"},{"id":"deck4.keySync","label":"Deck 4 Key sync","kind":"button"},{"id":"deck4.keyUp","label":"Deck 4 Key +1 semitone","kind":"button"},{"id":"deck4.keyDown","label":"Deck 4 Key −1 semitone","kind":"button"},{"id":"deck4.keyReset","label":"Deck 4 Key reset","kind":"button"},{"id":"deck4.keyKnob","label":"Deck 4 Key knob (±12 semitones)","kind":"abs"},{"id":"deck4.slice1","label":"Deck 4 Slicer pad 1","kind":"button"},{"id":"deck4.slice2","label":"Deck 4 Slicer pad 2","kind":"button"},{"id":"deck4.slice3","label":"Deck 4 Slicer pad 3","kind":"button"},{"id":"deck4.slice4","label":"Deck 4 Slicer pad 4","kind":"button"},{"id":"deck4.slice5","label":"Deck 4 Slicer pad 5","kind":"button"},{"id":"deck4.slice6","label":"Deck 4 Slicer pad 6","kind":"button"},{"id":"deck4.slice7","label":"Deck 4 Slicer pad 7","kind":"button"},{"id":"deck4.slice8","label":"Deck 4 Slicer pad 8","kind":"button"},{"id":"deck4.instantDouble","label":"Deck 4 Instant double from other deck","kind":"button"},{"id":"deck4.stem1Mute","label":"Deck 4 Stem Vocals on/off","kind":"button"},{"id":"deck4.stem1Level","label":"Deck 4 Stem Vocals level","kind":"abs"},{"id":"deck4.stem2Mute","label":"Deck 4 Stem Drums on/off","kind":"button"},{"id":"deck4.stem2Level","label":"Deck 4 Stem Drums level","kind":"abs"},{"id":"deck4.stem3Mute","label":"Deck 4 Stem Bass on/off","kind":"button"},{"id":"deck4.stem3Level","label":"Deck 4 Stem Bass level","kind":"abs"},{"id":"deck4.stem4Mute","label":"Deck 4 Stem Melody on/off","kind":"button"},{"id":"deck4.stem4Level","label":"Deck 4 Stem Melody level","kind":"abs"},{"id":"deck4.stemAcapella","label":"Deck 4 Stems: acapella","kind":"button"},{"id":"deck4.stemInstrumental","label":"Deck 4 Stems: instrumental","kind":"button"},{"id":"deck4.stemFx","label":"Deck 4 Stem FX (vocal echo)","kind":"button"},{"id":"deck4.prepareStems","label":"Deck 4 Prepare AI stems","kind":"button"},{"id":"mixer4.vocal","label":"Channel 4 Vocal level (AI stems or quick stems)","kind":"abs"},{"id":"mixer4.inst","label":"Channel 4 Instrumental level (AI stems or quick stems)","kind":"abs"},{"id":"mixer4.volume","label":"Channel 4 Fader","kind":"abs"},{"id":"mixer4.trim","label":"Channel 4 Trim","kind":"abs"},{"id":"mixer4.eqHigh","label":"Channel 4 EQ High","kind":"abs"},{"id":"mixer4.eqMid","label":"Channel 4 EQ Mid","kind":"abs"},{"id":"mixer4.eqLow","label":"Channel 4 EQ Low","kind":"abs"},{"id":"mixer4.filter","label":"Channel 4 Filter","kind":"abs"},{"id":"mixer4.cue","label":"Channel 4 Headphone cue","kind":"button"},{"id":"mixer4.fxOn","label":"Channel 4 FX on","kind":"button"},{"id":"mixer4.fxMix","label":"Channel 4 FX mix","kind":"abs"},{"id":"mixer4.fxParam","label":"Channel 4 FX parameter","kind":"abs"},{"id":"mixer4.fxParam2","label":"Channel 4 FX parameter 2","kind":"abs"},{"id":"mixer.crossfader","label":"Crossfader","kind":"abs"},{"id":"master.volume","label":"Master volume","kind":"abs"},{"id":"master.cueMix","label":"Headphone cue/master mix","kind":"abs"},{"id":"master.hpVolume","label":"Headphone volume","kind":"abs"},{"id":"global.shift","label":"Shift","kind":"button"},{"id":"mic.on","label":"Microphone on/off","kind":"button"},{"id":"mic.talkover","label":"Talkover (duck music)","kind":"button"},{"id":"mic.volume","label":"Microphone level","kind":"abs"},{"id":"sequencer.toggle","label":"Sequencer start/stop","kind":"button"},{"id":"browser.scroll","label":"Browser: scroll tracks","kind":"rel"},{"id":"browser.up","label":"Browser: previous track","kind":"button"},{"id":"browser.down","label":"Browser: next track","kind":"button"},{"id":"browser.loadFirstStopped","label":"Browser: load into first stopped deck","kind":"button"},{"id":"automix.toggle","label":"Automix on/off","kind":"button"},{"id":"record.toggle","label":"Record mix on/off","kind":"button"},{"id":"link.toggle","label":"Ableton Link on/off","kind":"button"},{"id":"link.follow","label":"Ableton Link: follow on/off","kind":"button"},{"id":"link.lead","label":"Ableton Link: lead on/off","kind":"button"},{"id":"link.pushPhase","label":"Ableton Link: push phase","kind":"button"},{"id":"deck1.karaoke","label":"Deck 1 Karaoke mode","kind":"button"},{"id":"deck1.lyricsEditor","label":"Deck 1 Lyrics editor","kind":"button"},{"id":"deck2.karaoke","label":"Deck 2 Karaoke mode","kind":"button"},{"id":"deck2.lyricsEditor","label":"Deck 2 Lyrics editor","kind":"button"},{"id":"deck3.karaoke","label":"Deck 3 Karaoke mode","kind":"button"},{"id":"deck3.lyricsEditor","label":"Deck 3 Lyrics editor","kind":"button"},{"id":"deck4.karaoke","label":"Deck 4 Karaoke mode","kind":"button"},{"id":"deck4.lyricsEditor","label":"Deck 4 Lyrics editor","kind":"button"},{"id":"lyrics.video","label":"Lyrics on the video output (on/off)","kind":"button"}];
+const BY_ID = new Map(TARGETS.map((t) => [t.id, t]));
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const hex = (n) => '0x' + n.toString(16).padStart(2, '0').toUpperCase();
+const describeKey = (k) => { const [t, c, n] = k.split(':'); return `${t === 'note' ? 'Note' : t === 'cc' ? 'CC' : 'Pitch'} ${hex(+n)} ch${+c + 1}`; };
+const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
+
+// ---------- state ----------
+let access = null, deviceName = '';
+let mapping = { name: '', entries: [] };
+let learn = null;            // { target, kind, msgs, timer, cap, guided }
+let guided = null;           // { steps, i, assigned:Set }
+let paused = false;
+const log = [];              // full capture for "Save log"
+const lastVal = new Map();   // key -> last value (for the Value column)
+
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), 2600); }
+function status(msg, cls = '') { const s = $('status'); s.textContent = msg; s.className = cls; }
+
+// ---------- function list ----------
+function groupOf(id) {
+  const p = id.split('.')[0];
+  let m;
+  if ((m = /^deck(\d)$/.exec(p))) return `Deck ${m[1]}`;
+  if ((m = /^mixer(\d)$/.exec(p))) return `Mixer channel ${m[1]}`;
+  if (p === 'mixer' || p === 'master') return 'Mixer and master';
+  if (p === 'browser') return 'Library browser';
+  if (p === 'mic' || p === 'sequencer' || p === 'global') return 'Global, mic and sequencer';
+  return 'Other';
+}
+const GROUP_ORDER = ['Deck 1', 'Deck 2', 'Deck 3', 'Deck 4', 'Mixer channel 1', 'Mixer channel 2', 'Mixer channel 3', 'Mixer channel 4', 'Mixer and master', 'Library browser', 'Global, mic and sequencer', 'Other'];
+const KIND_LABEL = { button: 'button', abs: 'fader/knob', rel: 'encoder/jog' };
+
+function renderFuncs() {
+  const q = $('search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const mapped = new Set(mapping.entries.map((e) => e.target));
+  const groups = new Map(GROUP_ORDER.map((g) => [g, []]));
+  for (const t of TARGETS) {
+    const hay = (t.label + ' ' + t.id).toLowerCase();
+    if (q.length && !q.every((w) => hay.includes(w))) continue;
+    groups.get(groupOf(t.id)).push(t);
+  }
+  const open = new Set([...document.querySelectorAll('details.group[open]')].map((d) => d.dataset.g));
+  const html = [];
+  for (const [g, list] of groups) {
+    if (!list.length) continue;
+    const isOpen = q.length || open.has(g) || (!open.size && g === 'Deck 1');
+    html.push(`<details class="group" data-g="${esc(g)}"${isOpen ? ' open' : ''}><summary>${esc(g)}<span class="count">${list.length}</span></summary>`);
+    for (const t of list) html.push(`<button class="fn${mapped.has(t.id) ? ' mapped' : ''}" data-id="${esc(t.id)}"><span class="lbl">${esc(t.label)}</span><span class="kind">${KIND_LABEL[t.kind] || t.kind}</span></button>`);
+    html.push('</details>');
+  }
+  $('funcs').innerHTML = html.join('') || '<div class="muted" style="padding:8px">No matching functions.</div>';
+}
+$('funcs').addEventListener('click', (ev) => {
+  const b = ev.target.closest('.fn'); if (!b) return;
+  stopGuided(false);
+  const t = BY_ID.get(b.dataset.id);
+  startLearn({ target: t.id, kind: t.kind, title: t.label, hint: hintFor(t.kind) });
+});
+$('search').addEventListener('input', renderFuncs);
+const hintFor = (kind) => kind === 'button' ? 'Press the button (or pad) on your controller.'
+  : kind === 'rel' ? 'Turn the encoder or spin the jog wheel a little.'
+  : 'Move the fader or turn the knob from one end to the other.';
+
+// ---------- learning ----------
+function startLearn(step) {
+  if (!deviceName) { setResult('Connect a controller first (and pick it at the top).', 'err'); return; }
+  clearTimeout(learn?.timer); clearTimeout(learn?.cap);
+  learn = { ...step, msgs: [], timer: 0, cap: 0 };
+  $('learn').classList.add('active');
+  $('learnStep').innerHTML = `<span class="pulse"></span>${guided ? `Step ${guided.i + 1} of ${guided.steps.length} · ${esc(step.section)}` : 'Listening'}`;
+  $('learnTitle').textContent = step.title;
+  $('learnHint').textContent = step.hint;
+  if (!guided) setResult('');
+  showButtons();
+}
+function stopLearn() {
+  if (learn) { clearTimeout(learn.timer); clearTimeout(learn.cap); }
+  learn = null;
+  $('learn').classList.remove('active');
+  $('learnStep').textContent = 'Ready';
+  $('learnTitle').textContent = 'Pick a function, or start the guided setup';
+  $('learnHint').textContent = 'Click any function on the left to map it, or run the guided setup again.';
+  showButtons();
+}
+function showButtons() {
+  const on = !!learn;
+  $('btnGuided').hidden = on || !!guided;
+  $('deckCount').parentElement.hidden = on || !!guided;
+  $('btnCancel').hidden = !on;
+  $('btnSkip').hidden = !guided;
+  $('btnBack').hidden = !guided;
+  $('btnBack').disabled = !guided || guided.i === 0;
+  $('btnDone').hidden = !on || learn.kind === 'button';
+  $('btnDone').disabled = !learn?.msgs.length;
+  $('progress').hidden = !guided;
+  if (guided) $('progress').firstElementChild.style.width = `${(guided.i / guided.steps.length) * 100}%`;
+}
+function setResult(msg, cls = '') { const r = $('learnResult'); r.textContent = msg; r.className = cls; }
+
+function captureForLearn(m) {
+  if (!learn.msgs.length && m.isOff) return; // a release left over from the previous control
+  learn.msgs.push(m);
+  $('btnDone').disabled = false;
+  clearTimeout(learn.timer);
+  if (learn.kind === 'button') {
+    learn.timer = setTimeout(finishLearn, 300); // gather the release / LSB that follows the press
+  } else {
+    // keep listening while the control moves; finish shortly after it stops
+    learn.timer = setTimeout(finishLearn, 900);
+    if (!learn.cap) learn.cap = setTimeout(finishLearn, 5000);
+  }
+}
+function finishLearn() {
+  if (!learn) return;
+  const L = learn;
+  clearTimeout(L.timer); clearTimeout(L.cap);
+  // in the guided setup, refuse controls already used for another function (but allow re-learning this one)
+  const own = mapping.entries.filter((e) => e.target === L.target).flatMap((e) => [e.key, e.lsbKey]);
+  const exclude = guided ? new Set([...guided.assigned].filter((k) => !own.includes(k))) : new Set();
+  const det = detectMidiControl(L.msgs, { kind: L.kind, exclude });
+  if (!det) {
+    setResult(L.msgs.length ? 'That control is already used in this setup. Try another, or Skip.' : 'Nothing received. Try again.', 'err');
+    startLearn(L); return;
+  }
+  if (L.kind !== 'button' && det.type === 'note') {
+    setResult(`That was a button (${describeKey(det.key)}), but "${L.title}" needs a ${L.kind === 'rel' ? 'jog wheel or encoder' : 'fader or knob'}. Try again.`, 'err');
+    startLearn(L); return;
+  }
+  const entry = entryFor(det, { target: L.target, kind: L.kind });
+  const replaced = mapping.entries.find((e) => e.target === entry.target);
+  mapping.entries = mapping.entries.filter((e) => e.target !== entry.target);
+  mapping.entries.push(entry);
+  if (guided) { guided.assigned.add(det.key); if (det.lsbKey) guided.assigned.add(det.lsbKey); }
+  const extra = det.lsbKey ? ' (14-bit, high resolution)' : entry.rel ? ` (relative, ${entry.rel === 'twos' ? "two's complement" : entry.rel === 'offset' ? 'centred on 64' : 'wrapping counter'})` : '';
+  const others = mapping.entries.filter((e) => e !== entry && e.key === entry.key).map((e) => BY_ID.get(e.target)?.label || e.target);
+  setResult(`${L.title} → ${describeKey(det.key)}${extra}${replaced ? ' (replaced the old control)' : ''}${others.length ? `. Note: this control is also mapped to ${others.join(', ')}` : ''}`, others.length ? 'warn' : 'ok');
+  changed();
+  if (guided) nextStep(1); else stopLearn();
+}
+
+// ---------- guided setup ----------
+function startGuided() {
+  if (!deviceName) { setResult('Connect a controller first (and pick it at the top).', 'err'); return; }
+  guided = { steps: wizardSteps(+$('deckCount').value), i: 0, assigned: new Set(mapping.entries.flatMap((e) => [e.key, e.lsbKey].filter(Boolean))) };
+  setResult('');
+  startLearn(guided.steps[0]);
+}
+function nextStep(dir) {
+  if (!guided) return;
+  guided.i += dir;
+  if (guided.i < 0) guided.i = 0;
+  if (guided.i >= guided.steps.length) { stopGuided(true); return; }
+  startLearn(guided.steps[guided.i]);
+}
+function stopGuided(done) {
+  if (!guided) return;
+  guided = null;
+  stopLearn();
+  if (done) { setResult(`Guided setup finished: ${mapping.entries.length} controls mapped. Add anything else from the list on the left, then click Save mapping.`, 'ok'); }
+}
+$('btnGuided').onclick = startGuided;
+$('btnSkip').onclick = () => { setResult(''); nextStep(1); };
+$('btnBack').onclick = () => { setResult(''); nextStep(-1); };
+$('btnDone').onclick = () => finishLearn();
+$('btnCancel').onclick = () => { if (guided) stopGuided(false); else stopLearn(); setResult(''); };
+
+// ---------- mapping table ----------
+function renderRows() {
+  const keyCount = new Map();
+  for (const e of mapping.entries) keyCount.set(e.key, (keyCount.get(e.key) || 0) + 1);
+  const html = mapping.entries.map((e, i) => {
+    const t = BY_ID.get(e.target);
+    const kind = t?.kind || 'button';
+    let opts = '';
+    if (kind === 'abs' && !e.rel) opts += `<label><input type="checkbox" data-i="${i}" data-opt="invert"${e.invert ? ' checked' : ''}> Invert</label>`;
+    if (kind === 'rel' || e.rel) {
+      opts += `<select data-i="${i}" data-opt="rel" aria-label="Encoder type">${[['auto', 'Auto'], ['offset', 'Centred (64)'], ['twos', "Two's complement"], ['wrap', 'Wrapping']].map(([v, l]) => `<option value="${v}"${(e.rel || 'auto') === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`;
+    }
+    const keyTxt = describeKey(e.key) + (e.lsbKey ? ` + ${describeKey(e.lsbKey).split(' ')[1]} (14-bit)` : '');
+    return `<tr data-key="${esc(e.key)}" data-lsb="${esc(e.lsbKey || '')}"${keyCount.get(e.key) > 1 ? ' class="dup" title="This control is mapped to more than one function"' : ''}>
+      <td class="key">${esc(keyTxt)}</td><td>${esc(t?.label || e.target)}${t ? '' : ' <span class="tiny">(unknown in this OpenDJ version)</span>'}</td>
+      <td class="val">${lastVal.has(e.key) ? lastVal.get(e.key) : ''}</td><td>${opts}</td>
+      <td style="white-space:nowrap"><button class="small" data-i="${i}" data-act="relearn" title="Map this function to a different control">Re-learn</button>
+      <button class="small" data-i="${i}" data-act="del" aria-label="Remove ${esc(t?.label || e.target)}">✕</button></td></tr>`;
+  });
+  $('rows').innerHTML = html.join('');
+  $('empty').hidden = mapping.entries.length > 0;
+  $('mapCount').textContent = mapping.entries.length ? `${mapping.entries.length} control${mapping.entries.length > 1 ? 's' : ''}` : '';
+  $('btnSave').disabled = !mapping.entries.length;
+  $('btnClear').disabled = !mapping.entries.length;
+}
+$('rows').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-act]'); if (!b) return;
+  const e = mapping.entries[+b.dataset.i]; if (!e) return;
+  if (b.dataset.act === 'del') { mapping.entries.splice(+b.dataset.i, 1); changed(); }
+  else { stopGuided(false); const t = BY_ID.get(e.target); if (t) startLearn({ target: t.id, kind: t.kind, title: t.label, hint: hintFor(t.kind) }); }
+});
+$('rows').addEventListener('change', (ev) => {
+  const x = ev.target, e = mapping.entries[+x.dataset.i]; if (!e) return;
+  if (x.dataset.opt === 'invert') { if (x.checked) e.invert = true; else delete e.invert; }
+  if (x.dataset.opt === 'rel') e.rel = x.value;
+  changed(false);
+});
+$('btnClear').onclick = () => { if (confirm('Remove every mapped control?')) { mapping.entries = []; changed(); } };
+
+function changed(rerender = true) {
+  if (rerender) renderRows();
+  renderFuncs();
+  if (deviceName) store.set('opendj-mapper:' + deviceName, { ...mapping, name: $('mapName').value });
+}
+
+// ---------- monitor ----------
+const monitorRows = [];
+function addMonitor(m) {
+  if (paused) return;
+  const ts = new Date(m.wall).toTimeString().slice(0, 8);
+  const what = m.type === 'note' ? (m.isOff ? 'Note off' : 'Note on ') : m.type === 'cc' ? 'CC      ' : m.type === 'pitch' ? 'Pitch   ' : 'Other   ';
+  const div = document.createElement('div');
+  if (m.isOff) div.className = 'off';
+  div.innerHTML = `<span class="t">${ts}</span> ${esc(what)} ch${m.channel + 1} ${m.type === 'pitch' ? '    ' : hex(m.number)} = ${String(m.value).padStart(m.type === 'pitch' ? 5 : 3)} <span class="t">[${m.raw}]</span>`;
+  const mon = $('monitor');
+  if (!monitorRows.length) mon.textContent = '';
+  const atBottom = mon.scrollTop + mon.clientHeight >= mon.scrollHeight - 4;
+  mon.appendChild(div); monitorRows.push(div);
+  if (monitorRows.length > 400) monitorRows.shift().remove();
+  if (atBottom) mon.scrollTop = mon.scrollHeight;
+}
+$('btnPause').onclick = (ev) => { paused = !paused; ev.target.textContent = paused ? 'Resume' : 'Pause'; ev.target.setAttribute('aria-pressed', String(paused)); };
+$('btnLog').onclick = () => {
+  if (!log.length) { toast('No messages captured yet'); return; }
+  const lines = [`# OpenDJ Controller Mapper ${'0.4.2'} MIDI log`, `# device: ${deviceName}`, `# columns: ms since start, raw bytes (hex), decoded`, ...log];
+  download(`${safeName(deviceName || 'controller')}.midi-log.txt`, lines.join('\n'), 'text/plain');
+};
+
+// ---------- testing mapped controls ----------
+function flashRows(m) {
+  const rows = $('rows').querySelectorAll('tr');
+  for (const tr of rows) {
+    if (tr.dataset.key !== m.key && tr.dataset.lsb !== m.key) continue;
+    if (tr.dataset.key === m.key) tr.querySelector('.val').textContent = m.value;
+    tr.classList.add('flash');
+    clearTimeout(tr._h); tr._h = setTimeout(() => tr.classList.remove('flash'), 350);
+  }
+}
+
+// ---------- MIDI ----------
+const t0 = performance.now();
+function onMidi(input, ev) {
+  const d = ev.data; if (!d || !d.length) return;
+  const status = d[0];
+  if (status >= 0xf0) return; // clock, active sensing, SysEx
+  const cmd = status & 0xf0, channel = status & 0x0f, d1 = d[1] ?? 0, d2 = d[2] ?? 0;
+  let type = 'other', number = d1, value = d2;
+  if (cmd === 0x90 || cmd === 0x80) type = 'note';
+  else if (cmd === 0xb0) type = 'cc';
+  else if (cmd === 0xe0) { type = 'pitch'; number = 0; value = (d2 << 7) | d1; }
+  const isOff = cmd === 0x80 || (cmd === 0x90 && d2 === 0);
+  const raw = [...d].map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+  const m = { device: input.name, key: `${type}:${channel}:${number}`, type, channel, number, value, isOff, raw, wall: Date.now() };
+  if (log.length < 200000) log.push(`${(performance.now() - t0).toFixed(1).padStart(10)}  ${raw.padEnd(9)}  ${input.name}  ${type} ch${channel + 1} ${number} = ${value}${isOff ? ' (off)' : ''}`);
+  addMonitor(m);
+  if (input.name !== deviceName || type === 'other') return;
+  lastVal.set(m.key, value);
+  if (learn) captureForLearn(m); else flashRows(m);
+}
+const NOT_A_CONTROLLER = /through|wavetable|\biac\b|loopmidi|virtual|rtpmidi|network|session \d|microsoft gs|fluid|timidity/i;
+function refreshDevices() {
+  const inputs = access ? [...access.inputs.values()] : [];
+  for (const i of inputs) i.onmidimessage = (ev) => onMidi(i, ev);
+  const sel = $('device');
+  const names = [...new Set(inputs.map((i) => i.name))];
+  const prev = deviceName;
+  sel.innerHTML = names.length ? names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('') : '<option value="">No controller found</option>';
+  let pick = names.includes(prev) ? prev : names.includes(wantDevice) ? wantDevice : (names.find((n) => !NOT_A_CONTROLLER.test(n)) || names[0] || '');
+  sel.value = pick;
+  if (pick !== prev) selectDevice(pick);
+  if (names.length) status(`${names.length} MIDI device${names.length > 1 ? 's' : ''} connected`, 'ok');
+  else status('No MIDI controller found. Plug it in (and close other DJ apps).', 'err');
+}
+function selectDevice(name) {
+  stopGuided(false); stopLearn();
+  deviceName = name;
+  lastVal.clear();
+  const saved = name && store.get('opendj-mapper:' + name);
+  if (saved && Array.isArray(saved.entries) && (saved.entries.length || !mapping.entries.length)) {
+    mapping = { name: saved.name || name, entries: saved.entries };
+    if (saved.entries.length) toast(`Restored your unsaved work for ${name}`);
+  } else if (!mapping.entries.length) mapping = { name, entries: [] };
+  $('mapName').value = mapping.name || name;
+  changed();
+  matchCurrent();
+  askHost();
+}
+$('device').onchange = (ev) => selectDevice(ev.target.value);
+$('mapName').oninput = () => changed(false);
+
+async function initMidi() {
+  if (!navigator.requestMIDIAccess) {
+    status('This browser has no Web MIDI. Open this file in Google Chrome or Microsoft Edge.', 'err');
+    return;
+  }
+  try {
+    access = await navigator.requestMIDIAccess({ sysex: false });
+    access.onstatechange = refreshDevices;
+    refreshDevices();
+  } catch (e) {
+    status(`MIDI access was refused (${e.message || e.name}). Allow MIDI devices for this page and reload.`, 'err');
+  }
+}
+
+// ---------- open / save ----------
+const safeName = (s) => String(s).replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'controller';
+function download(name, text, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+function mappingFile(extra = {}) {
+  const name = $('mapName').value.trim() || deviceName || 'Custom';
+  return { name, json: JSON.stringify({ opendjMidiMapping: 1, device: deviceName, name, ...extra, entries: mapping.entries }, null, 2) };
+}
+$('btnSave').onclick = () => {
+  const f = mappingFile();
+  download(`${safeName(f.name)}.opendj-midi.json`, f.json, 'application/json');
+  toast('Saved. In OpenDJ: Settings → Controllers → Import');
+};
+const CONTRIB = ['cBrand', 'cModel', 'cAuthor', 'cOs', 'cNotes'];
+for (const id of CONTRIB) { const v = store.get('opendj-mapper:' + id); if (typeof v === 'string') $(id).value = v; $(id).addEventListener('input', () => store.set('opendj-mapper:' + id, $(id).value)); }
+$('btnContrib').onclick = () => {
+  if (current?.file || current?.status === 'needs-verification') { submitChange('Improvement'); return; }
+  const brand = $('cBrand').value.trim(), model = $('cModel').value.trim();
+  if (!mapping.entries.length) { toast('Map some controls first'); return; }
+  if (!brand || !model) { toast('Fill in the brand and model'); (brand ? $('cModel') : $('cBrand')).focus(); return; }
+  if (!$('cCc0').checked) { toast('Tick the CC0 box to contribute'); $('cCc0').focus(); return; }
+  const contributed = { brand, model, author: $('cAuthor').value.trim() || undefined, testedOn: $('cOs').value.trim() || undefined,
+    notes: $('cNotes').value.trim() || undefined, license: 'CC0-1.0', tool: 'OpenDJ Controller Mapper 0.4.2' };
+  if (!$('mapName').value.trim() || $('mapName').value.trim() === deviceName) $('mapName').value = `${brand} ${model}`;
+  const f = mappingFile({ contributed });
+  const base = safeName(`${brand}-${model}`);
+  download(`${base}.opendj-midi.json`, f.json, 'application/json');
+  if (log.length) setTimeout(() => $('btnLog').click(), 400);
+  lastSaved = JSON.stringify(mapping.entries);
+  const inline = ISSUE({ template: 'controller-mapping.yml', title: `Controller mapping: ${brand} ${model}`,
+    brand, model, 'midi-name': deviceName, 'tested-on': $('cOs').value.trim(), notes: $('cNotes').value.trim() }, f.json);
+  setResult(inline ? 'The GitHub form opened with your mapping filled in: check it and click Create. Thank you!'
+    : `Your mapping is too big to fill in automatically: drag ${base}.opendj-midi.json (just saved) into the Mapping box of the GitHub form. Thank you!`, 'ok');
+};
+$('btnOpen').onclick = () => $('file').click();
+$('file').onchange = async (ev) => {
+  const f = ev.target.files[0]; ev.target.value = '';
+  if (!f) return;
+  const text = (await f.text()).trimStart();
+  if (text.startsWith('<')) { toast('That is a Mixxx mapping: import it directly in OpenDJ (Settings → Controllers → Import)'); return; }
+  try {
+    const m = JSON.parse(text);
+    if (!Array.isArray(m.entries)) throw new Error('no entries');
+    const entries = m.entries.filter((e) => e && typeof e.key === 'string' && typeof e.target === 'string');
+    stopGuided(false); stopLearn();
+    mapping = { name: m.name || f.name.replace(/\.opendj-midi\.json$|\.json$/i, ''), entries };
+    $('mapName').value = mapping.name;
+    const c = m.contributed || {};
+    for (const [id, k] of [['cBrand', 'brand'], ['cModel', 'model'], ['cAuthor', 'author'], ['cOs', 'testedOn'], ['cNotes', 'notes']]) if (typeof c[k] === 'string') $(id).value = c[k];
+    changed();
+    const unknown = entries.filter((e) => !BY_ID.has(e.target)).length;
+    toast(`Opened ${entries.length} controls${unknown ? ` (${unknown} unknown to this version)` : ''}`);
+    if (m.outputs) setResult('This file has custom LED outputs (from a Mixxx import). They are kept only if you import the original file in OpenDJ.', 'warn');
+  } catch { toast('Not an OpenDJ mapping file'); }
+};
+
+// ---------- controller list, synced from the OpenDJ repository ----------
+const REPO = 'Bucifer6/OpenDJ';
+const RAW = `https://raw.githubusercontent.com/${REPO}/main/mappings/`;
+/** Opens a prefilled GitHub issue form. With `json`, the mapping goes into its Mapping box when the link stays short
+ *  enough for GitHub; returns false when it didn't fit (the user then drags the saved file in). */
+function ISSUE(q, json) {
+  const clean = Object.fromEntries(Object.entries(q).filter(([, v]) => v));
+  let url = `https://github.com/${REPO}/issues/new?${new URLSearchParams(clean)}`, inline = false;
+  if (json) {
+    const withMap = `https://github.com/${REPO}/issues/new?${new URLSearchParams({ ...clean, mapping: JSON.stringify(JSON.parse(json)) })}`;
+    if (withMap.length <= 7500) { url = withMap; inline = true; }
+  }
+  window.open(url, '_blank', 'noopener');
+  return inline;
+}
+const SNAPSHOT = {"opendjControllerIndex":1,"controllers":[{"brand":"Denon DJ","model":"MC7000","status":"wanted","midiNames":["MC7000"]},{"brand":"Hercules","model":"DJControl Inpulse 200","status":"wanted","midiNames":["Inpulse 200"]},{"brand":"Hercules","model":"DJControl Inpulse 300","status":"wanted","midiNames":["Inpulse 300"]},{"brand":"Hercules","model":"DJControl Inpulse 500","status":"wanted","midiNames":["Inpulse 500"]},{"brand":"Hercules","model":"DJControl Mix","status":"wanted","midiNames":["DJControl Mix"]},{"brand":"Native Instruments","model":"Traktor Kontrol S2 MK3","status":"wanted","midiNames":["Traktor Kontrol S2 MK3"],"note":"Uses HID, not MIDI: map it in OpenDJ (Settings → Controllers → Learn)."},{"brand":"Numark","model":"Mixtrack Platinum FX","status":"wanted","midiNames":["Mixtrack Platinum FX"]},{"brand":"Numark","model":"Mixtrack Pro FX","status":"wanted","midiNames":["Mixtrack Pro FX"]},{"brand":"Numark","model":"Party Mix","status":"wanted","midiNames":["Party Mix"]},{"brand":"Pioneer DJ","model":"DDJ-200","status":"wanted","midiNames":["DDJ-200"]},{"brand":"Pioneer DJ","model":"DDJ-400","status":"needs-verification","midiNames":["DDJ-400"],"note":"A best-effort preset is built into OpenDJ. Test it and send fixes."},{"brand":"Pioneer DJ","model":"DDJ-FLX2","status":"wanted","midiNames":["DDJ-FLX2"]},{"brand":"Pioneer DJ","model":"DDJ-FLX4","status":"needs-verification","midiNames":["DDJ-FLX4"],"note":"A best-effort preset is built into OpenDJ. Test it and send fixes."},{"brand":"Pioneer DJ","model":"DDJ-FLX6","status":"wanted","midiNames":["DDJ-FLX6"]},{"brand":"Reloop","model":"Mixon 4","status":"wanted","midiNames":["Mixon 4","Mixon4"]}]};
+let index = SNAPSHOT, indexFrom = 'snapshot';
+let current = null;  // list entry for the connected controller
+let lastFile = '';   // the JSON last saved for a change request
+let base = null;     // { entry, entries }: the community mapping loaded for testing (changes are compared to it)
+const STATUS = { verified: 'Verified', 'needs-verification': 'Needs verification', wanted: 'Needs a mapping', unknown: 'Not in the list' };
+const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const fullName = (c) => `${c.brand} ${c.model}`;
+const badge = (st) => `<span class="badge ${st}">${STATUS[st] || st}</span>`;
+
+async function syncIndex(manual = false) {
+  $('syncLine').textContent = 'Syncing the controller list from GitHub…';
+  try {
+    const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 8000);
+    const r = await fetch(RAW + 'index.json', { cache: 'no-store', signal: ctl.signal }); clearTimeout(to);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    if (j.opendjControllerIndex !== 1 || !Array.isArray(j.controllers)) throw new Error('bad list');
+    index = j; indexFrom = 'github';
+    store.set('opendj-mapper:index', { at: Date.now(), data: j });
+  } catch {
+    const c = store.get('opendj-mapper:index');
+    if (c?.data?.controllers) { index = c.data; indexFrom = `saved copy from ${new Date(c.at).toLocaleDateString()}`; } else { index = SNAPSHOT; indexFrom = 'snapshot'; }
+    if (manual) toast("Couldn't reach GitHub");
+  }
+  const n = index.controllers.length, mapped = index.controllers.filter((c) => c.status !== 'wanted').length;
+  $('syncLine').innerHTML = `${n} controllers in the list, ${mapped} with a mapping · ${indexFrom === 'github' ? 'synced from GitHub just now' : `offline: using the ${esc(indexFrom === 'snapshot' ? 'list built into this file (v0.4.2)' : indexFrom)}`} · <a href="#" id="resync">Refresh</a>`;
+  $('resync').onclick = (ev) => { ev.preventDefault(); syncIndex(true); };
+  matchCurrent(); renderList();
+}
+
+// Brand from the MIDI port name, to prefill the "which controller is this?" question
+const BRANDS = [[/\b(ddj|xdj|djm|cdj)\b|ddj-|pioneer/i, 'Pioneer DJ'], [/mixtrack|party ?mix|numark|\bns\d|dj2go|\bidj/i, 'Numark'],
+  [/djcontrol|inpulse|hercules|\bdjc\b/i, 'Hercules'], [/\bmc\d{3,4}|denon|\bprime\b|\bsc\d{4}/i, 'Denon DJ'], [/traktor|kontrol/i, 'Native Instruments'],
+  [/mixon|reloop|beatmix|beatpad|\bbuddy\b|terminal mix/i, 'Reloop'], [/roland|\bdj-\d{3}/i, 'Roland'], [/behringer|\bcmd\b/i, 'Behringer'],
+  [/novation|launch(pad|control|key)|twitch/i, 'Novation'], [/akai|\bapc|\bmpk|\bamx\b|\bafx\b/i, 'Akai Professional'], [/xone|allen/i, 'Allen & Heath'],
+  [/\brane\b|\bseventy/i, 'Rane'], [/gemini/i, 'Gemini'], [/\bvestax|\bvci/i, 'Vestax'], [/korg|kaoss/i, 'Korg'], [/\bstanton|\bscs\b/i, 'Stanton']];
+function guessController(name) {
+  const brand = BRANDS.find(([re]) => re.test(name))?.[1] || '';
+  let model = String(name).replace(/\b(midi|usb|audio|in|out|input|output|port|controller)\b/gi, ' ').replace(/\d+:\d+/g, ' ')
+    .replace(/(\s+\d+)+\s*$/, '').replace(/\s+/g, ' ').trim();
+  for (const w of brand.split(' ')) model = model.replace(new RegExp(`^${w}\\b\\s*`, 'i'), '');
+  return { brand, model: model.trim() };
+}
+
+function matchCurrent() {
+  current = null;
+  if (deviceName) {
+    const pick = store.get('opendj-mapper:pick:' + deviceName);
+    if (pick) current = index.controllers.find((c) => norm(fullName(c)) === norm(pick.brand + pick.model)) || (pick.custom ? { ...pick, status: 'unknown' } : null);
+    if (!current) {
+      const dn = norm(deviceName); let best = 0;
+      for (const c of index.controllers) for (const m of c.midiNames || []) if (norm(m) && dn.includes(norm(m)) && norm(m).length > best) { best = norm(m).length; current = c; }
+    }
+  }
+  if (base && (!current || norm(fullName(base.entry)) !== norm(fullName(current)))) base = null;
+  renderController();
+}
+
+function renderController() {
+  const b = $('ctlBody');
+  if (!deviceName) { b.innerHTML = '<p class="muted">Plug in your controller to see whether OpenDJ already has a mapping for it.</p>'; return; }
+  const btn = (act, label, primary) => `<button data-act="${act}"${primary ? ' class="primary"' : ''}>${label}</button>`;
+  const st = current ? current.status : 'unknown';
+  let html = `<p><b>${esc(current ? fullName(current) : deviceName)}</b> ${badge(st)}${current ? ` <span class="tiny">MIDI name: ${esc(deviceName)}</span>` : ''}</p>`;
+  if (current?.note) html += `<p class="tiny">${esc(current.note)}</p>`;
+  if (st === 'verified' || (st === 'needs-verification' && current.file)) {
+    html += `<p class="muted">There is already a community mapping for it (${current.controls} controls${current.author ? `, by ${esc(current.author)}` : ''}${current.verifiedBy?.length ? `, verified by ${esc(current.verifiedBy.join(', '))}` : ''}).
+      ${base ? 'It is loaded below: move your controls to test it. Fix anything that is wrong, then submit your changes for review.' : 'Load it to test it on your controller.'}</p>`;
+    html += `<div class="row">${base ? btn('submit', 'Submit my changes for review', true) : btn('load', 'Load the mapping to test it', true)}
+      ${st === 'needs-verification' ? btn('verify', 'It works: verify it') : ''}${btn('report', 'Report a problem')}${btn('pick', 'Not this controller?')}</div>`;
+  } else if (st === 'needs-verification') {
+    html += `<p class="muted">OpenDJ has a built-in best-effort preset for it (Settings → Controllers → Preset). Test it in OpenDJ, then tell us whether it works. To fix controls, map them here and submit the changes.</p>
+      <div class="row">${btn('verify', 'It works: verify it', true)}${btn('report', 'Report a problem')}${btn('mapit', 'Map it here')}${btn('pick', 'Not this controller?')}</div>`;
+  } else if (st === 'wanted') {
+    html += `<p class="muted">Nobody has mapped this controller yet. You can be the first: run the guided setup, then contribute the mapping.</p>
+      <div class="row">${btn('mapit', 'Map it and contribute', true)}${btn('pick', 'Not this controller?')}</div>`;
+  } else if (current) {
+    html += `<p class="muted">You added this controller: it isn't in OpenDJ's list yet. Map it and contribute it, or just ask for it to be added so someone who owns one can map it.</p>
+      <div class="row">${btn('mapit', 'Map it and contribute', true)}${btn('request', 'Only request it')}${btn('rename', 'Change brand or model')}</div>`;
+  } else {
+    const g = guessController(deviceName);
+    html += `<p class="muted">OpenDJ doesn't recognise this controller. Which one is it? (Check the label on the controller or its box.)</p>
+      <div class="cgrid" style="max-width:460px; margin-bottom:8px">
+        <label for="iBrand">Brand</label><input type="text" id="iBrand" value="${esc(g.brand)}" placeholder="e.g. Numark" list="brandList">
+        <label for="iModel">Model</label><input type="text" id="iModel" value="${esc(g.model)}" placeholder="e.g. Mixtrack Pro FX">
+      </div>
+      <datalist id="brandList">${[...new Set([...index.controllers.map((c) => c.brand), ...BRANDS.map((b) => b[1])])].sort().map((b) => `<option value="${esc(b)}">`).join('')}</datalist>
+      <div class="row">${btn('identify', 'This is my controller', true)}${btn('pick', 'Pick from the list')}</div>`;
+  }
+  b.innerHTML = html;
+}
+
+$('ctlBody').addEventListener('click', (ev) => {
+  const a = ev.target.closest('button[data-act]')?.dataset.act; if (!a) return;
+  if (a === 'load') loadCommunity(current);
+  else if (a === 'submit') submitChange('Improvement');
+  else if (a === 'verify') submitChange('Verification');
+  else if (a === 'report') submitChange('Bug');
+  else if (a === 'pick') openList();
+  else if (a === 'add') openAdd();
+  else if (a === 'mapit') mapIt(current);
+  else if (a === 'request') ISSUE({ template: 'controller-request.yml', title: `Add controller: ${fullName(current)}`, brand: current.brand, model: current.model, 'midi-name': deviceName });
+  else if (a === 'rename') { store.set('opendj-mapper:pick:' + deviceName, null); matchCurrent(); }
+  else if (a === 'identify') {
+    const brand = $('iBrand').value.trim().replace(/\s+/g, ' '), model = $('iModel').value.trim().replace(/\s+/g, ' ');
+    if (!brand || !model) { toast('Fill in the brand and model'); (brand ? $('iModel') : $('iBrand')).focus(); return; }
+    const known = index.controllers.find((c) => norm(fullName(c)) === norm(brand + model));
+    store.set('opendj-mapper:pick:' + deviceName, known ? { brand: known.brand, model: known.model } : { brand, model, custom: true });
+    matchCurrent();
+    toast(known ? `Found ${fullName(known)} in the list` : `Saved: ${brand} ${model}`);
+  }
+});
+
+function mapIt(c) {
+  if (c) { $('cBrand').value = c.brand; $('cModel').value = c.model; for (const id of ['cBrand', 'cModel']) store.set('opendj-mapper:' + id, $(id).value); }
+  if (!$('mapName').value.trim() || $('mapName').value.trim() === deviceName) { $('mapName').value = c ? fullName(c) : deviceName; changed(false); }
+  $('contrib').open = true;
+  $('learn').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  setResult('Run the guided setup (or click functions on the left). When you are done, open "Contribute this mapping" below.', 'ok');
+}
+
+async function loadCommunity(c) {
+  if (!c?.file) return;
+  if (mapping.entries.length && !saved() && !confirm('Replace the controls you mapped here with the community mapping?')) return;
+  try {
+    const r = await fetch(RAW + c.file.split('/').map(encodeURIComponent).join('/'), { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const m = await r.json();
+    const entries = (m.entries || []).filter((e) => e && typeof e.key === 'string' && typeof e.target === 'string');
+    stopGuided(false); stopLearn();
+    mapping = { name: m.name || fullName(c), entries: structuredClone(entries) };
+    base = { entry: c, entries, contributed: m.contributed || {} };
+    $('mapName').value = mapping.name;
+    $('cBrand').value = c.brand; $('cModel').value = c.model;
+    lastSaved = JSON.stringify(mapping.entries);
+    changed(); renderController();
+    toast(`Loaded ${entries.length} controls. Move them to test.`);
+  } catch (e) { toast(`Couldn't download the mapping (${e.message}). Check your internet connection.`); }
+}
+
+/** Human-readable differences between the community mapping and the edited one, for reviewers. */
+function diffSummary(before, after) {
+  const lbl = (t) => BY_ID.get(t)?.label || t;
+  const desc = (e) => describeKey(e.key) + (e.lsbKey ? ' (14-bit)' : '') + (e.invert ? ' inverted' : '') + (e.rel ? ` rel:${e.rel}` : '');
+  const A = new Map(before.map((e) => [e.target, e])), B = new Map(after.map((e) => [e.target, e]));
+  const out = [];
+  for (const [t, e] of B) { const o = A.get(t); if (!o) out.push(`+ ${lbl(t)}: ${desc(e)}`); else if (desc(o) !== desc(e)) out.push(`~ ${lbl(t)}: ${desc(o)} → ${desc(e)}`); }
+  for (const [t, e] of A) if (!B.has(t)) out.push(`- ${lbl(t)}: ${desc(e)}`);
+  return out;
+}
+
+function submitChange(kind) {
+  const c = current || { brand: $('cBrand').value.trim(), model: $('cModel').value.trim() };
+  if (!c.brand || !c.model) { toast('Pick your controller from the list first'); openList(); return; }
+  let changes = [];
+  if (kind === 'Improvement') {
+    if (!mapping.entries.length) { toast('Map or load some controls first'); return; }
+    changes = base ? diffSummary(base.entries, mapping.entries) : mapping.entries.map((e) => `+ ${BY_ID.get(e.target)?.label || e.target}: ${describeKey(e.key)}`);
+    if (base && !changes.length) { toast('Nothing changed yet. Re-learn or edit controls first, or use "It works: verify it".'); return; }
+    if (!$('cCc0').checked) { $('contrib').open = true; toast('Tick the CC0 box under "Contribute this mapping" first'); $('cCc0').focus(); return; }
+    const prev = base?.contributed || {};
+    const contributed = { ...prev, brand: c.brand, model: c.model, license: 'CC0-1.0', tool: 'OpenDJ Controller Mapper 0.4.2',
+      changedBy: [...(prev.changedBy || []), $('cAuthor').value.trim() || 'anonymous'], verifiedBy: [] };
+    const f = mappingFile({ contributed });
+    lastFile = f.json;
+    download(`${safeName(`${c.brand}-${c.model}`)}.opendj-midi.json`, f.json, 'application/json');
+    if (log.length) setTimeout(() => $('btnLog').click(), 400);
+    lastSaved = JSON.stringify(mapping.entries);
+  }
+  const text = changes.slice(0, 40).join('\n') + (changes.length > 40 ? `\n…and ${changes.length - 40} more` : '');
+  const tested = $('cOs').value.trim();
+  if (kind === 'Verification') { ISSUE({ template: 'controller-verification.yml', title: `Verified mapping: ${fullName(c)}`, brand: c.brand, model: c.model, 'tested-on': tested }); return; }
+  if (kind === 'Bug') { ISSUE({ template: 'controller-mapping-change.yml', title: `Mapping problem: ${fullName(c)}`, brand: c.brand, model: c.model, 'tested-on': tested }); return; }
+  const inline = ISSUE({ template: 'controller-mapping-change.yml', title: `Mapping change: ${fullName(c)}`, brand: c.brand, model: c.model, 'tested-on': tested, changes: text }, lastFile);
+  setResult(inline ? 'The GitHub form opened with your changes filled in: tick the CC0 box and click Create. Someone else with this controller will verify them before they are merged.'
+    : 'Your mapping is too big to fill in automatically: drag the .opendj-midi.json file (just saved) into the Mapping box of the GitHub form.', 'ok');
+}
+
+function renderList() {
+  if (!$('listDlg').open) return;
+  const q = norm($('listSearch').value), f = $('listFilter').value;
+  const rows = index.controllers.filter((c) => (!q || norm(fullName(c)).includes(q)) && (!f || c.status === f));
+  $('listRows').innerHTML = rows.map((c) => {
+    const i = index.controllers.indexOf(c);
+    return `<tr><td><b>${esc(c.brand)}</b> ${esc(c.model)}${c.controls ? ` <span class="tiny">${c.controls} controls</span>` : ''}${c.note ? `<div class="tiny">${esc(c.note)}</div>` : ''}</td><td>${badge(c.status)}</td>
+      <td style="white-space:nowrap">${deviceName ? `<button class="small" data-pick="${i}">This is mine</button>` : ''}</td></tr>`;
+  }).join('') || '<tr><td colspan="3" class="muted">No controllers match. Add it below.</td></tr>';
+}
+function openList() { $('listDlg').showModal(); renderList(); $('listSearch').focus(); }
+$('btnList').onclick = openList;
+$('listSearch').oninput = renderList; $('listFilter').onchange = renderList;
+$('listRows').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-pick]'); if (!b) return;
+  const c = index.controllers[+b.dataset.pick];
+  store.set('opendj-mapper:pick:' + deviceName, { brand: c.brand, model: c.model });
+  $('listDlg').close(); matchCurrent();
+  toast(`${deviceName} is a ${fullName(c)}`);
+});
+function openAdd() {
+  if ($('listDlg').open) $('listDlg').close();
+  if (!$('aMidi').value) $('aMidi').value = deviceName;
+  $('addDlg').showModal(); $('aBrand').focus();
+}
+$('btnAdd').onclick = openAdd; $('btnAdd2').onclick = openAdd;
+const addFields = () => {
+  const brand = $('aBrand').value.trim(), model = $('aModel').value.trim();
+  if (!brand || !model) { toast('Fill in the brand and model'); (brand ? $('aModel') : $('aBrand')).focus(); return null; }
+  const dup = index.controllers.find((c) => norm(fullName(c)) === norm(brand + model));
+  return { brand, model, midi: $('aMidi').value.trim(), dup };
+};
+$('btnAddMap').onclick = () => {
+  const a = addFields(); if (!a) return;
+  if (deviceName) store.set('opendj-mapper:pick:' + deviceName, { brand: a.brand, model: a.model, custom: true, midiNames: [a.midi].filter(Boolean) });
+  $('addDlg').close(); matchCurrent();
+  if (a.dup && a.dup.status !== 'wanted') { toast(`${fullName(a.dup)} is already in the list`); return; }
+  mapIt(a);
+};
+$('btnAddReq').onclick = () => {
+  const a = addFields(); if (!a) return;
+  if (a.dup) { toast(`${fullName(a.dup)} is already in the list (${STATUS[a.dup.status]})`); return; }
+  ISSUE({ template: 'controller-request.yml', title: `Add controller: ${a.brand} ${a.model}`, brand: a.brand, model: a.model, 'midi-name': a.midi });
+  $('addDlg').close();
+};
+for (const d of document.querySelectorAll('dialog')) d.addEventListener('click', (ev) => { if (ev.target.matches('[data-close]') || ev.target === d) d.close(); });
+
+// ---------- inside OpenDJ: opened from Settings → Controllers ----------
+const params = new URLSearchParams(location.search);
+const wantDevice = params.get('device') || '';
+const host = (() => { try { return location.protocol.startsWith('http') && window.opener && window.opener.location.origin === location.origin ? window.opener : null; } catch { return null; } })();
+if (host) {
+  $('btnApply').hidden = false;
+  $('btnSave').classList.remove('primary');
+  $('helpUse').open = false;
+  $('helpUse').querySelector('summary').textContent = 'Using the mapping in OpenDJ (or on another computer)';
+  addEventListener('message', (ev) => {
+    if (ev.origin !== location.origin || ev.source !== host || ev.data?.type !== 'opendj-mapper:mapping') return;
+    const { device, mapping: m } = ev.data;
+    if (!device || device !== deviceName || !Array.isArray(m?.entries)) return;
+    if (!m.entries.length) return;
+    stopGuided(false); stopLearn();
+    mapping = { name: m.name || device, entries: structuredClone(m.entries) };
+    $('mapName').value = mapping.name;
+    lastSaved = JSON.stringify(mapping.entries);
+    changed();
+    toast(`Loaded your current OpenDJ mapping (${m.entries.length} controls)`);
+  });
+}
+const askHost = () => host && deviceName && host.postMessage({ type: 'opendj-mapper:hello', device: deviceName }, location.origin);
+$('btnApply').onclick = () => {
+  if (!host || host.closed) { toast('OpenDJ was closed. Use Save mapping instead.'); return; }
+  if (!deviceName) { toast('No controller selected'); return; }
+  host.postMessage({ type: 'opendj-mapper:apply', device: deviceName, mapping: { name: $('mapName').value.trim() || deviceName, entries: mapping.entries } }, location.origin);
+  lastSaved = JSON.stringify(mapping.entries);
+  toast('Applied in OpenDJ');
+};
+
+addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && learn) { $('btnCancel').click(); }
+});
+addEventListener('beforeunload', (ev) => { if (mapping.entries.length && !saved()) { ev.preventDefault(); } });
+let lastSaved = '';
+const saved = () => lastSaved === JSON.stringify(mapping.entries);
+$('btnSave').addEventListener('click', () => { lastSaved = JSON.stringify(mapping.entries); });
+
+renderFuncs(); renderRows(); renderController(); initMidi(); syncIndex();
+</script>
+</body>
+</html>

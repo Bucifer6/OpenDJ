@@ -43,6 +43,14 @@ README screenshots are reproducible: `node scripts/demo/make-demo-library.mjs` s
 3. Describe what changed and how you tested it (OS, browser/desktop, controller or hardware if relevant).
 4. CI (`.github/workflows/build.yml`) runs the unit tests, the Docker smoke test and the desktop builds on every PR.
 
+## Controller mappings
+
+Own a DJ controller? Open the **Controller Mapper** (OpenDJ → Settings → Controllers → Controller Mapper, or
+`OpenDJ-Controller-Mapper.html` from the latest release). It tells you whether your controller already has a mapping,
+lets you map or fix it, and submits it to GitHub for you. Mappings that others submitted need **verifying** by a second
+owner: if yours shows *needs verification*, testing it and clicking *It works: verify it* is a big help. Details:
+[mappings/README.md](mappings/README.md).
+
 Testing on real gear is especially valuable: DVS absolute mode with real timecode media, CDJ USB exports on Pioneer players, Ableton Link against Ableton Live, and controller mappings. Please open an issue with what you tried and what happened.
 
-By contributing you agree that your contributions are licensed under the MIT licence.
+By contributing you agree that your contributions are licensed under the MIT licence, except controller mappings in `mappings/`, which are released under CC0 1.0.

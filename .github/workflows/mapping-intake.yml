@@ -1,0 +1,95 @@
+name: Controller mapping intake
+
+# Turns controller issues (new mappings, fixes, verifications, controller requests; see .github/ISSUE_TEMPLATE/controller-*.yml
+# and scripts/mapping-intake.mjs) into pull requests that a maintainer reviews and merges.
+#
+# Safety: the issue text is untrusted. It is only read as data by scripts/mapping-intake.mjs (from the event file, never
+# interpolated into shell commands), the mapping is strictly validated, no npm packages are installed and no code from
+# the issue is run. The workflow file and scripts always come from the default branch.
+#
+# Repository settings needed once: Settings → Actions → General → "Allow GitHub Actions to create and approve pull
+# requests". Pull requests opened with the GITHUB_TOKEN don't start other workflows by themselves: close and reopen the
+# PR (or push to it) to run the tests before merging.
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mapping-intake-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  intake:
+    if: >-
+      github.event.issue.state == 'open' && (
+      contains(github.event.issue.labels.*.name, 'controller-mapping') ||
+      contains(github.event.issue.labels.*.name, 'controller-change') ||
+      contains(github.event.issue.labels.*.name, 'controller-verification') ||
+      contains(github.event.issue.labels.*.name, 'controller-request') ||
+      startsWith(github.event.issue.title, 'Controller mapping:') ||
+      startsWith(github.event.issue.title, 'Mapping change:') ||
+      startsWith(github.event.issue.title, 'Mapping problem:') ||
+      startsWith(github.event.issue.title, 'Verified mapping:') ||
+      startsWith(github.event.issue.title, 'Add controller:'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Read the issue
+        run: node scripts/mapping-intake.mjs "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/intake.json"
+
+      - name: Open or update the pull request
+        run: |
+          set -euo pipefail
+          R="$RUNNER_TEMP/intake.json"
+          ACTION=$(jq -r .action "$R")
+          jq -r '.comment // empty' "$R" > "$RUNNER_TEMP/comment.md"
+          for L in $(jq -r '(.labels // [])[]' "$R"); do
+            gh label create "$L" --color FBCA04 --force >/dev/null 2>&1 || true
+            gh issue edit "$ISSUE" --add-label "$L" || true
+          done
+          if [ "$ACTION" = pr ]; then
+            BRANCH=$(jq -r .branch "$R")
+            [[ "$BRANCH" =~ ^mapping-intake/issue-[0-9]+$ ]] || { echo "unexpected branch name"; exit 1; }
+            jq -r .title "$R" > "$RUNNER_TEMP/title.txt"
+            jq -r .body "$R" > "$RUNNER_TEMP/body.md"
+            node scripts/build-controller-mapper.mjs
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git checkout -B "$BRANCH"
+            git add mappings public/controller-mapper.html
+            if git diff --cached --quiet; then
+              echo "Nothing changed" > "$RUNNER_TEMP/comment.md"
+            else
+              { cat "$RUNNER_TEMP/title.txt"; echo; cat "$RUNNER_TEMP/body.md"; } > "$RUNNER_TEMP/msg.txt"
+              git commit -q -F "$RUNNER_TEMP/msg.txt"
+              git push -f origin "$BRANCH"
+              gh label create needs-verification --color FBCA04 --force >/dev/null 2>&1 || true
+              if ! gh pr view "$BRANCH" --json url -q .url >/dev/null 2>&1; then
+                gh pr create --head "$BRANCH" --title "$(cat "$RUNNER_TEMP/title.txt")" --body-file "$RUNNER_TEMP/body.md" --label needs-verification \
+                  || gh pr create --head "$BRANCH" --title "$(cat "$RUNNER_TEMP/title.txt")" --body-file "$RUNNER_TEMP/body.md"
+              fi
+              echo "" >> "$RUNNER_TEMP/comment.md"
+              echo "Pull request: $(gh pr view "$BRANCH" --json url -q .url)" >> "$RUNNER_TEMP/comment.md"
+            fi
+          fi
+          if [ -s "$RUNNER_TEMP/comment.md" ]; then
+            printf '\n\n---\n_This comment was posted automatically by the controller mapping bot._\n' >> "$RUNNER_TEMP/comment.md"
+            gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/comment.md"
+          fi

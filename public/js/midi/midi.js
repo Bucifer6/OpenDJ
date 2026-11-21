@@ -229,13 +229,42 @@ export class MidiManager extends Emitter {
     if (!host || typeof document === 'undefined') { this.app.toast?.(`New controller "${name}": open Settings → Controllers to find a mapping`); return; }
     const mk = (tag, cls, text, onclick) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; if (onclick) e.addEventListener('click', onclick); return e; };
     const box = mk('div', 'toast ctl-offer');
-    box.append(mk('div', 'ctl-offer-title', `New controller: ${name}`), mk('div', 'ctl-offer-text', 'Find a ready-made mapping (from the Mixxx community library) or set it up step by step.'));
+    box.append(mk('div', 'ctl-offer-title', `New controller: ${name}`), mk('div', 'ctl-offer-text', 'Find a ready-made mapping (from the Mixxx community library), set it up step by step, or map it in the Controller Mapper and share it with everyone.'));
     const row = mk('div', 'ctl-offer-actions');
-    row.append(mk('button', 'btn sm primary', 'Find mapping', () => open('search')), mk('button', 'btn sm', 'Guided setup', () => open('wizard')), mk('button', 'btn sm', "Don't ask again", dismiss));
+    row.append(mk('button', 'btn sm primary', 'Find mapping', () => open('search')), mk('button', 'btn sm', 'Guided setup', () => open('wizard')),
+      mk('button', 'btn sm', 'Controller Mapper', () => { close(); this.openMapper(name); }), mk('button', 'btn sm', "Don't ask again", dismiss));
     box.append(row);
     const close = () => { box.classList.add('out'); setTimeout(() => box.remove(), 400); };
     host.append(box);
     setTimeout(close, 20000);
+  }
+
+  /**
+   * Open the Controller Mapper (public/controller-mapper.html, built from tools/controller-mapper/) in its own window
+   * for one device. It asks for the device's current mapping and sends edits back with "Apply to OpenDJ"; from there
+   * people can also submit the mapping (or a fix) to the community collection on GitHub.
+   */
+  openMapper(device = '') {
+    if (typeof window === 'undefined') return null;
+    const w = window.open(`controller-mapper.html${device ? `?device=${encodeURIComponent(device)}` : ''}`, 'opendj-controller-mapper', 'width=1320,height=880');
+    if (!w) { this.app.toast?.('Allow pop-ups for OpenDJ to open the Controller Mapper'); return null; }
+    this._mapperWin = w;
+    if (!this._onMapperMsg) { this._onMapperMsg = (ev) => this.onMapperMessage(ev); window.addEventListener('message', this._onMapperMsg); }
+    w.focus?.();
+    return w;
+  }
+  onMapperMessage(ev) {
+    if (ev.origin !== location.origin || !this._mapperWin || ev.source !== this._mapperWin) return;
+    const d = ev.data || {};
+    if (typeof d.device !== 'string' || !d.device || d.device.length > 200) return;
+    if (d.type === 'opendj-mapper:hello') {
+      const m = this.mappings[d.device];
+      ev.source.postMessage({ type: 'opendj-mapper:mapping', device: d.device, mapping: { name: m?.name || d.device, entries: m?.entries || [] } }, location.origin);
+    } else if (d.type === 'opendj-mapper:apply' && Array.isArray(d.mapping?.entries)) {
+      const entries = d.mapping.entries.filter((e) => e && typeof e.key === 'string' && typeof e.target === 'string');
+      this.importMapping(d.device, JSON.stringify({ name: String(d.mapping.name || d.device).slice(0, 120), entries }));
+      this.app.toast?.(`Controller Mapper: ${entries.length} controls applied to ${d.device}`);
+    }
   }
 
   mappingFor(name) { if (!this.mappings[name]) this.mappings[name] = { name: 'Custom', entries: [] }; return this.mappings[name]; }
