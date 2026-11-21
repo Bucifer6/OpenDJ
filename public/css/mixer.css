@@ -101,3 +101,4 @@
 .mixer-chip { position: absolute; left: 8px; right: 8px; top: 4px; z-index: 20; display: flex; gap: 4px; align-items: center; justify-content: center; padding: 3px; background: color-mix(in srgb, var(--panel) 92%, transparent); border: 1px solid var(--accent); border-radius: 999px; font-size: 10px; }
 .mixer-chip[hidden] { display: none; }
 .mixer-chip .chip-apply { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root.compact .mixer-master { min-width: 84px; }

@@ -29,8 +29,7 @@ for (const spec of specs.length ? specs : ['classic:1280:800:classic:2:100']) {
     return { mixer: r(m), xf: r(document.querySelector('.crossfader .fader-track')), strips: [...document.querySelectorAll('.mixer .strip')].filter((s) => s.offsetParent).map(r), master: r(document.querySelector('.mixer-master')) };
   });
   console.log(name, JSON.stringify(g));
-  const m = await page.locator('.mixer').boundingBox();
-  if (m) await page.screenshot({ path: path.join(out, `${name}.png`), clip: { x: Math.max(0, m.x - 4), y: Math.max(0, m.y - 4), width: m.width + 8, height: m.height + 8 } });
+  await page.locator('.mixer').screenshot({ path: path.join(out, `${name}.png`) }).catch((e) => console.warn(name, e.message));
   await page.screenshot({ path: path.join(out, `${name}-full.png`) });
   await page.close();
 }

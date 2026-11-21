@@ -232,7 +232,7 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   const placeTools = () => {
     if (tools.parentNode !== master) master.append(tools);
     root.classList.remove('tools-row');
-    if (master.scrollHeight > master.clientHeight + 1 || (document.body.classList.contains('four-decks') && !document.body.classList.contains('skin-club-booth'))) { toolsRow.append(tools); root.classList.add('tools-row'); }
+    if (master.scrollHeight > master.clientHeight + 1 || master.clientWidth < 104 || document.documentElement.classList.contains('compact') || (document.body.classList.contains('four-decks') && !document.body.classList.contains('skin-club-booth'))) { toolsRow.append(tools); root.classList.add('tools-row'); }
   };
   const fit = (h, w = lastW) => {
     const on = desk.matches;
