@@ -105,6 +105,20 @@ const fit = (panels) => ev(async (panels) => {
       if (a.right > tr.right + 1) out.push(`top bar: ${items[i].className || items[i].tagName} outside the bar`);
       for (let j = i + 1; j < items.length; j++) { const b = items[j].getBoundingClientRect(); if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1) out.push(`top bar: ${items[i].className} overlaps ${items[j].className}`); }
     }
+    // mixer: full-width crossfader, strips edge to edge (no empty bands between the columns)
+    const mx = document.querySelector('.mixer');
+    if (vis(mx)) {
+      const R = mx.getBoundingClientRect(), zr = R.width / mx.offsetWidth || 1, W = R.width, pad = parseFloat(getComputedStyle(mx).paddingLeft) * zr;
+      const xf = document.querySelector('.mixer .crossfader .fader-track')?.getBoundingClientRect();
+      if (!mx.classList.contains('mx-noxf') && (!xf || xf.width < Math.min(0.8 * W, 220 * zr) || xf.width < 0.7 * W)) out.push(`crossfader squished: ${Math.round(xf?.width || 0)} of ${Math.round(W)} px mixer`);
+      const cols = [...mx.querySelectorAll('.mixer-strips > .strip, .mixer-top > .mixer-master')].filter(vis).map((e) => e.getBoundingClientRect()).sort((a, b) => a.left - b.left);
+      const edges = [R.left + pad, ...cols.flatMap((c) => [c.left, c.right]), R.right - pad];
+      const maxGap = Math.max(16 * zr, 0.03 * W);
+      for (let i = 0; i < edges.length; i += 2) if (edges[i + 1] - edges[i] > maxGap + 0.5) out.push(`mixer: ${Math.round(edges[i + 1] - edges[i])} px empty band between columns ${i / 2} and ${i / 2 + 1}`);
+      const side = [...mx.querySelectorAll('.mixer-top > .mixer-master')].filter(vis).reduce((a, e) => a + e.getBoundingClientRect().width, 0);
+      const sum = [...mx.querySelectorAll('.mixer-strips > .strip')].filter(vis).reduce((a, e) => a + e.getBoundingClientRect().width, 0), avail = W - 2 * pad - side;
+      if (sum < 0.9 * avail) out.push(`mixer strips fill ${Math.round(sum)} of ${Math.round(avail)} px`);
+    }
     for (const d of decks()) {
       const n = `${panel}@deck${+d.dataset.deck + 1}`, mid = d.querySelector('.deck-mid');
       if (d.getBoundingClientRect().right > innerWidth + 1) out.push(`deck${+d.dataset.deck + 1} outside the window`);
@@ -173,6 +187,31 @@ try {
       check(!f.length, `${w}x${h} ${layout} @${zoom}%: all decks' panels fit, nothing outside the window${f.length ? ' — ' + f.slice(0, 4).join('; ') : ''}`);
     }
   }
+  // ---------- the personalities ----------
+  await page.setViewportSize({ width: 1280, height: 800 });
+  for (const p of ['classic', 'rotary', 'battle', 'club']) {
+    await setUi({ layout: 'classic', theme: 'midnight', zoom: 100 });
+    await ev((id) => window.opendjMixer.setPersonality(id), p); await page.waitForTimeout(200);
+    const a = await audit(), f = await fit(['cues']);
+    check(!summary(a) && !f.length, `1280x800 classic, ${p} personality: controls in bounds, mixer fits${summary(a) ? ' — ' + summary(a) : ''}${f.length ? ' — ' + f.slice(0, 4).join('; ') : ''}`);
+  }
+  // advanced drawer: closed by default, every tab's controls inside the drawer (vertical scroll allowed), no overlaps
+  check(await ev(() => document.querySelector('.mixer-drawer')?.hidden === true), 'advanced mixer drawer is closed by default');
+  for (const [w, h, zoom] of [[1280, 800, 100], [1920, 1080, 150], [1024, 768, 80]]) {
+    await page.setViewportSize({ width: w, height: h }); await setUi({ layout: 'classic', theme: 'midnight', zoom });
+    for (const tab of ['channel', 'faders', 'master', 'mic', 'fx', 'loudness']) {
+      await ev((t) => window.opendjMixer.toggleDrawer(true, t), tab); await page.waitForTimeout(80);
+      const bad = await ev(() => {
+        const d = document.querySelector('.mixer-drawer'), dr = d.getBoundingClientRect(), out = [];
+        const els = [...d.querySelectorAll('.btn, .knob, select, .fx-strip')].filter((e) => e.offsetParent).map((e) => ({ e, r: e.getBoundingClientRect() }));
+        for (const { e, r } of els) if (r.left < dr.left - 1 || r.right > dr.right + 1) out.push(`${e.className} outside`);
+        for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) { const a = els[i].r, b = els[j].r; if (els[i].e.contains(els[j].e) || els[j].e.contains(els[i].e)) continue; if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1.5) out.push(`${els[i].e.className} x ${els[j].e.className}`); }
+        return out;
+      });
+      check(!bad.length, `${w}x${h} @${zoom}% advanced drawer ${tab} tab: controls inside, none overlapping${bad.length ? ' — ' + bad.slice(0, 3).join('; ') : ''}`);
+    }
+    await ev(() => window.opendjMixer.toggleDrawer(false));
+  }
   await ev(() => window.opendj.engine.decks.forEach((d) => d.showPanel?.('cues')));
   // top bar in its busiest state: hosted mode's Sign out shown and automix announcing a long "Next: …" line
   await ev(() => { const a = window.opendj; a.signOutBtn.hidden = false; a.amInfo.textContent = 'Next: A Very Long Artist Name – An Extremely Long Track Title (Extended Club Mix) · Bass swap in 01:23'; });
@@ -215,7 +254,7 @@ try {
 
   // ---------- 2. click sweep per layout ----------
   await page.setViewportSize({ width: 1920, height: 1080 });
-  const SKIP = /eject|stems-prep|mc-btn|rec\b|live-btn|dvs-btn|video-btn|light-btn|signout|fullscreen|automix-btn|lib-collapse|upl-btn|import-btn/;
+  const SKIP = /eject|stems-prep|mc-btn|rec\b|live-btn|dvs-btn|video-btn|light-btn|signout|fullscreen|automix-btn|lib-collapse|upl-btn|import-btn|mixer-adv-btn/; // (the drawer has its own checks)
   for (const layout of layouts) {
     await setUi({ layout, theme: 'midnight', zoom: 100 });
     await page.waitForTimeout(200);

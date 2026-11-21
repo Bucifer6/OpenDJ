@@ -499,6 +499,7 @@ export class Sampler {
   constructor(ctx, destination, config = {}) {
     this.ctx = ctx;
     this.out = ctx.createGain(); this.out.gain.value = 0.8; this.out.connect(destination);
+    this.pre = ctx.createGain(); this.pre.connect(this.out); // pads -> pre (sampler cue taps here, before the volume) -> out
     /** () => AudioContext time of the master deck's next beat, or null. Set by the engine. */
     this.nextBeat = null;
     /** Called when a pad's sound / name / settings change (UI refresh). */
@@ -596,7 +597,7 @@ export class Sampler {
     const src = this.ctx.createBufferSource(); src.buffer = s.buffer;
     const g = this.ctx.createGain(); g.gain.value = velocity * (s.volume ?? 1);
     src.gainNode = g;
-    src.connect(g); g.connect(this.out); src.start(at || 0);
+    src.connect(g); g.connect(this.pre); src.start(at || 0);
     s.playing = src; src.onended = () => { if (s.playing === src) s.playing = null; };
   }
   stop(i) {

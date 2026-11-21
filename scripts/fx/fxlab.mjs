@@ -32,7 +32,7 @@ export async function openLab({ demoWav } = {}) {
     effects: await page.evaluate(() => window.fxlab.effects),
     async render(spec) {
       const r = await page.evaluate((s) => window.fxlab.run(s), spec);
-      return { sr: r.sr, L: dec(r.L), R: dec(r.R), ms: r.ms, dry: r.dry ? r.dry.map(dec) : null };
+      return { sr: r.sr, L: dec(r.L), R: dec(r.R), ms: r.ms, dry: r.dry ? r.dry.map(dec) : null, all: r.all ? r.all.map(dec) : null, probe: r.probe };
     },
     async close() { await browser.close(); app.shutdown?.(); app.server.close(); fs.rmSync(tmp, { recursive: true, force: true }); },
   };
