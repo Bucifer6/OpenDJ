@@ -74,7 +74,7 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 
 <img src="docs/images/automix.png" alt="Automix dialog with smart ordering, energy curve and transition options" width="60%">
 
-- Non-stop mixing of any playlist or library view on decks 1 and 2
+- Non-stop mixing of any playlist or library view on decks 1 and 2. **One click on AUTOMIX** starts a smart mix of the queue (or, without one, of the playlist / library view shown) with your saved preferences; click it again to stop. **Shift-click or right-click AUTOMIX** (or **Automix view** above the track list, or a playlist's menu) opens the Automix dialog with order, mix profile, transition style and length. While automix runs, each deck's **MIX NOW** starts the next transition at once
 - Beat-matched, **phrase-aligned** transitions in 10 **mixing styles** that drive the real EQ, filter and FX: smooth blend (bass swap on the phrase), quick bass swap, crossfade, filter sweep, echo out, cut on the downbeat, backspin, vinyl brake, loop out (rolling loop) and reverb wash, or **Auto**, which picks one per transition from the BPM jump, energy change, key and genre. Length 4–32 bars, "vary styles", and a per-transition override in the **queue panel**, which also shows the next transition's style and when it starts. Afterwards the new track eases back to its original tempo over 8 bars (can be turned off)
 - **Smart mix**: orders a playlist, crate, media-server playlist, search result or the whole library by how well tracks go together (Camelot compatibility, BPM incl. half/double time, energy flow toward a set shape such as warm-up → peak → cool-down, genre/tags, no repeated artists or recently played tracks, intro phrases), or picks each next track live while playing; each transition is explained ("8A → 9A, 124 → 126 BPM, energy +1, same genre"). Presets plus harmonic / energy / variety sliders. **Shuffle & mix** plays a random order, still beat-matched
 - Loading a track on a deck while automix runs works like a pro DJ app: on the next deck it becomes the next track, on the playing deck automix asks (play next / stop and load), during a transition it is queued; optional Key Sync fixes key clashes
@@ -333,7 +333,7 @@ The full feature-by-feature table is in **[docs/GAP_ANALYSIS.md](docs/GAP_ANALYS
 | ↑ / ↓ | Browse tracks |
 | Shift + ← / → | Load to deck 1 / 2 |
 | R | Record |
-| A | Automix |
+| A | Automix: start (smart mix of the queue or view) / stop |
 | Ctrl+F | Search |
 
 ## Building from source & tests

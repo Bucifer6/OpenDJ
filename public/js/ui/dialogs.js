@@ -417,7 +417,7 @@ export class Dialogs {
       ['Space', 'Play/pause deck 1'], ['Z / X / C', 'Deck 1 cue / play / sync'], ['M / , / .', 'Deck 2 cue / play / sync'],
       ['1 – 4', 'Deck 1 hot cues A–D (Shift = delete)'], ['7 – 0', 'Deck 2 hot cues A–D'], ['Q / W', 'Deck 1 loop 4 / exit'], ['O / P', 'Deck 2 loop 4 / exit'],
       ['← / →', 'Crossfader'], ['↑ / ↓', 'Browser selection'], ['Shift + ← / →', 'Load selected track to deck 1 / 2'],
-      ['Ctrl + F', 'Search library'], ['R', 'Start / stop recording'], ['A', 'Automix on/off'], ['Shift (hold)', 'Shift layer (delete cues, set master…)'],
+      ['Ctrl + F', 'Search library'], ['R', 'Start / stop recording'], ['A', 'Automix: start (smart mix of the queue or view) / stop'], ['Shift (hold)', 'Shift layer (delete cues, set master…)'],
     ].map(([k, d]) => el('tr', {}, el('td', {}, el('kbd', {}, k)), el('td', {}, d)))));
 
     // ---- appearance ----

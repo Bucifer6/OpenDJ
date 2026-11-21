@@ -137,8 +137,9 @@ class App {
     this.clock = el('span', { class: 'clock' });
     this.recBtn = el('button', { class: 'btn rec', onclick: () => this.toggleRecord(), title: 'Record your mix to disk. R = start / stop' }, el('span', { class: 'rec-dot' }), 'REC');
     this.recTime = el('span', { class: 'rec-time' });
-    this.amBtn = el('button', { class: 'btn automix-btn', onclick: () => this.toggleAutomix(), title: 'Automix the current library view' }, iconLabel('automix', 'AUTOMIX'));
-    this.amNowBtn = el('button', { class: 'btn am-now-btn', onclick: () => this.automixNow(), title: 'Start automix on the current library view using saved preferences', 'aria-label': 'Automix now' }, iconLabel('automix', 'AUTOMIX NOW'));
+    // one click: start a smart automix of the queue / this library view at once (what the separate AUTOMIX NOW
+    // button did); click again to stop. Shift-click or right-click: the Automix dialog (order, profile, transitions).
+    this.amBtn = el('button', { class: 'btn automix-btn', onclick: (e) => this.toggleAutomix({ dialog: e.shiftKey || this.shift }), oncontextmenu: (e) => { e.preventDefault(); if (!this.automix.enabled && !this._amStarting) this.toggleAutomix({ dialog: true }); }, title: 'Automix: start a smart mix of the queue, or else of this library view, with your saved preferences. Click again to stop. Shift-click or right-click: Automix options. Key: A' }, iconLabel('automix', 'AUTOMIX'));
     this.amSkip = el('button', { class: 'btn sm icon-only', onclick: () => this.automix.skip(), title: 'Mix to next track now', 'aria-label': 'Mix to next track now' }, icon('next'));
     this.amInfo = el('span', { class: 'am-info' });
     this.amQueueBtn = el('button', { class: 'btn sm am-queue-btn', onclick: () => this.toggleQueuePanel(), title: 'Automix queue: upcoming tracks, transition styles, smart-mix reasons' }, 'QUEUE');
@@ -158,7 +159,7 @@ class App {
     const topbar = el('header', { class: 'topbar' },
       el('div', { class: 'logo' }, logoMark(), el('span', { class: 'logo-word' }, 'Open', el('b', {}, 'DJ'))),
       deckSel, shiftBtn,
-      el('div', { class: 'tb-group automix-actions' }, this.amBtn, this.amNowBtn, this.amSkip, this.amQueueBtn), this.amInfo,
+      el('div', { class: 'tb-group automix-actions' }, this.amBtn, this.amSkip, this.amQueueBtn), this.amInfo,
       el('div', { class: 'tb-spacer' }),
       el('div', { class: 'tb-group' }, this.recBtn, this.recTime),
       this.midiDot, this.cpu, this.clock,
@@ -403,30 +404,43 @@ class App {
   }
 
   // ---------------- automix / record ----------------
-  toggleAutomix() {
+  /** The tracks AUTOMIX starts from: what is left in the automix queue, else the library view (playlist, crate…). */
+  automixSource() {
+    const a = this.automix;
+    return a.queue.length > a.idx ? { tracks: a.queue.slice(a.idx), from: 'queue' } : { tracks: this.library?.rows || [], from: 'view' };
+  }
+  /** AUTOMIX button / key A / MIDI automix.toggle: start at once, or stop; { dialog: true } opens the options dialog. */
+  toggleAutomix({ dialog = false } = {}) {
     // pressed again while a start is still analysing / loading the first track: cancel it
     if (this._amStarting) { this._amStarting.cancelled = true; this.automix.stop(); this.toast('Automix cancelled'); return; }
-    if (this.automix.enabled) { this.automix.stop(); this.toast('Automix stopped'); }
-    else this.dialogs.automixQueue(this.automix.queue.length > this.automix.idx ? this.automix.queue.slice(this.automix.idx) : this.library.rows);
+    if (this.automix.enabled) { this.automix.stop(); this.toast('Automix stopped'); return; }
+    if (dialog) { this.dialogs.automixQueue(this.automixSource().tracks); return; }
+    return this.automixStart();
   }
 
-  /** Start a smart automix immediately using the visible library rows and saved preferences. */
-  async automixNow() {
-    if (this.automix.enabled) {
-      const result = this.automix.skip();
-      if (result === 'started') this.toast('Transition started');
-      else if (result === 'preparing') this.toast('Preparing the next track; transition will start as soon as it is ready');
-      else if (this.automix.transition) this.toast('A transition is already in progress');
-      else this.toast(this.automix.nextTrack() ? 'Could not start the transition yet' : 'No upcoming track queued');
-      return;
-    }
-    const tracks = this.library?.rows || [];
-    if (!tracks.length) { this.toast('No tracks in this view'); return; }
+  /** Deck MIX NOW: start the queued transition now (waits for the next deck's preload if needed). */
+  mixNow() {
+    if (!this.automix.enabled) return;
+    const result = this.automix.skip();
+    if (result === 'started') this.toast('Transition started');
+    else if (result === 'preparing') this.toast('Preparing the next track; transition will start as soon as it is ready');
+    else if (this.automix.transition) this.toast('A transition is already in progress');
+    else this.toast(this.automix.nextTrack() ? 'Could not start the transition yet' : 'No upcoming track queued');
+  }
+  /**
+   * One-click start with the saved preferences: a smart mix of the remaining queue, else of the library view
+   * (playlist, crate, search…); shuffled when "shuffle" is the saved preference.
+   */
+  async automixStart() {
+    const { tracks, from } = this.automixSource();
+    if (!tracks.length) { this.toast('No tracks in this view: open a playlist or add music, or right-click AUTOMIX for options'); return; }
     const opts = this.settings.automix || {};
     const mode = opts.shuffle ? 'shuffle' : 'smart';
     // same set length as the Automix dialog's default: a smart order over a whole big library would block the UI
-    await this.startAutomix(tracks, { mode, shape: opts.shape, sliders: opts.sliders, limit: tracks.length > 200 ? 40 : undefined });
+    await this.startAutomix(tracks, { mode, shape: opts.shape, sliders: opts.sliders, limit: from === 'view' && tracks.length > 200 ? 40 : undefined });
   }
+  /** Older name (MCP / scripts): MIX NOW while automix runs, else the one-click start. */
+  automixNow() { return this.automix.enabled ? this.mixNow() : this.automixStart(); }
   queueAdd(tracks) {
     if (!this.automix.enabled) { this.automix.queue = [...this.automix.queue.slice(this.automix.idx), ...tracks]; this.automix.idx = 0; }
     else if (this.shift) this.automix.insertNext(tracks); // Shift = play next
@@ -439,8 +453,6 @@ class App {
     this.amBtn.classList.toggle('active', a.enabled);
     const next = a.nextTrack();
     this.amSkip.disabled = !a.enabled || !!a.transition || !next;
-    this.amNowBtn.title = a.enabled ? (a.transition ? 'A transition is already in progress' : next ? 'Start the queued transition now' : 'No upcoming track queued') : 'Start automix on the current library view using saved preferences';
-    this.amNowBtn.setAttribute('aria-label', a.enabled ? 'Start transition now' : 'Automix now');
     for (const [i, deck] of (this.deckEls || []).entries()) {
       const mixButton = deck.querySelector('.deck-mix-now');
       if (!mixButton) continue;
@@ -465,7 +477,7 @@ class App {
    * have no analysis yet (remote tracks included) for a short while, then score with whatever data there is.
    */
   async startAutomix(tracks, opts = {}) {
-    // one start at a time: repeated AUTOMIX NOW / MIX NOW presses during the analysis wait used to start several
+    // one start at a time: repeated AUTOMIX / MIX NOW presses during the analysis wait used to start several
     if (this._amStarting) { this.toast('Automix is starting…'); return; }
     const run = this._amStarting = { cancelled: false };
     try { await this._startAutomix(tracks, opts, run); } finally { if (this._amStarting === run) this._amStarting = null; }

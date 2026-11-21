@@ -289,14 +289,13 @@ try {
   });
   await startFive();
   await waitNextLoaded();
-  // repeated presses: the deck's MIX NOW five times, then the top bar's twice -> exactly one transition
+  // repeated presses: the deck's MIX NOW seven times -> exactly one transition
   const presses = await page.evaluate(async () => {
     const a = window.opendj.automix, idx0 = a.idx, cur = a.current.index;
     let begun = 0; const orig = a.beginTransition.bind(a); a.beginTransition = (...x) => { begun++; return orig(...x); };
     const btn = document.querySelector(`.deck[data-deck="${cur}"] .deck-mix-now`);
     const enabledBefore = !btn.disabled;
-    for (let k = 0; k < 5; k++) btn.click();
-    for (let k = 0; k < 2; k++) document.querySelector('.am-now-btn').click();
+    for (let k = 0; k < 7; k++) btn.click();
     await new Promise((r) => setTimeout(r, 400));
     a.beginTransition = orig;
     return { begun, steps: a.idx - idx0, transition: !!a.transition, enabledBefore, disabledNow: btn.disabled, toast: [...document.querySelectorAll('.toast')].map((t) => t.textContent).at(-1) };
@@ -346,16 +345,45 @@ try {
     return { res, enabled: a.automix.enabled, playing: a.engine.decks.filter((d) => d.playing).length, toasts };
   });
   check(stopFirst.res === 'ok' && !stopFirst.enabled && stopFirst.playing === 0 && !stopFirst.toasts.some((t) => /could be loaded/.test(t)), `stop during the first track's preload: nothing plays, no load error (${JSON.stringify(stopFirst)})`);
-  // AUTOMIX NOW pressed repeatedly while the start is still in progress: one start only
-  const nowTwice = await page.evaluate(async () => {
-    const a = window.opendj; a.automix.stop(); for (const d of a.engine.decks) if (d.playing) d.pause();
-    let starts = 0; const orig = a.automix.start.bind(a.automix); a.automix.start = (...x) => { starts++; return orig(...x); };
+  // AUTOMIX (one click, no dialog): starts a smart mix of the library view; again while starting = cancel;
+  // repeated starts are coalesced; Shift-click / right-click opens the options dialog; no AUTOMIX NOW button any more
+  const oneClick = await page.evaluate(async () => {
+    const a = window.opendj; a.automix.stop(); for (const d of a.engine.decks) d.pause();
+    a.automix.queue = []; a.automix.idx = 0;
     a.library.setView({ kind: 'all' }, 'Collection');
-    await Promise.all([a.automixNow(), a.automixNow(), a.automixNow()]);
+    let starts = 0, mode = null; const orig = a.automix.start.bind(a.automix); a.automix.start = (l, o) => { starts++; mode = o.mode; return orig(l, o); };
+    document.querySelector('.automix-btn').click();
+    await Promise.all([a.automixStart(), a.automixStart()]);
+    for (let k = 0; k < 100 && !(a.automix.enabled && a.automix.current?.playing); k++) await new Promise((r) => setTimeout(r, 100));
     a.automix.start = orig;
-    return { starts, enabled: a.automix.enabled };
+    const dialog = !!document.querySelector('.overlay select[data-am="mode"]');
+    const r = { starts, mode, enabled: a.automix.enabled, playing: !!a.automix.current?.playing, dialog, nowBtn: document.querySelectorAll('.am-now-btn').length };
+    document.querySelector('.automix-btn').click(); // stop
+    r.stopped = !a.automix.enabled;
+    document.querySelector('.automix-btn').dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    await new Promise((res) => setTimeout(res, 200));
+    r.shiftDialog = !!document.querySelector('.overlay select[data-am="mode"]');
+    document.querySelector('.overlay .modal-x')?.click(); document.querySelectorAll('.overlay').forEach((o) => o.querySelector('button')?.textContent === 'Cancel' && o.querySelector('button').click());
+    await new Promise((res) => setTimeout(res, 100));
+    document.querySelector('.automix-btn').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await new Promise((res) => setTimeout(res, 200));
+    r.ctxDialog = !!document.querySelector('.overlay select[data-am="mode"]');
+    document.querySelectorAll('.overlay').forEach((o) => o.remove());
+    return r;
   });
-  check(nowTwice.starts === 1 && nowTwice.enabled, `AUTOMIX NOW pressed 3 times during the start: started once (${nowTwice.starts})`);
+  check(oneClick.starts === 1 && oneClick.mode === 'smart' && oneClick.enabled && oneClick.playing && !oneClick.dialog && oneClick.nowBtn === 0, `AUTOMIX starts a smart mix in one click, no dialog, repeated starts coalesced (${JSON.stringify(oneClick)})`);
+  check(oneClick.stopped && oneClick.shiftDialog && oneClick.ctxDialog, 'AUTOMIX again stops; Shift-click and right-click open the Automix options');
+  // the remaining queue wins over the library view
+  const fromQueue = await page.evaluate(async () => {
+    const a = window.opendj; const all = [...a.library.tracks.values()];
+    a.automix.queue = [all[3], all[4]]; a.automix.idx = 0;
+    let got = null; const orig = a.automix.start.bind(a.automix); a.automix.start = (l, o) => { got = l.map((t) => t.id); return orig(l, o); };
+    a.toggleAutomix();
+    for (let k = 0; k < 100 && !got; k++) await new Promise((r) => setTimeout(r, 50));
+    a.automix.start = orig;
+    return { got: (got || []).sort(), want: [all[3].id, all[4].id].sort() };
+  });
+  check(JSON.stringify(fromQueue.got) === JSON.stringify(fromQueue.want), 'AUTOMIX (key A / MIDI automix.toggle) starts from the remaining queue when there is one');
   await page.evaluate(() => { window.opendj.automix.stop(); for (const d of window.opendj.engine.decks) d.pause(); });
 
   // ================= D) media-server playlists → automix =================

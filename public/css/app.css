@@ -442,6 +442,10 @@ kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-bottom
 .deck-mix-now { grid-column: 1 / -1; width: 100%; min-height: 30px; font-weight: 800; letter-spacing: .06em; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .deck-mix-now:not(:disabled):hover { box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 28%, transparent); }
 .deck-mix-now:disabled { opacity: .45; }
+/* 4 decks: the transport column is 52 px; "MIX NOW" with its letter-spacing was wider and pushed CUE / PLAY into
+   the hot-cue pads (e2e-ui-sweep, 1920x1080 at 80 %). Two compact lines instead. */
+.four-decks .transport > * { min-width: 0; }
+.four-decks .deck-mix-now { font-size: 9px; letter-spacing: 0; padding: 2px 1px; white-space: normal; line-height: 1.05; min-height: 26px; }
 
 /* Licensed one-shot sample browser */
 .sample-catalog-body { display: flex; flex-direction: column; gap: 10px; }
@@ -453,3 +457,4 @@ kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-bottom
 .sample-catalog-name { font-weight: 750; }
 .sample-catalog-credit { color: var(--text-2); font-size: var(--fs-xs); }
 @media (max-width: 520px) { .sample-catalog-filters { grid-template-columns: 1fr; } .sample-catalog-list { grid-template-columns: 1fr; } }
+
