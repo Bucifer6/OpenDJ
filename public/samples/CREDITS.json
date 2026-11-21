@@ -1,0 +1,16 @@
+{
+  "about": "Every sound file bundled with OpenDJ under public/samples, with its creator, source and SPDX licence (checked by test/deck-physics.test.js). Sounds that OpenDJ synthesises at run time are listed under \"generated\". Downloadable sounds (Settings → Sampler, scratch sample slots) are credited in public/js/audio/sample-catalog.js.",
+  "files": [
+    { "file": "air-horn.mp3", "title": "Pneumatic horn, simple #1", "creator": "Joseph SARDIN", "source": "https://bigsoundbank.com/pneumatic-horn-simple-1-s1827.html", "license": "CC0-1.0" }
+  ],
+  "generated": [
+    { "id": "ahh", "title": "Ahh (vowel)", "creator": "OpenDJ contributors", "how": "formant-filtered sawtooth voice synthesised in public/js/audio/scratch-samples.js", "license": "MIT" },
+    { "id": "ooh", "title": "Ooh (vowel)", "creator": "OpenDJ contributors", "how": "formant-filtered sawtooth voice synthesised in public/js/audio/scratch-samples.js", "license": "MIT" },
+    { "id": "tone", "title": "Tone burst", "creator": "OpenDJ contributors", "how": "1 kHz sine burst", "license": "MIT" },
+    { "id": "stab", "title": "Synth stab", "creator": "OpenDJ contributors", "how": "detuned saw chord with a fast envelope", "license": "MIT" },
+    { "id": "kick", "title": "Kick", "creator": "OpenDJ contributors", "how": "pitch-swept sine", "license": "MIT" },
+    { "id": "snare", "title": "Snare", "creator": "OpenDJ contributors", "how": "noise burst plus a tuned body", "license": "MIT" },
+    { "id": "bass", "title": "Bass hit", "creator": "OpenDJ contributors", "how": "sub sine with a drive envelope", "license": "MIT" },
+    { "id": "noise", "title": "Noise sweep", "creator": "OpenDJ contributors", "how": "filtered noise", "license": "MIT" }
+  ]
+}
