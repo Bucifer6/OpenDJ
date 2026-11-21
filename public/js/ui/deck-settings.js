@@ -16,6 +16,7 @@ export function deckSettingsFields(app, { field, sel, chk }) {
   const motorNow = MOTOR.find(([, , [a, b]]) => a === v.start && b === v.stop)?.[0] || 'custom';
   return [
     el('h3', {}, 'Platter'),
+    field('Deck look', sel(o.deckLook || 'auto', [['auto', 'Follow the theme'], ['standard', 'Standard decks'], ['turntable', 'Direct-drive turntables'], ['player', 'Pro media players']], (x) => setOpt({ deckLook: x })), 'Themes such as Direct-Drive Turntable, Pro Media Player and Club Booth pick a look; each deck\'s Platter panel can override it. Phones and 4-deck layouts show a simplified version.'),
     field('Platter look', sel(o.platterSkin, PLATTER_SKINS, (x) => setOpt({ platterSkin: x })), 'Vinyl: rotating cover art, strobe and a tonearm you can drag to drop the needle. Jog display: artwork, position ring, loop and slip markers.'),
     field('Motor (every deck)', sel(motorNow, [...MOTOR.map(([id, l]) => [id, l]), ...(motorNow === 'custom' ? [['custom', 'Custom (set in the decks\' Platter panels)']] : [])], (x) => { const m = MOTOR.find(([id]) => id === x); if (m) { setVinyl({ start: m[2][0], stop: m[2][1] }); app.setSetting('vinylDecks', (app.settings.vinylDecks || []).map((d) => (d ? (({ start, stop, ...rest }) => rest)(d) : d))); for (const d of app.engine.decks) d.applyVinyl(vinylFor(app.settings, d.index)); } }),
       'Start and stop times of play / pause and of the platter after you let go. Each deck\'s Platter panel has the full set (weight, slip-mat, coast, spin-back, 33 / 45 / 78).'),

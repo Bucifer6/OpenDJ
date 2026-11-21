@@ -1,5 +1,6 @@
 import { icon, glyphIcon } from './icons.js';
 import { deckSettingsFields } from './deck-settings.js';
+import { WAVEFORM_STYLES } from './waveform.js';
 import { el, uiZoom } from '../util.js';
 import { api } from '../api.js';
 import { THEMES, applyTheme, refreshSkinCatalog } from './themes.js';
@@ -459,7 +460,7 @@ export class Dialogs {
       el('div', { class: 'row' }, field('Accent colour', accent), el('button', { class: 'btn sm', onclick: async () => { await set('accentColor', ''); applyTheme(app.settings); } }, 'Use theme accent')),
       field('Interface size', sel(s.uiScale || 100, [80, 90, 100, 110, 125, 150].map((v) => [v, `${v}%`]), async (v) => { await set('uiScale', Number(v)); applyTheme(app.settings); scaleNote(); }), 'Shrink for small laptop screens, enlarge for touchscreens and big displays.'),
       scaleNoteEl,
-      field('Waveform colours', sel(s.waveformColors, [['rgb', '3-band RGB'], ['blue', 'Blue'], ['mono', 'Monochrome']], (v) => set('waveformColors', v))),
+      field('Waveform style', sel(s.waveformColors, WAVEFORM_STYLES, (v) => set('waveformColors', v)), 'Player Blue and Player RGB look like the waveforms of club media players.'),
     );
     const dvsTab = el('div', { class: 'form' }, el('p', { class: 'hint' }, 'Control decks with Serato or Traktor timecode vinyl / CDs through your audio interface inputs.'), el('button', { class: 'btn', onclick: () => import('../dvs/dvs-ui.js').then((m) => m.openDvsPanel(app)) }, 'Open DVS setup…'));
     const about = this.aboutPane(chk);

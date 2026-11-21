@@ -16,6 +16,8 @@ import { setDeckVinyl, needleLocked } from '../midi/deck-targets.js';
 import { haptics, setHapticsLevel } from './haptics.js';
 import { PLATTER_SKINS } from './platter-skins.js';
 import { openScratchView } from './scratch-view.js';
+import { buildProPlayer } from './pro-player.js';
+import { themeDeckLook } from './themes.js';
 
 export const DECK_COLORS = ['var(--deck1)', 'var(--deck2)', 'var(--deck3)', 'var(--deck4)'];
 const LOOP_SIZES = [1 / 4, 1 / 2, 1, 2, 4, 8, 16, 32];
@@ -109,7 +111,15 @@ export function buildDeck(app, deck) {
   // ---------- jog ----------
   const opts = () => deckOptions(app.settings);
   setHapticsLevel(opts().haptics);
-  const jog = jogWheel(deck, { skin: () => opts().platterSkin, haptics });
+  // deck look (Settings → Decks, the deck's Platter panel, or the theme / skin): standard, a direct-drive turntable or
+  // a pro media player. Phones and 4-deck layouts get the simplified version (standard layout, matching platter).
+  let look = 'standard', lookFull = false;
+  const jog = jogWheel(deck, { skin: () => (look === 'turntable' ? (lookFull ? 'turntable' : 'vinyl') : look === 'player' ? 'cdj' : opts().platterSkin), haptics });
+  // turntable plinth controls (shown only in the turntable look): start / stop and 33 / 45 / 78
+  const ttRpm = (r) => R(button(r === 33 ? '33' : String(r), { cls: 'tt-btn', click: () => setDeckVinyl(app, deck, { rpm: r }), active: () => deck.vinyl.rpm === r, title: `${r === 33 ? '33⅓' : r} rpm` }));
+  jog.append(el('div', { class: 'tt-controls' },
+    R(button('START·STOP', { cls: 'tt-btn tt-start', click: () => { app.engine.resume(); deck.startStop(); }, active: () => deck.playing, title: 'Start / stop with motor ramps' })),
+    ttRpm(33), ttRpm(45), ttRpm(78)));
   jog.style.setProperty('--deck-color', DECK_COLORS[i]);
   deck.applyVinyl(vinylFor(app.settings, i));
 
@@ -336,6 +346,7 @@ export function buildDeck(app, deck) {
       R(button('QUARTZ', { cls: 'xs', click: () => vset({ quartz: !deck.vinyl.quartz }), active: () => deck.vinyl.quartz, title: 'Quartz lock: tempo pinned at 0 % (the fader is ignored)' })),
       R(button('LOCK', { cls: 'xs', click: () => { deck.hardLock = !deck.hardLock; deck.emit('state'); }, active: () => deck.hardLock, title: 'Deck lock: while this deck plays, loads onto it are refused' })),
       R(button('START/STOP', { cls: 'xs', click: () => { app.engine.resume(); deck.startStop(); }, active: () => deck.playing, title: 'Turntable start / stop: always with motor ramps' })),
+      (() => { const sl = el('select', { class: 'sel tiny', title: 'This deck\'s look (Follow = Settings → Decks / the theme)' }, ...[['auto', 'LOOK: follow'], ['standard', 'Standard'], ['turntable', 'Turntable'], ['player', 'Media player']].map(([v, t]) => el('option', { value: v }, t))); sl.value = app.settings.vinylDecks?.[i]?.look || 'auto'; sl.addEventListener('change', () => setDeckVinyl(app, deck, { look: sl.value })); return sl; })(),
     ),
   );
 
@@ -441,8 +452,31 @@ export function buildDeck(app, deck) {
   let lastFrame = 0;
   const setText = (node, txt) => { if (node._t !== txt) { node._t = txt; node.textContent = txt; } };
   const setClass = (node, cls, on) => { on = !!on; if (node['_c' + cls] !== on) { node['_c' + cls] = on; node.classList.toggle(cls, on); } };
+  const deckMid = () => root.querySelector('.deck-mid');
+  const panelsBox = () => root.querySelector('.deck-panels');
+  let pro = null, lookT = 0;
+  const applyLook = () => {
+    const per = app.settings.vinylDecks?.[i]?.look, glob = opts().deckLook;
+    let want = per && per !== 'auto' ? per : glob && glob !== 'auto' ? glob : themeDeckLook();
+    if (!['standard', 'turntable', 'player'].includes(want)) want = 'standard';
+    const html = document.documentElement;
+    const full = want !== 'standard' && !html.classList.contains('compact') && !document.body.classList.contains('four-decks');
+    if (want === look && full === lookFull) return;
+    look = want; lookFull = full;
+    for (const l of ['turntable', 'player']) root.classList.toggle(`look-${l}`, look === l);
+    root.classList.toggle('look-full', full);
+    const proOn = look === 'player' && full;
+    if (proOn && !pro) { pro = buildProPlayer(app, deck, { R, shift, panels: panelsBox(), panelTabs, showPanel }); root.append(pro.root); }
+    if (proOn) pro.mountPanels(true);
+    else if (pro && panelsBox().parentElement !== deckMid()) deckMid().append(panelTabs, panelsBox());
+    root.classList.toggle('pro-on', proOn);
+    renderState(); fitSoon();
+  };
+  deck.applyLook = applyLook;
   root.frame = (now) => {
-    jog.draw(now); overview.draw(now); drawPhase();
+    if (now - lookT > 300) { lookT = now; applyLook(); }
+    if (pro && root.classList.contains('pro-on')) { pro.frame(now); drawPhase(); }
+    else { jog.draw(now); overview.draw(now); drawPhase(); }
     if (now - lastFrame < 50) return; lastFrame = now;
     const pos = deck.positionAt(smoothTime(deck.ctx, now));
     setText(elapsed, fmtTime(pos));

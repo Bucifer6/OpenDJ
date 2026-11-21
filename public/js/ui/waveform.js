@@ -13,7 +13,14 @@ import { NEEDLE_HOLD_MS } from '../audio/vinyl.js';
 const PALETTES = {
   blue: { low: [24, 92, 214], mid: [70, 160, 255], high: [205, 236, 255] },
   mono: { low: [96, 106, 122], mid: [160, 170, 186], high: [232, 236, 242] },
+  // pro-player styles: "Player Blue" (blue body, white / cyan peaks, like classic club players) and "Player RGB"
+  // (3-band: low dark blue, mid amber, high white, like the newer players)
+  'player-blue': { low: [18, 84, 230], mid: [60, 150, 255], high: [236, 250, 255], solo: true },
+  'player-rgb': { low: [16, 70, 220], mid: [255, 168, 38], high: [252, 252, 255] },
 };
+/** Waveform styles offered in Settings → Appearance (the first is the default). */
+export const WAVEFORM_STYLES = [['rgb', '3-band RGB'], ['blue', 'Blue'], ['mono', 'Monochrome'], ['player-blue', 'Player Blue'], ['player-rgb', 'Player RGB']];
+const proStyle = (name) => name === 'player-blue' || name === 'player-rgb';
 const hex = (s, d) => { const m = /^#?([0-9a-f]{6})$/i.exec(String(s).trim()); if (!m) return d; const n = parseInt(m[1], 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
 function palette(name) {
   if (PALETTES[name]) return PALETTES[name];
@@ -57,6 +64,13 @@ function paintBands(g, w, pal, x0, x1, H, binAt, opts = {}) {
     }
     g.fill();
   };
+  if (pal.solo) { // Player Blue: a solid blue body (full band), a lighter core and white / cyan peaks from the highs
+    layer(P, 1, rgba(pal.low));
+    layer(M, 0.85, rgba(pal.mid, 0.85));
+    const W2 = new Float32Array(cols); for (let k = 0; k < cols; k++) W2[k] = Math.min(P[k], Hh[k] * 1.6 + 0.35 * P[k] * (P[k] > 0.8 ? 1 : 0));
+    layer(W2, 0.6, rgba(pal.high, 0.9));
+    return;
+  }
   layer(P, 1, rgba(pal.low, 0.35));
   layer(L, 1, rgba(pal.low));
   layer(M, 0.78, rgba(pal.mid));
@@ -70,8 +84,9 @@ const waveDpr = () => Math.min(2, devicePixelRatio || 1); // keep dense displays
 
 export class DetailWaveform {
   static all = new Set();
-  constructor(deck, getSettings) {
-    this.deck = deck; this.getSettings = getSettings;
+  /** opts.style: a fixed waveform style for this view (the media-player deck screen), else Settings → Appearance. */
+  constructor(deck, getSettings, opts = {}) {
+    this.deck = deck; this.getSettings = getSettings; this.styleOverride = opts.style || null;
     this.canvas = el('canvas', { class: 'wf-detail' });
     this.g = this.canvas.getContext('2d', { alpha: false });
     this.zoom = 8; // seconds across the view at normal speed (target; viewZoom eases towards it)
@@ -112,6 +127,7 @@ export class DetailWaveform {
     this.ro.observe(this.canvas);
   }
 
+  wfStyle() { return this.styleOverride || this.getSettings().waveformColors || 'rgb'; }
   resize() {
     const dpr = waveDpr();
     if (!this.cw) { const r = this.canvas.getBoundingClientRect(); this.cw = r.width || 1; this.ch = r.height || 1; }
@@ -170,7 +186,7 @@ export class DetailWaveform {
     const cues = deck.track?.cues || [];
     const loop = deck.loop;
     // nothing moved and nothing changed: keep the last frame
-    const sig = `${pos.toFixed(5)}|${rate}|${W}x${H}|${this.viewZoom}|${themeRev}|${s.waveformColors}|${deck.track?.id}|${!!w}|${deck.loading}|${deck.playing}|${loop ? `${loop.start},${loop.end},${loop.active}` : ''}|${cues.length}:${cues.reduce((a, c) => a + c.position + (c.index + 1) * 7, 0)}|${deck.cuePoint}|${deck.bpm}|${deck.gridOffset}|${(deck.track?.phrases || []).length}`;
+    const sig = `${pos.toFixed(5)}|${rate}|${W}x${H}|${this.viewZoom}|${themeRev}|${this.wfStyle()}|${deck.track?.id}|${!!w}|${deck.loading}|${deck.playing}|${loop ? `${loop.start},${loop.end},${loop.active}` : ''}|${cues.length}:${cues.reduce((a, c) => a + c.position + (c.index + 1) * 7, 0)}|${deck.cuePoint}|${deck.bpm}|${deck.gridOffset}|${(deck.track?.phrases || []).length}`;
     if (sig === this.sig) return;
     this.sig = sig;
 
@@ -189,9 +205,9 @@ export class DetailWaveform {
       g.fillStyle = loop.active ? 'rgba(46, 212, 122, 0.20)' : 'rgba(46, 212, 122, 0.08)'; g.fillRect(x1, 0, x2 - x1, H);
     }
     if (w) {
-      const key = `${deck.track?.id}|${H}|${base.toFixed(3)}|${s.waveformColors}|${themeRev}|${w.peak.length}`;
+      const key = `${deck.track?.id}|${H}|${base.toFixed(3)}|${this.wfStyle()}|${themeRev}|${w.peak.length}`;
       if (key !== this.tileKey) { this.tiles.clear(); this.pendingTiles.clear(); this.tileQueue.length = 0; this.tileKey = key; }
-      const pal = palette(s.waveformColors);
+      const pal = palette(this.wfStyle());
       const TW = Math.round(TILE * dpr), tileSecs = TW / base, scale = pxPerSec / base, dur = w.peak.length / w.rate;
       const first = Math.max(0, Math.floor(t0 / tileSecs)), last = Math.min(Math.floor(dur / tileSecs), Math.floor((t0 + W / pxPerSec) / tileSecs));
       const exact = Math.abs(scale - 1) < 1e-6;
@@ -259,7 +275,7 @@ export class DetailWaveform {
 export class OverviewWaveform {
   /** opts: { needleLocked() -> bool, needleHint() } (needle lock, T6) */
   constructor(deck, getSettings, opts = {}) {
-    this.deck = deck; this.getSettings = getSettings; this.opts = opts;
+    this.deck = deck; this.getSettings = getSettings; this.opts = opts; this.styleOverride = opts.style || null;
     this.canvas = el('canvas', { class: 'wf-overview' });
     this.g = this.canvas.getContext('2d', { alpha: false });
     this.cache = null; this.cacheKey = ''; this.sig = ''; this.cw = 0; this.ch = 0;
@@ -287,13 +303,14 @@ export class OverviewWaveform {
     this.ro = new ResizeObserver((es) => { const r = es.at(-1).contentRect, z = uiZoom(); this.cw = r.width * z; this.ch = r.height * z; });
     this.ro.observe(this.canvas);
   }
+  wfStyle() { return this.styleOverride || this.getSettings().waveformColors || 'rgb'; }
   renderCache(W, H, played) {
     const w = this.deck.waveform; const s = this.getSettings();
     const off = newCanvas(W, H);
     const g = off.getContext('2d');
     g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, W, H);
     const n = w.peak.length;
-    paintBands(g, w, palette(s.waveformColors), 0, W, H, (x) => Math.floor(x / W * n), { pad: 1 });
+    paintBands(g, w, palette(this.wfStyle()), 0, W, H, (x) => Math.floor(x / W * n), { pad: 1 });
     if (played) { g.globalAlpha = 0.6; g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, W, H); g.globalAlpha = 1; }
     return off;
   }
@@ -308,21 +325,23 @@ export class OverviewWaveform {
     const cues = deck.track?.cues || [];
     const loop = deck.loop;
     const warn = deck.duration > 0 && deck.playing && deck.duration * (1 - k) < 30;
-    const sig = `${px}|${W}x${H}|${themeRev}|${this.getSettings().waveformColors}|${deck.track?.id}|${!!deck.waveform}|${loop ? `${loop.start},${loop.end},${loop.active}` : ''}|${cues.length}:${cues.reduce((a, c) => a + c.position, 0)}|${(deck.track?.phrases || []).length}|${deck.bpm}|${warn}`;
+    const sig = `${px}|${W}x${H}|${themeRev}|${this.wfStyle()}|${deck.track?.id}|${!!deck.waveform}|${loop ? `${loop.start},${loop.end},${loop.active}` : ''}|${cues.length}:${cues.reduce((a, c) => a + c.position, 0)}|${(deck.track?.phrases || []).length}|${deck.bpm}|${warn}`;
     if (sig === this.sig) return;
     this.sig = sig;
     g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, W, H);
     if (!deck.waveform || !deck.duration) return;
-    const key = `${deck.track?.id}:${W}:${H}:${this.getSettings().waveformColors}:${themeRev}`;
+    const key = `${deck.track?.id}:${W}:${H}:${this.wfStyle()}:${themeRev}`;
     if (key !== this.cacheKey) { this.cache = this.renderCache(W, H, false); this.cachePlayed = this.renderCache(W, H, true); this.cacheKey = key; }
     // played part from the dimmed copy, the rest at full colour
     if (px > 0) g.drawImage(this.cachePlayed, 0, 0, px, H, 0, 0, px, H);
     if (px < W) g.drawImage(this.cache, px, 0, W - px, H, px, 0, W - px, H);
     if (loop) { g.fillStyle = 'rgba(46,212,122,0.30)'; g.fillRect(loop.start / deck.duration * W, 0, Math.max(2, (loop.end - loop.start) / deck.duration * W), H); }
-    // phrase / structure bands along the top (intro, drop, breakdown, outro…)
+    // phrase / structure bands (intro, drop, breakdown, outro…): along the top, or a strip along the bottom in the
+    // pro-player styles
+    const pro = proStyle(this.wfStyle()), ph = pro ? 4 * dpr : 3 * dpr, py = pro ? H - ph : 0;
     for (const p of deck.track?.phrases || []) {
       g.fillStyle = PHRASE_COLORS[p.type] || '#6b7685';
-      g.fillRect(Math.round(p.start / deck.duration * W + dpr), 0, Math.max(1, Math.round((p.end - p.start) / deck.duration * W - 2 * dpr)), 3 * dpr);
+      g.fillRect(Math.round(p.start / deck.duration * W + dpr), py, Math.max(1, Math.round((p.end - p.start) / deck.duration * W - 2 * dpr)), ph);
     }
     // bar ticks every 16 bars
     if (deck.bpm > 0) {
@@ -339,6 +358,7 @@ export class OverviewWaveform {
     }
     // playhead
     g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(px - 2 * dpr, 0, 4 * dpr, H);
-    g.fillStyle = warn ? cssVar('--red') : cssVar('--playhead'); g.fillRect(px - Math.round(dpr / 2), 0, Math.max(1, Math.round(1.5 * dpr)), H);
+    g.fillStyle = warn ? cssVar('--red') : pro ? '#ffffff' : cssVar('--playhead'); g.fillRect(px - Math.round(dpr / 2), 0, Math.max(1, Math.round(1.5 * dpr)), H);
+    if (pro) { g.beginPath(); g.moveTo(px - 4 * dpr, 0); g.lineTo(px + 4 * dpr, 0); g.lineTo(px, 5 * dpr); g.fill(); } // position needle
   }
 }

@@ -6,7 +6,7 @@
 //   sanitizeSetting(key, value) -> { ok: true, value } | { ok: false }
 //   sanitizeSettings(obj, defaults) -> a copy with every known key valid (invalid ones replaced by the default)
 
-export const THEME_IDS = ['midnight', 'graphite', 'club', 'neon', 'ocean', 'gold', 'forest', 'light', 'contrast', 'cdj', 'vinyl', 'performance', 'studio'];
+export const THEME_IDS = ['midnight', 'graphite', 'club', 'neon', 'ocean', 'gold', 'forest', 'light', 'contrast', 'cdj', 'vinyl', 'performance', 'studio', 'turntable', 'player'];
 
 const bool = () => (v) => (typeof v === 'boolean' ? v : v === 'true' ? true : v === 'false' ? false : undefined);
 const str = (max = 4096) => (v) => (typeof v === 'string' ? v.slice(0, max) : v == null ? '' : undefined);
@@ -28,7 +28,7 @@ const shape = (fields) => (v) => {
 
 const VINYL_SHAPE = {
   start: num(0, 3), stop: num(0, 3), inertia: num(0, 4), slipmat: num(0, 1), jogWeight: num(0, 1), rpm: oneOf(33, 45, 78),
-  brakeTime: num(0.2, 6), spinTime: num(0.4, 4), spinSpeed: num(2, 8), quartz: bool(),
+  brakeTime: num(0.2, 6), spinTime: num(0.4, 4), spinSpeed: num(2, 8), quartz: bool(), look: oneOf('auto', 'standard', 'turntable', 'player'),
 };
 
 const SCHEMA = {
@@ -45,7 +45,7 @@ const SCHEMA = {
   keyLockDefault: bool(), quantize: bool(), autoGain: bool(), limiter: bool(), fxPostFader: bool(), autoCues: bool(), stemsAutoLoad: bool(), highPrecisionAudio: bool(),
   syncMode: oneOf('beat', 'tempo'),
   waveformZoom: num(1, 120),
-  waveformColors: oneOf('rgb', 'blue', 'mono'),
+  waveformColors: oneOf('rgb', 'blue', 'mono', 'player-blue', 'player-rgb'),
   downloadDir: str(), uploadDir: str(),
   automix: shape({
     transitionBeats: num(1, 256), smartStart: bool(), profile: oneOf('club', 'harmonic', 'peak', 'open', 'quick', 'custom'),
@@ -85,7 +85,7 @@ const SCHEMA = {
   deckOptions: shape({
     platterSkin: oneOf('minimal', 'vinyl', 'cdj'), haptics: oneOf('auto', 'off', 'subtle', 'full'), needleLock: oneOf('auto', 'on', 'off'),
     needleSnap: oneOf('off', 'beat', 'bar'), flickSpinback: bool(), bendMode: oneOf('ramp', 'fixed'), fineStep: oneOf(0.02, 0.05, 0.5),
-    hardLock: bool(), scratchHand: oneOf('right', 'left'),
+    hardLock: bool(), scratchHand: oneOf('right', 'left'), deckLook: oneOf('auto', 'standard', 'turntable', 'player'),
   }),
   updateSnooze: (v) => {
     if (v === null) return null;
