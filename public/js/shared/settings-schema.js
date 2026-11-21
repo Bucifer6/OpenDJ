@@ -6,7 +6,7 @@
 //   sanitizeSetting(key, value) -> { ok: true, value } | { ok: false }
 //   sanitizeSettings(obj, defaults) -> a copy with every known key valid (invalid ones replaced by the default)
 
-export const THEME_IDS = ['midnight', 'graphite', 'club', 'neon', 'ocean', 'gold', 'forest', 'light', 'contrast', 'cdj', 'vinyl', 'performance', 'studio', 'turntable', 'player'];
+export const THEME_IDS = ['midnight', 'graphite', 'club', 'neon', 'ocean', 'gold', 'forest', 'light', 'contrast', 'cdj', 'vinyl', 'performance', 'studio', 'turntable', 'player', 'compact-controller', 'all-in-one'];
 
 const bool = () => (v) => (typeof v === 'boolean' ? v : v === 'true' ? true : v === 'false' ? false : undefined);
 const str = (max = 4096) => (v) => (typeof v === 'string' ? v.slice(0, max) : v == null ? '' : undefined);
