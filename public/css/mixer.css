@@ -26,7 +26,8 @@
 .xfader-row { display: block; }
 .xfader-control { display: flex; align-items: center; gap: 10px; min-width: 0; width: 100%; }
 .xfader-control .crossfader { flex: 1 1 auto; min-width: 0; width: auto; }
-.crossfader .fader-thumb { width: 30px; }
+.mixer .crossfader { --cap: 30px; }
+.mixer .crossfader .fader-thumb { width: var(--cap); } /* (the cap is placed with --cap: width and travel must agree) */
 
 /* wider strips: bigger knobs, wider meters and fader caps, longer fader */
 .mixer.mx-w1:not(.mx-tiny) .strip .knob-sm { width: 28px; height: 28px; }
