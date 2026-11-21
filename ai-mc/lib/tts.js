@@ -118,6 +118,14 @@ export async function makeReference(config, src, dst) {
     'highpass=f=70,silenceremove=start_periods=1:start_threshold=-45dB,loudnorm=I=-18:TP=-2', '-ac', '1', '-ar', '22050', dst]);
 }
 
+/** Uploaded sound effect → trimmed (leading silence, max length, short fade), loudness-matched MP3. */
+export async function makeSfx(config, src, dst, maxSeconds = 3) {
+  const fadeAt = Math.max(0, maxSeconds - 0.35).toFixed(2);
+  await run(config.ffmpeg || 'ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-af',
+    `silenceremove=start_periods=1:start_threshold=-45dB,atrim=0:${maxSeconds},afade=t=out:st=${fadeAt}:d=0.35,loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100`,
+    '-ac', '2', '-b:a', '192k', dst]);
+}
+
 /** Deletes rendered audio older than a day. */
 export function cleanupAudio() {
   const dir = path.join(DATA, 'audio');

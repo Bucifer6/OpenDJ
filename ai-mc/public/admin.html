@@ -123,6 +123,13 @@
   </section>
 
   <section class="wide">
+    <h2>🔊 Efecte de sunet</h2>
+    <p class="muted">DJ-ul AI le folosește pe beat la treceri (goarna și la dedicații). Poți înlocui oricare cu un fișier al tău (mp3/wav): se taie liniștea, se scurtează și se aduce la același volum.</p>
+    <div id="sfxList" style="display:grid;gap:6px"></div>
+    <button id="sfxPads">🎹 Pune efectele pe pad-urile sampler-ului din OpenDJ</button>
+  </section>
+
+  <section class="wide">
     <h2>Ultimele texte ale AI-ului</h2>
     <p class="muted">Apasă 👍 la textele reușite: devin exemple din care învață stilul personajului.</p>
     <div id="outputs" style="display:grid;gap:8px"></div>
@@ -302,6 +309,32 @@ $('xTest').onclick = async () => {
   catch (e) { alert(e.message); } finally { b.disabled = false; b.textContent = '🎤 Test pe post'; }
 };
 
+// ---------------- sound effects
+const SFX_NAMES = { airhorn: '📯 Goarnă', siren: '🚨 Sirenă', riser: '📈 Riser', impact: '💥 Impact', rewind: '⏪ Rewind', scratch: '💿 Scratch', laser: '🔫 Laser', drop: '🔊 Bass drop' };
+const sfxAudio = new Audio();
+async function loadSfx() {
+  const list = await api('sfx'), box = $('sfxList'); box.textContent = '';
+  for (const { role, ok } of list) {
+    const play = el('button', { textContent: '▶', disabled: !ok, title: 'Ascultă' });
+    play.onclick = async () => {
+      const r = await fetch('/admin/api/sfx/' + role, { headers: { 'x-admin-key': key } });
+      sfxAudio.src = URL.createObjectURL(await r.blob()); sfxAudio.play();
+    };
+    const file = el('input', { type: 'file', accept: 'audio/*' });
+    file.style.maxWidth = '220px';
+    file.onchange = async () => {
+      const f = file.files[0]; if (!f) return;
+      const r = await fetch('/admin/api/sfx/' + role, { method: 'POST', headers: { 'x-admin-key': key, 'Content-Type': 'application/octet-stream' }, body: f });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) return alert(j.error || 'Nu a mers');
+      loadSfx();
+    };
+    box.append(el('div', { className: 'row', style: 'align-items:center' }, el('b', { textContent: SFX_NAMES[role] || role, style: 'flex:none;min-width:120px' }),
+      el('span', { className: ok ? 'ok' : 'muted', textContent: ok ? 'înregistrat' : (role === 'airhorn' ? 'goarna din OpenDJ' : 'lipsește (DJ-ul nu-l folosește)'), style: 'flex:1' }), play, file));
+  }
+}
+$('sfxPads').onclick = async () => { await api('sfx-to-sampler', { method: 'POST' }); $('sfxPads').textContent = '✓ Trimis – se încarcă în OpenDJ'; setTimeout(() => $('sfxPads').textContent = '🎹 Pune efectele pe pad-urile sampler-ului din OpenDJ', 3000); };
+
 // ---------------- music filter
 let genreList = [], selGenres = new Set(), prevT = null;
 const PRESETS = { manele: /manele/, dance: /dance|house|electro|edm|techno|club|trance/, pop: /\bpop\b|^pop/, retro: /70|80|90|disco|retro|oldies|italo|synth/, ro: null, all: null };
@@ -359,6 +392,7 @@ async function boot() {
     $('friends').value = (await api('memory')).friends || '';
     await Promise.all([loadStatus(), loadOutputs()]);
     loadMusic().catch((e) => { $('mCount').textContent = 'Nu pot încărca genurile: ' + e.message; });
+    loadSfx().catch(() => {});
     api('status').then(loadVoices).catch(() => {});
     clearInterval(boot.t); boot.t = setInterval(() => { loadStatus().catch(() => {}); }, 5000);
   } catch (e) { if (e.message !== '401') showLogin(e.message); }

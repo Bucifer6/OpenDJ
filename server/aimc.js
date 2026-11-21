@@ -17,6 +17,13 @@ export function registerAimcRoutes({ route }) {
     await fwd('/bridge/done', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: String(body?.id || '') }) });
     return { ok: true };
   });
+  route('GET', '/api/aimc/sfx/:role', async ({ params, res }) => {
+    if (!/^[a-z0-9]{1,20}$/.test(params.role)) { res.writeHead(400); return res.end(); }
+    const r = await fwd('/bridge/sfx/' + params.role);
+    if (!r?.ok || !r.body) { res.writeHead(404); return res.end(); }
+    res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-cache' });
+    Readable.fromWeb(r.body).pipe(res);
+  });
   route('GET', '/api/aimc/audio/:id', async ({ params, res }) => {
     if (!/^[a-f0-9]{16}$/.test(params.id)) { res.writeHead(400); return res.end(); }
     const r = await fwd('/bridge/audio/' + params.id);

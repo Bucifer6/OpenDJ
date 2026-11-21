@@ -13,7 +13,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { ROOT, DATA, loadConfig, saveConfig, listPersonas, savePersona, loadMemory, saveMemory } from './lib/store.js';
 import { generate, listModels, buildMessages, TASK_TYPES, direct, SOUNDS } from './lib/llm.js';
-import { speak, ttsStatus, cleanupAudio, xttsHealth, makeReference } from './lib/tts.js';
+import { speak, ttsStatus, cleanupAudio, xttsHealth, makeReference, makeSfx } from './lib/tts.js';
 import { findTracks, label } from './lib/match.js';
 import { musicMatch, describe as describeMusic, genresOf, languageOf } from '../public/js/ai-mc-music.js';
 
@@ -35,6 +35,10 @@ saveConfig(config);
 
 const PUBLIC = path.join(ROOT, 'public');
 const VOICES = path.join(ROOT, 'voices');
+// Recorded sound effects (ai-mc/sfx/<role>.mp3). Kept out of git: their licences (e.g. Pixabay) allow use, not redistribution.
+const SFX = path.join(ROOT, 'sfx');
+const SFX_ROLES = ['airhorn', 'siren', 'riser', 'impact', 'rewind', 'scratch', 'laser', 'drop'];
+const sfxAvailable = () => SFX_ROLES.filter((r) => fs.existsSync(path.join(SFX, r + '.mp3')));
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const uid = () => crypto.randomBytes(6).toString('hex');
 const now = () => Date.now();
@@ -124,7 +128,7 @@ async function work() {
 const directorOn = () => config.auto.director !== false;
 async function runDirector(p, d) {
   const t0 = now();
-  const plan = await direct(config, p, d, state.chat.filter((m) => m.kind === 'user').slice(-6));
+  const plan = await direct(config, p, d, state.chat.filter((m) => m.kind === 'user').slice(-6), sfxAvailable());
   if (!plan.nextId) throw new Error('DJ: nicio piesă aleasă');
   state.lastError = '';
   const fxTxt = plan.fx.map((f) => `${SOUNDS[f.sound]} la ${f.when === 'start' ? 'început' : 'drop'}`).join(', ');
@@ -217,7 +221,8 @@ function bridgePoll() {
   }
   const queue = state.toQueue.splice(0);
   const plans = state.plans.splice(0);
-  return { play, queue, plans, director: directorOn(), music: config.music, persona: persona()?.name };
+  const loadSampler = state.loadSampler; state.loadSampler = false;
+  return { play, queue, plans, director: directorOn(), music: config.music, sfx: sfxAvailable(), sfxStamp: sfxAvailable().map((r) => Math.round(fs.statSync(path.join(SFX, r + '.mp3')).mtimeMs)).join('.'), loadSampler, persona: persona()?.name };
 }
 
 // ------------------------------------------------------------------ Icecast-compatible source + listeners
@@ -400,6 +405,13 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
         return fs.createReadStream(f).pipe(res);
       }
+      const sm = /^\/bridge\/sfx\/([a-z0-9]+)$/.exec(p);
+      if (sm) {
+        const f = path.join(SFX, sm[1] + '.mp3');
+        if (!SFX_ROLES.includes(sm[1]) || !fs.existsSync(f)) return send(res, 404, { error: 'no sfx' });
+        res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-cache' });
+        return fs.createReadStream(f).pipe(res);
+      }
       if (p === '/bridge/done' && req.method === 'POST') { const b = await body(req); state.ann.delete(str(b.id, 40)); return send(res, 200, { ok: true }); }
       return send(res, 404, { error: 'no such bridge endpoint' });
     }
@@ -430,6 +442,29 @@ const server = http.createServer(async (req, res) => {
       if (a === 'memory' && req.method === 'GET') return send(res, 200, loadMemory());
       if (a === 'memory' && req.method === 'PUT') { const b = await body(req, 512 * 1024); const m = loadMemory(); if (typeof b.friends === 'string') m.friends = b.friends.slice(0, 8000); if (Array.isArray(b.liked)) m.liked = b.liked.slice(0, 500); saveMemory(m); return send(res, 200, m); }
       if (a === 'outputs') return send(res, 200, state.outputs);
+      // ---- recorded sound effects: list, listen, replace, put them on OpenDJ's sampler pads
+      if (a === 'sfx') return send(res, 200, SFX_ROLES.map((r) => ({ role: r, ok: fs.existsSync(path.join(SFX, r + '.mp3')) })));
+      if (a === 'sfx-to-sampler' && req.method === 'POST') { state.loadSampler = true; return send(res, 200, { ok: true }); }
+      const fm = /^sfx\/([a-z0-9]+)$/.exec(a);
+      if (fm && SFX_ROLES.includes(fm[1]) && req.method === 'GET') {
+        const f = path.join(SFX, fm[1] + '.mp3');
+        if (!fs.existsSync(f)) return send(res, 404, { error: 'Nu există' });
+        res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' });
+        return fs.createReadStream(f).pipe(res);
+      }
+      if (fm && SFX_ROLES.includes(fm[1]) && req.method === 'POST') {
+        const chunks = []; let size = 0;
+        for await (const c of req) { size += c.length; if (size > 20 * 1024 * 1024) return send(res, 413, { error: 'Prea mare (max 20 MB)' }); chunks.push(c); }
+        if (size < 500) return send(res, 400, { error: 'Fișier gol' });
+        fs.mkdirSync(SFX, { recursive: true });
+        const src = path.join(DATA, 'audio', `sfx-${uid()}`);
+        fs.writeFileSync(src, Buffer.concat(chunks));
+        const max = { riser: 8, siren: 5, impact: 4 }[fm[1]] || 3;
+        try { await makeSfx(config, src, path.join(SFX, fm[1] + '.mp3'), max); }
+        catch (e) { return send(res, 400, { error: 'Nu pot citi fișierul: ' + e.message.slice(0, 200) }); }
+        finally { fs.rm(src, { force: true }, () => {}); }
+        return send(res, 200, { ok: true });
+      }
       // ---- what the AI DJ may play: genres in the library, and a preview of a filter
       if (a === 'genres') {
         const counts = new Map();

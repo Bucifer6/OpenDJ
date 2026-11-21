@@ -8,8 +8,33 @@ import { musicMatch, filterActive } from './ai-mc-music.js';
 const POLL_MS = 1500;
 const DUCK_DB = -18; // music level under the AI voice
 const VOICE_GAIN = 1.0; // the voice file is already loudness-normalised: more gain only clips on the master limiter
-let hornP = null;
-const hornBuffer = (ctx) => (hornP ||= fetch('samples/air-horn.mp3').then((r) => r.arrayBuffer()).then((b) => ctx.decodeAudioData(b)).catch(() => { hornP = null; return null; }));
+// Recorded effects from AI MC (ai-mc/sfx/<role>.mp3); OpenDJ's own air horn when there is none.
+let sfxRoles = new Set(), sfxVersion = '';
+const sfxCache = new Map();
+function sfxBuffer(ctx, id) {
+  if (!sfxCache.has(id)) {
+    const url = sfxRoles.has(id) ? `/api/aimc/sfx/${id}?v=${encodeURIComponent(sfxVersion)}` : id === 'airhorn' ? 'samples/air-horn.mp3' : null;
+    const p = url ? fetch(url, { credentials: 'same-origin' }).then((r) => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }).then((b) => ctx.decodeAudioData(b)) : renderSound(id, ctx.sampleRate);
+    sfxCache.set(id, p.catch(() => { sfxCache.delete(id); return null; }));
+  }
+  return sfxCache.get(id);
+}
+const hornBuffer = (ctx) => sfxBuffer(ctx, 'airhorn');
+
+/** Puts the recorded effects on OpenDJ's sampler pads (pad 1 = air horn …), asked for from the AI MC panel. */
+async function loadSamplerPads() {
+  const a = app(), sampler = a.engine?.sampler;
+  if (!sampler?.loadFile) return;
+  let i = 0;
+  for (const role of ['airhorn', 'siren', 'riser', 'impact', 'rewind', 'scratch', 'laser', 'drop']) {
+    if (!sfxRoles.has(role) || i >= (sampler.slots?.length || 8)) continue;
+    try {
+      const blob = await (await fetch(`/api/aimc/sfx/${role}?v=${Date.now()}`, { credentials: 'same-origin' })).blob();
+      await sampler.loadFile(i++, new File([blob], `${role}.mp3`, { type: 'audio/mpeg' }));
+    } catch (e) { console.warn('[ai-mc] sampler pad', role, e); }
+  }
+  a.toast?.(`AI MC: ${i} efecte puse pe pad-urile sampler-ului`);
+}
 let playing = false;
 const queue = [];
 let offlineSince = 0;
@@ -120,7 +145,7 @@ function onBeat(deck) {
 async function playSound(id, when) {
   const eng = app().engine;
   try {
-    const buf = id === 'airhorn' ? await hornBuffer(eng.ctx) : await renderSound(id, eng.ctx.sampleRate);
+    const buf = await sfxBuffer(eng.ctx, id);
     if (!buf) return;
     const s = eng.ctx.createBufferSource(); s.buffer = buf;
     const g = eng.ctx.createGain(); g.gain.value = 0.8;
@@ -231,6 +256,11 @@ async function tick() {
         // the organiser changed the music: re-plan the next track for the one playing now
         try { pendingDirector = buildDirector(s.current); } catch (e) { console.warn('[ai-mc] director', e); }
       }
+      if (Array.isArray(r.sfx)) {
+        const v = r.sfx.join(',') + '|' + (r.sfxStamp || '');
+        if (v !== sfxVersion) { sfxRoles = new Set(r.sfx); sfxVersion = v; sfxCache.clear(); }
+      }
+      if (r.loadSampler) loadSamplerPads();
       if (r.queue?.length) queueTracks(r.queue);
       for (const p of r.plans || []) applyPlan(p);
       if (r.play?.length) { queue.push(...r.play); playNext(); }

@@ -20,3 +20,4 @@ ai-mc/voices/
 ai-mc/xtts/.venv/
 ai-mc/xtts/model/
 ai-mc/xtts/__pycache__/
+ai-mc/sfx/
