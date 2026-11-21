@@ -33,6 +33,7 @@ import { registerRecordingRoutes } from './recorder.js';
 import { registerTtsRoutes } from './tts.js';
 import { registerMcp } from './mcp.js';
 import { registerBroadcastRoutes } from './broadcast.js';
+import { registerAimcRoutes } from './aimc.js';
 import { registerCdjRoutes } from './cdj/routes.js';
 import { findIdenticalTrack } from './upload-dedupe.js';
 import { registerStemRoutes } from './stems.js';
@@ -822,6 +823,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   registerTtsRoutes({ route, httpError: (status, msg) => new HttpError(status, msg), detect: tts });
   // remote control for AI assistants (MCP): off by default; own loopback listener, or session + token when hosted
   const mcp = registerMcp({ route, library, emit, auth, hosted: auth.enabled, version: VERSION, log, broadcastConfig: () => library.settings.broadcast || { targets: [] }, ...(mcpOpts || {}) });
+  registerAimcRoutes({ route });
   registerCdjRoutes({ route, library, emit, allowPath, readable });
   const updates = registerUpdateRoutes({ route, library, version: VERSION, hosted: restricted });
 

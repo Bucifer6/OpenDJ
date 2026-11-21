@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI MC – panou</title>
+<style>
+  :root { --bg:#101014; --card:#1a1a22; --line:#2d2d3a; --text:#eee; --muted:#9a9ab0; --acc:#ff3d7f; --ok:#3ddc84; --bad:#ff5c5c; }
+  * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
+  .chk { display:flex !important; gap:6px; align-items:center; color:var(--text); flex:none; min-width:0; }
+  .chk input { width:auto; }
+  .gchip { display:inline-flex; gap:5px; align-items:center; padding:4px 9px; border:1px solid var(--line); border-radius:99px; font-size:13px; color:var(--text); cursor:pointer; }
+  .gchip input { width:auto; margin:0; } .gchip.on { border-color:var(--acc); background:rgba(255,61,127,.15); }
+  .gchip small { color:var(--muted); }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width:1100px; margin:0 auto; padding:16px; display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; display:grid; gap:8px; align-content:start; }
+  section.wide { grid-column:1/-1; }
+  h1 { grid-column:1/-1; margin:0; font-size:20px; } h2 { margin:0 0 4px; font-size:16px; }
+  label { display:grid; gap:3px; font-size:13px; color:var(--muted); }
+  input, select, textarea { width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:#0c0c10; color:var(--text); font:inherit; }
+  textarea { min-height:80px; resize:vertical; }
+  button { padding:8px 12px; border-radius:8px; border:1px solid var(--line); background:#262633; color:var(--text); cursor:pointer; font:inherit; }
+  button.p { background:var(--acc); border-color:var(--acc); color:#fff; font-weight:600; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:end; } .row > * { flex:1; min-width:120px; }
+  .st { display:grid; grid-template-columns:auto 1fr; gap:4px 10px; font-size:14px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .muted { color:var(--muted); font-size:13px; }
+  .out { border:1px solid var(--line); border-radius:8px; padding:8px; white-space:pre-wrap; display:grid; gap:6px; }
+  .out .row button { flex:none; min-width:0; }
+  .ex { display:grid; grid-template-columns:110px 1fr auto; gap:6px; align-items:start; }
+  #login { position:fixed; inset:0; background:var(--bg); display:grid; place-items:center; }
+  #login form { display:grid; gap:8px; width:min(320px,90vw); }
+</style>
+</head>
+<body>
+<div id="login"><form id="lf"><h2>AI MC – panou DJ</h2><input id="pw" type="password" placeholder="Parola (din consola AI MC)" autocomplete="current-password"><button class="p">Intră</button><p class="muted" id="lerr"></p></form></div>
+
+<div class="wrap" id="main" hidden>
+  <h1>🎤 AI MC – panou DJ</h1>
+
+  <section>
+    <h2>Stare</h2>
+    <div class="st" id="status"></div>
+    <div class="row"><button id="refresh">Reîmprospătează</button><button id="clearChat">Golește chatul</button></div>
+  </section>
+
+  <section>
+    <h2>Setări</h2>
+    <label>Nume radio<input id="stationName"></label>
+    <label>Adresă Ollama (PC-ul cu AI, prin Tailscale)<input id="ollamaUrl" placeholder="http://100.x.y.z:11434"></label>
+    <div class="row">
+      <label>Model<select id="model"></select></label>
+      <label>Creativitate<input id="temperature" type="number" min="0" max="2" step="0.1"></label>
+    </div>
+    <label>Personaj la microfon<select id="persona"></select></label>
+    <div class="row">
+      <label>Anunță fiecare a N-a piesă (0 = niciodată)<input id="introEvery" type="number" min="0" max="20"></label>
+      <label>Cereri<select id="moderation"><option value="auto">intră direct</option><option value="manual">le aprob eu</option></select></label>
+    </div>
+    <label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input id="director" type="checkbox" style="width:auto"> 🎛️ DJ AI: alege el piesele, trecerile și efectele (cererile prietenilor au prioritate)</label>
+    <label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input id="speakChat" type="checkbox" style="width:auto"> Răspunde și la chat cu voce (altfel doar în scris)</label>
+    <div class="row"><label>Viteză voce (1 = normal, mai mare = mai rar)<input id="lengthScale" type="number" min="0.5" max="2" step="0.05"></label></div>
+    <button class="p" id="saveCfg">Salvează setările</button>
+  </section>
+
+  <section>
+    <h2>Testează / dă pe post</h2>
+    <div class="row">
+      <label>Ce să facă<select id="tTask"><option value="dedicatie">Dedicație</option><option value="versuri">Versuri</option><option value="intro">Anunță piesa</option><option value="chat">Răspuns la chat</option><option value="liber">Instrucțiune liberă</option></select></label>
+      <label>De la<input id="tFrom"></label><label>Pentru<input id="tTo"></label>
+    </div>
+    <label>Mesaj / subiect / instrucțiune<textarea id="tMsg"></textarea></label>
+    <div class="row"><button id="tGen">Generează (doar test)</button><button class="p" id="tAir">Generează și dă pe post</button></div>
+    <label>Spune exact textul ăsta la microfon<textarea id="say"></textarea></label>
+    <button id="sayBtn">🎤 Spune acum</button>
+  </section>
+
+  <section>
+    <h2>🎙️ Voce clonată</h2>
+    <div class="muted" id="xStatus">Verific serverul de voce…</div>
+    <label>Vocea radioului<select id="engine"><option value="xtts">Voce clonată (XTTS, pe placa video)</option><option value="edge">Microsoft Emil / Alina (online)</option><option value="piper">Piper (local, robotic)</option></select></label>
+    <label>Folosește înregistrarea<select id="xVoice"></select></label>
+    <details>
+      <summary style="cursor:pointer">Înregistrează o voce nouă</summary>
+      <p class="muted">10–30 de secunde, cu energie de MC, fără muzică pe fundal, aproape de microfon. Citește de exemplu:</p>
+      <p style="font-style:italic;margin:0 0 6px">„Aaa-leleu! Bună seara, petrecere! Mâinile sus, toată lumea! Aici e Radio Petrecerea, cu dedicații și voie bună! Pentru fratele meu Mihai, cu mult respect: să trăiești, frate, sănătate și noroc! Hai, hai, hai, nu stă nimeni jos în seara asta!”</p>
+      <div class="row"><label>Nume<input id="xName" value="mc" maxlength="40"></label></div>
+      <div class="row"><button class="p" id="recBtn">⏺ Înregistrează</button><label style="min-width:200px">sau încarcă un fișier (mp3, m4a, wav)<input id="xFile" type="file" accept="audio/*"></label></div>
+      <audio id="xPlay" controls style="width:100%;display:none"></audio>
+    </details>
+    <div class="row"><button id="xSave">Salvează vocea</button><button id="xTest">🎤 Test pe post</button></div>
+  </section>
+
+  <section>
+    <h2>Cereri de aprobat</h2>
+    <div id="pending" class="muted">Nimic în așteptare.</div>
+  </section>
+
+  <section class="wide">
+    <h2>🎵 Ce muzică pune DJ-ul</h2>
+    <p class="muted">DJ-ul AI alege următoarea piesă doar dintre cele care se potrivesc aici. Cererile prietenilor trec oricum.</p>
+    <div class="row" style="align-items:center">
+      <b style="flex:none;min-width:0">Limbi:</b>
+      <label class="chk"><input type="checkbox" class="lang" value="ro"> 🇷🇴 română</label>
+      <label class="chk"><input type="checkbox" class="lang" value="en"> 🇬🇧 engleză</label>
+      <label class="chk"><input type="checkbox" class="lang" value="es"> 🇪🇸 spaniolă</label>
+      <label class="chk"><input type="checkbox" class="lang" value="other"> 🌍 alte limbi</label>
+    </div>
+    <label class="chk"><input type="checkbox" id="mRo"> Doar muzică românească (manele, lăutărească, populară, pop românesc…)</label>
+    <div class="row">
+      <button data-preset="all">Toate genurile</button><button data-preset="manele">Manele</button><button data-preset="dance">Dance / House</button>
+      <button data-preset="pop">Pop</button><button data-preset="ro">Petrecere românească</button><button data-preset="retro">Retro 70-80-90</button>
+    </div>
+    <label>Genuri din colecția ta (nimic bifat = toate)<input id="gSearch" placeholder="caută gen…"></label>
+    <div id="genres" style="display:flex;flex-wrap:wrap;gap:6px;max-height:190px;overflow:auto"></div>
+    <div class="row">
+      <label>Doar piese care conțin (cuvinte, separate prin virgulă)<input id="mInc" placeholder="ex: remix, live"></label>
+      <label>Fără piese care conțin<input id="mExc" placeholder="ex: christmas, colinde, karaoke"></label>
+    </div>
+    <div class="out"><b id="mCount">…</b><span class="muted" id="mSample"></span></div>
+    <button class="p" id="mSave">Salvează muzica</button>
+  </section>
+
+  <section class="wide">
+    <h2>Ultimele texte ale AI-ului</h2>
+    <p class="muted">Apasă 👍 la textele reușite: devin exemple din care învață stilul personajului.</p>
+    <div id="outputs" style="display:grid;gap:8px"></div>
+  </section>
+
+  <section class="wide">
+    <h2>Învață-l: personajul</h2>
+    <div class="row">
+      <label>Editează personajul<select id="pSel"></select></label>
+      <label>Id (pentru unul nou)<input id="pId" placeholder="ex: lautar2"></label>
+      <label>Stil voce<select id="pVoice"><option value="radio">radio (curat)</option><option value="mc">MC (compresat, ecou scurt)</option><option value="lautar">lăutar (ecou de sală)</option><option value="manele">manele (chorus + ecou)</option></select></label>
+    </div>
+    <div class="row"><label>Voce Microsoft<select id="pEdge"><option value="ro-RO-EmilNeural">Emil (bărbat)</option><option value="ro-RO-AlinaNeural">Alina (femeie)</option></select></label><label>Viteză vorbire (ex: +15%)<input id="pRate" placeholder="+12%"></label><label>Ton (ex: +5Hz)<input id="pPitch" placeholder="+5Hz"></label></div>
+    <label>Nume afișat<input id="pName"></label>
+    <label>Cum se comportă (descrie-l cât mai concret: expresii, teme, ce strigă, cum se adresează)<textarea id="pSystem" style="min-height:140px"></textarea></label>
+    <h2>Exemple de stil</h2>
+    <p class="muted">Scrie cum ai vrea să sune. Nu copia versuri din melodii reale, scrie în stilul lor.</p>
+    <div id="pEx" style="display:grid;gap:6px"></div>
+    <div class="row"><button id="addEx">+ Exemplu</button><button class="p" id="saveP">Salvează personajul</button><button id="mf">Exportă Modelfile (Ollama)</button><button id="tj">Exportă date de antrenare (.jsonl)</button></div>
+  </section>
+
+  <section class="wide">
+    <h2>Învață-l: prietenii</h2>
+    <p class="muted">Ce știe AI-ul despre ascultători: porecle, glume interne, ce le place. Un rând pe persoană.</p>
+    <textarea id="friends" style="min-height:120px" placeholder="Andrei (Dede): gazda petrecerii, ține cu echipa lui, îi plac manelele vechi&#10;Maria: e ziua ei azi, iubește munții"></textarea>
+    <button class="p" id="saveFriends">Salvează</button>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let key = ''; try { key = sessionStorage.getItem('aimc') || ''; } catch {}
+let personas = {}, cfg = {};
+const api = async (path, opt = {}) => {
+  const r = await fetch('/admin/api/' + path, { ...opt, headers: { 'Content-Type': 'application/json', 'x-admin-key': key, ...(opt.headers || {}) }, body: opt.body && typeof opt.body !== 'string' ? JSON.stringify(opt.body) : opt.body });
+  if (r.status === 401) { showLogin('Parolă greșită'); throw new Error('401'); }
+  const ct = r.headers.get('content-type') || '';
+  const j = ct.includes('json') ? await r.json() : await r.text();
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+};
+const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+function showLogin(msg) { $('login').hidden = false; $('main').hidden = true; $('lerr').textContent = msg || ''; }
+$('lf').onsubmit = async (e) => { e.preventDefault(); key = $('pw').value; try { sessionStorage.setItem('aimc', key); } catch {} await boot(); };
+
+async function loadStatus() {
+  const s = await api('status');
+  const st = $('status'); st.textContent = '';
+  const line = (k, ok, v) => st.append(el('span', { textContent: k }), el('span', { className: ok ? 'ok' : 'bad', textContent: v }));
+  line('Ollama', s.ollama.ok && s.ollama.hasModel, s.ollama.ok ? (s.ollama.hasModel ? 'conectat' : `conectat, dar lipsește modelul ${cfg.model}`) : 'nu răspunde: ' + (s.ollama.why || ''));
+  line('Voce', s.tts.ok, s.tts.ok ? ({ xtts: `clonată (${s.tts.voice})${s.xtts?.ok ? '' : ' – serverul nu rulează, merge Microsoft'}`, edge: 'Microsoft ' + (s.tts.voice || ''), piper: 'Piper' }[s.tts.engine] || 'OK') : s.tts.why);
+  line('OpenDJ', s.bridge, s.bridge ? `conectat${s.automix ? ', automix pornit' : ''}` : 'pagina OpenDJ nu e deschisă');
+  line('Emisie', s.onAir, s.onAir ? 'LIVE' : 'oprită (OpenDJ → Broadcast)');
+  line('Ascultători', true, String(s.listeners));
+  line('Piese în colecție', s.tracks > 0, String(s.tracks));
+  line('Acum', true, s.nowPlaying || '–');
+  line('Coada AI', true, String(s.jobs));
+  if (s.lastError) line('Ultima eroare', false, s.lastError);
+  const models = s.ollama.models || [];
+  const sel = $('model'); const cur = cfg.model; sel.textContent = '';
+  for (const m of new Set([cur, ...models])) sel.append(el('option', { value: m, textContent: m + (models.includes(m) ? '' : ' (lipsește)') }));
+  sel.value = cur;
+  const pd = $('pending'); pd.textContent = s.pending.length ? '' : 'Nimic în așteptare.';
+  for (const r of s.pending) {
+    const txt = `${r.name} → ${r.kind}${r.song ? ': ' + r.song : ''}${r.to ? ' pentru ' + r.to : ''}${r.message ? ' – ' + r.message : ''}`;
+    const ok = el('button', { className: 'p', textContent: 'Aprobă' }), no = el('button', { textContent: 'Respinge' });
+    ok.onclick = () => api('pending', { method: 'POST', body: { id: r.id, approve: true } }).then(loadStatus);
+    no.onclick = () => api('pending', { method: 'POST', body: { id: r.id, approve: false } }).then(loadStatus);
+    pd.append(el('div', { className: 'out' }, el('span', { textContent: txt }), el('div', { className: 'row' }, ok, no)));
+  }
+}
+async function loadOutputs() {
+  const list = await api('outputs'); const box = $('outputs'); box.textContent = '';
+  if (!list.length) box.append(el('p', { className: 'muted', textContent: 'Încă nimic.' }));
+  for (const o of list.slice(0, 20)) {
+    const ta = el('textarea', { value: o.text });
+    const like = el('button', { textContent: '👍 Învață din asta' });
+    like.onclick = async () => { await api('like', { method: 'POST', body: { id: o.id, text: ta.value, persona: o.persona, type: o.type } }); like.textContent = '✓ învățat'; like.disabled = true; };
+    box.append(el('div', { className: 'out' }, el('span', { className: 'muted', textContent: `${o.persona} · ${o.type} · ${new Date(o.at).toLocaleTimeString('ro-RO')} (poți corecta textul înainte de 👍)` }), ta, el('div', { className: 'row' }, like)));
+  }
+}
+function exRow(e = { type: '', text: '' }) {
+  const t = el('select'); for (const [v, l] of [['', 'oricând'], ['dedicatie', 'dedicație'], ['versuri', 'versuri'], ['intro', 'anunț piesă'], ['cerere', 'piesă cerută'], ['chat', 'chat']]) t.append(el('option', { value: v, textContent: l }));
+  t.value = e.type || '';
+  const x = el('textarea', { value: e.text }); const del = el('button', { textContent: '✕' });
+  const row = el('div', { className: 'ex' }, t, x, del); del.onclick = () => row.remove();
+  $('pEx').append(row);
+}
+function showPersona(id) {
+  const p = personas[id] || { id: '', name: '', voice: 'radio', system: '', examples: [] };
+  $('pId').value = p.id; $('pName').value = p.name; $('pVoice').value = p.voice || 'radio'; $('pEdge').value = p.edgeVoice || 'ro-RO-EmilNeural'; $('pRate').value = p.edgeRate || '+12%'; $('pPitch').value = p.edgePitch || '+5Hz'; $('pSystem').value = p.system || '';
+  $('pEx').textContent = ''; (p.examples || []).forEach(exRow);
+}
+async function loadPersonas() {
+  personas = await api('personas');
+  for (const sel of [$('persona'), $('pSel')]) { const v = sel.value; sel.textContent = ''; for (const p of Object.values(personas)) sel.append(el('option', { value: p.id, textContent: p.name })); sel.value = v || cfg.persona; }
+  $('pSel').append(el('option', { value: '__new', textContent: '+ personaj nou' }));
+  $('persona').value = cfg.persona;
+  if (!$('pId').value) showPersona($('pSel').value);
+}
+$('pSel').onchange = () => showPersona($('pSel').value === '__new' ? '' : $('pSel').value);
+$('addEx').onclick = () => exRow();
+$('saveP').onclick = async () => {
+  const examples = [...$('pEx').children].map((r) => ({ type: r.children[0].value, text: r.children[1].value.trim() })).filter((e) => e.text);
+  const p = await api('personas', { method: 'PUT', body: { id: $('pId').value, name: $('pName').value, voice: $('pVoice').value, edgeVoice: $('pEdge').value, edgeRate: $('pRate').value.trim(), edgePitch: $('pPitch').value.trim(), system: $('pSystem').value, examples } });
+  await loadPersonas(); $('pSel').value = p.id; alert('Salvat: ' + p.name);
+};
+const download = (name, text) => { const a = el('a', { href: URL.createObjectURL(new Blob([text])), download: name }); a.click(); };
+$('mf').onclick = async () => download(`Modelfile-${$('pSel').value}`, await api('modelfile?persona=' + encodeURIComponent($('pSel').value)));
+$('tj').onclick = async () => download('antrenare-dj.jsonl', await api('training.jsonl'));
+
+async function loadConfig() {
+  cfg = await api('config');
+  for (const k of ['stationName', 'ollamaUrl', 'temperature']) $(k).value = cfg[k];
+  $('introEvery').value = cfg.auto.introEvery; $('moderation').value = cfg.auto.moderation; $('speakChat').checked = cfg.auto.speakChat; $('director').checked = cfg.auto.director !== false;
+  $('lengthScale').value = cfg.tts.lengthScale;
+}
+$('saveCfg').onclick = async () => {
+  cfg = await api('config', { method: 'PUT', body: { stationName: $('stationName').value, ollamaUrl: $('ollamaUrl').value, model: $('model').value, temperature: $('temperature').value, persona: $('persona').value,
+    auto: { introEvery: $('introEvery').value, moderation: $('moderation').value, speakChat: $('speakChat').checked, director: $('director').checked }, tts: { lengthScale: $('lengthScale').value } } });
+  await loadStatus();
+};
+async function test(onAir) {
+  const btn = onAir ? $('tAir') : $('tGen'); btn.disabled = true; const t = btn.textContent; btn.textContent = 'Se gândește…';
+  try { await api('test', { method: 'POST', body: { task: $('tTask').value, from: $('tFrom').value, to: $('tTo').value, message: $('tMsg').value, persona: $('persona').value, onAir } }); await loadOutputs(); }
+  catch (e) { alert('Eroare: ' + e.message); } finally { btn.disabled = false; btn.textContent = t; }
+}
+$('tGen').onclick = () => test(false); $('tAir').onclick = () => test(true);
+$('sayBtn').onclick = async () => { const r = await api('say', { method: 'POST', body: { text: $('say').value } }); if (!r.audio) alert('Trimis ca text (vocea Piper nu e instalată).'); $('say').value = ''; };
+$('saveFriends').onclick = async () => { await api('memory', { method: 'PUT', body: { friends: $('friends').value } }); alert('Salvat'); };
+$('refresh').onclick = () => { loadStatus(); loadOutputs(); };
+$('clearChat').onclick = () => api('chat-clear', { method: 'POST' });
+
+// ---------------- cloned voice
+let recorder = null, recChunks = [], recTimer = null;
+async function loadVoices(s) {
+  const list = await api('voices');
+  const sel = $('xVoice'), cur = cfg.tts?.xttsVoice || 'mc'; sel.textContent = '';
+  if (!list.length) sel.append(el('option', { value: cur, textContent: '(nicio înregistrare încă)' }));
+  for (const v of list) sel.append(el('option', { value: v, textContent: v }));
+  sel.value = list.includes(cur) ? cur : (list[0] || cur);
+  $('engine').value = cfg.tts?.engine || 'edge';
+  const x = s?.xtts;
+  $('xStatus').textContent = x?.ok ? `Serverul de voce merge (${x.device === 'cuda' ? 'placa video' : 'procesor'}).` : 'Serverul de voce clonată nu rulează (pornește ai-mc\\xtts\\start-xtts.ps1). Până atunci se folosește vocea Microsoft.';
+  $('xStatus').className = x?.ok ? 'ok' : 'muted';
+}
+$('recBtn').onclick = async () => {
+  if (recorder) { recorder.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true } });
+    recChunks = []; recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (e) => e.data.size && recChunks.push(e.data);
+    recorder.onstop = () => {
+      stream.getTracks().forEach((t) => t.stop()); clearInterval(recTimer); recorder = null;
+      $('recBtn').textContent = '⏺ Înregistrează din nou';
+      const blob = new Blob(recChunks, { type: recChunks[0]?.type || 'audio/webm' });
+      $('xPlay').src = URL.createObjectURL(blob); $('xPlay').style.display = ''; $('xPlay').blob = blob;
+    };
+    recorder.start(); const t0 = Date.now();
+    recTimer = setInterval(() => { const s = Math.round((Date.now() - t0) / 1000); $('recBtn').textContent = `⏹ Stop (${s}s)`; if (s >= 30) recorder?.stop(); }, 250);
+  } catch (e) { alert('Nu pot porni microfonul: ' + e.message); }
+};
+$('xFile').onchange = () => { const f = $('xFile').files[0]; if (!f) return; $('xPlay').src = URL.createObjectURL(f); $('xPlay').style.display = ''; $('xPlay').blob = f; };
+$('xSave').onclick = async () => {
+  const blob = $('xPlay').blob, name = $('xName').value.trim().toLowerCase().replace(/[^\w-]/g, '') || 'mc';
+  if (!blob) return alert('Înregistrează sau alege întâi un fișier.');
+  const r = await fetch('/admin/api/voice/' + name, { method: 'POST', headers: { 'x-admin-key': key, 'Content-Type': 'application/octet-stream' }, body: blob });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) return alert(j.error || 'Nu a mers');
+  cfg = await api('config', { method: 'PUT', body: { tts: { xttsVoice: name, engine: $('engine').value } } });
+  await loadVoices(await api('status')); alert('Vocea „' + name + '” e salvată.');
+};
+$('engine').onchange = $('xVoice').onchange = async () => { cfg = await api('config', { method: 'PUT', body: { tts: { engine: $('engine').value, xttsVoice: $('xVoice').value } } }); loadStatus(); };
+$('xTest').onclick = async () => {
+  const b = $('xTest'); b.disabled = true; b.textContent = 'Generez…';
+  try { await api('say', { method: 'POST', body: { text: 'Aaa-leleu! Mâinile sus, petrecere! Aici e Radio Petrecerea, cu vocea nouă! Hai, toată lumea, să facem gălăgie!' } }); }
+  catch (e) { alert(e.message); } finally { b.disabled = false; b.textContent = '🎤 Test pe post'; }
+};
+
+// ---------------- music filter
+let genreList = [], selGenres = new Set(), prevT = null;
+const PRESETS = { manele: /manele/, dance: /dance|house|electro|edm|techno|club|trance/, pop: /\bpop\b|^pop/, retro: /70|80|90|disco|retro|oldies|italo|synth/, ro: null, all: null };
+function renderGenres() {
+  const box = $('genres'), q = $('gSearch').value.trim().toLowerCase(); box.textContent = '';
+  for (const { genre, count } of genreList) {
+    if (q && !genre.includes(q) && !selGenres.has(genre)) continue;
+    const cb = el('input', { type: 'checkbox', checked: selGenres.has(genre) });
+    const chip = el('label', { className: 'gchip' + (selGenres.has(genre) ? ' on' : '') }, cb, genre, el('small', { textContent: String(count) }));
+    cb.onchange = () => { cb.checked ? selGenres.add(genre) : selGenres.delete(genre); chip.classList.toggle('on', cb.checked); previewMusic(); };
+    box.append(chip);
+  }
+  if (!genreList.length) box.append(el('span', { className: 'muted', textContent: 'Colecția nu are genuri completate (sau OpenDJ nu rulează).' }));
+}
+const currentMusic = () => ({
+  genres: [...selGenres], romanian: $('mRo').checked,
+  languages: [...document.querySelectorAll('.lang')].filter((c) => c.checked).map((c) => c.value),
+  include: $('mInc').value, exclude: $('mExc').value,
+});
+function previewMusic() {
+  clearTimeout(prevT);
+  prevT = setTimeout(async () => {
+    $('mCount').textContent = 'Număr piesele…';
+    try {
+      const p = await api('music-preview', { method: 'POST', body: { music: currentMusic() } });
+      $('mCount').textContent = `Se potrivesc ${p.count.toLocaleString('ro-RO')} din ${p.total.toLocaleString('ro-RO')} piese (${p.describe}) · RO ${p.langs.ro} · EN ${p.langs.en} · ES ${p.langs.es} · alte ${p.langs.other}`;
+      $('mSample').textContent = p.sample.length ? 'De exemplu: ' + p.sample.join(' · ') : 'Nicio piesă nu se potrivește: DJ-ul nu va avea ce alege.';
+    } catch (e) { $('mCount').textContent = 'Nu pot număra: ' + e.message; }
+  }, 300);
+}
+async function loadMusic() {
+  const m = cfg.music || { languages: ['ro', 'en', 'es'] };
+  document.querySelectorAll('.lang').forEach((c) => { c.checked = !m.languages?.length || m.languages.includes(c.value); });
+  $('mRo').checked = !!m.romanian; $('mInc').value = m.include || ''; $('mExc').value = m.exclude || '';
+  selGenres = new Set(m.genres || []);
+  genreList = await api('genres').catch(() => []);
+  renderGenres(); previewMusic();
+}
+document.querySelectorAll('[data-preset]').forEach((b) => b.onclick = () => {
+  const k = b.dataset.preset;
+  selGenres = new Set(PRESETS[k] ? genreList.filter((g) => PRESETS[k].test(g.genre)).map((g) => g.genre) : []);
+  $('mRo').checked = k === 'ro' || (k === 'manele' && $('mRo').checked);
+  renderGenres(); previewMusic();
+});
+['mRo', 'mInc', 'mExc'].forEach((id) => $(id).addEventListener('input', previewMusic));
+document.querySelectorAll('.lang').forEach((c) => c.onchange = previewMusic);
+$('gSearch').oninput = renderGenres;
+$('mSave').onclick = async () => { cfg = await api('config', { method: 'PUT', body: { music: currentMusic() } }); $('mSave').textContent = '✓ Salvat – DJ-ul replanifică'; setTimeout(() => $('mSave').textContent = 'Salvează muzica', 2500); };
+
+async function boot() {
+  try {
+    await loadConfig();
+    $('login').hidden = true; $('main').hidden = false;
+    await loadPersonas();
+    $('friends').value = (await api('memory')).friends || '';
+    await Promise.all([loadStatus(), loadOutputs()]);
+    loadMusic().catch((e) => { $('mCount').textContent = 'Nu pot încărca genurile: ' + e.message; });
+    api('status').then(loadVoices).catch(() => {});
+    clearInterval(boot.t); boot.t = setInterval(() => { loadStatus().catch(() => {}); }, 5000);
+  } catch (e) { if (e.message !== '401') showLogin(e.message); }
+}
+if (key) boot(); else showLogin();
+</script>
+</body>
+</html>

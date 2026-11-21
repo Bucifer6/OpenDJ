@@ -12,3 +12,11 @@ mobile/ios/App/build/
 mobile/ios/DerivedData/
 *.keystore
 *.jks
+
+# AI MC runtime data
+ai-mc/data/
+ai-mc/tools/
+ai-mc/voices/
+ai-mc/xtts/.venv/
+ai-mc/xtts/model/
+ai-mc/xtts/__pycache__/

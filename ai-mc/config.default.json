@@ -1,0 +1,43 @@
+{
+  "stationName": "Radio Petrecerea",
+  "port": 7381,
+  "host": "0.0.0.0",
+  "opendjUrl": "http://127.0.0.1:7380",
+  "ollamaUrl": "http://127.0.0.1:11434",
+  "model": "gemma3:4b",
+  "temperature": 0.9,
+  "persona": "manele",
+  "sourcePassword": "",
+  "adminPassword": "",
+  "ffmpeg": "ffmpeg",
+  "tts": {
+    "engine": "edge",
+    "edgeVoice": "ro-RO-EmilNeural",
+    "edgeRate": "+12%",
+    "edgePitch": "+5Hz",
+    "python": "python",
+    "piperPath": "tools/piper/piper.exe",
+    "voice": "tools/voices/ro_RO-mihai-medium.onnx",
+    "lengthScale": 0.9
+  },
+  "auto": {
+    "introEvery": 3,
+    "speakChat": false,
+    "moderation": "auto",
+    "maxQueue": 20,
+    "horn": true,
+    "director": true
+  },
+  "trustedProxies": [],
+  "music": {
+    "genres": [],
+    "romanian": false,
+    "languages": [
+      "ro",
+      "en",
+      "es"
+    ],
+    "include": "",
+    "exclude": ""
+  }
+}

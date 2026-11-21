@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0612">
+<title>Radio live</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎧</text></svg>">
+<style>
+  :root {
+    --bg:#0b0612; --ink:#fff6fb; --muted:#b9a3c9; --card:rgba(30,14,44,.62); --line:rgba(255,255,255,.10);
+    --pink:#ff2e88; --gold:#ffc94a; --cyan:#3ef0ff; --violet:#8b5cff; --ok:#41f59a;
+    --display: "Bahnschrift", "Arial Narrow", "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing:border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; overflow-x:hidden; }
+  #bg { position:fixed; inset:0; width:100vw; height:100vh; z-index:0; display:block; }
+  .grain { position:fixed; inset:0; z-index:1; pointer-events:none; opacity:.07; background-image:radial-gradient(#fff 1px, transparent 1px); background-size:3px 3px; mix-blend-mode:overlay; }
+  main { position:relative; z-index:2; max-width:1180px; margin:0 auto; padding:16px 16px 120px; }
+
+  /* top bar */
+  .top { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .brand { font-family:var(--display); font-weight:800; letter-spacing:.06em; text-transform:uppercase; font-size:clamp(22px,4.4vw,38px); line-height:1;
+    color:#fff; text-shadow:0 0 6px var(--pink), 0 0 22px var(--pink), 0 0 48px rgba(255,46,136,.6); margin:0; }
+  .brand small { display:block; font-size:.36em; letter-spacing:.42em; color:var(--gold); text-shadow:0 0 10px rgba(255,201,74,.7); margin-top:6px; }
+  .spacer { flex:1; }
+  .onair { font-family:var(--display); font-weight:800; letter-spacing:.2em; padding:6px 12px 6px 14px; border:2px solid #5b3b66; border-radius:8px; color:#6d5577; text-transform:uppercase; font-size:14px; }
+  .onair.live { color:#fff; border-color:var(--pink); background:rgba(255,46,136,.18); box-shadow:0 0 14px var(--pink), inset 0 0 14px rgba(255,46,136,.5); text-shadow:0 0 8px #fff; animation:flicker 4s infinite; }
+  @keyframes flicker { 0%,19%,21%,62%,64%,100% { opacity:1 } 20%,63% { opacity:.55 } }
+  .pill { padding:6px 12px; border-radius:99px; background:var(--card); border:1px solid var(--line); color:var(--muted); font-size:14px; backdrop-filter:blur(8px); }
+  .pill b { color:var(--ink); }
+
+  /* hero */
+  .hero { display:grid; grid-template-columns:minmax(260px,420px) 1fr; gap:28px; align-items:center; margin:22px 0 10px; }
+  .deck { position:relative; width:100%; aspect-ratio:1; }
+  #ring { position:absolute; inset:0; width:100%; height:100%; }
+  .vinyl { position:absolute; inset:15%; border-radius:50%;
+    background:
+      radial-gradient(circle, transparent 0 31%, rgba(255,255,255,.05) 31.5% 32%, transparent 32.5%),
+      repeating-radial-gradient(circle, #121014 0 2px, #1c191f 2.5px 3px),
+      #111;
+    box-shadow:0 0 0 6px #050307, 0 18px 60px rgba(0,0,0,.7), 0 0 60px rgba(139,92,255,.25);
+    animation:spin 1.8s linear infinite; animation-play-state:paused; }
+  .vinyl::after { content:""; position:absolute; inset:0; border-radius:50%; background:conic-gradient(from 30deg, transparent 0 8%, rgba(255,255,255,.14) 12%, transparent 18% 58%, rgba(255,255,255,.09) 62%, transparent 68%); }
+  .playing .vinyl { animation-play-state:running; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .label { position:absolute; inset:33%; border-radius:50%; background:radial-gradient(circle at 35% 30%, #ff6fb0, var(--pink) 45%, #a3125a); display:grid; place-items:center; box-shadow:inset 0 0 0 3px rgba(0,0,0,.25); }
+  .label span { font-family:var(--display); font-weight:900; font-size:clamp(9px,1.6vw,13px); letter-spacing:.2em; color:#fff3; position:absolute; top:16%; }
+  #play { position:absolute; inset:38%; border-radius:50%; border:0; background:#fff; color:var(--pink); font-size:clamp(22px,4vw,34px); cursor:pointer; display:grid; place-items:center; z-index:3;
+    box-shadow:0 0 0 6px rgba(255,255,255,.12), 0 8px 30px rgba(0,0,0,.5); transition:transform .15s; }
+  #play:hover { transform:scale(1.06); } #play:active { transform:scale(.96); }
+  #play svg { width:42%; height:42%; fill:currentColor; }
+  .tonearm { position:absolute; right:2%; top:4%; width:34%; height:50%; pointer-events:none; transform-origin:85% 10%; transform:rotate(-22deg); transition:transform .8s cubic-bezier(.5,1.6,.4,1); z-index:2; }
+  .playing .tonearm { transform:rotate(2deg); }
+
+  .now h2 { margin:0 0 4px; font-size:13px; letter-spacing:.35em; text-transform:uppercase; color:var(--cyan); text-shadow:0 0 10px rgba(62,240,255,.6); font-weight:600; }
+  .title { font-family:var(--display); font-weight:800; font-size:clamp(26px,4.6vw,52px); line-height:1.02; margin:0; text-wrap:balance; }
+  .artist { font-size:clamp(17px,2.2vw,22px); color:var(--gold); margin:6px 0 0; min-height:1.3em; }
+  .next { color:var(--muted); margin:14px 0 0; font-size:15px; min-height:1.4em; }
+  .next b { color:var(--ink); font-weight:600; }
+  .vol { display:flex; align-items:center; gap:10px; margin-top:18px; max-width:420px; }
+  .vol span { font-size:20px; }
+  input[type=range] { flex:1; accent-color:var(--pink); }
+  .tap { margin-top:10px; color:var(--gold); font-weight:600; font-size:15px; }
+  .playing .tap { display:none; }
+
+  /* mic banner */
+  #mic { display:flex; gap:14px; align-items:center; margin:18px 0 6px; padding:14px 16px; border-radius:16px; border:1px solid rgba(255,201,74,.35);
+    background:linear-gradient(90deg, rgba(255,201,74,.16), rgba(255,46,136,.10)); backdrop-filter:blur(8px); transform-origin:left; }
+  #mic.hot { animation:pop .5s ease-out; border-color:var(--gold); box-shadow:0 0 28px rgba(255,201,74,.35); }
+  @keyframes pop { 0% { transform:scale(.96); opacity:.4 } 60% { transform:scale(1.01) } 100% { transform:scale(1); opacity:1 } }
+  .micicon { flex:none; width:46px; height:46px; border-radius:50%; display:grid; place-items:center; font-size:24px; background:rgba(0,0,0,.35); }
+  #mic.hot .micicon { animation:bob .9s ease-in-out infinite; }
+  @keyframes bob { 50% { transform:translateY(-3px) rotate(-8deg); } }
+  #micText { white-space:pre-wrap; overflow-wrap:anywhere; }
+  #micWho { font-size:12px; letter-spacing:.25em; text-transform:uppercase; color:var(--gold); }
+
+  /* content grid */
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:16px; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:20px; padding:16px; backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); }
+  .panel h3 { margin:0 0 12px; font-family:var(--display); text-transform:uppercase; letter-spacing:.14em; font-size:16px; color:var(--muted); }
+  .tabs { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:12px; }
+  .tabs button { padding:10px 4px; border-radius:12px; border:1px solid var(--line); background:rgba(0,0,0,.25); color:var(--ink); cursor:pointer; font:600 14px/1.2 inherit; display:grid; gap:2px; justify-items:center; }
+  .tabs button i { font-style:normal; font-size:22px; }
+  .tabs button.sel { background:linear-gradient(135deg,var(--pink),var(--violet)); border-color:transparent; box-shadow:0 6px 20px rgba(255,46,136,.35); }
+  form { display:grid; gap:9px; }
+  input:not([type=range]), textarea { width:100%; padding:12px 14px; border-radius:12px; border:1px solid var(--line); background:rgba(0,0,0,.35); color:var(--ink); font:inherit; }
+  input:focus, textarea:focus { outline:2px solid var(--pink); outline-offset:1px; }
+  textarea { min-height:78px; resize:vertical; }
+  .send { padding:13px; border:0; border-radius:12px; font:800 16px/1 var(--display); letter-spacing:.14em; text-transform:uppercase; color:#1a0710; cursor:pointer;
+    background:linear-gradient(90deg,var(--gold),#ff9f43,var(--pink)); background-size:200% 100%; animation:shine 4s linear infinite; }
+  @keyframes shine { to { background-position:200% 0; } }
+  .hint { color:var(--muted); font-size:13px; margin:0; }
+  .sugg { display:grid; gap:5px; } .sugg button { text-align:left; padding:9px 12px; border-radius:10px; border:1px solid var(--line); background:rgba(0,0,0,.3); color:var(--ink); cursor:pointer; font:inherit; }
+  .sugg button.sel { border-color:var(--ok); color:var(--ok); }
+
+  #chat { display:flex; flex-direction:column; gap:10px; max-height:560px; overflow-y:auto; padding-right:4px; scrollbar-width:thin; }
+  .msg { padding:10px 13px; border-radius:16px 16px 16px 4px; background:rgba(0,0,0,.32); border:1px solid var(--line); white-space:pre-wrap; overflow-wrap:anywhere; animation:in .35s ease-out; }
+  @keyframes in { from { opacity:0; transform:translateY(8px); } }
+  .msg .who { font-weight:700; color:var(--cyan); margin-right:6px; }
+  .msg time { color:var(--muted); font-size:12px; margin-left:6px; }
+  .msg.ai { border-radius:16px 16px 4px 16px; background:linear-gradient(135deg,rgba(255,46,136,.22),rgba(139,92,255,.18)); border-color:rgba(255,46,136,.45); }
+  .msg.ai .who { color:var(--gold); }
+  .msg.ai.air { border-color:var(--gold); box-shadow:0 0 18px rgba(255,201,74,.18); }
+  .msg.system { background:transparent; border-style:dashed; color:var(--muted); font-size:14px; border-radius:12px; }
+  .empty { color:var(--muted); text-align:center; padding:30px 10px; }
+
+  #eq { position:fixed; left:0; right:0; bottom:0; height:90px; width:100%; z-index:1; pointer-events:none; }
+  #toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:10; background:#000d; border:1px solid var(--line); padding:11px 18px; border-radius:12px; display:none; max-width:90vw; }
+
+  @media (max-width: 860px) {
+    .hero { grid-template-columns:1fr; justify-items:center; text-align:center; gap:16px; }
+    .deck { max-width:340px; }
+    .vol { margin-inline:auto; }
+    .grid { grid-template-columns:1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .vinyl, .send, .onair.live, #mic.hot .micicon { animation:none !important; }
+  }
+</style>
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+<div class="grain"></div>
+<canvas id="eq" aria-hidden="true"></canvas>
+
+<main>
+  <div class="top">
+    <h1 class="brand" id="station">Radio Petrecerea<small>live · dedicații · cereri</small></h1>
+    <div class="spacer"></div>
+    <span class="onair" id="air">Off air</span>
+    <span class="pill">🎧 <b id="lis">0</b> ascultă</span>
+  </div>
+
+  <section class="hero" id="hero">
+    <div class="deck">
+      <canvas id="ring" aria-hidden="true"></canvas>
+      <div class="vinyl"><div class="label"><span id="labelTxt">LIVE</span></div></div>
+      <svg class="tonearm" viewBox="0 0 100 140" aria-hidden="true">
+        <circle cx="85" cy="14" r="11" fill="#2a2430" stroke="#555" stroke-width="2"/>
+        <circle cx="85" cy="14" r="4" fill="#999"/>
+        <path d="M85 14 L70 110 L52 128" stroke="#cfc6d6" stroke-width="5" fill="none" stroke-linecap="round"/>
+        <rect x="40" y="122" width="20" height="13" rx="3" transform="rotate(-40 50 128)" fill="#ff2e88"/>
+      </svg>
+      <button id="play" aria-label="Ascultă live"><svg viewBox="0 0 24 24"><path id="playIcon" d="M8 5v14l11-7z"/></svg></button>
+    </div>
+    <div class="now">
+      <h2>Acum se aude</h2>
+      <p class="title" id="title">Pregătim petrecerea…</p>
+      <p class="artist" id="artist"></p>
+      <p class="next" id="next"></p>
+      <div class="vol"><span>🔊</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.9" aria-label="Volum"></div>
+      <p class="tap">Apasă pe disc ca să intri în emisie ▶</p>
+    </div>
+  </section>
+
+  <div id="mic" aria-live="polite">
+    <div class="micicon">🎤</div>
+    <div><div id="micWho">La microfon</div><div id="micText">Cere o piesă sau o dedicație și DJ-ul o spune în emisie!</div></div>
+  </div>
+
+  <div class="grid">
+    <section class="panel">
+      <h3>Cere ceva de la DJ</h3>
+      <div class="tabs" role="tablist">
+        <button data-t="piesa" class="sel"><i>🎵</i>Piesă</button>
+        <button data-t="dedicatie"><i>💌</i>Dedicație</button>
+        <button data-t="versuri"><i>📜</i>Versuri</button>
+        <button data-t="chat"><i>💬</i>Chat</button>
+      </div>
+      <form id="f">
+        <input id="name" placeholder="Numele tău" maxlength="30" autocomplete="nickname" required>
+        <div data-show="chat"><textarea id="text" placeholder="Scrie-i DJ-ului…" maxlength="300"></textarea></div>
+        <div data-show="piesa" class="sugg">
+          <input id="song" placeholder="Ce piesă vrei? (artist, titlu)" maxlength="120" autocomplete="off">
+          <div id="sugg" class="sugg"></div>
+        </div>
+        <div data-show="piesa dedicatie versuri"><input id="to" placeholder="Pentru cine?" maxlength="40"></div>
+        <div data-show="piesa dedicatie versuri"><textarea id="message" placeholder="Mesajul tău" maxlength="300"></textarea></div>
+        <p class="hint" id="hint"></p>
+        <button class="send">Trimite la DJ</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h3>Pe unde scurte</h3>
+      <div id="chat"><div class="empty">Încă liniște… scrie primul mesaj! 🎉</div></div>
+    </section>
+  </div>
+</main>
+<div id="toast"></div>
+<audio id="audio" preload="none"></audio>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const audio = $('audio');
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let tab = 'piesa', trackId = '', persona = 'DJ-ul';
+
+// ------------------------------------------------------------ UI
+const HINTS = {
+  chat: 'DJ-ul AI îți răspunde aici în câteva secunde.',
+  piesa: 'Alege piesa din listă. DJ-ul o pune la rând și o anunță cu dedicația ta.',
+  dedicatie: 'DJ-ul citește dedicația la microfon, peste muzică.',
+  versuri: 'DJ-ul compune versuri pentru prietenul tău și le declamă live.',
+};
+try { $('name').value = localStorage.getItem('name') || ''; } catch {}
+function toast(t) { const el = $('toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => el.style.display = 'none', 3500); }
+function setTab(t) {
+  tab = t;
+  document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('sel', b.dataset.t === t));
+  document.querySelectorAll('[data-show]').forEach((el) => el.style.display = el.dataset.show.split(' ').includes(t) ? '' : 'none');
+  $('hint').textContent = HINTS[t];
+  $('to').placeholder = t === 'piesa' ? 'Dedicată cui? (opțional)' : 'Pentru cine?';
+  $('message').placeholder = t === 'versuri' ? 'Despre ce? (ex: e ziua lui, iubește pescuitul)' : t === 'piesa' ? 'Mesaj (opțional)' : 'Mesajul tău';
+}
+document.querySelectorAll('.tabs button').forEach((b) => b.onclick = () => setTab(b.dataset.t));
+setTab('piesa');
+
+// ------------------------------------------------------------ player + analyser
+let actx, analyser, freq, wave;
+function ensureAudioGraph() {
+  if (actx) return;
+  try {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = actx.createMediaElementSource(audio);
+    analyser = actx.createAnalyser(); analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.82;
+    src.connect(analyser); analyser.connect(actx.destination);
+    freq = new Uint8Array(analyser.frequencyBinCount); wave = new Uint8Array(analyser.fftSize);
+  } catch { actx = null; }
+}
+const PLAY = 'M8 5v14l11-7z', PAUSE = 'M6 5h4v14H6zm8 0h4v14h-4z';
+function start() {
+  ensureAudioGraph(); actx?.resume();
+  audio.src = '/live?t=' + Date.now(); audio.volume = $('vol').value;
+  audio.play().catch(() => toast('Apasă din nou pentru a porni sunetul'));
+}
+$('play').onclick = () => { if (audio.paused) start(); else { audio.pause(); audio.removeAttribute('src'); audio.load(); } };
+audio.onplaying = () => { $('playIcon').setAttribute('d', PAUSE); $('hero').classList.add('playing'); document.body.classList.add('playing'); };
+audio.onpause = () => { $('playIcon').setAttribute('d', PLAY); $('hero').classList.remove('playing'); document.body.classList.remove('playing'); };
+audio.onerror = () => { if (audio.getAttribute('src')) setTimeout(() => { if (audio.getAttribute('src')) start(); }, 3000); };
+$('vol').oninput = (e) => audio.volume = e.target.value;
+
+// ------------------------------------------------------------ song search
+let sTimer;
+$('song').oninput = () => {
+  trackId = ''; clearTimeout(sTimer);
+  const q = $('song').value.trim();
+  sTimer = setTimeout(async () => {
+    const box = $('sugg'); box.textContent = '';
+    if (q.length < 2) return;
+    const list = await fetch('/api/search?q=' + encodeURIComponent(q)).then((r) => r.json()).catch(() => []);
+    if (!list.length) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = 'Nu găsesc piesa asta în colecție. Încearcă alt titlu.'; box.append(p); }
+    for (const s of list) {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = '🎵 ' + s.label;
+      b.onclick = () => { trackId = s.id; $('song').value = s.label; box.querySelectorAll('button').forEach((x) => x.classList.remove('sel')); b.classList.add('sel'); };
+      box.append(b);
+    }
+  }, 250);
+};
+$('f').onsubmit = async (e) => {
+  e.preventDefault();
+  const name = $('name').value.trim();
+  try { localStorage.setItem('name', name); } catch {}
+  const body = tab === 'chat' ? { name, text: $('text').value } : { name, kind: tab, song: $('song').value, trackId, to: $('to').value, message: $('message').value };
+  const r = await fetch(tab === 'chat' ? '/api/chat' : '/api/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => null);
+  const j = r ? await r.json().catch(() => ({})) : { error: 'Fără conexiune' };
+  if (!r?.ok) return toast(j.error || 'Nu a mers');
+  toast(tab === 'chat' ? 'Trimis!' : j.pending ? 'Trimis! DJ-ul aprobă cererea.' : 'Trimis! DJ-ul pregătește dedicația 🎤');
+  burst(innerWidth / 2, innerHeight * 0.6, 40);
+  $('text').value = ''; $('message').value = ''; if (tab === 'piesa') { $('song').value = ''; trackId = ''; $('sugg').textContent = ''; }
+};
+
+// ------------------------------------------------------------ live state + chat
+function addMsg(m, fresh) {
+  const box = $('chat'); box.querySelector('.empty')?.remove();
+  const d = document.createElement('div'); d.className = 'msg ' + m.kind + (m.onAir ? ' air' : '');
+  if (m.kind !== 'system') { const w = document.createElement('span'); w.className = 'who'; w.textContent = (m.kind === 'ai' ? '🎤 ' : '') + m.name; d.append(w); }
+  d.append(document.createTextNode(m.text));
+  const t = document.createElement('time'); t.textContent = new Date(m.at).toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' }) + (m.onAir ? ' · în emisie' : ''); d.append(t);
+  box.prepend(d);
+  while (box.children.length > 120) box.lastChild.remove();
+  if (m.kind === 'ai' && m.onAir) {
+    $('micWho').textContent = m.name + ' · la microfon'; $('micText').textContent = m.text;
+    const mic = $('mic'); mic.classList.remove('hot'); void mic.offsetWidth; mic.classList.add('hot');
+    clearTimeout(addMsg.h); addMsg.h = setTimeout(() => mic.classList.remove('hot'), 20000);
+    if (fresh) { const r = mic.getBoundingClientRect(); burst(r.left + 40, r.top + 30, 70); }
+  }
+}
+function setState(s) {
+  const st = $('station'); st.firstChild.textContent = s.station; document.title = s.station + ' · live';
+  const [artist, ...rest] = (s.nowPlaying || '').split(' - ');
+  $('title').textContent = s.nowPlaying ? (rest.length ? rest.join(' - ') : artist) : (s.onAir ? 'În emisie' : 'Radioul pornește în curând');
+  $('artist').textContent = s.nowPlaying && rest.length ? artist : '';
+  $('next').textContent = ''; if (s.next) { $('next').append('Urmează: '); const b = document.createElement('b'); b.textContent = s.next; $('next').append(b); }
+  $('air').textContent = s.onAir ? 'On air' : 'Off air'; $('air').classList.toggle('live', s.onAir);
+  $('lis').textContent = s.listeners;
+  if (s.persona) { persona = s.persona; if (!$('mic').classList.contains('hot')) $('micWho').textContent = persona + ' · la microfon'; }
+  $('labelTxt').textContent = (s.station || 'LIVE').split(/\s+/).map((w) => w[0]).join('').slice(0, 3).toUpperCase();
+}
+let first = true;
+const es = new EventSource('/events');
+es.addEventListener('state', (e) => setState(JSON.parse(e.data)));
+es.addEventListener('history', (e) => { $('chat').textContent = ''; const h = JSON.parse(e.data); if (!h.length) $('chat').innerHTML = '<div class="empty">Încă liniște… scrie primul mesaj! 🎉</div>'; h.forEach((m) => addMsg(m, false)); first = false; });
+es.addEventListener('chat', (e) => addMsg(JSON.parse(e.data), true));
+
+// ------------------------------------------------------------ visuals
+const bg = $('bg'), ring = $('ring'), eq = $('eq');
+const bgc = bg.getContext('2d'), rc = ring.getContext('2d'), ec = eq.getContext('2d');
+const DPR = Math.min(2, devicePixelRatio || 1);
+function fit(c) { const r = c.getBoundingClientRect(); const w = Math.round(r.width * DPR), h = Math.round(r.height * DPR); if (c.width !== w || c.height !== h) { c.width = w; c.height = h; } }
+const blobs = [
+  { x: .18, y: .22, r: .55, c: [255, 46, 136], sp: .00011 },
+  { x: .82, y: .30, r: .50, c: [139, 92, 255], sp: .00009 },
+  { x: .55, y: .85, r: .60, c: [62, 240, 255], sp: .00007 },
+  { x: .30, y: .70, r: .40, c: [255, 201, 74], sp: .00013 },
+];
+const stars = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random(), z: Math.random() * .8 + .2, tw: Math.random() * 6 }));
+let confetti = [];
+function burst(x, y, n) {
+  if (reduced) return;
+  const cols = ['#ff2e88', '#ffc94a', '#3ef0ff', '#8b5cff', '#41f59a', '#fff'];
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, v = 3 + Math.random() * 7;
+    confetti.push({ x: x * DPR, y: y * DPR, vx: Math.cos(a) * v * DPR, vy: (Math.sin(a) * v - 5) * DPR, r: (3 + Math.random() * 4) * DPR, rot: Math.random() * 6, vr: (Math.random() - .5) * .3, c: cols[i % cols.length], life: 1 });
+  }
+}
+let bass = 0, mid = 0, high = 0;
+function levels(t) {
+  if (analyser && !audio.paused) {
+    analyser.getByteFrequencyData(freq);
+    const avg = (a, b) => { let s = 0; for (let i = a; i < b; i++) s += freq[i]; return s / (b - a) / 255; };
+    bass = bass * .6 + avg(1, 8) * .4; mid = mid * .7 + avg(8, 60) * .3; high = high * .7 + avg(60, 160) * .3;
+  } else {
+    // idle "breathing" when nothing plays
+    bass = .18 + .08 * Math.sin(t / 900); mid = .15 + .05 * Math.sin(t / 1300); high = .1;
+  }
+}
+function drawBg(t) {
+  fit(bg); const W = bg.width, H = bg.height;
+  bgc.globalCompositeOperation = 'source-over';
+  bgc.fillStyle = '#0b0612'; bgc.fillRect(0, 0, W, H);
+  bgc.globalCompositeOperation = 'lighter';
+  for (const [i, b] of blobs.entries()) {
+    const x = (b.x + .08 * Math.sin(t * b.sp * 6 + i)) * W, y = (b.y + .06 * Math.cos(t * b.sp * 5 + i * 2)) * H;
+    const r = b.r * Math.max(W, H) * (0.55 + (i === 0 ? bass : i === 1 ? mid : i === 2 ? bass * .8 : high) * .6);
+    const g = bgc.createRadialGradient(x, y, 0, x, y, r);
+    const a = .16 + (i % 2 ? mid : bass) * .22;
+    g.addColorStop(0, `rgba(${b.c},${a})`); g.addColorStop(1, `rgba(${b.c},0)`);
+    bgc.fillStyle = g; bgc.fillRect(0, 0, W, H);
+  }
+  // stars that pulse with the highs
+  for (const s of stars) {
+    const a = (.25 + .75 * Math.abs(Math.sin(t / 900 + s.tw))) * (.4 + high * 1.5) * s.z;
+    bgc.fillStyle = `rgba(255,255,255,${Math.min(1, a)})`;
+    const sz = s.z * 1.6 * DPR * (1 + bass);
+    bgc.fillRect(s.x * W, ((s.y + t * .000006 * s.z) % 1) * H, sz, sz);
+  }
+  // spotlight beams on the beat
+  if (!reduced) {
+    const beams = 3;
+    for (let i = 0; i < beams; i++) {
+      const ang = Math.sin(t / (2600 + i * 700) + i * 2) * .5 + Math.PI / 2;
+      const ox = W * (i + 1) / (beams + 1), len = H * 1.3;
+      bgc.beginPath(); bgc.moveTo(ox, -10);
+      bgc.lineTo(ox + Math.cos(ang - .09) * len, Math.sin(ang - .09) * len);
+      bgc.lineTo(ox + Math.cos(ang + .09) * len, Math.sin(ang + .09) * len);
+      bgc.closePath();
+      const g = bgc.createLinearGradient(ox, 0, ox, len);
+      const col = ['255,46,136', '62,240,255', '255,201,74'][i];
+      g.addColorStop(0, `rgba(${col},${.05 + bass * .16})`); g.addColorStop(1, `rgba(${col},0)`);
+      bgc.fillStyle = g; bgc.fill();
+    }
+  }
+  // confetti
+  bgc.globalCompositeOperation = 'source-over';
+  confetti = confetti.filter((p) => p.life > 0 && p.y < H + 40);
+  for (const p of confetti) {
+    p.vy += .22 * DPR; p.vx *= .99; p.x += p.vx; p.y += p.vy; p.rot += p.vr; p.life -= .006;
+    bgc.save(); bgc.translate(p.x, p.y); bgc.rotate(p.rot); bgc.globalAlpha = Math.max(0, p.life);
+    bgc.fillStyle = p.c; bgc.fillRect(-p.r, -p.r / 2, p.r * 2, p.r); bgc.restore();
+  }
+  bgc.globalAlpha = 1;
+}
+function drawRing(t) {
+  fit(ring); const W = ring.width, H = ring.height, cx = W / 2, cy = H / 2;
+  rc.clearRect(0, 0, W, H);
+  const inner = W * .36, maxLen = W * .13, N = 96;
+  // glow halo
+  const g = rc.createRadialGradient(cx, cy, inner * .9, cx, cy, inner + maxLen * 1.4);
+  g.addColorStop(0, `rgba(255,46,136,${.12 + bass * .35})`); g.addColorStop(1, 'rgba(255,46,136,0)');
+  rc.fillStyle = g; rc.beginPath(); rc.arc(cx, cy, inner + maxLen * 1.4, 0, Math.PI * 2); rc.fill();
+  const live = analyser && !audio.paused;
+  rc.lineCap = 'round'; rc.lineWidth = Math.max(2, W / 150);
+  for (let i = 0; i < N; i++) {
+    // mirror the spectrum so the ring is symmetric
+    const k = i < N / 2 ? i : N - 1 - i;
+    const v = live ? freq[2 + Math.floor(k * 1.4)] / 255 : (.2 + .15 * Math.sin(t / 400 + i * .45)) * .6;
+    const a = (i / N) * Math.PI * 2 - Math.PI / 2 + t * .00008;
+    const len = 4 * DPR + v * v * maxLen * 1.4;
+    const hue = 320 + (i / N) * 140;
+    rc.strokeStyle = `hsla(${hue % 360},100%,${60 + v * 15}%,${.55 + v * .45})`;
+    rc.beginPath();
+    rc.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner);
+    rc.lineTo(cx + Math.cos(a) * (inner + len), cy + Math.sin(a) * (inner + len));
+    rc.stroke();
+  }
+  // waveform circle
+  if (live) {
+    analyser.getByteTimeDomainData(wave);
+    rc.beginPath();
+    for (let i = 0; i <= 128; i++) {
+      const s = (wave[(i * 4) % wave.length] - 128) / 128;
+      const a = (i / 128) * Math.PI * 2;
+      const r = inner * .93 + s * W * .03;
+      const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+      i ? rc.lineTo(x, y) : rc.moveTo(x, y);
+    }
+    rc.strokeStyle = 'rgba(62,240,255,.55)'; rc.lineWidth = DPR * 1.5; rc.stroke();
+  }
+}
+function drawEq(t) {
+  fit(eq); const W = eq.width, H = eq.height;
+  ec.clearRect(0, 0, W, H);
+  const bars = Math.max(24, Math.floor(W / (14 * DPR))), bw = W / bars;
+  const live = analyser && !audio.paused;
+  for (let i = 0; i < bars; i++) {
+    const k = Math.floor((i / bars) * 150) + 2;
+    const v = live ? freq[k] / 255 : .08 + .06 * Math.sin(t / 500 + i * .5);
+    const h = Math.max(2 * DPR, v * v * H);
+    const grad = ec.createLinearGradient(0, H, 0, H - h);
+    grad.addColorStop(0, 'rgba(255,46,136,.0)'); grad.addColorStop(.3, 'rgba(255,46,136,.55)'); grad.addColorStop(1, 'rgba(255,201,74,.9)');
+    ec.fillStyle = grad;
+    ec.fillRect(i * bw + bw * .18, H - h, bw * .64, h);
+  }
+}
+function frame(t) {
+  levels(t);
+  drawBg(t); drawRing(t); drawEq(t);
+  if (!reduced || !frame.once) requestAnimationFrame(frame);
+  frame.once = true;
+}
+requestAnimationFrame(frame);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && reduced) requestAnimationFrame(frame); });
+</script>
+</body>
+</html>
