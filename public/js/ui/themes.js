@@ -45,7 +45,7 @@ export function applyTheme(settings) {
   root.classList.toggle('zoom-large', z > 1.05);
   // short / narrow desktop windows squeeze the desktop layout (css/performance.css); compact screens have their own
   const effH = compact ? Infinity : innerHeight / z;
-  root.classList.toggle('h920', effH <= 920); root.classList.toggle('h860', effH <= 860); root.classList.toggle('h800', effH <= 800);
+  root.classList.toggle('h1250', effH >= 1250 && effH !== Infinity); root.classList.toggle('h920', effH <= 920); root.classList.toggle('h860', effH <= 860); root.classList.toggle('h800', effH <= 800);
   const effW = compact ? Infinity : innerWidth / z;
   root.classList.toggle('w1500', effW <= 1500); root.classList.toggle('w1400', effW <= 1400); root.classList.toggle('w1300', effW <= 1300); root.classList.toggle('w1200', effW <= 1200);
   if (!applyTheme._resize) { applyTheme._resize = true; let t; addEventListener('resize', () => { clearTimeout(t); t = setTimeout(() => applyTheme(applyTheme._last), 150); }); }

@@ -508,3 +508,15 @@ body:not(.four-decks) .mixer.mx-short .mixer-master > .strip-num, body:not(.four
 .lbl-dual .ls { display: none; }
 .deck.short-labels .lbl-dual .lf { display: none; }
 .deck.short-labels .lbl-dual .ls { display: inline; }
+
+/* ---- tall windows (>= 1250 effective px, e.g. 2560x1440 at 100 %): the extra height goes to the waveforms,
+   the library and bigger pads / platter instead of leaving half of each deck empty (QA p2) ---- */
+:root.h1250 { --wave-h: 128px; --browser-h: clamp(300px, calc(33vh / var(--ui-zoom, 1)), 520px); }
+:root.h1250 body.layout-waveform:not(.four-decks) { --wave-h: 210px; }
+:root.h1250 .four-decks { --wave-h: 72px; }
+:root.h1250 body:not(.four-decks) .deck-panel[data-panel="cues"] .pads { max-height: 200px; grid-auto-rows: minmax(44px, 1fr); }
+:root.h1250 .deck-mid .btn.sm { min-height: 30px; }
+:root.h1250 .sync-row .btn { min-height: 38px; }
+:root.h1250 body:not(.four-decks) .deck-body { grid-template-columns: minmax(190px, 0.9fr) minmax(0, 1.6fr) 62px; }
+:root.h1250 .jog { max-width: 300px; }
+:root.h1250 .btn.big { height: 60px; max-width: 72px; }
