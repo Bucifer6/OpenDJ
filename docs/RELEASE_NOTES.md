@@ -23,6 +23,13 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.4.1
+
+- Smoother controls and waveforms under background load, including deferred waveform rendering and background library filtering.
+- Smarter Automix start points, phrase-aware track selection, and transition profiles with per-mix EQ presets.
+- Fixed the Windows portable app's one-click AI stems setup.
+- Added in-app skin updates from Settings → Appearance, so new skins can be installed without a full app release.
+
 ### New in 0.4
 **Phone and tablet app (preview)**
 - OpenDJ now runs as a standalone app on Android and iOS: no computer or server needed.

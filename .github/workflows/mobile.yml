@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Attach the Android APK to the GitHub Release with this tag (e.g. v0.4.0). Leave empty to only build.'
+        description: 'Attach the Android APK to the GitHub Release with this tag (e.g. v0.4.1). Leave empty to only build.'
         required: false
         default: ''
 
