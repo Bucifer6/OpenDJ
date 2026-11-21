@@ -14,7 +14,7 @@ import { PRESETS } from './presets.js';
 import { BEATLOOPS, BEATJUMPS, ROLLS, convertMixxx, toStoredMapping } from './mixxx.js';
 import { HidManager, describeHidKey } from './hid.js';
 import { listMixxxMappings, matchMappings, downloadMixxxMapping, mappingTitle } from './mixxx-online.js';
-import { fetchControllerIndex, matchController, controllerName, fetchCommunityMapping, hashEntries } from './community.js';
+import { fetchControllerIndex, findController, controllerName, fetchCommunityMapping, hashEntries } from './community.js';
 import { GamepadManager, describeGamepadKey } from './gamepad.js';
 
 const fmtBeats = (b) => (b < 1 ? `1/${Math.round(1 / b)}` : String(b));
@@ -263,8 +263,12 @@ export class MidiManager extends Emitter {
           : 'OpenDJ has a community mapping for it. Nobody else has verified it yet: if it works, please verify it in the Controller Mapper.';
         btns.push(mk('button', 'btn sm primary', 'Use it', () => apply(() => this.useCommunityMapping(name, community), 'Community mapping')));
       } else if (unsupported) {
-        text = `There is no ready-made mapping for this controller yet, so it needs to be mapped by hand. It takes a few minutes: press each control when the Controller Mapper asks. Then share it so it works for the next person.`;
-        btns.push(mk('button', 'btn sm primary', 'Map it now', () => { close(); this.openMapper(name); }), mk('button', 'btn sm', "Don't ask again", dismiss));
+        text = community
+          ? 'Nobody has shared a mapping for it yet, so it needs to be mapped by hand. It takes a few minutes: press each control when the Controller Mapper asks. Then share it so it works for the next person.'
+          : "OpenDJ couldn't recognise it. If it's in the community list under another name, choose it there and its mapping is downloaded. Otherwise map it by hand: press each control when the Controller Mapper asks, then share it.";
+        btns.push(mk('button', 'btn sm primary', 'Map it now', () => { close(); this.openMapper(name); }));
+        if (!community) btns.push(mk('button', 'btn sm', 'Choose my controller', () => { close(); this.openMapper(name, { pick: true }); }));
+        btns.push(mk('button', 'btn sm', "Don't ask again", dismiss));
       } else {
         text = `${community ? 'No OpenDJ community mapping yet. ' : ''}${mixxx ? `The Mixxx library has "${mixxx.name}".` : ''} You can also map it yourself and share it.`;
         if (mixxx) btns.push(mk('button', 'btn sm primary', 'Use Mixxx mapping', () => apply(async () => this.applyMixxx(name, await downloadMixxxMapping(mixxx.file), mixxx.file), 'Mixxx mapping')));
@@ -282,8 +286,9 @@ export class MidiManager extends Emitter {
    * Settings opens on that tab. The page talks to the app with postMessage: it asks for the device's mapping
    * (opendj-mapper:hello) and sends edits back (opendj-mapper:apply).
    */
-  openMapper(device = '') {
+  openMapper(device = '', { pick = false } = {}) {
     this.mapperDevice = device;
+    this.mapperPick = pick; // open the community controller list straight away ("Choose my controller")
     if (this._l.get('open-mapper')?.size) this.emit('open-mapper', device);
     else this.app.dialogs?.settings?.('mapper');
   }
@@ -306,7 +311,10 @@ export class MidiManager extends Emitter {
       ev.source.postMessage({ type: 'opendj-mapper:mapping', device: d.device, mapping: { name: m?.name || d.device, entries: m?.entries || [] } }, location.origin);
     } else if (d.type === 'opendj-mapper:apply' && Array.isArray(d.mapping?.entries)) {
       const entries = d.mapping.entries.filter((e) => e && typeof e.key === 'string' && typeof e.target === 'string');
-      this.importMapping(d.device, JSON.stringify({ name: String(d.mapping.name || d.device).slice(0, 120), entries }));
+      const stored = this.importMapping(d.device, JSON.stringify({ name: String(d.mapping.name || d.device).slice(0, 120), entries }));
+      if (typeof d.community?.file === 'string' && d.community.file.length < 300) {
+        Object.assign(stored, { source: 'community', communityFile: d.community.file, communityHash: hashEntries(entries) }); this.save();
+      }
       this.app.toast?.(`Controller Mapper: ${entries.length} control${entries.length === 1 ? '' : 's'} applied to ${d.device}`);
     }
   }
@@ -332,11 +340,12 @@ export class MidiManager extends Emitter {
    */
   async applyBundled(device) {
     const b = await this.loadBundle();
-    const entry = b && matchController(b.index.controllers, device);
+    const entry = b && findController(b.index.controllers, device);
     const m = entry?.file && b.mappings[entry.file];
     const cur = this.mappings[device];
     if (!m || (cur?.entries?.length && cur.source !== 'preset')) return false;
     this.storeCommunity(device, entry, m);
+    this.checkCommunityUpdates().catch(() => {}); // a newer version may be on GitHub already
     this.app.toast?.(`MIDI: recognised ${controllerName(entry)} and loaded its community mapping (${m.entries.length} controls${entry.status === 'verified' ? ', verified' : ', not verified yet'}). Something wrong? Settings → Controller Mapper.`);
     this.emit('devices');
     return true;
@@ -382,8 +391,8 @@ export class MidiManager extends Emitter {
     const job = (async () => {
       let community = null, mixxx = null, online = false;
       const b = await this.loadBundle();
-      if (b) community = matchController(b.index.controllers, name);
-      try { this._index ||= await fetchControllerIndex(fetchFn, 6000); community = matchController(this._index.controllers, name) || community; online = true; } catch { /* offline */ }
+      if (b) community = findController(b.index.controllers, name);
+      try { this._index ||= await fetchControllerIndex(fetchFn, 6000); community = findController(this._index.controllers, name) || community; online = true; } catch { /* offline */ }
       if (!community?.file) {
         try { const best = matchMappings(name, await listMixxxMappings({ fetchFn }), 1)[0]; online = true; if (best) mixxx = { file: best.file, name: best.name || mappingTitle(best.file) }; } catch { /* offline or rate-limited */ }
       }

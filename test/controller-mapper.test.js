@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build, buildIndex, buildBundle, targetList, mappingFiles, OUT, INDEX, BUNDLE } from '../scripts/build-controller-mapper.mjs';
-import { matchController, guessController, hashEntries } from '../public/js/midi/community.js';
+import { matchController, guessController, hashEntries, findController } from '../public/js/midi/community.js';
 import { mappingErrors, mappingPath, cleanEntries } from '../scripts/lib/mapping-schema.mjs';
 import { parseForm, issueKind, mappingFromForm, processIssue } from '../scripts/mapping-intake.mjs';
 
@@ -39,7 +39,7 @@ test('controller mapper: strict CSP allows exactly its own inline scripts', () =
   assert.match(csp, /default-src 'none'/);
   assert.match(csp, /connect-src 'self' https:\/\/raw\.githubusercontent\.com;/);
   assert.ok(!/script-src[^;]*unsafe/.test(csp));
-  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)].map((m) => m[1]);
   assert.equal(scripts.length, 2);
   for (const s of scripts) assert.ok(csp.includes(`'sha256-${createHash('sha256').update(s).digest('base64')}'`));
 });
@@ -183,4 +183,14 @@ test('bundle: community mappings are built into the app with their version hash'
   const b = JSON.parse(buildBundle());
   assert.equal(b.opendjCommunityBundle, 1);
   for (const c of b.index.controllers) if (c.file && b.mappings[c.file]) assert.equal(hashEntries(b.mappings[c.file].entries), c.hash);
+});
+
+test('recognition: a controller the user chose from the list is remembered for its MIDI name', () => {
+  const list = [{ brand: 'Acme', model: 'DJ-2', midiNames: ['ACME DJ-2'] }, { brand: 'Numark', model: 'Party Mix', midiNames: ['Party Mix'] }];
+  const storage = { items: { 'opendj-mapper:pick:USB MIDI Device': JSON.stringify({ brand: 'Numark', model: 'Party Mix' }) }, getItem(k) { return this.items[k] ?? null; } };
+  assert.equal(findController(list, 'USB MIDI Device', storage).model, 'Party Mix');
+  assert.equal(findController(list, 'ACME DJ-2 MIDI 1', storage).model, 'DJ-2');
+  assert.equal(findController(list, 'Other', storage), null);
+  storage.items['opendj-mapper:pick:Broken'] = '{not json';
+  assert.equal(findController(list, 'Broken', storage), null);
 });

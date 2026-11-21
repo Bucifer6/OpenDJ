@@ -109,7 +109,7 @@ export function build(index = buildIndex()) {
   const fill = { '/*@@TARGETS@@*/': json(targetList()), '/*@@INDEX@@*/': json(JSON.parse(index)), '/*@@WIZARD@@*/': wizard, '/*@@COMMUNITY@@*/': community, '@@VERSION@@': pkg.version };
   const html = parts.map((p) => (p in fill ? fill[p] : p)).join('');
   // strict CSP: only these exact inline scripts may run, and the page may only fetch from raw.githubusercontent.com
-  const hashes = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => `'sha256-${createHash('sha256').update(m[1]).digest('base64')}'`);
+  const hashes = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)].map((m) => `'sha256-${createHash('sha256').update(m[1]).digest('base64')}'`);
   const csp = `default-src 'none'; script-src ${hashes.join(' ')}; style-src 'unsafe-inline'; font-src 'self'; img-src data:; connect-src 'self' https://raw.githubusercontent.com; base-uri 'none'; form-action 'none'`;
   return html.replace('@@CSP@@', csp);
 }

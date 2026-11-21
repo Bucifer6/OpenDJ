@@ -33,6 +33,16 @@ export function matchController(controllers, portName) {
   return best;
 }
 
+/** The controller the user picked for this MIDI port in the Controller Mapper ("This is mine"), if it is in the list. */
+export function pickedController(controllers, portName, storage = typeof localStorage !== 'undefined' ? localStorage : null) {
+  let pick = null;
+  try { pick = JSON.parse(storage?.getItem('opendj-mapper:pick:' + portName) || 'null'); } catch { return null; }
+  if (!pick?.brand || !pick?.model) return null;
+  return (controllers || []).find((c) => normName(controllerName(c)) === normName(pick.brand + pick.model)) || null;
+}
+/** Picked by the user, else recognised from the MIDI name. */
+export const findController = (controllers, portName, storage) => pickedController(controllers, portName, storage) || matchController(controllers, portName);
+
 /** Brand guesses from words in MIDI port names, to prefill "which controller is this?" for unknown devices. */
 export const BRAND_HINTS = [
   [/\b(ddj|xdj|djm|cdj)\b|ddj-|pioneer/i, 'Pioneer DJ'], [/mixtrack|party ?mix|numark|\bns\d|dj2go|\bidj/i, 'Numark'],

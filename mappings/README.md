@@ -18,7 +18,9 @@ from its MIDI name:
 
 - **Community mapping available:** it is loaded straight away (built-in DJ-400 / FLX4-style presets are replaced by it).
 - **Not in the OpenDJ collection:** OpenDJ looks for a matching mapping in the Mixxx library and offers it.
-- **Nothing found:** "Not supported yet: this controller needs to be mapped by hand", with **Map it now**.
+- **Not recognised:** "Not supported yet", with **Map it now** and **Choose my controller**. Choosing it from the
+  community list downloads its mapping and applies it, and OpenDJ remembers the choice for that MIDI name.
+- **Recognised but nobody has mapped it yet:** "needs to be mapped by hand", with **Map it now**.
 
 With **Recognise new controllers online** on (Settings → Controller Mapper; on by default), OpenDJ checks GitHub every
 6 hours for newer versions of the community mappings you use and updates them. A mapping you changed yourself is

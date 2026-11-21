@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-EvCBOKcwUKwHAQjvR3w0MKTNL+Z5Fcx3h5TFb7kcIzI=' 'sha256-kekjPY6cBuShRNRBcKfqgIJoFk5VTYZnDwPPzO5PNSw='; style-src 'unsafe-inline'; font-src 'self'; img-src data:; connect-src 'self' https://raw.githubusercontent.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-kalOupjauiGO1SYQbYG2VRXG1TLLLNDAFVymM1Bod9k=' 'sha256-U0s0VfaG6ABteNKatmgnO0o/FRT2bbLKgEaaY9vVAx4='; style-src 'unsafe-inline'; font-src 'self'; img-src data:; connect-src 'self' https://raw.githubusercontent.com; base-uri 'none'; form-action 'none'">
 <title>OpenDJ Controller Mapper</title>
 <style>
 :root {
@@ -409,6 +409,16 @@ function matchController(controllers, portName) {
   }
   return best;
 }
+
+/** The controller the user picked for this MIDI port in the Controller Mapper ("This is mine"), if it is in the list. */
+function pickedController(controllers, portName, storage = typeof localStorage !== 'undefined' ? localStorage : null) {
+  let pick = null;
+  try { pick = JSON.parse(storage?.getItem('opendj-mapper:pick:' + portName) || 'null'); } catch { return null; }
+  if (!pick?.brand || !pick?.model) return null;
+  return (controllers || []).find((c) => normName(controllerName(c)) === normName(pick.brand + pick.model)) || null;
+}
+/** Picked by the user, else recognised from the MIDI name. */
+const findController = (controllers, portName, storage) => pickedController(controllers, portName, storage) || matchController(controllers, portName);
 
 /** Brand guesses from words in MIDI port names, to prefill "which controller is this?" for unknown devices. */
 const BRAND_HINTS = [
@@ -872,6 +882,7 @@ function matchCurrent() {
     const pick = store.get('opendj-mapper:pick:' + deviceName);
     if (pick) current = index.controllers.find((c) => norm(fullName(c)) === norm(pick.brand + pick.model)) || (pick.custom ? { ...pick, status: 'unknown' } : null);
     if (!current) current = matchController(index.controllers, deviceName);
+    if (wantPick && deviceName === (wantDevice || deviceName) && !pickShown) { pickShown = true; setTimeout(openList, 0); }
   }
   if (base && (!current || norm(fullName(base.entry)) !== norm(fullName(current)))) base = null;
   renderController();
@@ -940,9 +951,9 @@ function mapIt(c) {
   setResult('Run the guided setup (or click functions on the left). When you are done, open "Contribute this mapping" below.', 'ok');
 }
 
-async function loadCommunity(c) {
-  if (!c?.file) return;
-  if (mapping.entries.length && !saved() && !confirm('Replace the controls you mapped here with the community mapping?')) return;
+async function loadCommunity(c, { force = false } = {}) {
+  if (!c?.file) return false;
+  if (!force && mapping.entries.length && !saved() && !confirm('Replace the controls you mapped here with the community mapping?')) return false;
   try {
     // inside OpenDJ the built-in copy is used when it is the current version; otherwise it comes from GitHub
     let m = null;
@@ -959,7 +970,8 @@ async function loadCommunity(c) {
     lastSaved = JSON.stringify(mapping.entries);
     changed(); renderController();
     toast(`Loaded ${entries.length} controls. Move them to test.`);
-  } catch (e) { toast(`Couldn't download the mapping (${e.message}). Check your internet connection.`); }
+    return true;
+  } catch (e) { toast(`Couldn't download the mapping (${e.message}). Check your internet connection.`); return false; }
 }
 
 /** Human-readable differences between the community mapping and the edited one, for reviewers. */
@@ -1019,6 +1031,8 @@ $('listRows').addEventListener('click', (ev) => {
   store.set('opendj-mapper:pick:' + deviceName, { brand: c.brand, model: c.model });
   $('listDlg').close(); matchCurrent();
   toast(`${deviceName} is a ${fullName(c)}`);
+  // pull its community mapping on demand; inside OpenDJ it is applied straight away
+  if (c.file && (!mapping.entries.length || host)) loadCommunity(c, { force: true }).then((ok) => { if (ok && host) $('btnApply').click(); });
 });
 function openAdd() {
   if ($('listDlg').open) $('listDlg').close();
@@ -1050,6 +1064,8 @@ for (const d of document.querySelectorAll('dialog')) d.addEventListener('click',
 // ---------- inside OpenDJ: Settings → Controller Mapper (iframe) or a pop-up window ----------
 const params = new URLSearchParams(location.search);
 const wantDevice = params.get('device') || '';
+const wantPick = params.get('pick') === '1'; // "Choose my controller" from the plug-in message
+let pickShown = false;
 const sameOrigin = (w) => { try { return !!w && w !== window && w.location.origin === location.origin; } catch { return false; } };
 const embedded = location.protocol.startsWith('http') && sameOrigin(window.parent);
 const host = !location.protocol.startsWith('http') ? null : embedded ? window.parent : sameOrigin(window.opener) ? window.opener : null;
@@ -1090,7 +1106,9 @@ $('btnApply').onclick = () => {
   if (!host || host.closed) { toast('OpenDJ was closed. Use Save mapping instead.'); return; }
   if (learn) finishLearn();
   if (!deviceName) { toast('No controller selected'); return; }
-  host.postMessage({ type: 'opendj-mapper:apply', device: deviceName, mapping: { name: $('mapName').value.trim() || deviceName, entries: mapping.entries } }, location.origin);
+  // an unchanged community mapping stays linked to its file, so OpenDJ keeps it up to date
+  const community = base && JSON.stringify(mapping.entries) === JSON.stringify(base.entries) ? { file: base.entry.file } : null;
+  host.postMessage({ type: 'opendj-mapper:apply', device: deviceName, mapping: { name: $('mapName').value.trim() || deviceName, entries: mapping.entries }, community }, location.origin);
   lastSaved = JSON.stringify(mapping.entries);
   toast('Applied in OpenDJ');
 };

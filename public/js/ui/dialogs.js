@@ -423,8 +423,11 @@ export class Dialogs {
           chk(s.controllerLookup !== false, (v) => app.setSetting('controllerLookup', v)), ' Recognise new controllers online')),
       mapperHost);
     const loadMapper = () => {
-      const dev = app.midi.mapperDevice || '';
-      mapperFrame = el('iframe', { class: 'mapper-frame', title: 'Controller Mapper', allow: 'midi', src: `controller-mapper.html${dev ? `?device=${encodeURIComponent(dev)}` : ''}` });
+      const dev = app.midi.mapperDevice || '', q = new URLSearchParams();
+      if (dev) q.set('device', dev);
+      if (app.midi.mapperPick) q.set('pick', '1');
+      app.midi.mapperPick = false;
+      mapperFrame = el('iframe', { class: 'mapper-frame', title: 'Controller Mapper', allow: 'midi', src: `controller-mapper.html${q.size ? `?${q}` : ''}` });
       mapperHost.replaceChildren(mapperFrame);
       app.midi.attachMapper(mapperFrame.contentWindow);
     };
