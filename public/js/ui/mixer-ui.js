@@ -131,7 +131,10 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   colorSel.addEventListener('change', () => { for (const ch of eng.channels) ch.set('colorFx', colorSel.value); app.setSetting('colorFx', colorSel.value); });
   const root = el('section', { class: 'mixer' },
     el('div', { class: 'mixer-top' }, stripsWrap, master),
-    el('div', { class: 'xfader-row' }, eqPreset, colorSel, el('span', { class: 'xf-l' }, 'A'), xfader, el('span', { class: 'xf-l' }, 'B'), curveSel),
+    el('div', { class: 'xfader-row' },
+      el('div', { class: 'xfader-options' }, eqPreset, colorSel, curveSel),
+      el('div', { class: 'xfader-control' }, el('span', { class: 'xf-l' }, 'A'), xfader, el('span', { class: 'xf-l' }, 'B')),
+    ),
   );
 
   eng.on('mixer', (i) => { for (const r of byCh[i] || renderers) r.render(); if (!applyingEqPreset) eqPreset.value = 'custom'; });
