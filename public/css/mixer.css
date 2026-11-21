@@ -119,3 +119,4 @@
 .mixer.mx-noxf .mixer-curve { display: none; } /* no crossfader (rotary): no curve menu */
 /* touch screens: finger-sized setup controls */
 :root.tablet .mixer-tools .btn, :root.tablet .mixer-tools .sel, :root.touch .mixer-tools .btn, :root.touch .mixer-tools .sel { min-height: 32px; }
+.adv-pane[hidden] { display: none; }

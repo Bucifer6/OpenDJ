@@ -190,7 +190,8 @@ export function buildDrawer(app, mixerRoot) {
     el('div', { class: 'adv-tabs', role: 'tablist' }, ...tabBtns), body);
   let tab = 'channel', raf = 0;
   function show(id) {
-    tab = id; body.replaceChildren(pane[id]);
+    tab = id; // every pane stays in the DOM (hidden), so their controls are always reachable by selectors
+    for (const [k, p] of Object.entries(pane)) { if (p.parentNode !== body) body.append(p); p.hidden = k !== id; }
     for (const b of tabBtns) { const on = b.dataset.tab === id; b.classList.toggle('active', on); b.setAttribute('aria-selected', String(on)); }
     if (id === 'loudness') eng.ensureMeter();
     if (id !== 'channel') eng.channels.forEach((c) => c.bandLevels(false));
