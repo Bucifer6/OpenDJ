@@ -17,7 +17,7 @@ import { isoKnobGain, cutKnobDb, sculptKnobDb, sculptFreq, dbToGain } from './cu
  *             kill, mids +6 / -26 dB (⚠ flagship 6-channel mixer, exact frequencies unverified).
  *  rotaryIso  "Rotary Isolator": wide-range, smooth 24 dB/oct (LR4) isolator at 300 Hz / 4 kHz, +12 dB .. -inf with a
  *             long log taper and a gentle tanh "colour" stage (⚠ boutique rotary / 4th-order isolator mixers: +12 / -inf).
- *  battle     "Battle": simple 3-band LR8 isolator at 250 Hz / 3 kHz with a steep kill (full kill by 9 o'clock) for
+ *  battle     "Battle": simple 3-band LR8 isolator at 250 Hz / 3 kHz with a steep kill (silent from 9 o'clock, v = -0.67) for
  *             cuts on scratch mixers, +6 dB boost.
  *  vintage    "Vintage Warm": analogue-feel EQ, broad overlapping bands: low shelf 100 Hz, mid peak 800 Hz (Q 0.5), high
  *             shelf 8 kHz, +10 / -20 dB, kill at the end, mild tanh colour.
@@ -30,7 +30,7 @@ export const EQ_PRESETS = [
   { id: 'classic', label: 'Club Classic', type: 'shelving', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { freqs: [70, 1000, 13000], q: 0.7, boost: 6, cut: 26, kill: [180, 5000] } },
   { id: 'fourBand', label: '4-Band Club', type: 'fourBand', knobs: ['eqHigh', 'eqMidHigh', 'eqMidLow', 'eqLow'], opts: { xover: [150, 1000, 5000], order: 8 } },
   { id: 'rotaryIso', label: 'Rotary Isolator', type: 'isolator', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { xover: [300, 4000], order: 4, boost: 12, cut: 30, killFrom: -0.55, color: 'soft' } },
-  { id: 'battle', label: 'Battle', type: 'isolator', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { xover: [250, 3000], order: 8, boost: 6, cut: 30, killFrom: -0.45 } },
+  { id: 'battle', label: 'Battle', type: 'isolator', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { xover: [250, 3000], order: 8, boost: 6, cut: 30, killFrom: -0.4, killTo: -0.67 } },
   { id: 'vintage', label: 'Vintage Warm', type: 'shelving', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { freqs: [100, 800, 8000], q: 0.5, boost: 10, cut: 20, kill: [300, 4000], color: 'warm' } },
   { id: 'sculpt', label: 'Sculpt', type: 'sculpt', knobs: ['eqHigh', 'eqMid', 'eqFreq', 'eqLow'], opts: {} },
 ];
@@ -79,12 +79,12 @@ export function bandSplitter(ctx, xovers, { order = 8, sum = true } = {}) {
 const K = 0.012; // knob smoothing time constant (s), as the rest of the channel
 
 /** Isolator knob law: +boost dB at the right, 0 at noon, cut dB at the left fading to a full kill from `killFrom`. */
-export const isoLaw = (v, { boost = 6, cut = 26, killFrom = -0.8 } = {}) => (v >= 0 ? dbToGain(v * boost) : dbToGain(v * cut) * (1 - smoothstep(killFrom, -1, v)));
+export const isoLaw = (v, { boost = 6, cut = 26, killFrom = -0.8, killTo = -1 } = {}) => (v >= 0 ? dbToGain(v * boost) : v <= killTo ? 0 : dbToGain(v * cut) * (1 - smoothstep(killFrom, killTo, v)));
 const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 /** Gentle colour stage: a tanh curve with unity slope at 0 (transparent at low level, rounds off peaks). */
 function colorStage(ctx, kind) {
-  const sh = ctx.createWaveShaper(), n = 2049, c = new Float32Array(n), k = kind === 'warm' ? 0.9 : 0.6;
+  const sh = ctx.createWaveShaper(), n = 2049, c = new Float32Array(n), k = kind === 'warm' ? 0.45 : 0.35; // -0.15 / -0.09 dB at -6 dBFS peaks
   for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 4 - 2; c[i] = Math.tanh(k * x) / (2 * k); }
   sh.curve = c; // pre 0.5 / post 2: the curve covers ±2 full scale (no hard clip), unity slope at 0
   const pre = ctx.createGain(), post = ctx.createGain(); pre.gain.value = 0.5; post.gain.value = 2; pre.connect(sh); sh.connect(post);
@@ -98,9 +98,9 @@ function withColor(ctx, eq, kind) {
   return { ...eq, output: c.output, color: kind, dispose() { d(); for (const n of c.nodes) try { n.disconnect(); } catch { /* */ } } };
 }
 
-function isolator(ctx, { xover = ISO_XOVER, order = 8, boost = 6, cut = 26, killFrom = -0.8 } = {}) {
+function isolator(ctx, { xover = ISO_XOVER, order = 8, boost = 6, cut = 26, killFrom = -0.8, killTo = -1 } = {}) {
   const s = bandSplitter(ctx, xover, { order });
-  const [low, mid, high] = s.bands, law = { boost, cut, killFrom };
+  const [low, mid, high] = s.bands, law = { boost, cut, killFrom, killTo };
   return {
     input: s.input, output: s.output, biquads: s.biquads.length, bands: { low, mid, high },
     set(st, t, k = K) {

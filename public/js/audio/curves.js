@@ -26,8 +26,9 @@ export const legacyXfName = (curve) => (curve < 0.25 ? 'constant' : curve < 0.7 
  * Between those points the shapes blend, so the family is continuous and monotonic. cutIn (0..0.1) is a dead zone
  * at each end where nothing changes; reverse (hamster) swaps the sides.
  */
-export function xfGain(pos, side, { curve = 0.5, cutIn = 0, reverse = false } = {}) {
+export function xfGain(pos, side, o = {}) {
   if (side === 'THRU') return 1;
+  const curve = o.curve ?? o.xfCurve ?? 0.5, cutIn = o.cutIn ?? o.xfCutIn ?? 0, reverse = o.reverse ?? o.xfReverse ?? false; // (mixer config keys accepted)
   const x = (clamp(pos, -1, 1) + 1) / 2; // 0 = A end, 1 = B end
   let p = side === 'A' ? x : 1 - x; // 0 = fully this side, 1 = fully the other side
   if (reverse) p = 1 - p;

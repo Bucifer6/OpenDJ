@@ -170,7 +170,7 @@ export class Channel extends Emitter {
   /** Logical control as set from the UI or a controller: Center Lock applies to the filter knob there (not automix). */
   controlSet(key, value, lock) { if (lock && key === 'filter' && mixerOf(this.engine).centerLock) value = lock.filter(value); this.set(key, value); }
 
-  /** EQ type: builds the new chain, cross-fades 30 ms (equal gain), frees the old one. */
+  /** EQ type: builds the new chain, cross-fades 20 ms (equal gain), frees the old one. */
   setEqType(type, fade = true) {
     const mx = mixerOf(this.engine), opts = { killOn: mx.classicKill !== false };
     if (type === 'isolator' && Array.isArray(mx.eqXover) && String(mx.eqXover) !== '200,2500') opts.xover = mx.eqXover; // advanced crossover adjust
@@ -182,8 +182,9 @@ export class Channel extends Emitter {
     eq.set(this.state, t, 0.0005);
     this.eqIn.connect(eq.input); eq.output.connect(g); g.connect(this.eqOut);
     if (old && fade) {
-      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(1, t + 0.03);
-      oldFade.gain.cancelScheduledValues(t); oldFade.gain.setValueAtTime(1, t); oldFade.gain.linearRampToValueAtTime(0, t + 0.03);
+      // 20 ms: two EQ types have different phase at noon, so a long equal-gain fade would dip the bass while both play
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(1, t + 0.02);
+      oldFade.gain.cancelScheduledValues(t); oldFade.gain.setValueAtTime(1, t); oldFade.gain.linearRampToValueAtTime(0, t + 0.02);
       setTimeout(() => { try { this.eqIn.disconnect(old.input); } catch { /* */ } try { oldFade.disconnect(); } catch { /* */ } old.dispose(); }, 150);
     } else if (old) { try { this.eqIn.disconnect(old.input); } catch { /* */ } oldFade.disconnect(); old.dispose(); }
     this.eq = eq; this.eqFade = g; this.eqKey = key;

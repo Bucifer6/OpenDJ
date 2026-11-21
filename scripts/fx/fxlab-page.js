@@ -156,6 +156,11 @@ async function build(ctx, spec, src) {
       }
       const tap = spec.tap || 'master';
       if (tap === 'outputs') await e.applyOutputs();
+      else if (tap === 'diff01') { // channel 1 minus channel 2 (exact nulls inside one render)
+        const inv = ctx.createGain(); inv.gain.value = -1;
+        for (const c of e.channels.slice(0, 2)) c.busOut.disconnect();
+        e.channels[0].busOut.connect(ctx.destination); e.channels[1].busOut.connect(inv); inv.connect(ctx.destination);
+      }
       else {
         if (tap === 'booth') e.ensureBooth();
         if (tap === 'hp2') e.ensureHp2();

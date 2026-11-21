@@ -495,9 +495,9 @@ export function kWeighting(fs) {
   const rlb = { b: [1, -2, 1], a: [2 * (K * K - 1) / d, (1 - K / Q + K * K) / d] };
   return [pre, rlb];
 }
-/** 4x interpolation FIR for true peak (BS.1770-4 Annex 2 style): 4 phases x 16 taps, Kaiser-windowed sinc. */
+/** 4x interpolation FIR for true peak (BS.1770-4 Annex 2: 48 taps, 4 phases x 12), Kaiser-windowed sinc. */
 function truePeakFir() {
-  const N = 64, P = 4, h = new Float64Array(N), beta = 7;
+  const N = 48, P = 4, h = new Float64Array(N), beta = 7;
   const i0 = (x) => { let s = 1, t = 1; for (let k = 1; k < 30; k++) { t *= (x / (2 * k)) ** 2; s += t; } return s; };
   for (let n = 0; n < N; n++) {
     const m = n - (N - 1) / 2, x = m / P, sinc = x === 0 ? 1 : Math.sin(Math.PI * x) / (Math.PI * x);
