@@ -260,7 +260,7 @@ export function jogWheel(deck, opts = {}) {
   root.draw = (now = performance.now()) => {
     pickSkin();
     if (!size) {
-      const b = roW ? null : canvas.getBoundingClientRect(), w = roW || b.width, h = roH || b.height || w, dpr = devicePixelRatio || 1;
+      const b = roW && roH ? null : canvas.getBoundingClientRect(), w = roW || b.width, h = roH || b?.height || w, dpr = devicePixelRatio || 1;
       size = Math.max(64, Math.min(1400, Math.round(w * dpr))) || 360;
       const hh = skin.rect ? Math.max(48, Math.min(1400, Math.round(h * dpr))) || size : size;
       if (canvas.width !== size || canvas.height !== hh) { canvas.width = size; canvas.height = hh; body = null; sig = ''; }

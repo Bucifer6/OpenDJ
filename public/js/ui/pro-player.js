@@ -145,7 +145,7 @@ export function buildProPlayer(app, deck, ctx) {
   };
   const tempoFader = R(fader({ min: -1, max: 1, def: 0, get: () => deck.tempo / deck.tempoRange, set: (v) => deck.setTempoFader(v), invert: true, cls: 'pmp-tempo-fader', title: 'Tempo (double-click to reset)' }));
   const tempoLed = el('div', { class: 'pmp-tempo-led' });
-  const right = el('div', { class: 'pmp-right' },
+  const right = el('div', { class: 'pmp-right' }, el('div', { class: 'pmp-rctl' },
     el('div', { class: 'pmp-group pmp-opt' },
       btn('LOAD', { cls: 'xs', click: () => app.library?.loadSelected(i), title: 'Load the selected library track' }),
       btn(icon('eject'), { cls: 'xs', click: () => deck.eject(), title: 'Eject' })),
@@ -163,8 +163,8 @@ export function buildProPlayer(app, deck, ctx) {
       btn('RANGE', { cls: 'xs', click: () => { const k = TEMPO_STEPS.indexOf(deck.tempoRange); deck.setTempoRange(TEMPO_STEPS[(k + 1) % TEMPO_STEPS.length]); tempoFader.render(); }, title: 'Tempo range: ±6 / ±10 / ±16 / WIDE' }),
       btn('M.TEMPO', { cls: 'xs led', click: () => deck.setKeyLock(!deck.keyLock), active: () => deck.keyLock, title: 'Key lock' })),
     btn('TEMPO RESET', { cls: 'xs', click: () => { deck.resetTempo(); tempoFader.render(); }, active: () => deck.tempo !== 0 }),
+    tempoLed),
     el('div', { class: 'pmp-tempo' }, el('div', { class: 'pmp-scale' }, ...['+', '', '', '', '0', '', '', '', '−'].map((t) => el('span', {}, t))), tempoFader),
-    tempoLed,
   );
 
   const root = el('div', { class: 'pmp' },

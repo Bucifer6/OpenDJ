@@ -22,15 +22,13 @@ export function coverBitmap(id) {
   if (covers.has(id)) { const p = covers.get(id); covers.delete(id); covers.set(id, p); return p; }
   const p = (async () => {
     try {
-      const res = await fetch(api.coverUrl(id));
-      if (!res.ok) return null;
-      const blob = await res.blob();
-      if (!blob.size || !/^image\//.test(blob.type || 'image/')) return null;
-      const probe = await createImageBitmap(blob);
-      const w = probe.width, h = probe.height, s = Math.min(1, 512 / Math.max(w, h)); // (read before close(): it zeroes them)
-      if (s >= 1) return probe;
-      probe.close?.();
-      return await createImageBitmap(blob, { resizeWidth: Math.max(1, Math.round(w * s)), resizeHeight: Math.max(1, Math.round(h * s)), resizeQuality: 'medium' });
+      // an <img> (not fetch): on-device covers are blob: URLs, which the page's connect-src does not allow
+      const img = new Image(); img.decoding = 'async'; img.src = api.coverUrl(id);
+      await img.decode();
+      const w = img.naturalWidth, h = img.naturalHeight;
+      if (!w || !h) return null;
+      const s = Math.min(1, 512 / Math.max(w, h));
+      return await createImageBitmap(img, s < 1 ? { resizeWidth: Math.max(1, Math.round(w * s)), resizeHeight: Math.max(1, Math.round(h * s)), resizeQuality: 'medium' } : {});
     } catch { return null; }
   })();
   covers.set(id, p);

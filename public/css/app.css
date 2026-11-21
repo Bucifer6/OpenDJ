@@ -167,8 +167,8 @@ button, input, select { font: inherit; color: inherit; }
 .deck-toggles .btn, .loop-row .btn { flex: 1; min-width: 0; padding-left: 3px; padding-right: 3px; }
 .loop-btn { color: var(--green); font-family: var(--mono); }
 .loop-btn.active { background: var(--green) !important; color: #032 !important; border-color: var(--green) !important; box-shadow: 0 0 12px color-mix(in srgb, var(--green) 50%, transparent) !important; }
-.pad-modes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
-.pad-mode { background: transparent; border: 1px solid var(--line-2); border-radius: var(--r-sm); font-size: var(--fs-2xs); font-weight: 750; letter-spacing: .05em; color: var(--text-3); padding: 3px 0; cursor: pointer; transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease), background-color var(--dur) var(--ease); }
+.pad-modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 2px; }
+.pad-mode { background: transparent; border: 1px solid var(--line-2); border-radius: var(--r-sm); font-size: var(--fs-2xs); font-weight: 750; letter-spacing: .02em; overflow: hidden; text-overflow: clip; white-space: nowrap; min-width: 0; color: var(--text-3); padding: 3px 0; cursor: pointer; transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease), background-color var(--dur) var(--ease); }
 .pad-mode:hover { color: var(--text-2); }
 .pad-mode.active { color: var(--deck-color); border-color: var(--deck-color); background: color-mix(in srgb, var(--deck-color) 12%, transparent); }
 /* performance pads: rubber pads, backlit in the cue colour */
@@ -452,7 +452,7 @@ kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-bottom
 /* ---------- turntable and deck features (docs/MIXER_AND_TURNTABLES_PLAN.md §6) ---------- */
 .sample-badge { background: #22d3ee; color: #031418; flex-shrink: 0; }
 .scratch-view-btn { display: none; flex-shrink: 0; min-height: 24px; font-weight: 800; letter-spacing: .05em; }
-@media (pointer: coarse) { .scratch-view-btn { display: inline-flex; align-items: center; } }
+@media (pointer: coarse) { .scratch-view-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; margin-block: -12px; } }
 .deck-popup { position: fixed; z-index: 400; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 8px; max-width: min(320px, calc(100vw - 16px)); background: var(--panel-2); border: 1px solid var(--line-2); border-radius: var(--r-md, 8px); box-shadow: var(--elev-3, 0 12px 32px rgba(0,0,0,.55)); }
 .deck-popup-title { grid-column: 1 / -1; font-size: var(--fs-2xs); font-weight: 800; letter-spacing: .06em; color: var(--text-3); text-transform: uppercase; padding: 0 2px 2px; }
 .deck-popup .btn { min-height: 32px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -484,8 +484,8 @@ body.scratch-view-open { overflow: hidden; }
 .scratch-view.left-hand .sv-body { grid-template-columns: 76px minmax(0, 1fr); }
 .scratch-view.left-hand .sv-fader { order: -1; }
 .sv-platter { display: grid; place-items: center; min-height: 0; height: 100%; }
-.sv-jog.jog { max-width: none; width: min(100%, 100cqh, 92vw); height: auto; max-height: 100%; aspect-ratio: 1; container-type: normal; }
-.sv-platter { container-type: size; }
+:root .scratch-view .sv-jog.jog { max-width: none !important; aspect-ratio: auto; flex: none; }
+.sv-platter { overflow: hidden; }
 .sv-fader { display: flex; flex-direction: column; gap: 8px; align-items: stretch; height: 100%; min-height: 0; }
 .sv-strip { --v: 1; position: relative; flex: 1; min-height: 120px; border-radius: 12px; background: var(--deep); border: 1px solid var(--line-2); box-shadow: inset 0 2px 6px rgba(0,0,0,.6); touch-action: none; cursor: ns-resize; }
 .sv-strip-slot { position: absolute; left: 50%; top: 14px; bottom: 14px; width: 6px; margin-left: -3px; border-radius: 3px; background: #000; }
@@ -506,9 +506,9 @@ body.scratch-view-open { overflow: hidden; }
 /* ---------- deck looks: Direct-Drive Turntable and Pro Media Player (ui/pro-player.js) ----------
    Colours come from the Club Booth tokens (club-booth.css, mixer skin) when present, with dark defaults. */
 .tt-controls { display: none; }
-.deck.look-turntable.look-full .deck-body { grid-template-columns: minmax(240px, 1.45fr) minmax(0, 1fr) 74px; }
+.deck.look-turntable.look-full .deck-body { grid-template-columns: minmax(200px, 1.15fr) minmax(0, 1.2fr) 74px; }
 .deck.look-turntable.look-full .deck-left { justify-content: flex-start; }
-:root .deck.look-turntable.look-full .jog { position: relative; max-width: none; width: 100%; aspect-ratio: 1.32; border-radius: 12px; border: 0; box-shadow: 0 10px 26px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.06); flex: 1 1 auto; }
+:root .deck.look-turntable.look-full .jog { position: relative; max-width: none; width: 100%; aspect-ratio: 1.32; border-radius: 12px; border: 0; box-shadow: 0 10px 26px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.06); flex: 0 1 auto; height: auto; }
 :root .deck.look-turntable.look-full .jog.touched { box-shadow: 0 10px 26px rgba(0,0,0,.6), 0 0 0 2px var(--deck-color); }
 :root .deck.look-turntable.look-full .jog-canvas { border-radius: 12px; background: none; }
 .deck.look-turntable.look-full .tt-controls { display: grid; grid-template-columns: repeat(3, auto); position: absolute; right: 2.5%; bottom: 4%; gap: 4px; justify-items: stretch; }
@@ -583,7 +583,7 @@ body.scratch-view-open { overflow: hidden; }
 .pmp-group.col { flex-direction: column; align-items: stretch; }
 .pmp-group > .pmp-silk:first-child { margin-right: 2px; }
 .pmp-row { display: flex; gap: 3px; } .pmp-row > * { flex: 1; min-width: 0; }
-.pmp-body { display: grid; grid-template-columns: 112px minmax(0, 1fr) 140px; gap: 8px; min-height: 0; }
+.pmp-body { display: grid; grid-template-columns: 112px minmax(0, 1fr) 150px; gap: 8px; min-height: 0; }
 .pmp-left { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 6px; min-height: 0; }
 .pmp-padcol { min-height: 0; }
 .pmp-leftctl { display: flex; flex-direction: column; gap: 4px; min-height: 0; min-width: 0; }
@@ -602,12 +602,13 @@ body.scratch-view-open { overflow: hidden; }
 .pmp-center { display: grid; place-items: center; min-height: 0; min-width: 0; container-type: size; }
 :root .deck .pmp-jog.jog { width: min(100cqw, 100cqh); max-width: none; height: auto; aspect-ratio: 1; border: 0; box-shadow: 0 10px 26px rgba(0,0,0,.7), 0 0 0 2px #050607; }
 :root .deck .pmp-jog .jog-canvas { background: none; }
-.pmp-right { display: grid; grid-template-columns: minmax(0, 1fr) 30px; grid-template-rows: repeat(7, auto) 1fr; gap: 3px 5px; min-height: 0; }
-.pmp-right > :not(.pmp-tempo):not(.pmp-tempo-led) { grid-column: 1; }
-.pmp-tempo { grid-column: 2; grid-row: 1 / span 8; display: flex; gap: 1px; min-height: 0; align-self: stretch; }
+.pmp-right { display: grid; grid-template-columns: minmax(0, 1fr) 30px; gap: 5px; min-height: 0; }
+.pmp-rctl { display: flex; flex-direction: column; gap: 3px; min-height: 0; min-width: 0; overflow: hidden; }
+.pmp-rctl .pmp-btn { font-size: 8px; letter-spacing: 0; padding: 1px 3px; }
+.pmp-tempo { display: flex; gap: 1px; min-height: 0; height: 100%; }
 .pmp-scale { display: flex; flex-direction: column; justify-content: space-between; font: 700 8px var(--mono); color: var(--silk); opacity: .7; padding: 6px 0; }
 .pmp-tempo .fader { flex: 1; min-height: 0; height: 100%; } .pmp-tempo .fader-track { flex: 1; height: auto; min-height: 60px; }
-.pmp-tempo-led { grid-column: 1; align-self: end; font: 700 11px var(--mono); color: #6fe6ff; background: #031014; border-radius: 3px; text-align: center; padding: 1px; text-shadow: 0 0 6px rgba(80,220,255,.8); }
+.pmp-tempo-led { margin-top: auto; font: 700 11px var(--mono); color: #6fe6ff; background: #031014; border-radius: 3px; text-align: center; padding: 1px; text-shadow: 0 0 6px rgba(80,220,255,.8); }
 .pmp-knobs { display: flex; justify-content: space-around; }
 .pmp-knobs .knob-label, .pmp-right .knob-label { font-size: 7px; letter-spacing: .03em; }
 .pmp-right .knob-val { display: none; }
@@ -630,3 +631,5 @@ body.scratch-view-open { overflow: hidden; }
 }
 @container pmp (max-height: 380px) { .pmp-menu { display: none; } .pmp-info .pmp-box-sub { display: none; } }
 .pmp-padcol > .pmp-silk { white-space: normal; text-align: center; font-size: 7px; line-height: 1; overflow: hidden; }
+@media (pointer: coarse) { .deck-mix-now { min-height: 44px; } .scratch-view .sv-pad { height: 44px; min-height: 44px; } }
+html.tablet .deck .panel-tab { font-size: 9.5px; letter-spacing: 0; padding-left: 1px; padding-right: 1px; min-width: 0; }

@@ -179,7 +179,7 @@ export function buildDeck(app, deck) {
   // ---------- performance pads ----------
   let padMode = 'hotcue';
   const padModes = ['hotcue', 'roll', 'slicer', 'jump', 'pitch', 'scale', 'scratch', 'sampler', 'fx'];
-  const modeLabels = { hotcue: 'CUE', roll: 'ROLL', slicer: 'SLICE', jump: 'JUMP', pitch: 'PITCH', scale: 'SCALE', scratch: 'SCRATCH', sampler: 'SMPL', fx: 'FX' };
+  const modeLabels = { hotcue: 'CUE', roll: 'ROLL', slicer: 'SLICE', jump: 'JUMP', pitch: 'PITCH', scale: 'SCALE', scratch: 'SCR', sampler: 'SMPL', fx: 'FX' };
   const modeTitles = { scale: 'Scale play: pads play the hot cue at scale steps by changing the platter speed (key lock off while held). Shift-press a pad: pick the hot cue', scratch: 'Scratch samples: a pad swaps this deck to a short sound to scratch; press it again to go back to the track. Shift-press or right-click: choose the sound, or drop an audio file on a pad' };
   let scaleName = 'major';
   app.scratchSamples ??= new ScratchSamples(app.engine);
@@ -350,7 +350,7 @@ export function buildDeck(app, deck) {
     ),
   );
 
-  const PANELS = [['cues', 'Cues'], ['loops', 'Loops'], ['fx', 'FX'], ['stems', 'Stems'], ['key', 'Key'], ['platter', 'Platter']];
+  const PANELS = [['cues', 'Cues'], ['loops', 'Loops'], ['fx', 'FX'], ['stems', 'Stems'], ['key', 'Key'], ['platter', 'Vinyl']];
   const panelBodies = {
     cues: el('div', { class: 'deck-panel', 'data-panel': 'cues', role: 'tabpanel' }, modeBar, padGrid),
     loops: el('div', { class: 'deck-panel', 'data-panel': 'loops', role: 'tabpanel' }, loopRow, jumpRow, loopExtra),

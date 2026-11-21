@@ -85,6 +85,10 @@ export function openScratchView(app, deck) {
     ),
     el('div', { class: 'sv-foot' }, el('div', { class: 'sv-transport' }, cue, play), el('div', { class: 'sv-pads' }, ...pads), ret),
   );
+  // the platter takes the largest square that fits its area
+  const plat = view.querySelector('.sv-platter');
+  const fitJog = new ResizeObserver(() => { const r = plat.getBoundingClientRect(); const s = Math.max(120, Math.floor(Math.min(r.width, r.height))); jog.style.width = jog.style.height = `${s}px`; });
+  fitJog.observe(plat);
   let raf = 0;
   const frame = (now) => {
     jog.draw(now); play.render();
@@ -97,7 +101,7 @@ export function openScratchView(app, deck) {
   const api = {
     deck, el: view,
     close() {
-      cancelAnimationFrame(raf); document.removeEventListener('keydown', onKey, true);
+      cancelAnimationFrame(raf); fitJog.disconnect(); document.removeEventListener('keydown', onKey, true);
       if (saved != null) { strip.set(saved); saved = null; }
       if (deck.scratching) deck.jogPositionEnd?.(performance.now());
       view.remove(); document.body.classList.remove('scratch-view-open'); open = null;

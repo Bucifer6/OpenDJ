@@ -101,7 +101,7 @@ html.touch .lr .art { width: 28px; height: 28px; margin: 6px 1px; }
   .deck-mid .btn, .deck-toggles .btn { min-height: 44px; font-size: 12px; }
   .deck-toggles, .loop-row { flex-wrap: nowrap; }
   .deck-toggles .btn, .loop-row .btn { flex: 1 1 0; }
-  .pad-modes { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .pad-modes { grid-template-columns: repeat(9, minmax(0, 1fr)); }
   .pad-mode { min-height: 40px; font-size: 10px; }
   .pads { gap: 6px; }
   .pad { height: 54px; }
@@ -176,7 +176,7 @@ html.tablet .fx-unit .btn, html.tablet .fx-unit .sel { min-height: 36px; }
 /* narrow decks: a smaller platter column, toggles in 3 columns, pad modes in two rows of 4 (finger-wide) */
 html.tablet body:not(.four-decks) .deck-body { grid-template-columns: minmax(84px, 0.4fr) minmax(0, 1.8fr) 54px; }
 html.tablet .deck-toggles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-html.tablet .pad-modes { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+html.tablet .pad-modes { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 
 /* touch screens: finger-sized crossfader assign / mic buttons; on narrow mixers (tablet portrait, phones) the
    crossfader gets the whole row and the two selects move below it (QA m8: 16x40 A/T/B, 35x18 MIC/TALK, 85 px fader) */
