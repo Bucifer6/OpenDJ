@@ -156,9 +156,10 @@ export class Channel extends Emitter {
   applyFilter(x, side, t) {
     const k = 0.012;
     const lpOn = x > 0 && side < 0, hpOn = x > 0 && side > 0;
-    // exponential sweeps: LPF 18 kHz -> 70 Hz, HPF 25 Hz -> 9 kHz; parked filters are inaudible (flat to < 0.01 dB)
-    const lpF = lpOn ? Math.min(this.parkLp, 18000 * Math.pow(70 / 18000, Math.pow(x, 0.85))) : this.parkLp;
-    const hpF = hpOn ? 25 * Math.pow(9000 / 25, Math.pow(x, 0.85)) : 3;
+    // exponential sweeps: LPF 18 kHz -> 70 Hz (1.1 kHz half way), HPF 20 Hz -> 8 kHz (400 Hz half way); parked
+    // filters are inaudible (flat to < 0.01 dB)
+    const lpF = lpOn ? Math.min(this.parkLp, 18000 * Math.pow(70 / 18000, x)) : this.parkLp;
+    const hpF = hpOn ? 20 * Math.pow(8000 / 20, x) : 3;
     // resonance fades in over the first 20 % of travel (no jump out of the dead zone), eases off at the extremes
     const res = smoothstep(0, 0.2, x) * (1 - 0.35 * smoothstep(0.8, 1, x));
     const q2 = 2.32 + 4.2 * res; // dB: Butterworth 2nd stage (+2.3 dB) up to ~+6.5 dB resonant peak
