@@ -19,6 +19,7 @@ const opt = (k, d) => { const a = argv.find((x) => x.startsWith(`--${k}=`)); ret
 const OUT = path.resolve(opt('out', path.join(os.tmpdir(), 'opendj-ui-bench')));
 const THEMES = opt('themes', 'midnight,light,neon').split(',');
 const SECS = Number(opt('secs', 6));
+const LAYOUTS = opt('layouts', 'classic').split(',');
 fs.mkdirSync(OUT, { recursive: true });
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'opendj-bench-'));
@@ -47,16 +48,17 @@ const titles = ['Pressure Index', 'Copper Skyline', 'Static Bloom', 'Midnight Tr
 for (let i = 0; i < 4; i++) await loadDeck(i, titles[i]);
 // let the background analyser finish first (measured separately with --analysis)
 if (!argv.includes('--analysis')) await page.waitForFunction(() => !window.opendj.analyser.running, null, { timeout: 180000 }).catch(() => console.warn('analyser still running'));
-async function playState(n) {
-  await ev((n) => {
+async function playState(n, layout = 'classic') {
+  await ev(async ([n, layout]) => {
     const a = window.opendj, E = a.engine;
+    if (a.setLayout) { E.decks.forEach((d) => d.pause()); await a.setLayout(layout, false); }
     E.decks.forEach((d, i) => { d.pause(); d.exitLoop?.(); d.seek(d.beatLen * 4 * [46, 8, 24, 56][i]); });
     a.setDeckCount(n, false);
     E.channels[1].set('eqLow', -0.75); E.channels[0].set('fxType', 'echo'); E.channels[0].set('fxOn', true); E.channels[0].set('fxMix', 0.35);
     E.decks.slice(0, n).forEach((d, i) => { d.play(); if (i) d.sync(); });
     E.decks[1].autoLoop(8);
     a.mixer.renderAll?.();
-  }, n);
+  }, [n, layout]);
   await sleep(600);
 }
 const setTheme = (id) => ev(async (id) => { const { applyTheme } = await import('/js/ui/themes.js'); await window.opendj.setSetting('theme', id); applyTheme(window.opendj.settings); }, id);
@@ -66,10 +68,10 @@ if (argv.includes('--shots')) {
     await setTheme(theme);
     for (const [w, h] of [[1920, 1080], [1366, 768]]) {
       await page.setViewportSize({ width: w, height: h });
-      for (const n of [2, 4]) {
-        await playState(n);
+      for (const [n, layout] of [...LAYOUTS.map((l) => [2, l]), [4, 'classic']]) {
+        await playState(n, layout);
         await sleep(700);
-        const f = path.join(OUT, `${theme}-${w}-${n}deck.png`);
+        const f = path.join(OUT, `${theme}-${w}-${n}deck${n === 2 && layout !== 'classic' ? '-' + layout : ''}.png`);
         await page.screenshot({ path: f });
         console.log('[shot]', f);
       }

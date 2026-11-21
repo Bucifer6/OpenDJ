@@ -9,7 +9,8 @@ import { icon as uiIcon, iconLabel, glyphIcon } from './icons.js';
 import { platform, unavailable } from '../platform.js';
 
 // rows are taller on touch screens (phones, tablets) so a finger can pick one
-const ROW_H = globalThis.matchMedia?.('(pointer: coarse)').matches ? 40 : 26;
+const COARSE = !!globalThis.matchMedia?.('(pointer: coarse)').matches;
+let ROW_H = COARSE ? 40 : 26; // 'art' rows (Settings / library toolbar) are 44 px: see setRowMode()
 const COLS = [
   { id: '#', label: '#', w: 34, ordered: true }, // position in a playlist / set / history view (only shown there)
   { id: 'art', label: '', w: 30, sort: null },
@@ -105,6 +106,10 @@ export class LibraryUI {
     // a whole-number upper bound includes its decimals: bpm:120-128 matches 128.5 like bpm:128 does
     const upper = (v) => (v.includes('.') ? +v : +v + 0.999);
     q = q.replace(/bpm:(\d+(?:\.\d+)?)(?:-(\d+(?:\.\d+)?))?/g, (_, a, b) => { const lo = +a, hi = upper(b ?? a); tests.push((t) => t.bpm >= lo && t.bpm <= hi); return ''; });
+    // chips (ui/lib-chips.js): bpm:near = within 6 % of the master deck (or half / double time), key:compat = harmonic match
+    const m = this.app.engine.masterDeck?.(), mBpm = m?.effectiveBpm, mCam = toCamelot(m?.track?.key);
+    q = q.replace(/bpm:near/g, () => { tests.push((t) => !mBpm || (t.bpm > 0 && [1, 2, 0.5].some((f) => Math.abs(t.bpm * f / mBpm - 1) < 0.06))); return ''; });
+    q = q.replace(/key:compat/g, () => { tests.push((t) => !mCam || camelotCompatible(mCam, toCamelot(t.key))); return ''; });
     q = q.replace(/key:(\S*)/g, (_, k) => { const c = toCamelot(k); tests.push(c ? (t) => toCamelot(t.key) === c : () => false); return ''; }); // unknown key: no match
     q = q.replace(/genre:(\S+)/g, (_, g) => { tests.push((t) => (t.genre || '').toLowerCase().includes(g)); return ''; });
     q = q.replace(/tag:(\S+)/g, (_, g) => { tests.push((t) => (t.tags || []).some((x) => x.toLowerCase().includes(g))); return ''; });
@@ -114,6 +119,14 @@ export class LibraryUI {
       const hay = `${t.title} ${t.artist} ${t.album} ${t.genre} ${t.key || ''} ${toCamelot(t.key) || ''} ${t.comment || ''} ${(t.tags || []).join(' ')} ${colorName(t.color)}`.toLowerCase();
       return words.every((w) => hay.includes(w));
     });
+  }
+
+  /** Row style: 'compact' (26 px, 40 px on touch screens) or 'art' (44 px with larger artwork). */
+  setRowMode(mode) {
+    ROW_H = mode === 'art' ? 44 : COARSE ? 40 : 26;
+    this.root?.classList.toggle('rows-art', mode === 'art');
+    this.root?.style.setProperty('--row-h', `${ROW_H}px`);
+    this.renderRows(true);
   }
 
   get showOrder() { return ORDERED_VIEWS.has(this.view.kind); }

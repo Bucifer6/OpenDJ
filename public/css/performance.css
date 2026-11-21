@@ -224,3 +224,169 @@
 
 /* ---- knob value rings sit 4 px outside the cap: keep the labels clear of them ---- */
 .knob-wrap > .knob + .knob-label { margin-top: 3px; margin-bottom: 1px; line-height: 1.1; }
+
+/* =====================================================================================================
+   Second pass: calm, spacious layout. Waveforms are the hero; decks show only what matters, the rest lives
+   in switchable panels (.panel-tabs / .deck-panel). Layout modes: body.layout-classic | layout-performance |
+   layout-waveform, and .four-decks.
+   ===================================================================================================== */
+:root { --wave-h: 84px; }
+:root.h920 { --wave-h: 70px; }
+:root.h860 { --wave-h: 56px; }
+:root.h800 { --wave-h: 50px; }
+.four-decks { --wave-h: 44px; }
+.wave-row { transition: none; }
+
+/* deck colour carried through: header tint, waveform label, platter ring, strip bar, panel tab */
+.deck { background: linear-gradient(180deg, color-mix(in srgb, var(--deck-color) 7%, var(--panel-2)), var(--panel) 34%); }
+.deck-header { padding-bottom: 2px; }
+.deck-cover { width: 44px; height: 44px; border-radius: var(--radius); }
+.deck-header { grid-template-columns: 26px 44px minmax(0, 1fr) auto auto; }
+.deck-title { font-size: 16px; }
+.wave-row { position: relative; }
+.wave-label { color: var(--deck-color) !important; background: color-mix(in srgb, var(--deck-color) 10%, var(--deep)); }
+
+/* compact toggles row: KEY LOCK · QUANT · SLIP · REV · VINYL as small chips */
+.deck-toggles { gap: 3px; }
+.deck-toggles .btn.sm { padding-top: 2px; padding-bottom: 2px; font-size: 9.5px; letter-spacing: .06em; min-height: 22px; border-radius: 11px; }
+.deck-toggles .btn:not(.active) { background: transparent; box-shadow: none; color: var(--text-3); border-color: var(--line); }
+.deck-toggles .btn:not(.active):hover { color: var(--text); border-color: var(--line-2); }
+
+/* panel switcher */
+.panel-tabs { display: flex; gap: 2px; padding: 2px; background: var(--inset); border: 1px solid var(--line); border-radius: var(--radius); flex: none; }
+.panel-tab { flex: 1; min-width: 0; background: transparent; border: 0; border-radius: var(--r-sm); padding: 3px 0; font-size: var(--fs-2xs); font-weight: 750; letter-spacing: .07em; text-transform: uppercase; color: var(--text-3); cursor: pointer; transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease); white-space: nowrap; overflow: hidden; }
+.panel-tab:hover { color: var(--text); }
+.panel-tab.active { background: var(--panel-3); color: var(--text); box-shadow: inset 0 -2px 0 var(--deck-color), 0 1px 2px rgba(0,0,0,.35); }
+.panel-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.deck-panels { display: flex; flex-direction: column; gap: 5px; min-height: 0; }
+.deck-panel { display: none; flex-direction: column; gap: 5px; min-width: 0; }
+.deck-panel.shown { display: flex; animation: panel-in 120ms var(--ease); }
+@keyframes panel-in { from { opacity: 0; } }
+.deck-panel[data-panel="fx"] .fx-unit { flex-wrap: wrap; }
+.deck-panel[data-panel="key"] .key-row { padding: 4px 0; }
+html.odj-local .panel-tab[data-panel="stems"] { display: none; }
+@media (prefers-reduced-motion: reduce) { .deck-panel.shown { animation: none; } }
+
+/* bigger, calmer pads */
+.pads { gap: 5px; }
+.pad { height: 38px; }
+:root.h920 body:not(.four-decks) .pad { height: 30px; }
+
+/* empty / loading / error deck states */
+.overview-wrap { position: relative; }
+.deck.empty .overview-wrap { border-style: dashed; border-color: var(--line-2); background: color-mix(in srgb, var(--deck-color) 4%, var(--wave-bg)); }
+.deck.empty .overview-wrap::after { content: 'Drag a track here from the library — or select one and press Shift + ← / →'; position: absolute; inset: 0; display: grid; place-items: center; font-size: var(--fs-sm); color: var(--text-3); pointer-events: none; }
+.deck.empty .deck-title { color: var(--text-3); font-weight: 500; }
+.deck.empty .deck-cover { background: var(--inset) no-repeat center / 20px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236a7584' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Ccircle cx='12' cy='12' r='2'/%3E%3C/svg%3E"); box-shadow: inset 0 0 0 1px var(--line-2); }
+.deck.empty .deck-bpm { color: var(--text-3); }
+.deck.loading .overview-wrap::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--deck-color) 30%, transparent), transparent); width: 40%; animation: shimmer 1.1s linear infinite; }
+@keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+.deck.failed .deck-title { color: var(--red); }
+.deck.failed .overview-wrap { border-color: color-mix(in srgb, var(--red) 50%, var(--line)); }
+@media (prefers-reduced-motion: reduce) { .deck.loading .overview-wrap::after { animation: none; opacity: .5; } }
+
+/* mixer: compact, prominent crossfader */
+.xfader-row { padding: 6px 6px 2px; border-top: 1px solid var(--line); }
+.crossfader { --cap: 26px; }
+.crossfader .fader-track { height: 34px; }
+.crossfader .fader-slot { height: 6px; margin-top: -3px; }
+.crossfader .fader-thumb { top: 1px; bottom: 1px; }
+.xf-l { font-size: 12px; }
+
+/* ---------------- layout modes (2 decks, not on phones) ---------------- */
+@media (min-width: 700px) and (min-height: 561px) {
+  /* Performance: no platter, CUE/PLAY stacked, loops + pads always visible and larger */
+  body.layout-performance:not(.four-decks) .deck-left { justify-content: center; }
+  body.layout-performance:not(.four-decks) .jog { display: none; }
+  body.layout-performance:not(.four-decks) .transport { grid-template-columns: 1fr; }
+  body.layout-performance:not(.four-decks) .deck-body { grid-template-columns: 74px minmax(0, 1fr) 62px; }
+  body.layout-performance:not(.four-decks) .deck-panel[data-panel="loops"],
+  body.layout-performance:not(.four-decks) .deck-panel[data-panel="cues"] { display: flex; }
+  body.layout-performance:not(.four-decks) .deck-panel[data-panel="loops"] { order: -1; }
+  body.layout-performance:not(.four-decks) .panel-tab[data-panel="cues"],
+  body.layout-performance:not(.four-decks) .panel-tab[data-panel="loops"] { display: none; }
+  body.layout-performance:not(.four-decks) .pad { height: 52px; }
+  :root.h920 body.layout-performance:not(.four-decks) .pads { grid-template-columns: repeat(4, 1fr); }
+  :root.h920 body.layout-performance:not(.four-decks) .pad { height: 40px; }
+  :root.h800 body.layout-performance:not(.four-decks) .pad { height: 32px; }
+  body.layout-performance:not(.four-decks) .pad-label { font-size: 11px; }
+  body.layout-performance:not(.four-decks) .btn.big { height: 56px; max-width: 56px; }
+
+  /* Waveform focus: tall waveforms, compact decks (no platter, pads in one row) */
+  body.layout-waveform:not(.four-decks) { --wave-h: 150px; }
+  :root.h920 body.layout-waveform:not(.four-decks) { --wave-h: 118px; }
+  :root.h800 body.layout-waveform:not(.four-decks) { --wave-h: 92px; }
+  body.layout-waveform:not(.four-decks) .jog { display: none; }
+  body.layout-waveform:not(.four-decks) .deck-left { justify-content: center; }
+  body.layout-waveform:not(.four-decks) .transport { grid-template-columns: 1fr; }
+  body.layout-waveform:not(.four-decks) .deck-body { grid-template-columns: 70px minmax(0, 1fr) 54px; }
+  body.layout-waveform:not(.four-decks) .pads { grid-template-columns: repeat(8, 1fr); }
+  body.layout-waveform:not(.four-decks) .pad { height: 30px; }
+  body.layout-waveform:not(.four-decks) .phase-meter { display: none; }
+  body.layout-waveform:not(.four-decks) .overview-wrap { height: 26px; }
+}
+
+/* 4 decks: the panel switcher is compact */
+.four-decks .panel-tab { padding: 1px 0; font-size: 8px; }
+.four-decks .deck-toggles { display: none; }
+
+/* touch: 44 px targets for the new controls */
+@media (max-width: 699px), (max-height: 560px) {
+  .panel-tab { min-height: 44px; font-size: 11px; }
+  .deck-toggles .btn.sm { min-height: 44px; font-size: 11px; border-radius: var(--radius); }
+}
+
+/* ---------------- library: chips, suggestions, artwork rows, collapse ---------------- */
+.lib-tools { gap: 8px; padding: 8px 10px; }
+.lib-search { min-height: 30px; font-size: 12.5px; }
+.lib-chips { display: flex; align-items: center; gap: 6px; padding: 0 10px 6px; min-height: 52px; flex-wrap: nowrap; overflow: hidden; background: var(--panel); border-bottom: 1px solid var(--line); }
+.chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; border-radius: 12px; border: 1px solid var(--line-2); background: transparent; color: var(--text-2); font-size: var(--fs-sm); font-weight: 600; cursor: pointer; white-space: nowrap; flex: none; transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+.chip .ico { width: 13px; height: 13px; }
+.chip:hover { color: var(--text); border-color: color-mix(in srgb, var(--line-2) 60%, var(--text) 25%); }
+.chip.on { background: color-mix(in srgb, var(--accent) 18%, transparent); border-color: color-mix(in srgb, var(--accent) 70%, transparent); color: var(--text); }
+.chip.on .ico { color: var(--accent); }
+.chip-sel { padding: 0 8px; appearance: auto; background: var(--panel); }
+.chip-spacer { flex: 1; }
+.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lib-suggest { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; margin-left: 6px; padding-left: 10px; border-left: 1px solid var(--line); overflow: hidden; }
+.sg-title { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; max-width: 220px; font-size: var(--fs-sm); color: var(--text-3); white-space: nowrap; overflow: hidden; }
+.sg-title b { color: var(--text-2); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.sg-title .ico { color: var(--accent); width: 14px; height: 14px; flex: none; }
+.sg-cards { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; padding: 2px 0; }
+.sg-card { display: grid; grid-template-columns: 36px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 8px; align-items: center; flex: 0 0 200px; height: 44px; padding: 4px 8px 4px 4px; border-radius: var(--radius); border: 1px solid var(--line); background: linear-gradient(180deg, var(--panel-2), color-mix(in srgb, var(--panel-2) 60%, var(--panel))); color: var(--text); cursor: pointer; text-align: left; transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease), transform var(--dur) var(--ease); }
+.sg-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.sg-card:active { transform: none; }
+.sg-art { grid-row: 1 / 3; width: 36px; height: 36px; border-radius: var(--r-sm); background: var(--panel-3) center / cover; box-shadow: 0 0 0 1px rgba(255,255,255,.05); }
+.sg-text { display: flex; flex-direction: column; min-width: 0; }
+.sg-t { font-weight: 600; font-size: var(--fs-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sg-a { font-size: var(--fs-xs); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sg-meta { display: flex; gap: 8px; font: 600 10px var(--mono); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.sg-key.match::after { content: ' ✓'; color: var(--green); }
+.sg-empty { color: var(--text-3); font-size: var(--fs-sm); padding: 0 4px; white-space: nowrap; }
+.library.rows-art .lr { height: 44px; }
+.library.rows-art .lr .art { width: 30px; height: 30px; margin: 7px 0; }
+.library.rows-art .lr .c-title { font-size: 13px; }
+.lib-collapse-btn { margin-left: auto; flex: none; }
+:root.lib-collapsed { --browser-h: 46px !important; }
+:root.lib-collapsed .lib-chips, :root.lib-collapsed .lib-suggest, :root.lib-collapsed .lib-header, :root.lib-collapsed .lib-scroll, :root.lib-collapsed .lib-tree { visibility: hidden; }
+:root.lib-anim #app { transition: grid-template-rows 180ms var(--ease); }
+@media (prefers-reduced-motion: reduce) { :root.lib-anim #app { transition: none; } }
+@media (max-width: 699px), (max-height: 560px) {
+  .chip { min-height: 40px; font-size: 12px; }
+  .sg-card { min-height: 52px; }
+  :root.lib-collapsed .library { height: auto; }
+}
+
+/* deck: the cues panel fills the free height with bigger pads (capped so they stay pad-shaped); not on phones */
+@media (min-width: 700px) and (min-height: 561px) {
+  .deck-mid > .deck-panels { flex: 1 1 auto; }
+  body:not(.four-decks) .deck-panel[data-panel="cues"].shown { flex: 1 1 auto; min-height: 0; }
+  body:not(.four-decks) .deck-panel[data-panel="cues"] .pads { flex: 1 1 auto; grid-auto-rows: minmax(30px, 1fr); max-height: 132px; }
+  body:not(.four-decks) .deck-panel[data-panel="cues"] .pad { height: auto; min-height: 30px; }
+  :root.h920 body:not(.four-decks) .deck-panel[data-panel="cues"] .pads { grid-auto-rows: minmax(24px, 1fr); max-height: 64px; }
+  :root.h920 body:not(.four-decks) .deck-panel[data-panel="cues"] .pad { min-height: 24px; }
+}
+/* waveform focus on laptop screens: keep room for the mixer */
+@media (min-width: 700px) and (min-height: 561px) {
+  :root.h800 body.layout-waveform:not(.four-decks) { --wave-h: 74px; --browser-h: clamp(140px, calc(24vh / var(--ui-zoom, 1)), 260px); }
+}

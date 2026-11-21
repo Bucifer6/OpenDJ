@@ -11,6 +11,7 @@ import { MidiManager } from './midi/midi.js';
 import { Sequencer } from './audio/sequencer.js';
 import { applyTheme } from './ui/themes.js';
 import { icon, iconLabel } from './ui/icons.js';
+import { setupLibraryExtras } from './ui/library-extras.js';
 import { Lighting } from './lighting/lighting.js';
 import { setupVideo } from './video/video-ui.js';
 import { setupUpload } from './ui/upload.js';
@@ -62,10 +63,12 @@ class App {
     this.lighting = new Lighting(this);
     if (!unavailable('lighting')) { try { await this.lighting.init(); } catch (e) { console.warn('lighting init failed', e); } }
     await this.library.refresh();
+    this.libraryExtras = setupLibraryExtras(this);
     this.analyser.autoQueue(); // tracks added earlier (or by another device) that were never analysed
     api.capabilities().then((c) => { this.hosted = !!c.hosted; this.auth = !!c.auth; this.library.renderEmpty(); this.updateHostedUi?.(); }).catch(() => {});
     this.library.refreshDrives();
     setInterval(() => this.library.refreshDrives(), 15000); // notice USB sticks being plugged in
+    this.setLayout(this.settings.layoutMode || 'classic', false, true);
     this.setDeckCount(this.deckCount, false);
     if (!unavailable('dvs')) this.dvs.init().catch((e) => console.warn('DVS init failed', e));
     this.engine.setMasterVolume(0.8); this.engine.setHeadphoneVolume(0.8);
@@ -125,7 +128,12 @@ class App {
     this.amInfo = el('span', { class: 'am-info' });
     this.midiDot = el('span', { class: 'midi-dot', title: 'MIDI activity' }, 'MIDI');
     this.cpu = el('span', { class: 'cpu' });
-    const deckSel = el('div', { class: 'seg' }, ...[2, 4].map((n) => el('button', { class: 'seg-btn', 'data-n': n, onclick: () => this.setDeckCount(n) }, `${n} DECK`)));
+    // layout modes: three 2-deck views + 4 decks (deckCount). data-n stays on each button for the deck count it shows.
+    const LAYOUTS = [['classic', 'Classic', 'Two decks and the mixer'], ['performance', 'Perform', 'Performance: pads and loops up front'], ['waveform', 'Waves', 'Waveform focus: big waveforms, compact decks'], ['four', '4 Decks', 'Four decks']];
+    const deckSel = el('div', { class: 'seg layout-seg', role: 'radiogroup', 'aria-label': 'Layout' }, ...LAYOUTS.map(([id, label, title]) => el('button', {
+      class: 'seg-btn', role: 'radio', 'data-layout': id, 'data-n': id === 'four' ? 4 : 2, title,
+      onclick: () => (id === 'four' ? this.setDeckCount(4) : this.setLayout(id)),
+    }, label)));
     this.deckSel = deckSel;
     const shiftBtn = el('button', { class: 'btn sm shift-btn', title: 'Shift (or hold the Shift key)' }, 'SHIFT');
     shiftBtn.addEventListener('pointerdown', () => { this.shift = true; shiftBtn.classList.add('active'); });
@@ -276,9 +284,23 @@ class App {
     this.deckEls.forEach((d, i) => { d.style.display = i < n ? '' : 'none'; });
     this.waves.forEach((w, i) => { w.style.display = i < n ? '' : 'none'; });
     this.mixer.setDeckCount(n);
-    for (const b of this.deckSel.children) b.classList.toggle('active', Number(b.dataset.n) === n);
+    this.renderLayoutSel();
     this.showDeckTab(this.mobileDeck || 0);
     if (save) this.setSetting('deckCount', n);
+  }
+
+  /** 2-deck view: classic | performance | waveform (body.layout-*). Switching to it from 4 decks goes back to 2. */
+  async setLayout(mode, save = true, keepDecks = false) {
+    mode = ['classic', 'performance', 'waveform'].includes(mode) ? mode : 'classic';
+    if (this.deckCount === 4 && !keepDecks) { await this.setDeckCount(2, save); if (this.deckCount === 4) return; }
+    this.layoutMode = mode;
+    for (const m of ['classic', 'performance', 'waveform']) document.body.classList.toggle(`layout-${m}`, m === mode);
+    this.renderLayoutSel();
+    if (save && this.settings.layoutMode !== mode) this.setSetting('layoutMode', mode);
+  }
+  renderLayoutSel() {
+    const cur = this.deckCount === 4 ? 'four' : (this.layoutMode || 'classic');
+    for (const b of this.deckSel.children) { const on = b.dataset.layout === cur; b.classList.toggle('active', on); b.setAttribute('aria-checked', String(on)); }
   }
 
   // ---------------- automix / record ----------------
