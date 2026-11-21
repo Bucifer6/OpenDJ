@@ -92,7 +92,7 @@ test('server: OPENDJ_UPDATE_URL is only honoured for loopback URLs (tests); prod
 
 // ---------------------------------------------------------------- release notes
 test('release notes: only the "New in" sections newer than the running version, not the download table', () => {
-  const body = NOTES.replace(/### New in 0\.4\.1\n[\s\S]*?(?=### New in 0\.4\n)/, '').replace('### New in 0.4', '### New in 0.5\n**Big**\n- one\n\n#### Detail\n- two\n\n### New in 0.4.1\n- fix\n\n### New in 0.4');
+  const body = NOTES.replace(/### New in 0\.4\.2\n[\s\S]*?(?=### New in 0\.4\n)/, '').replace('### New in 0.4', '### New in 0.5\n**Big**\n- one\n\n#### Detail\n- two\n\n### New in 0.4.1\n- fix\n\n### New in 0.4');
   const secs = notesSections(body);
   assert.deepEqual(secs.map((s) => s.version), ['0.5', '0.4.1', '0.4', '0.3', '0.2']);
   assert.ok(!secs.some((s) => /Windows 10\/11|SHA256SUMS/.test(s.markdown)), 'the download table is not a section');
@@ -271,7 +271,7 @@ test('checker: headers, ETag revalidation, caching, rate-limit back-off, offline
   assert.equal(calls[0].init.redirect, 'error');
   assert.equal(calls[0].init.credentials, 'omit');
   assert.deepEqual(Object.keys(calls[0].init.headers).sort(), ['Accept', 'User-Agent', 'X-GitHub-Api-Version'], 'nothing about the user');
-  assert.deepEqual(r1.latest.notes.map((section) => section.version), ['0.4.1'], 'show the release notes newer than 0.4.0');
+  assert.deepEqual(r1.latest.notes.map((section) => section.version), ['0.4.2', '0.4.1'], 'show the release notes newer than 0.4.0');
   await c.check(); assert.equal(calls.length, 1, 'cached');
   t += 16 * 60e3;
   reply = () => res(304, null, { ETag: '"e1"' });

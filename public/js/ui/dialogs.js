@@ -275,8 +275,34 @@ export class Dialogs {
       el('label', { class: 'check' }, smartStart, ' Start at the best analysed phrase'),
       el('label', { class: 'check' }, vary, ' Vary transition styles'),
       el('label', { class: 'check' }, keySync, ' Fix key clashes with Key Sync'));
+    const native = window.opendjNative;
+    const model = el('input', { class: 'inp', placeholder: 'Installed Ollama model', value: localStorage.getItem('dj-model') || '' });
+    const voice = el('select', { class: 'sel' }, ...[['off','Off'],['en','English'],['ro','Romanian']].map(([value,label]) => el('option',{value},label)));
+    if (native?.planSet) {
+      modeSel.append(el('option',{value:'local'},'Local AI (Ollama)'));
+      const settings = el('div',{class:'form'}, el('label',{class:'field'},'Model',model), el('label',{class:'field'},'Spoken introduction',voice));
+      settings.hidden = true;
+      modeSel.addEventListener('change', () => { settings.hidden = modeSel.value !== 'local'; });
+      profile.addEventListener('change', () => { settings.hidden = modeSel.value !== 'local'; });
+      body.append(settings);
+    }
     const r = await this.modal('Automix', body, [{ label: 'Cancel', value: null }, { label: 'Start automix', primary: true, value: true }]);
     if (!r) return;
+    if (modeSel.value === 'local') {
+      const candidates = tracks.slice(0,60);
+      try {
+        localStorage.setItem('dj-model',model.value.trim());
+        this.app.toast('Planning your set with Ollama…');
+        const plan = await native.planSet({model:model.value.trim(),language:voice.value,tracks:candidates.map(({title,artist,bpm,key,energy})=>({title,artist,bpm,key,energy}))});
+        tracks = [...plan.order.map(i=>candidates[i]), ...tracks.slice(60)];
+        modeSel.value = 'order';
+        if (voice.value !== 'off' && window.speechSynthesis && plan.intro) {
+          const line = new SpeechSynthesisUtterance(plan.intro);
+          line.lang = voice.value === 'ro' ? 'ro-RO' : 'en-GB';
+          window.speechSynthesis.speak(line);
+        }
+      } catch (error) { this.app.toast('Local DJ: ' + error.message); return; }
+    }
     const sm = smartBox.value();
     await this.app.setSetting('automix', { ...o, style: style.value, transitionBeats: Number(bars.value) * 4, keySync: keySync.checked,
       varyStyles: vary.checked, shape: shape.value, preset: sm.preset, sliders: sm.sliders,

@@ -23,6 +23,11 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.4.2
+- MIX NOW on the active deck and wider crossfader travel.
+- 111 downloadable samples and a bundled recorded air horn.
+- Desktop Ollama set planning with optional English or Romanian spoken introduction.
+
 ### New in 0.4.1
 
 - Smoother controls and waveforms under background load, including deferred waveform rendering and background library filtering.
