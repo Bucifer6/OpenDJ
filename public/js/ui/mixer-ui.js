@@ -62,6 +62,7 @@ export function buildMixer(app) {
     { id: 'custom', label: 'Custom', values: null },
   ];
   const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
+  let mcBtn = null;
   const stripsWrap = el('div', { class: 'mixer-strips' });
 
   for (const i of order) {
@@ -104,7 +105,8 @@ export function buildMixer(app) {
     el('div', { class: 'mic-box' },
       R(button('MIC', { cls: 'xs mic-on', click: () => app.toggleMic(), active: () => eng.micOn, title: 'Microphone / aux input on/off' })),
       R(knob({ label: 'MIC', min: 0, max: 1, def: 0.7, bipolar: false, get: () => eng.micVolume ?? 0.7, set: (v) => eng.setMicVolume(v), size: 'sm' })),
-      R(button('TALK', { cls: 'xs talk', click: () => eng.setTalkover(!eng.talkover), active: () => eng.talkover, title: 'Talkover: duck the music while you speak' }))),
+      R(button('TALK', { cls: 'xs talk', click: () => eng.setTalkover(!eng.talkover), active: () => eng.talkover, title: 'Talkover: duck the music while you speak' })),
+      (mcBtn = R(button('MC', { cls: 'xs mc-btn', click: () => app.dedications?.open(), active: () => !!app.dedications?.current, title: 'Dedication: a short message spoken over the mix at the next phrase (English or Romanian), with the music ducked' })))),
   );
   const xfader = R(fader({ min: -1, max: 1, def: 0, get: () => eng.crossfader, set: (v) => eng.setCrossfader(v), horizontal: true, cls: 'crossfader', title: 'Crossfader' }));
   let applyingEqPreset = false;
@@ -143,6 +145,7 @@ export function buildMixer(app) {
   const EQ_KEYS = new Set(['eqLow', 'eqMid', 'eqHigh']);
   eng.on('mixer', (i, key) => { for (const r of byCh[i] || renderers) r.render(); if (!applyingEqPreset && EQ_KEYS.has(key)) eqPreset.value = eqPresetFor(); });
   eng.on('master', () => { for (const r of renderers) r.render(); });
+  app.dedications?.on('change', () => { mcBtn?.render?.(); mcBtn?.setAttribute('data-count', String(app.dedications.pending() || '')); });
   eng.on('mic', () => { for (const r of renderers) r.render(); });
   // compact strips when the layout leaves the mixer little height (.mx-short / .mx-400 / .mx-tiny in performance.css);
   // phones stack the mixer at its natural height, so only desktop / tablet grids use this

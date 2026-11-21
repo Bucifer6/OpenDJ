@@ -30,6 +30,7 @@ import { registerLightingRoutes } from './lighting/routes.js';
 import { registerLinkRoutes } from './link/index.js';
 import { registerLyricsRoutes } from './lyrics.js';
 import { registerRecordingRoutes } from './recorder.js';
+import { registerTtsRoutes } from './tts.js';
 import { registerBroadcastRoutes } from './broadcast.js';
 import { registerCdjRoutes } from './cdj/routes.js';
 import { findIdenticalTrack } from './upload-dedupe.js';
@@ -213,7 +214,7 @@ async function proxy(req, res, { url, headers = {}, name }, { connectTimeout = 1
  * @param {string} [o.launchToken]  Electron only: every request must carry this token in the LAUNCH_COOKIE cookie, so
  *   other local users / processes cannot use the password-less desktop server. Not set by `npm run web` / tests.
  */
-export function createServer({ dataDir = defaultDataDir(), log = console, auth: authOpt, ffmpeg: ffmpegOpt, allowedHosts, roots: rootsOpt, password, trustProxy, launchToken } = {}) {
+export function createServer({ dataDir = defaultDataDir(), log = console, auth: authOpt, ffmpeg: ffmpegOpt, allowedHosts, roots: rootsOpt, password, trustProxy, launchToken, tts } = {}) {
   const library = new Library(dataDir);
   const sse = new Set();
   const emit = (type, payload) => {
@@ -805,6 +806,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   registerLyricsRoutes({ route, library, emit, dataDir, canRead: readable, canWrite: readable });
   const recording = registerRecordingRoutes({ route, library, emit, pathAllowed, allowedRoots });
   const broadcast = registerBroadcastRoutes({ route, library, emit, pathAllowed: readable, log });
+  registerTtsRoutes({ route, httpError: (status, msg) => new HttpError(status, msg), detect: tts });
   registerCdjRoutes({ route, library, emit, allowPath, readable });
   const updates = registerUpdateRoutes({ route, library, version: VERSION, hosted: restricted });
 

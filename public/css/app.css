@@ -458,3 +458,16 @@ kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-bottom
 .sample-catalog-credit { color: var(--text-2); font-size: var(--fs-xs); }
 @media (max-width: 520px) { .sample-catalog-filters { grid-template-columns: 1fr; } .sample-catalog-list { grid-template-columns: 1fr; } }
 
+/* Live dedications: the MC button's queue count and the on-screen banner while one plays */
+.mc-btn[data-count]:not([data-count=""])::after { content: attr(data-count); margin-left: 3px; font-size: 9px; color: var(--accent); }
+.dedication-banner { position: fixed; left: 50%; bottom: 18%; transform: translateX(-50%); z-index: 60; max-width: min(760px, 86vw); display: flex; gap: 12px; align-items: baseline; padding: 12px 20px; border-radius: 12px; background: color-mix(in srgb, var(--panel) 92%, transparent); border: 1px solid var(--accent); box-shadow: 0 10px 34px rgba(0,0,0,.55); pointer-events: none; animation: ded-in .35s ease-out; }
+.dedication-tag { font: 800 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); white-space: nowrap; }
+.dedication-text { font-size: 18px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+@keyframes ded-in { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) { .dedication-banner { animation: none; } }
+.dedication-input { width: 100%; resize: vertical; min-height: 64px; }
+.dedication-list { margin: 0; padding-left: 18px; max-height: 160px; overflow: auto; }
+.dedication-list li { padding: 3px 0; }
+.dedication-list .ded-playing .ded-text { color: var(--accent); font-weight: 600; }
+.dedication-voice { margin: 4px 0; }
+

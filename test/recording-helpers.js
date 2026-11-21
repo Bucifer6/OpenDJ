@@ -47,14 +47,14 @@ export const fakeLibrary = (dataDir, ff = null) => ({
  * Mock Icecast 2 server on one port: source logins (PUT with 100-continue, or SOURCE), /admin/metadata and
  * /status-json.xsl. opts: { password, put: false (answer 405 to PUT, like Icecast < 2.4) }.
  */
-export function mockIcecast({ password = 'hackme', user = 'source', put = true } = {}) {
+export function mockIcecast({ password = 'hackme', user = 'source', put = true, keepAll = false } = {}) {
   const st = { sources: [], metadata: [], bytes: 0, chunks: [], sockets: new Set(), heads: [] };
   const auth = 'Basic ' + Buffer.from(`${user}:${password}`).toString('base64');
   const server = net.createServer((sock) => {
     st.sockets.add(sock); sock.on('close', () => st.sockets.delete(sock)); sock.on('error', () => {});
     let buf = Buffer.alloc(0), streaming = null;
     sock.on('data', (d) => {
-      if (streaming) { streaming.bytes += d.length; st.bytes += d.length; if (st.chunks.length < 64) st.chunks.push(d); return; }
+      if (streaming) { streaming.bytes += d.length; st.bytes += d.length; if (keepAll || st.chunks.length < 64) st.chunks.push(d); return; }
       buf = Buffer.concat([buf, d]);
       const i = buf.indexOf('\r\n\r\n');
       if (i < 0) return;
@@ -68,7 +68,7 @@ export function mockIcecast({ password = 'hackme', user = 'source', put = true }
         streaming = { method, mount: target, headers: hdr, bytes: 0 };
         st.sources.push(streaming);
         sock.write(method === 'PUT' && /100-continue/i.test(hdr.expect || '') ? 'HTTP/1.1 100 Continue\r\n\r\n' : 'HTTP/1.0 200 OK\r\n\r\n');
-        if (rest.length) { streaming.bytes += rest.length; st.bytes += rest.length; }
+        if (rest.length) { streaming.bytes += rest.length; st.bytes += rest.length; if (keepAll) st.chunks.push(rest); }
         return;
       }
       const u = new URL(target, 'http://x');

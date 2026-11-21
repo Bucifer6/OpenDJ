@@ -191,7 +191,7 @@ try {
 
   // ---------- 2. click sweep per layout ----------
   await page.setViewportSize({ width: 1920, height: 1080 });
-  const SKIP = /eject|stems-prep|rec\b|live-btn|dvs-btn|video-btn|light-btn|signout|fullscreen|automix-btn|lib-collapse|upl-btn|import-btn/;
+  const SKIP = /eject|stems-prep|mc-btn|rec\b|live-btn|dvs-btn|video-btn|light-btn|signout|fullscreen|automix-btn|lib-collapse|upl-btn|import-btn/;
   for (const layout of layouts) {
     await setUi({ layout, theme: 'midnight', zoom: 100 });
     await page.waitForTimeout(200);

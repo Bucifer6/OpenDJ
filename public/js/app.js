@@ -2,6 +2,8 @@ import { el, fmtTime } from './util.js';
 import { api } from './api.js';
 import { Engine } from './audio/engine.js';
 import { SAMPLE_CATALOG } from './audio/sample-catalog.js';
+import { VoiceBus } from './audio/voice.js';
+import { Dedications } from './dedications.js';
 import { buildDeck, DECK_COLORS } from './ui/deck-ui.js';
 import { buildMixer } from './ui/mixer-ui.js';
 import { DetailWaveform } from './ui/waveform.js';
@@ -52,6 +54,8 @@ class App {
     // (not in the mobile app: its files are inside the app already)
     if ('serviceWorker' in navigator && !/Electron/.test(navigator.userAgent) && !platform.native) navigator.serviceWorker.register('/sw.js').catch(() => {});
     this.automix = new AutoMix(this);
+    this.voice = new VoiceBus(this.engine); // MC voice: spoken intros and dedications through the master bus
+    this.dedications = new Dedications(this);
     this.midi = new MidiManager(this);
     this.sequencer = new Sequencer(this.engine);
     this.buildLayout();
@@ -417,6 +421,13 @@ class App {
     if (dialog) { this.dialogs.automixQueue(this.automixSource().tracks); return; }
     return this.automixStart();
   }
+
+  /** MC announcement (e.g. the Local AI intro): spoken over the mix at the next phrase, music ducked. */
+  announce(text, { lang = 'en', overlay = false } = {}) {
+    try { return this.dedications.add(text, { lang, overlay, meta: false, from: 'announce' }); } catch (e) { this.toast(e.message); return null; }
+  }
+  /** Queue a live dedication (UI, MCP). */
+  queueDedication(text, opts = {}) { return this.dedications.add(text, opts); }
 
   /** Deck MIX NOW: start the queued transition now (waits for the next deck's preload if needed). */
   mixNow() {
