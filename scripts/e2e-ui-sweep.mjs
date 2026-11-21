@@ -115,7 +115,7 @@ const fit = (panels) => ev(async (panels) => {
       const edges = [R.left + pad, ...cols.flatMap((c) => [c.left, c.right]), R.right - pad];
       const maxGap = Math.max(16 * zr, 0.03 * W);
       for (let i = 0; i < edges.length; i += 2) if (edges[i + 1] - edges[i] > maxGap + 0.5) out.push(`mixer: ${Math.round(edges[i + 1] - edges[i])} px empty band between columns ${i / 2} and ${i / 2 + 1}`);
-      const side = [...mx.querySelectorAll('.mixer-top > .mixer-master)].filter(vis).reduce((a, e) => a + e.getBoundingClientRect().width, 0);
+      const side = [...mx.querySelectorAll('.mixer-top > .mixer-master')].filter(vis).reduce((a, e) => a + e.getBoundingClientRect().width, 0);
       const sum = [...mx.querySelectorAll('.mixer-strips > .strip')].filter(vis).reduce((a, e) => a + e.getBoundingClientRect().width, 0), avail = W - 2 * pad - side;
       if (sum < 0.9 * avail) out.push(`mixer strips fill ${Math.round(sum)} of ${Math.round(avail)} px`);
     }
