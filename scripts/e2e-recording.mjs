@@ -179,7 +179,11 @@ try {
     const speech = band(1200, 3500), tone = band(150, 300);
     const base = [...speech].sort((a, b) => a - b)[Math.floor(speech.length * 0.2)];
     const voiced = speech.map((v) => v > base * 4);
-    const vIdx = voiced.map((v, i) => (v ? i : -1)).filter((i) => i >= 0);
+    // the dedication = the longest run of voiced windows (gaps between words up to 0.5 s); a stray window such as the
+    // encoder's start-up transient is ignored
+    const runs = [];
+    voiced.forEach((v, i) => { if (!v) return; const r = runs.at(-1); if (r && i - r.at(-1) <= 5) r.push(i); else runs.push([i]); });
+    const vIdx = runs.reduce((a, b) => (b.length > a.length ? b : a), []);
     const first = vIdx[0], last = vIdx.at(-1);
     const db = (v) => 20 * Math.log10(Math.max(v, 1e-9));
     const avg = (arr) => arr.reduce((a, b) => a + b, 0) / Math.max(1, arr.length);
