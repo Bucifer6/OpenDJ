@@ -149,3 +149,17 @@ test('EQ knob: unity at 12 o\'clock, +6 dB at max, full kill at min, monotonic',
   assert.equal(eqKnobGain(-1), 0);
   let prev = -1; for (let v = -1; v <= 1.0001; v += 0.01) { const g = eqKnobGain(v); assert.ok(g >= prev); prev = g; }
 });
+
+test('deck: key lock on, nudge / bend / tempo to and from 0 % / key shift switch modes without a click (QA M1)', () => {
+  const tone = Float32Array.from({ length: SR * 8 }, (_, i) => 0.28 * Math.sin(2 * Math.PI * 220 * i / SR));
+  const { p, msg } = deck(tone);
+  msg({ type: 'keylock', value: true }); msg({ type: 'rate', value: 1 }); msg({ type: 'play', value: true });
+  const parts = [run(p, 6016)];
+  // each change switches between direct resampling (rate 1, key unchanged) and the key-lock grains
+  for (const r of [1.04, 1, 0.96, 1, 1.08, 1, 1.002, 1]) { msg({ type: 'rate', value: r }); parts.push(run(p, 7040)); }
+  msg({ type: 'pitch', value: Math.pow(2, 1 / 12) }); parts.push(run(p, 7040));
+  msg({ type: 'pitch', value: 1 }); parts.push(run(p, 7040));
+  const all = new Float32Array(parts.reduce((a, b) => a + b.length, 0)); let o = 0; for (const x of parts) { all.set(x, o); o += x.length; }
+  const clean = 2 * Math.PI * 220 * 0.28 / SR;
+  assert.ok(maxStep(all) <= clean * 1.3, `largest step ${maxStep(all).toFixed(4)} (clean sine ${clean.toFixed(4)}; a click was 0.2–0.46)`);
+});
