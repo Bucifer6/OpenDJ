@@ -33,6 +33,7 @@ export const DEFAULT_SETTINGS = {
   talkoverDb: -12,
   midiClockOutput: '',
   colorFx: 'filter',
+  mixer: {},                  // mixer v2 config (audio/mixer-config.js fills defaults; crossfaderCurve migrates into it)
   fxPostFader: true,          // beat FX tails ring out after the channel fader / crossfader closes (false = pre-fader FX)
   autoCues: true,
   autoAnalyse: true,          // analyse new tracks (BPM, key, waveform, cues) in the background, in the browser

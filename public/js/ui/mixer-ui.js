@@ -6,6 +6,9 @@ import { COLOR_FX } from '../audio/effects.js';
 import { EQ_PRESETS as EQ_MODEL_LIST } from '../audio/eq.js';
 import { updateMixer } from './mixer-state.js';
 import { buildClubSections } from './mixer-club.js';
+import { buildDrawer, setPersonality } from './mixer-advanced.js';
+import { centerLock } from '../audio/curves.js';
+import { suggestPersonality, PERSONALITIES } from '../audio/personalities.js';
 
 /**
  * Segmented LED meter. Meter ballistics like hardware: instant attack, ~24 dB/s release, a peak-hold segment that
@@ -21,7 +24,7 @@ function vuMeter() {
   const ro = new ResizeObserver((es) => { const r = es.at(-1).contentRect, z = uiZoom(); box = { width: r.width * z, height: r.height * z }; dirty = true; });
   ro.observe(c);
   window.addEventListener('opendj-theme', () => { sig = ''; });
-  c.draw = (peak, now = performance.now()) => {
+  c.draw = (peak, now = performance.now(), rms) => { // rms given: the bar shows RMS, the hold dot follows the peak
     if (dirty) {
       dirty = false;
       const r = box || c.getBoundingClientRect(), dpr = devicePixelRatio || 1;
@@ -29,10 +32,10 @@ function vuMeter() {
       if (c.width !== W || c.height !== H) { c.width = W; c.height = H; sig = ''; }
     }
     const dt = Math.min(0.1, lastT ? (now - lastT) / 1000 : 0); lastT = now;
-    const db = 20 * Math.log10(peak + 1e-9);
-    const k = Math.max(0, Math.min(1, (db + 48) / 51)); // -48..+3 dB
+    const toK = (x) => Math.max(0, Math.min(1, (20 * Math.log10(x + 1e-9) + 48) / 51)); // -48..+3 dB
+    const k = toK(rms ?? peak), kp = rms == null ? k : toK(peak);
     level = k >= level ? k : Math.max(k, level - dt * 24 / 51);
-    if (level >= held) { held = level; heldT = now; } else if (now - heldT > 1000) held = Math.max(level, held - dt * 0.6);
+    if (kp >= held) { held = kp; heldT = now; } else if (now - heldT > 1000) held = Math.max(kp, held - dt * 0.6);
     const lit = Math.round(level * SEGS), pk = Math.min(SEGS - 1, Math.floor(held * SEGS - 1e-6));
     const s = `${lit}|${pk}|${c.width}x${c.height}`;
     if (s === sig) return;
@@ -67,6 +70,8 @@ export function buildMixer(app) {
   { id: 'custom', label: 'Tone: custom', values: null },
 ];
 const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
+  /** Strip / master variant element: shown by the root classes set from the mixer config (applyVariants). */
+  const v = (cls, e) => { e.classList.add('mxv', cls); return e; };
   const stripsWrap = el('div', { class: 'mixer-strips' });
 
   for (const i of order) {
@@ -74,6 +79,10 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     const ch = eng.channels[i];
     const S = (k) => ({ get: () => ch.state[k], set: (v) => ch.set(k, v) });
     const vu = vuMeter();
+    // Center Lock (M4): a drag from one side stops at 12 o'clock; the next drag can cross
+    const lock = centerLock({ mode: 'drag' });
+    const filterKnob = R(knob({ label: 'FILTER', get: () => ch.state.filter, set: (x) => ch.controlSet('filter', x, lock), def: 0, size: 'md', title: 'Filter / Color FX amount. Left: low-pass, right: high-pass' }));
+    filterKnob.addEventListener('pointerdown', () => lock.reset(), true);
     const xf = el('div', { class: 'xf-assign' }, ...['A', 'THRU', 'B'].map((a) => {
       const b = button(a === 'THRU' ? 'T' : a, { cls: 'xs', click: () => ch.set('xfAssign', a), active: () => ch.state.xfAssign === a, title: `Crossfader assign: ${a}` });
       return R(b);
@@ -82,14 +91,20 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
       el('div', { class: 'strip-num' }, String(i + 1)),
       R(knob({ label: 'TRIM', ...S('trim'), def: 0, size: 'sm', format: (v) => `${v >= 0 ? '+' : ''}${(v * 12).toFixed(1)}dB` })),
       R(knob({ label: 'HI', ...S('eqHigh'), def: 0, size: 'sm', title: 'High EQ (fully left = kill)' })),
-      R(knob({ label: 'MID', ...S('eqMid'), def: 0, size: 'sm' })),
+      v('v-mid', R(knob({ label: 'MID', ...S('eqMid'), def: 0, size: 'sm' }))),
+      v('v-eq4', R(knob({ label: 'MID-HI', ...S('eqMidHigh'), def: 0, size: 'sm', title: '4-band EQ: mid-high' }))),
+      v('v-eq4', R(knob({ label: 'MID-LO', ...S('eqMidLow'), def: 0, size: 'sm', title: '4-band EQ: mid-low' }))),
+      v('v-sculpt', R(knob({ label: 'FREQ', min: 0, max: 1, def: 0.5, bipolar: false, ...S('eqFreq'), size: 'sm', title: 'Sculpt EQ frequency (70 Hz - 7 kHz)', format: (x) => { const f = 70 * Math.pow(100, x); return f >= 1000 ? `${(f / 1000).toFixed(1)}k` : `${Math.round(f)}`; } }))),
       R(knob({ label: 'LOW', ...S('eqLow'), def: 0, size: 'sm' })),
-      R(knob({ label: 'FILTER', ...S('filter'), def: 0, size: 'md', title: 'Filter / Color FX amount. Left: low-pass, right: high-pass' })),
+      v('v-filter', filterKnob),
+      v('v-dual', R(knob({ label: 'HP', min: 0, max: 1, def: 0, bipolar: false, ...S('filterHp'), size: 'sm', title: 'High-pass (cut only)' }))),
+      v('v-dual', R(knob({ label: 'LP', min: 0, max: 1, def: 0, bipolar: false, ...S('filterLp'), size: 'sm', title: 'Low-pass (cut only)' }))),
+      v('v-comp', R(knob({ label: 'COMP', min: 0, max: 1, def: 0, bipolar: false, ...S('comp'), size: 'sm', title: 'One-knob compressor' }))),
       el('div', { class: 'stem-knobs' },
         R(knob({ label: 'VOC', min: 0, max: 1, def: 1, bipolar: false, ...S('vocal'), size: 'xs', title: 'Quick stems: vocal level (DSP centre-channel estimate)' })),
         R(knob({ label: 'INST', min: 0, max: 1, def: 1, bipolar: false, ...S('inst'), size: 'xs', title: 'Quick stems: instrumental level' }))),
       R(button('CUE', { cls: 'btn-pfl', click: () => ch.set('cue', !ch.state.cue), active: () => ch.state.cue, title: 'Headphone cue (PFL)' })),
-      el('div', { class: 'fader-row' }, R(fader({ ...S('volume'), def: 0.8, cls: 'ch-fader' })), vu),
+      el('div', { class: 'fader-row' }, v('v-fader', R(fader({ ...S('volume'), def: 0.8, cls: 'ch-fader' }))), v('v-rotary', R(knob({ label: 'LEVEL', min: 0, max: 1, def: 0.8, bipolar: false, ...S('volume'), size: 'lg', title: 'Channel level (rotary: -inf .. +6 dB)' }))), vu),
       xf,
     );
     strip.vu = vu; strip.ch = ch; strip.idx = i;
@@ -97,11 +112,18 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     cur = null;
   }
 
-  // master section
+  // master section: RMS bar + peak dot meters, limiter gain-reduction LED
   const mvuL = vuMeter(), mvuR = vuMeter();
+  const grLed = el('span', { class: 'gr-led', title: 'Limiter gain reduction' });
   const master = el('div', { class: 'mixer-master' },
     el('div', { class: 'strip-num' }, 'MASTER'),
-    el('div', { class: 'master-vu' }, mvuL, mvuR),
+    el('div', { class: 'master-vu' }, mvuL, mvuR, grLed),
+    v('v-iso', el('div', { class: 'master-iso' },
+      R(knob({ label: 'ISO LO', size: 'sm', title: 'Master isolator low', get: () => eng.iso.low, set: (x) => eng.setMasterIso('low', x) })),
+      R(knob({ label: 'ISO MID', size: 'sm', title: 'Master isolator mid', get: () => eng.iso.mid, set: (x) => eng.setMasterIso('mid', x) })),
+      R(knob({ label: 'ISO HI', size: 'sm', title: 'Master isolator high', get: () => eng.iso.high, set: (x) => eng.setMasterIso('high', x) })))),
+    v('v-warm', R(knob({ label: 'WARMTH', min: 0, max: 1, def: 0, bipolar: false, size: 'sm', title: 'Warmth (2nd-harmonic saturation)', get: () => eng.warmth, set: (x) => eng.setWarmth(x) }))),
+    v('v-booth', R(knob({ label: 'BOOTH', min: 0, max: 1, def: 0.8, bipolar: false, size: 'sm', title: 'Booth level', get: () => eng.boothVolume, set: (x) => { eng.ensureBooth(); eng.setBoothVolume(x); } }))),
     R(knob({ label: 'MASTER', min: 0, max: 1, def: 0.8, get: () => eng.masterVolume ?? 0.8, set: (v) => eng.setMasterVolume(v) })),
     R(knob({ label: 'CUE/MST', min: 0, max: 1, def: 0, bipolar: false, get: () => eng.cueMix ?? 0, set: (v) => eng.setCueMix(v), size: 'sm', title: 'Headphone mix: cue ↔ master' })),
     R(knob({ label: 'PHONES', min: 0, max: 1, def: 0.8, get: () => eng.hpVolume ?? 0.8, set: (v) => eng.setHeadphoneVolume(v), size: 'sm' })),
@@ -111,7 +133,12 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
       R(knob({ label: 'MIC', min: 0, max: 1, def: 0.7, bipolar: false, get: () => eng.micVolume ?? 0.7, set: (v) => eng.setMicVolume(v), size: 'sm' })),
       R(button('TALK', { cls: 'xs talk', click: () => eng.setTalkover(!eng.talkover), active: () => eng.talkover, title: 'Talkover: duck the music while you speak' }))),
   );
-  const xfader = R(fader({ min: -1, max: 1, def: 0, get: () => eng.crossfader, set: (v) => eng.setCrossfader(v), horizontal: true, cls: 'crossfader', title: 'Crossfader' }));
+  const xfader = R(fader({ min: -1, max: 1, def: 0, get: () => eng.crossfader, set: (x) => eng.setCrossfader(x), horizontal: true, cls: 'crossfader', title: 'Crossfader' }));
+  // personality switches wait while a fast-cut crossfader is held mid-scratch
+  xfader.addEventListener('pointerdown', () => { eng.xfTouched = true; });
+  for (const ev of ['pointerup', 'pointercancel']) xfader.addEventListener(ev, () => { eng.xfTouched = false; });
+  const revBtn = el('button', { class: 'btn xs xf-rev mxv v-rev', title: 'Crossfader reverse (hamster)', 'aria-pressed': 'false', onclick: () => updateMixer(app, { xfReverse: !eng.mx.xfReverse }) }, 'REV');
+  revBtn.render = () => { revBtn.classList.toggle('active', !!eng.mx.xfReverse); revBtn.setAttribute('aria-pressed', String(!!eng.mx.xfReverse)); };
   let applyingEqPreset = false;
   const eqPreset = el('select', { class: 'sel tiny mixer-eq-preset', title: 'Tone: set the EQ knobs of all decks to a starting point', 'aria-label': 'EQ knob tone preset (all decks)' },
     ...EQ_PRESETS.map((p) => el('option', { value: p.id }, p.label)));
@@ -144,7 +171,7 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     ...EQ_MODEL_LIST.map((p) => el('option', { value: p.id }, `EQ: ${p.label}`)));
   eqModel.value = eng.mx.eqType;
   eqModel.addEventListener('change', () => updateMixer(app, { eqType: eqModel.value }));
-  const tools = el('div', { class: 'mixer-tools' }, eqModel, el('div', { class: 'mixer-tools-pair' }, eqPreset, colorSel), el('div', { class: 'mixer-tools-pair' }, curveSel, advBtn));
+  const tools = el('div', { class: 'mixer-tools' }, eqModel, el('div', { class: 'mixer-tools-pair' }, eqPreset, colorSel), el('div', { class: 'mixer-tools-pair' }, curveSel, revBtn, advBtn));
   // club booth faceplate sections (shown only with the Club Booth skin)
   const club = buildClubSections(app, R);
   master.querySelector('.mic-box').before(club.masterExtra);
@@ -158,6 +185,39 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
       el('div', { class: 'xfader-control' }, el('span', { class: 'xf-l' }, 'A'), xfader, el('span', { class: 'xf-l' }, 'B')),
     ),
   );
+  // advanced drawer (closed by default) and the personality suggestion chip
+  const drawer = buildDrawer(app, root);
+  root.append(drawer.el);
+  root.toggleDrawer = (on, tab) => drawer.toggle(on, tab);
+  const chip = el('div', { class: 'mixer-chip', hidden: true, role: 'status' });
+  root.append(chip);
+  let suggestion = null, undoTo = null;
+  const dismissKey = () => `opendj-mixer-suggest-${app.automix?.playlistId || app.automix?.queue?.map((t) => t.id).slice(0, 3).join(',') || 'queue'}`;
+  const refreshChip = () => {
+    if (undoTo) return;
+    const onAir = eng.decks.some((d, i) => d.playing && eng.channels[i].state.volume > 0.05);
+    let dismissed = false; try { dismissed = !!localStorage.getItem(dismissKey()); } catch { /* */ }
+    suggestion = !onAir && !dismissed ? suggestPersonality(app.automix?.queue || [], eng.mx.personality) : null;
+    chip.hidden = !suggestion;
+    if (suggestion) chip.replaceChildren(
+      el('button', { class: 'btn xs chip-apply', title: 'Apply (tap again to undo)', onclick: () => { undoTo = eng.mx.personality; setPersonality(app, suggestion.id); chip.replaceChildren(el('span', {}, `${PERSONALITIES[suggestion.id].label} mixer on.`), el('button', { class: 'btn xs', onclick: () => { setPersonality(app, undoTo); undoTo = null; chip.hidden = true; } }, 'Undo'), el('button', { class: 'btn xs', 'aria-label': 'Close', onclick: () => { undoTo = null; chip.hidden = true; } }, '✕')); } }, suggestion.text),
+      el('button', { class: 'btn xs', title: "Don't suggest for this playlist", 'aria-label': "Don't suggest for this playlist", onclick: () => { try { localStorage.setItem(dismissKey(), '1'); } catch { /* */ } chip.hidden = true; } }, '✕'));
+  };
+  app.automix?.on?.('state', () => {
+    const drive = !!app.automix.enabled;
+    if (eng.automixDriving !== drive) { eng.automixDriving = drive; for (const c of eng.channels) c.apply(); } // automix fades on the club fader law
+    refreshChip();
+  });
+  /** Root classes for the personality / config variants (Club: none of them, today's look). */
+  const applyVariants = () => {
+    const m = eng.mx, t = m.eqType;
+    const cls = { 'mx-rotary': m.rotary && !document.documentElement.classList.contains('compact'), 'mx-dual': m.filterMode === 'dual', 'mx-eq4': t === 'fourBand', 'mx-sculpt': t === 'sculpt', 'mx-comp': m.showComp, 'mx-noxf': m.hideXfader, 'mx-rev': m.revVisible || m.xfReverse, 'mx-iso': m.showMasterIso, 'mx-warm': m.showWarmth, 'mx-booth': m.showBooth, 'mx-nocolor': m.colorHidden, [`mx-p-${m.personality}`]: true };
+    for (const c of [...root.classList]) if (/^mx-p-/.test(c)) root.classList.remove(c);
+    for (const [c, on] of Object.entries(cls)) root.classList.toggle(c, !!on);
+    revBtn.render();
+  };
+  eng.on('mixer-config', () => { applyVariants(); requestAnimationFrame(() => fit(lastH, lastW)); });
+  applyVariants();
   eng.on('mixer-config', () => { renderCurve(); eqModel.value = eng.mx.eqType; });
 
   eng.on('mixer', (i) => { for (const r of byCh[i] || renderers) r.render(); if (!applyingEqPreset) eqPreset.value = 'custom'; });
@@ -190,8 +250,10 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   root.setDeckCount = (n) => { for (const s of strips) s.style.display = s.idx < n ? '' : 'none'; requestAnimationFrame(() => fit(lastH, lastW)); };
   root.frame = () => {
     for (const s of strips) if (s.style.display !== 'none') s.vu.draw(s.ch.level());
-    const [l, r] = eng.masterLevels(); mvuL.draw(l); mvuR.draw(r);
+    const m = eng.masterMeter(); mvuL.draw(m.peak[0], undefined, m.rms[0]); mvuR.draw(m.peak[1], undefined, m.rms[1]);
+    const gr = eng.limiterGr() < 0.98; if (gr !== grLed._on) { grLed._on = gr; grLed.classList.toggle('on', gr); }
   };
   root.renderAll = () => { for (const r of renderers) r.render(); };
+  window.opendjMixer = { setPersonality: (id) => setPersonality(app, id), toggleDrawer: (on, tab) => drawer.toggle(on, tab), refreshChip };
   return root;
 }

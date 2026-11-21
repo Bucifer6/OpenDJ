@@ -14,6 +14,7 @@ import { PRESETS } from './presets.js';
 import { BEATLOOPS, BEATJUMPS, ROLLS, convertMixxx, toStoredMapping } from './mixxx.js';
 import { HidManager, describeHidKey } from './hid.js';
 import { GamepadManager, describeGamepadKey } from './gamepad.js';
+import { mixerMidiTargets, mixerMidiStates } from './mixer-targets.js';
 
 const fmtBeats = (b) => (b < 1 ? `1/${Math.round(1 / b)}` : String(b));
 
@@ -97,7 +98,7 @@ export function buildTargets(app) {
     add(`${M}.eqHigh`, `Channel ${n} EQ High`, 'abs', (v) => ch.set('eqHigh', v * 2 - 1), null, bi('eqHigh'));
     add(`${M}.eqMid`, `Channel ${n} EQ Mid`, 'abs', (v) => ch.set('eqMid', v * 2 - 1), null, bi('eqMid'));
     add(`${M}.eqLow`, `Channel ${n} EQ Low`, 'abs', (v) => ch.set('eqLow', v * 2 - 1), null, bi('eqLow'));
-    add(`${M}.filter`, `Channel ${n} Filter`, 'abs', (v) => ch.set('filter', v * 2 - 1), null, bi('filter'));
+    add(`${M}.filter`, `Channel ${n} Filter`, 'abs', (v) => ch.controlSet('filter', v * 2 - 1, ch._midiLock), null, bi('filter')); // Center Lock (mixer M4)
     add(`${M}.cue`, `Channel ${n} Headphone cue`, 'button', (down) => down && ch.set('cue', !ch.state.cue), () => ch.state.cue);
     add(`${M}.fxOn`, `Channel ${n} FX on`, 'button', (down) => down && ch.set('fxOn', !ch.state.fxOn), () => ch.state.fxOn);
     add(`${M}.fxMix`, `Channel ${n} FX mix`, 'abs', (v) => ch.set('fxMix', v), null, () => ch.state.fxMix);
@@ -124,7 +125,7 @@ export function buildTargets(app) {
   });
   add('automix.toggle', 'Automix on/off', 'button', (down) => down && app.toggleAutomix(), () => app.automix.enabled);
   add('record.toggle', 'Record mix on/off', 'button', (down) => down && app.toggleRecord(), () => app.engine.recording);
-  T.push(...linkMidiTargets(app), ...lyricsMidiTargets(app));
+  T.push(...mixerMidiTargets(app), ...linkMidiTargets(app), ...lyricsMidiTargets(app));
   return T;
 }
 
@@ -140,6 +141,7 @@ export function buildStates(app) {
   }
   S.set('master.vu', () => Math.max(0, ...eng.channels.map(lvl)));
   for (let i = 0; i < 8; i++) S.set(`sampler${i + 1}.loaded`, () => !!eng.sampler?.slots?.[i]?.buffer);
+  for (const [k, f] of mixerMidiStates(app)) S.set(k, f); // mixer v2: loudness / true peak / limiter LEDs
   return S;
 }
 
