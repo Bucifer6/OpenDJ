@@ -404,8 +404,8 @@ html.odj-local .panel-tab[data-panel="stems"] { display: none; }
 .mixer.mx-short .strip .knob-label { font-size: 7.5px; }
 .mixer.mx-short .strip .knob-sm { width: 20px; height: 20px; }
 .mixer.mx-short .strip .knob-md { width: 24px; height: 24px; }
-.mixer.mx-short .mixer-master { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; align-content: start; gap: 3px; }
-.mixer.mx-short .mixer-master > .strip-num, .mixer.mx-short .mixer-master > .master-vu, .mixer.mx-short .mixer-master > .mic-box { grid-column: span 2; }
+body:not(.four-decks) .mixer.mx-short .mixer-master { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; align-content: start; gap: 3px; }
+body:not(.four-decks) .mixer.mx-short .mixer-master > .strip-num, body:not(.four-decks) .mixer.mx-short .mixer-master > .master-vu, body:not(.four-decks) .mixer.mx-short .mixer-master > .mic-box { grid-column: span 2; }
 .mixer.mx-short .mixer-master .knob-md { width: 24px; height: 24px; }
 .mixer.mx-short .master-vu { height: 44px; min-height: 30px; }
 .mixer.mx-short .mic-box { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 3px; }
