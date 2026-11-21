@@ -117,6 +117,31 @@ if (argv.includes('--perf')) {
   fs.writeFileSync(path.join(OUT, 'perf.json'), JSON.stringify(results, null, 2));
 }
 
+if (argv.includes('--latency')) {
+  // pointer down -> next rendered frame (double rAF after the event's timestamp), for the controls you hit live
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await playState(2, LAYOUTS[0]);
+  await ev(() => { window._lat = []; document.addEventListener('pointerdown', (e) => { const t0 = e.timeStamp; requestAnimationFrame(() => requestAnimationFrame((t2) => window._lat.push({ el: e.target.closest('button, .pad, .knob')?.className || e.target.className, ms: t2 - t0 }))); }, true); });
+  const targets = ['.deck[data-deck="0"] .pad >> nth=4', '.deck[data-deck="0"] .panel-tab >> nth=1', '.deck[data-deck="0"] .panel-tab >> nth=0', '.deck[data-deck="0"] .btn-sync', '.mixer .btn-pfl >> nth=0', '.layout-seg .seg-btn >> nth=0'];
+  for (let k = 0; k < 4; k++) for (const t of targets) { await page.locator(t).click(); await sleep(60); }
+  const lat = await ev(() => window._lat.map((x) => x.ms).sort((a, b) => a - b));
+  const res = { samples: lat.length, p50: +lat[Math.floor(lat.length / 2)].toFixed(1), p95: +lat[Math.floor(lat.length * 0.95)].toFixed(1), max: +lat.at(-1).toFixed(1) };
+  console.log('[latency] pointerdown -> next frame (ms):', JSON.stringify(res));
+  // long tasks while a track loads onto deck 1 and while the background analyser works, deck 2 playing
+  const measure = (fn) => ev(async (src) => {
+    const longs = []; const po = new PerformanceObserver((l) => { for (const e of l.getEntries()) longs.push(e.duration); }); po.observe({ type: 'longtask' });
+    const frames = []; let last = performance.now(), run = true; const tick = (t) => { frames.push(t - last); last = t; if (run) requestAnimationFrame(tick); }; requestAnimationFrame(tick);
+    await (0, eval)(src)();
+    run = false; po.disconnect();
+    const f = frames.slice(1);
+    return { longTasks: longs.length, longest: Math.round(Math.max(0, ...longs)), droppedFrames: f.filter((x) => x > 25).length, frames: f.length, worstFrame: Math.round(Math.max(...f)) };
+  }, fn);
+  const load = await measure(`async () => { const a = window.opendj, E = a.engine; E.decks[1].play(); E.decks[0].pause(); const id = [...a.library.tracks.values()].find((t) => t.title === 'Glass Horizon').id; await a.loadTrack(0, id); await new Promise((r) => setTimeout(r, 500)); }`);
+  console.log('[load] track load while a deck plays:', JSON.stringify(load));
+  const ana = await measure(`async () => { const a = window.opendj; a.engine.decks[1].play(); a.analyser.request([...a.library.tracks.values()].slice(0, 3), { force: true }); await new Promise((r) => setTimeout(r, 400)); for (let i = 0; i < 300 && a.analyser.running; i++) await new Promise((r) => setTimeout(r, 100)); }`);
+  console.log('[analysis] background analysis of 3 tracks while a deck plays:', JSON.stringify(ana));
+}
+
 await browser.close();
 app.shutdown?.(); app.server.close();
 process.exit(0);

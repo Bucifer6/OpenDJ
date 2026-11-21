@@ -395,43 +395,35 @@ html.odj-local .panel-tab[data-panel="stems"] { display: none; }
 .wave-zoom { right: auto; left: 30px; top: 3px; }
 
 /* ---------------- mixer adapts to its own height (layout modes change it, not just the window) ---------------- */
-/* size containment needs a height from the layout: desktop / tablet grids only (phones stack the mixer at auto height) */
-@media (min-width: 700px) and (min-height: 561px) { .mixer { container: mixer / size; } }
+/* .mx-short / .mx-tiny are set from the mixer's own height by a ResizeObserver (mixer-ui.js). A CSS size container
+   query did the same but re-ran style for the mixer on every layout (20+ ms/s of style recalcs while playing). */
 .strip .fader-v .fader-track { min-height: 30px; }
-@container mixer (max-height: 470px) {
-  .strip { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; align-content: start; row-gap: 2px; grid-template-rows: auto auto auto auto auto auto minmax(30px, 1fr) auto; }
-  .strip > .strip-num, .strip > .stem-knobs, .strip > .btn-pfl, .strip > .fader-row, .strip > .xf-assign { grid-column: span 2; }
-  .strip > .fader-row { height: 100%; min-height: 30px; }
-  .strip .knob-label { font-size: 7.5px; }
-  .strip .knob-sm { width: 20px; height: 20px; }
-  .strip .knob-md { width: 24px; height: 24px; }
-  .mixer-master { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; align-content: start; gap: 3px; }
-  .mixer-master > .strip-num, .mixer-master > .master-vu, .mixer-master > .mic-box { grid-column: span 2; }
-  .mixer-master .knob-md { width: 24px; height: 24px; }
-  .master-vu { height: 44px; min-height: 30px; }
-  .mic-box { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 3px; }
-}
-@container mixer (max-height: 330px) {
-  .strip { row-gap: 0; padding-top: 2px; }
-  .strip .knob-sm, .strip .knob-md { width: 18px; height: 18px; }
-  .strip .knob-label { font-size: 7px; margin-top: 2px; }
-  .strip .stem-knobs .knob-label { display: none; }
-  .btn-pfl { padding: 1px 0; font-size: 9px; }
-  .mixer-master .knob-md, .mixer-master .knob-sm { width: 18px; height: 18px; }
-  .mixer-master .knob-label { font-size: 7px; }
-  .master-vu { height: 28px; }
-  .xfader-row { padding-top: 3px; }
-  .crossfader .fader-track { height: 28px; }
-}
-@container mixer (max-height: 470px) {
-  :root body.four-decks .mixer-master { gap: 2px; }
-  :root body.four-decks .mixer-master .knob-md, :root body.four-decks .mixer-master .knob-sm { width: 20px; height: 20px; }
-  :root body.four-decks .mixer-master > .master-vu { height: 28px; min-height: 20px; }
-  :root body.four-decks .mic-box { gap: 2px; }
-}
-@container mixer (max-height: 400px) {
-  :root body.four-decks .mixer-master .knob-label { display: none; }
-}
+.mixer.mx-short .strip { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; align-content: start; row-gap: 2px; grid-template-rows: auto auto auto auto auto auto minmax(30px, 1fr) auto; }
+.mixer.mx-short .strip > .strip-num, .mixer.mx-short .strip > .stem-knobs, .mixer.mx-short .strip > .btn-pfl, .mixer.mx-short .strip > .fader-row, .mixer.mx-short .strip > .xf-assign { grid-column: span 2; }
+.mixer.mx-short .strip > .fader-row { height: 100%; min-height: 30px; }
+.mixer.mx-short .strip .knob-label { font-size: 7.5px; }
+.mixer.mx-short .strip .knob-sm { width: 20px; height: 20px; }
+.mixer.mx-short .strip .knob-md { width: 24px; height: 24px; }
+.mixer.mx-short .mixer-master { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; align-content: start; gap: 3px; }
+.mixer.mx-short .mixer-master > .strip-num, .mixer.mx-short .mixer-master > .master-vu, .mixer.mx-short .mixer-master > .mic-box { grid-column: span 2; }
+.mixer.mx-short .mixer-master .knob-md { width: 24px; height: 24px; }
+.mixer.mx-short .master-vu { height: 44px; min-height: 30px; }
+.mixer.mx-short .mic-box { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 3px; }
+.mixer.mx-tiny .strip { row-gap: 0; padding-top: 2px; }
+.mixer.mx-tiny .strip .knob-sm, .mixer.mx-tiny .strip .knob-md { width: 18px; height: 18px; }
+.mixer.mx-tiny .strip .knob-label { font-size: 7px; margin-top: 2px; }
+.mixer.mx-tiny .strip .stem-knobs .knob-label { display: none; }
+.mixer.mx-tiny .btn-pfl { padding: 1px 0; font-size: 9px; }
+.mixer.mx-tiny .mixer-master .knob-md, .mixer.mx-tiny .mixer-master .knob-sm { width: 18px; height: 18px; }
+.mixer.mx-tiny .mixer-master .knob-label { font-size: 7px; }
+.mixer.mx-tiny .master-vu { height: 28px; }
+.mixer.mx-tiny .xfader-row { padding-top: 3px; }
+.mixer.mx-tiny .crossfader .fader-track { height: 28px; }
+:root body.four-decks .mixer.mx-short .mixer-master { gap: 2px; }
+:root body.four-decks .mixer.mx-short .mixer-master .knob-md, :root body.four-decks .mixer.mx-short .mixer-master .knob-sm { width: 20px; height: 20px; }
+:root body.four-decks .mixer.mx-short .mixer-master > .master-vu { height: 28px; min-height: 20px; }
+:root body.four-decks .mixer.mx-short .mic-box { gap: 2px; }
+:root body.four-decks .mixer.mx-400 .mixer-master .knob-label { display: none; }
 /* waveform focus on short windows: the tempo column fits (double-click the fader also resets) */
 @media (min-width: 700px) and (min-height: 561px) {
   body.layout-waveform:not(.four-decks) .tempo-fader { min-height: 36px; }
