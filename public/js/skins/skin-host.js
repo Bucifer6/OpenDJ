@@ -34,6 +34,7 @@ async function apply(app) {
   if (id === currentId) return;
   const my = ++seq;
   if (current) { current.destroy(); current = null; }
+  pauseHidden(app, false);
   currentId = id;
   const area = app.deckArea;
   document.body.classList.toggle('skin-on', !!id);
@@ -49,7 +50,15 @@ async function apply(app) {
   if (my !== seq) return;
   area.classList.add('sk-host');
   current = mod.mount(app, area);
+  pauseHidden(app, true);
   window.dispatchEvent(new CustomEvent('opendj-skin', { detail: { id } }));
+}
+
+/** The standard deck / mixer UIs stay built under a skin but are hidden: skip their per-frame drawing meanwhile. */
+const paused = [];
+function pauseHidden(app, on) {
+  if (!on) { for (const [o, f] of paused.splice(0)) o.frame = f; return; }
+  for (const o of [...(app.deckEls || []), app.mixer]) if (o && typeof o.frame === 'function' && !paused.some(([x]) => x === o)) { paused.push([o, o.frame]); o.frame = () => {}; }
 }
 
 const store = {
