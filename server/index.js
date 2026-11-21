@@ -148,7 +148,19 @@ function sendPlaceholder(res) {
 }
 
 /** Stream a remote media-server URL to the client (Range passed through). Aborts upstream when the client leaves. */
-async function proxy(req, res, { url, headers = {} }, { connectTimeout = 15000, kind = 'audio' } = {}) {
+/** A media server problem in words a DJ can act on (instead of Node's "fetch failed"). */
+export function mediaServerError(url, { status, err, timeout, name } = {}) {
+  let host = ''; try { host = new URL(url).host; } catch { /* */ }
+  const who = name ? `${name}${host ? ` (${host})` : ''}` : host || 'the media server';
+  if (timeout) return `${who} did not answer in time — check it's on and reachable`;
+  if (err) return `Can't reach ${who} — check it's on and reachable from this computer`;
+  if (status === 401 || status === 403) return `${who} refused the request — check the login in the server's settings`;
+  if (status === 404) return `${who} no longer has this track (HTTP 404) — rescan the server`;
+  if (status >= 500) return `${who} had a problem (HTTP ${status}) — try again in a moment`;
+  return `${who} answered HTTP ${status}`;
+}
+
+async function proxy(req, res, { url, headers = {}, name }, { connectTimeout = 15000, kind = 'audio' } = {}) {
   const h = { ...headers };
   if (req.headers.range) h.Range = req.headers.range;
   const ctrl = new AbortController();
@@ -159,12 +171,12 @@ async function proxy(req, res, { url, headers = {} }, { connectTimeout = 15000, 
   try { up = await fetch(url, { headers: h, signal: ctrl.signal }); } catch (e) {
     res.off('close', onClose);
     if (res.destroyed) return;
-    throw new HttpError(502, ctrl.signal.aborted ? 'Media server did not answer in time' : `Media server unreachable: ${e.message}`);
+    throw new HttpError(502, mediaServerError(url, { timeout: ctrl.signal.aborted, err: !ctrl.signal.aborted, name }));
   } finally { clearTimeout(timer); }
   if (![200, 206, 416].includes(up.status)) {
     ctrl.abort();
     res.off('close', onClose);
-    throw new HttpError(502, `Media server answered HTTP ${up.status}`);
+    throw new HttpError(502, mediaServerError(url, { status: up.status, name }));
   }
   const out = { 'content-type': safeMediaType(up.headers.get('content-type'), kind) };
   for (const k of ['content-length', 'content-range', 'accept-ranges']) {
@@ -369,6 +381,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     return sendFileRange(req, res, cached, 'audio/wav');
   };
 
+  const srcName = (t) => { try { return library.getSource(t.sourceId)?.name || ''; } catch { return ''; } };
   route('GET', '/api/tracks/:id/stream', async ({ params, req, res }) => {
     const t = track(params.id);
     const local = await servableFile(t);
@@ -397,8 +410,9 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
         return transcoder.serveAudio(req, res, {
           key: t.id, sampleRate: t.sampleRate, dsd: ['dsf', 'dff'].includes(String(t.format).toLowerCase()),
           input: async (signal, tmp) => {
-            const up = await fetch(reqInfo.url, { headers: reqInfo.headers || {}, signal });
-            if (!up.ok || !up.body) throw new HttpError(502, `Media server answered HTTP ${up.status}`);
+            let up;
+            try { up = await fetch(reqInfo.url, { headers: reqInfo.headers || {}, signal }); } catch (e) { if (signal?.aborted) throw e; throw new HttpError(502, mediaServerError(reqInfo.url, { err: true, name: srcName(t) })); }
+            if (!up.ok || !up.body) throw new HttpError(502, mediaServerError(reqInfo.url, { status: up.status, name: srcName(t) }));
             await pipeline(Readable.fromWeb(up.body), fs.createWriteStream(tmp), { signal });
             return tmp;
           },
@@ -407,10 +421,10 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       // No local FFmpeg: ask the media server to transcode, where its API can.
       const c = clientFor(library, t.sourceId);
       const tr = c.transcodeRequest?.(t.remoteId, t);
-      if (tr) return proxy(req, res, tr);
+      if (tr) return proxy(req, res, { ...tr, name: srcName(t) });
       throw needsFfmpeg(`This ${String(t.format).toUpperCase()} track`);
     }
-    return proxy(req, res, remoteStream(library, t));
+    return proxy(req, res, { ...remoteStream(library, t), name: srcName(t) });
   });
 
   // Video of a track (for the video decks): browser-playable files as is (Range), others remuxed/transcoded to MP4.
