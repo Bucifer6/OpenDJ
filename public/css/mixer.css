@@ -116,3 +116,4 @@
    size from the buffer would grow the strip on every resize where the row height is content-sized (phones) */
 .mixer canvas.vu { contain: size; }
 :root.compact .mixer .strip .fader-row { flex: none; height: 220px; } /* definite: the meter canvas must not set it */
+.mixer.mx-noxf .mixer-curve { display: none; } /* no crossfader (rotary): no curve menu */
