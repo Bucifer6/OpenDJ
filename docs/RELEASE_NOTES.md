@@ -23,6 +23,14 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.5.1
+- **AI stems prepared by OpenDJ itself, ahead of time.** The desktop app and the web server (Docker included) now separate stems natively in a background process, on the graphics card when there is one (DirectML on Windows, CoreML on Apple Silicon, CUDA on Linux) or on all CPU cores. Phones and browsers connected to it just ask, so the page no longer freezes while stems are prepared. Automix's next two tracks and every track you load on a deck are prepared automatically (Settings → AI stems). The browser engine remains as the fallback.
+- **Romanian interface.** Settings → Appearance → Language: Auto, English or Română. The whole app is translated, including the login page, video output and Controller Mapper.
+- **Automatic transition length** in Automix: *Auto (from the tracks)* picks 4 to 32 bars per transition from the outro and intro phrases, and the queue shows why.
+- **Automix queue editing:** compact rows, Shuffle for the remaining tracks, drag & drop or Alt+Up/Down to reorder, and *Play next in automix* in the library menu.
+- **Mixer:** two knob rows per channel and a taller MASTER meter with its buttons at the bottom.
+- Dialogs and settings fit the window at every interface size; the settings tabs wrap instead of hiding the last ones.
+
 ### New in 0.5
 **Turntables and decks** (docs/MIXER_AND_TURNTABLES_PLAN.md §6). Every new option defaults to the old behaviour.
 - **Vinyl feel:** each deck's new *Vinyl* panel sets motor start and stop times (play, pause, reverse and the spin-up after you let go of the platter), jog weight, platter coast (a thrown record on a stopped deck), slip-mat, brake time, spin-back length and throw speed, 33 / 45 / 78 rpm (the scratch scale) and quartz lock. *Settings → Decks* has motor presets from instant (CDJ) to low torque.
