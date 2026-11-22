@@ -2,6 +2,7 @@
 import { planBestTransition, vocalsBetween } from './mix-planner.js';
 import { planTransition, incomingStart, DROP_STYLES } from './automix.js';
 import { camelotRelation } from './smartmix.js';
+import { decodeVocalMap } from './shared/vocal-map.js';
 
 const finite = (x) => typeof x === 'number' && Number.isFinite(x);
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
@@ -12,6 +13,8 @@ const snap = (t, x) => anchor(t) + Math.round((x - anchor(t)) / barOf(t)) * barO
 const sections = (t) => (Array.isArray(t.phrases) ? t.phrases : [])
   .filter((p) => finite(p.start) && finite(p.end) && p.end > p.start)
   .slice(0, 200).sort((a, b) => a.start - b.start);
+const spread = (points, limit = 8) => points.length <= limit ? points :
+  Array.from({ length: limit }, (_, i) => points[Math.round(i * (points.length - 1) / (limit - 1))]);
 
 function localEnergy(t, a, b) {
   let sum = 0, weight = 0;
@@ -29,6 +32,10 @@ function localEnergy(t, a, b) {
  */
 export function planAdaptiveTransition(out, inn, opts = {}) {
   if (!out || !inn || !finite(out.duration) || !finite(inn.duration) || out.duration <= 0 || inn.duration <= 0) return null;
+  // Decode measured vocals once per search, rather than once per style/length/window.
+  out = { ...out, vocalMap: out.vocalMap || decodeVocalMap(out.stems?.vocals) };
+  inn = { ...inn, vocalMap: inn.vocalMap || decodeVocalMap(inn.stems?.vocals) };
+  const outSections = sections(out), inSections = sections(inn);
   const position = finite(opts.position) ? Math.max(0, opts.position) : 0;
   const minTime = Math.max(position + barOf(out) * 2, (opts.entry || 0) + Math.max(32, barOf(out) * 16));
   const earliest = anchor(out) + Math.ceil((minTime - anchor(out)) / barOf(out) - 1e-6) * barOf(out);
@@ -43,20 +50,21 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
   if (styles && !styles.length) return null;
   // Include the original endpoints as fallbacks; cap both axes independently of library/track size.
   const lastBar = anchor(out) + Math.floor((end - anchor(out)) / barOf(out) + 1e-6) * barOf(out);
-  const exits = [...new Set([lastBar, ...sections(out).map((p) => snap(out, p.end))])]
+  const exits = [...new Set([lastBar, ...outSections.map((p) => snap(out, p.end))])]
     .filter((x) => x > earliest && x <= end + 1e-6).sort((a, b) => a - b);
-  const boundedExits = exits.length > 8 ? [...exits.slice(0, 7), exits.at(-1)] : exits;
-  const entries = [...new Set([incomingStart(inn), ...sections(inn).map((p) => snap(inn, p.start))])]
-    .filter((x) => x >= (inn.startTime || 0) && x < inEnd - Math.max(16, barOf(inn) * 8)).slice(0, 8);
+  const boundedExits = spread(exits);
+  const allEntries = [...new Set([incomingStart(inn), ...inSections.map((p) => snap(inn, p.start))])]
+    .filter((x) => x >= (inn.startTime || 0) && x < inEnd - Math.max(16, barOf(inn) * 8));
+  const entries = spread(allEntries);
   let best = null, evaluated = 0;
   for (const exit of boundedExits) for (const cue of entries) {
     const remainingBars = Math.floor((exit - earliest) / barOf(out) + 1e-6);
     if (remainingBars < 1) continue;
-    const section = sections(out).find((p) => p.end >= exit - 0.01 && p.start < exit);
+    const section = outSections.find((p) => p.end >= exit - 0.01 && p.start < exit);
     const o = { ...out, duration: exit, endTime: exit, mixOut: Math.max(earliest, section ? snap(out, section.start) : earliest),
-      phrases: sections(out).filter((p) => p.start < exit).map((p) => ({ ...p, end: Math.min(exit, p.end) })) };
-    const n = { ...inn, mixIn: cue, phrases: sections(inn).filter((p) => p.end > cue) };
-    const candidateBars = [remainingBars, ...sections(inn).filter((p) => p.start <= cue && p.end > cue).map((p) => Math.floor((p.end - cue) / barOf(inn)))];
+      phrases: outSections.filter((p) => p.start < exit).map((p) => ({ ...p, end: Math.min(exit, p.end) })) };
+    const n = { ...inn, mixIn: cue, phrases: inSections.filter((p) => p.end > cue) };
+    const candidateBars = [remainingBars, ...inSections.filter((p) => p.start <= cue && p.end > cue).map((p) => Math.floor((p.end - cue) / barOf(inn)))];
     let p = planBestTransition(o, n, { ...opts, candidateBars, styles, keySync: false });
     let timing = planTransition(o, p.style, { transitionBeats: p.beats, skipSilence: true });
     const drop = DROP_STYLES.has(p.style);

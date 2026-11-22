@@ -50,6 +50,15 @@ test('bad durations, exhausted tracks and late starts degrade safely; candidates
   assert.ok(p && p.evaluated <= 64);
 });
 
+test('bounded search includes late interior sections in dense arrangements', () => {
+  const dense = { duration: 384, phrases: Array.from({ length: 48 }, (_, i) => ({ start: i * 8, end: (i + 1) * 8, type: 'verse' })) };
+  const out = track('a', { ...dense, vocalMap: Array(384).fill(1) });
+  const inn = track('b', { ...dense, vocalMap: Array.from({ length: 384 }, (_, i) => i >= 288 && i < 328 ? 0 : 1) });
+  const p = planAdaptiveTransition(out, inn, { styles: ['blend'] });
+  assert.ok(p && p.inStart >= 288 && p.inStart < 328, JSON.stringify(p));
+  assert.ok(p.evaluated <= 64);
+});
+
 test('live selection reranks at most six candidates by playable transition quality and excludes history', () => {
   const a = track('a'), b = track('b'), c = track('c');
   let calls = 0;
