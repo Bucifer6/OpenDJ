@@ -629,6 +629,11 @@ class App {
       downloads: (d) => this.library.setDownloads(d),
       lyrics: (e) => this.lyrics?.invalidate(e.trackId),
       'job-error': (e) => { this.library.setJobStatus(''); this.toast(`⚠ ${e.message}`); },
+      // AI stems prepared by the server (its queue, finished / failed tracks, stems added or removed)
+      'stems-queue': (e) => this.stems?.serverEvent('stems-queue', e),
+      'stems-done': (e) => this.stems?.serverEvent('stems-done', e),
+      'stems-failed': (e) => this.stems?.serverEvent('stems-failed', e),
+      stems: (e) => this.stems?.serverEvent('stems', e),
     });
     this.engine.on('track-updated', (t) => this.library.updateTrack(t));
     this.analyser.on('progress', (st) => this.library.setAnalysisStatus(st));
