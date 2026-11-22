@@ -23,12 +23,6 @@
 :root body .mixer.mx2 .mixer-strips { display: flex; gap: 6px; flex: 1 1 auto; justify-content: stretch; min-height: 0; }
 :root body .mixer.mx2 .strip { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 3px; flex: 1 1 0; min-width: 0; max-width: none; padding: 4px 4px 5px; row-gap: 3px; }
 :root body .mixer.mx2 .strip > .strip-num { text-align: center; line-height: 12px; height: 12px; }
-:root body .mixer.mx2 .strip > .knob-wrap { flex-direction: row-reverse; justify-content: center; align-items: center; gap: 5px; height: calc(var(--kn) + 2px); flex: none; }
-:root body .mixer.mx2 .strip > .knob-wrap .knob-label { width: 30px; text-align: right; font-size: 8px; margin: 0; display: block; overflow: hidden; text-overflow: clip; white-space: nowrap; }
-:root body .mixer.mx2 .strip > .knob-wrap .knob-val { display: none; }
-:root body .mixer.mx2 .strip .knob-sm, :root body .mixer.mx2 .strip .knob-md { width: var(--kn); height: var(--kn); }
-:root body .mixer.mx2 .strip > .v-filter .knob { width: calc(var(--kn) + 4px); height: calc(var(--kn) + 4px); }
-:root body .mixer.mx2 .strip > .v-filter { height: calc(var(--kn) + 6px); }
 :root body .mixer.mx2 .strip > .stem-knobs { display: flex; flex-direction: row; justify-content: center; gap: 8px; flex: none; }
 :root body .mixer.mx2 .strip > .stem-knobs .knob-wrap { flex-direction: row-reverse; gap: 3px; align-items: center; }
 :root body .mixer.mx2 .strip > .stem-knobs .knob-xs { width: calc(var(--kn) * 0.8); height: calc(var(--kn) * 0.8); }
@@ -40,12 +34,6 @@
 :root body .mixer.mx2 .strip .ch-fader .fader-track { min-height: 0; height: 100%; }
 :root body .mixer.mx2 .strip > .xf-assign { flex: none; justify-content: center; }
 .mixer.mx2 canvas.vu { contain: size; }
-/* slim MASTER column */
-:root body .mixer.mx2 .mixer-master { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 0 0 58px; width: 58px; min-width: 0; padding: 4px 3px; overflow: hidden; }
-:root body .mixer.mx2 .mixer-master > .strip-num { font-size: 9px; line-height: 12px; }
-:root body .mixer.mx2 .mixer-master .knob-sm { width: 26px; height: 26px; }
-:root body .mixer.mx2 .mixer-master .knob-label { font-size: 7.5px; display: block; }
-:root body .mixer.mx2 .mixer-master > .master-vu { flex: 1 1 auto; height: auto; min-height: 40px; width: 22px; justify-content: center; }
 /* full-width crossfader */
 .mixer.mx2 .xfader-row { display: block; padding: 4px 4px 0; border-top: 1px solid var(--line); }
 .mixer.mx2 .xfader-control { display: flex; align-items: center; gap: 10px; min-width: 0; width: 100%; }
@@ -58,9 +46,6 @@
 .mixer.mx2.mx-w1 .ch-fader { --cap: 20px; }
 .mixer.mx2.mx-w2 .strip .vu { width: 10px; }
 .mixer.mx2.mx-w2 .ch-fader .fader-track { width: 40px; }
-/* 4 decks: the knob labels are shorter */
-:root body.four-decks .mixer.mx2 .strip > .knob-wrap .knob-label { width: 22px; font-size: 7px; }
-:root body.four-decks .mixer.mx2 .strip > .knob-wrap { gap: 3px; }
 /* phones: the mixer is as tall as its content; give the fader row a definite height (the meter must not set it) */
 :root.compact body .mixer.mx2 .strip > .fader-row { flex: none; height: 220px; }
 /* touch screens: finger-sized buttons */
@@ -138,54 +123,66 @@
 :root body .mixer.mx2.mx-tight .strip { gap: 1px; row-gap: 1px; padding: 3px 3px 4px; }
 :root body .mixer.mx2.mx-tight .strip > .strip-num { height: 10px; line-height: 10px; font-size: 10px; }
 :root body .mixer.mx2.mx-tight .strip > .btn-pfl { height: 18px; font-size: 9px; }
-:root body .mixer.mx2.mx-tight .strip > .knob-wrap { height: calc(var(--kn) + 1px); }
-:root body .mixer.mx2.mx-tight .strip > .v-filter { height: calc(var(--kn) + 3px); }
-:root body .mixer.mx2.mx-tight .strip > .v-filter .knob { width: calc(var(--kn) + 2px); height: calc(var(--kn) + 2px); }
-:root body.four-decks .mixer.mx2 .strip > .knob-wrap .knob-label { letter-spacing: -0.02em; font-size: 6.5px; width: 24px; }
-/* MASTER column: title, tall stereo meter beside the level, headphones / sampler / mic pairs, mic cluster, setup */
-:root body .mixer.mx2 .mixer-master { display: grid; grid-template-columns: 1fr 1fr 18px; grid-auto-rows: min-content; align-content: start; align-items: center; justify-items: center; gap: 3px 2px; flex: 0 0 92px; width: 92px; padding: 4px 3px; overflow: hidden; }
-:root body .mixer.mx2 .mixer-master > * { grid-column: 1 / 3; }
-:root body .mixer.mx2 .mixer-master > .m-title { grid-column: 1 / -1; }
-:root body .mixer.mx2 .mixer-master > .m-meter { grid-column: 3; grid-row: 2 / span 30; align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 3px; height: 100%; min-height: 60px; }
-:root body .mixer.mx2 .mixer-master .master-vu { flex: 1 1 auto; height: auto; min-height: 40px; width: 16px; gap: 2px; padding: 1px; }
-:root body .mixer.mx2 .mixer-master .master-vu .vu { width: 6px; }
-:root body .mixer.mx2 .mixer-master .m-pair { display: flex; gap: 4px; justify-content: center; width: 100%; }
-:root body .mixer.mx2 .mixer-master .knob-xs { width: 22px; height: 22px; }
-:root body .mixer.mx2 .mixer-master .knob-sm { width: 30px; height: 30px; }
-:root body .mixer.mx2 .mixer-master .knob-label { font-size: 7px; display: block; white-space: nowrap; letter-spacing: 0; }
-:root body .mixer.mx2 .mixer-master .mic-box { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 2px; width: 100%; }
-:root body .mixer.mx2 .mixer-master .mic-box .btn, :root body .mixer.mx2 .mixer-master .m-setup .btn { padding: 2px 3px; font-size: 9px; min-width: 0; }
-:root body .mixer.mx2 .mixer-master .m-setup { display: flex; gap: 3px; justify-content: center; width: 100%; }
-:root body .mixer.mx2 .mixer-master .mixer-adv-btn { font-size: 12px; line-height: 1; padding: 2px 6px; }
 /* very short strips: TRIM in the drawer, CUE beside the crossfader assign */
 :root body .mixer.mx2.mx-tiny2 .strip > .v-trim { display: none; }
 :root body .mixer.mx2 .strip > .strip-foot { display: flex; gap: 3px; align-items: center; justify-content: center; flex: none; }
 :root body .mixer.mx2 .strip-foot > .btn-pfl { flex: 1 1 auto; height: 18px; padding: 0; font-size: 9px; min-width: 0; }
-:root body .mixer.mx2 .mixer-master { grid-template-rows: min-content min-content min-content min-content min-content min-content min-content 1fr; }
-:root body .mixer.mx2 .mixer-master > .m-meter { grid-row: 2 / 6; }
-:root body .mixer.mx2 .mixer-master > .mic-box, :root body .mixer.mx2 .mixer-master > .m-setup { grid-column: 1 / -1; }
-:root body .mixer.mx2 .mixer-master .mic-box { flex-wrap: wrap; } /* MIC / TALK / MC wrap in a narrow master column */
-/* MASTER column fills the strip height instead of packing everything at the top: the rows spread out (space-between
-   falls back to start when the column is short), the meter stretches over the rows it spans, and knobs / buttons
-   scale with --ms (set from the column height by mixer-ui fitMaster: 1 on short windows, up to 1.35) */
-:root body .mixer.mx2 .mixer-master { grid-template-rows: none; grid-auto-rows: min-content; align-content: space-between; }
-:root body .mixer.mx2 .mixer-master > .m-meter { height: auto; }
-:root body .mixer.mx2 .mixer-master .master-vu { flex: 1 1 0; max-height: none; } /* fills the stretched meter cell without feeding back into the row sizes */
-:root body .mixer.mx2 .mixer-master .knob-sm { width: calc(30px * var(--ms, 1)); height: calc(30px * var(--ms, 1)); }
-:root body .mixer.mx2 .mixer-master .knob-xs { width: calc(22px * var(--ms, 1)); height: calc(22px * var(--ms, 1)); }
-:root body .mixer.mx2 .mixer-master .knob-label { font-size: calc(7px * min(var(--ms, 1), 1.2)); }
-:root body .mixer.mx2 .mixer-master .mic-box { gap: calc(2px * var(--ms, 1)); }
-:root body .mixer.mx2 .mixer-master .mic-box .btn, :root body .mixer.mx2 .mixer-master .m-setup .btn { min-height: calc(18px * var(--ms, 1)); font-size: calc(9px * min(var(--ms, 1), 1.15)); }
-/* 4 decks: narrower MASTER and assign buttons so four columns fit */
-:root body.four-decks .mixer.mx2 .mixer-master { flex-basis: 76px; width: 76px; grid-template-columns: 1fr 1fr 14px; }
-:root body.four-decks .mixer.mx2 .mixer-master .knob-xs { width: calc(19px * var(--ms, 1)); height: calc(19px * var(--ms, 1)); }
-:root body.four-decks .mixer.mx2 .mixer-master .master-vu { width: 12px; }
-:root body.four-decks .mixer.mx2 .mixer-master .master-vu .vu { width: 4px; }
-:root body.four-decks .mixer.mx2 .mixer-master .knob-label { font-size: 6px; }
-:root body.four-decks .mixer.mx2 .mixer-master .mic-box .btn { padding: 2px 2px; font-size: 8px; }
 :root body.four-decks .mixer.mx2 .strip { padding-left: 2px; padding-right: 2px; }
 :root body.four-decks .mixer.mx2 .xf-assign .btn { padding: 1px 3px; }
 :root body.four-decks .mixer.mx2 .mixer-strips, :root body.four-decks .mixer.mx2 .mixer-top { gap: 4px; }
 /* 4 decks: no room for the VOC / INST pair in a column (they stay in the drawer's Channel tab) */
 :root body.four-decks .mixer.mx2 .strip > .stem-knobs { display: none; }
 :root body .mixer.mx2 .strip > .stem-knobs { min-width: 0; overflow: hidden; }
+
+/* ---------- channel knobs: two rows (TRIM / FILTER, then the EQ), labels under the knobs ---------- */
+:root body .mixer.mx2 .strip > .kn-row { display: flex; flex-direction: row; flex-wrap: nowrap; justify-content: space-evenly; align-items: flex-end; gap: 4px; flex: none; min-width: 0; }
+:root body .mixer.mx2 .strip > .kn-aux { padding-bottom: 3px; border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+:root body .mixer.mx2 .strip > .kn-row > .knob-wrap { flex-direction: column; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; }
+:root body .mixer.mx2 .strip > .kn-row .knob-label { font-size: 8px; line-height: 8px; height: 8px; margin: 0; text-align: center; display: block; white-space: nowrap; overflow: visible; letter-spacing: .02em; }
+:root body .mixer.mx2 .strip > .kn-row .knob-val { display: none; }
+:root body .mixer.mx2 .strip > .kn-row .knob { width: var(--kn); height: var(--kn); }
+:root body .mixer.mx2 .strip > .kn-row > .v-filter .knob { width: calc(var(--kn) + 4px); height: calc(var(--kn) + 4px); }
+:root body .mixer.mx2.mx-tight .strip > .kn-row { gap: 2px; }
+:root body .mixer.mx2.mx-tight .strip > .kn-aux { padding-bottom: 1px; }
+:root body.four-decks .mixer.mx2 .strip > .kn-row .knob-label { font-size: 6.5px; letter-spacing: -0.02em; }
+:root body.four-decks .mixer.mx2 .strip > .kn-row { gap: 1px; }
+
+/* ---------- MASTER column: level on top, a tall stereo meter with a dB scale, knobs and buttons at the bottom ---------- */
+:root body .mixer.mx2 .mixer-master { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 4px; flex: 0 0 92px; width: 92px; min-width: 0; padding: 4px 3px 5px; overflow: hidden; }
+:root body .mixer.mx2 .mixer-master > * { flex: none; }
+:root body .mixer.mx2 .mixer-master > .strip-num { font-size: 9px; line-height: 12px; }
+:root body .mixer.mx2 .mixer-master .m-level { display: flex; justify-content: center; }
+:root body .mixer.mx2 .mixer-master > .m-meter { flex: 1 1 auto; min-height: 40px; width: 100%; display: flex; justify-content: center; align-items: stretch; gap: 3px; position: relative; }
+:root body .mixer.mx2 .mixer-master .m-scale { position: relative; width: 16px; margin: 2px 0; flex: none; }
+:root body .mixer.mx2 .mixer-master .m-scale span { position: absolute; right: 0; transform: translateY(50%); font: 600 6.5px/1 var(--mono); color: var(--text-3); white-space: nowrap; }
+:root body .mixer.mx2 .mixer-master .master-vu { flex: none; height: auto; min-height: 0; max-height: none; width: auto; gap: 5px; padding: 2px 3px; }
+:root body .mixer.mx2 .mixer-master .mv-side { display: flex; gap: 2px; height: 100%; }
+:root body .mixer.mx2 .mixer-master .master-vu .vu { width: 7px; height: 100%; }
+:root body .mixer.mx2 .mixer-master .gr-led { align-self: flex-start; margin-top: 2px; }
+:root body .mixer.mx2 .mixer-master .m-pair { display: flex; gap: 6px; justify-content: center; width: 100%; }
+:root body .mixer.mx2 .mixer-master .knob-xs { width: 22px; height: 22px; }
+:root body .mixer.mx2 .mixer-master .knob-sm { width: 30px; height: 30px; }
+:root body .mixer.mx2 .mixer-master .knob-label { font-size: 7px; display: block; white-space: nowrap; letter-spacing: 0; }
+:root body .mixer.mx2 .mixer-master .mic-box { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 5px 5px; width: 100%; padding-top: 4px; border-top: 1px solid var(--line); }
+:root body .mixer.mx2 .mixer-master .mic-box .btn, :root body .mixer.mx2 .mixer-master .m-setup .btn { padding: 2px 4px; font-size: 9px; min-width: 0; }
+:root body .mixer.mx2 .mixer-master .m-setup { display: flex; gap: 5px; margin-top: 2px; justify-content: center; width: 100%; }
+:root body .mixer.mx2 .mixer-master .mixer-adv-btn { font-size: 12px; line-height: 1; padding: 2px 6px; }
+/* 4 decks: narrower MASTER so four columns fit */
+:root body.four-decks .mixer.mx2 .mixer-master { flex-basis: 76px; width: 76px; }
+:root body.four-decks .mixer.mx2 .mixer-master .knob-xs { width: 19px; height: 19px; }
+:root body.four-decks .mixer.mx2 .mixer-master .master-vu { gap: 3px; padding: 2px; }
+:root body.four-decks .mixer.mx2 .mixer-master .master-vu .vu { width: 6px; }
+:root body.four-decks .mixer.mx2 .mixer-master .m-scale { width: 13px; }
+:root body.four-decks .mixer.mx2 .mixer-master .knob-label { font-size: 6px; }
+:root body.four-decks .mixer.mx2 .mixer-master .mic-box .btn { padding: 2px 2px; font-size: 8px; }
+/* short mixers: no dB scale, the buttons stay */
+:root body .mixer.mx2.mx-tiny2 .mixer-master .m-scale { display: none; }
+/* breathing room between the crossfader assign buttons (A / T / B) */
+:root body .mixer.mx2 .strip .xf-assign { gap: 4px; }
+:root body.four-decks .mixer.mx2 .strip .xf-assign { gap: 2px; }
+/* channel knob rows: space between the knobs; VOC / INST laid out like the rows above (label under the knob) */
+:root body .mixer.mx2 .strip > .kn-row { justify-content: center; gap: 15px; }
+:root body.four-decks .mixer.mx2 .strip > .kn-row { gap: 10px; }
+:root body .mixer.mx2 .strip > .stem-knobs { justify-content: center; gap: 18px; padding-top: 3px; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+:root body .mixer.mx2 .strip > .stem-knobs .knob-wrap { flex-direction: column; align-items: center; gap: 2px; }
+:root body .mixer.mx2 .strip > .stem-knobs .knob-label { font-size: 7px; line-height: 7px; text-align: center; width: auto; margin: 0; }

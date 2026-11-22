@@ -15,10 +15,10 @@ import { setSmartFader, smartAutoTransition } from '../midi/controller-extras.js
  * stays 1 s then falls. Sized from a ResizeObserver (no layout reads per frame) and redrawn only when a lit
  * segment changes, so idle channels cost nothing.
  */
-function vuMeter() {
+function vuMeter(segPx = 0) { // segPx: one segment per ~segPx CSS px of height (more segments on a tall meter), else 20
   const c = el('canvas', { class: 'vu', width: 8, height: 120 });
   const g = c.getContext('2d');
-  const SEGS = 20;
+  let SEGS = 20;
   let level = 0, held = 0, heldT = 0, lastT = 0, sig = '', dirty = true;
   let box = null;
   const ro = new ResizeObserver((es) => { const r = es.at(-1).contentRect, z = uiZoom(); box = { width: r.width * z, height: r.height * z }; dirty = true; });
@@ -30,6 +30,7 @@ function vuMeter() {
       const r = box || c.getBoundingClientRect(), dpr = devicePixelRatio || 1;
       const W = Math.max(2, Math.round(r.width * dpr)), H = Math.max(10, Math.round(r.height * dpr));
       if (c.width !== W || c.height !== H) { c.width = W; c.height = H; sig = ''; }
+      if (segPx) SEGS = Math.max(16, Math.min(48, Math.round(H / dpr / segPx)));
     }
     const dt = Math.min(0.1, lastT ? (now - lastT) / 1000 : 0); lastT = now;
     const toK = (x) => Math.max(0, Math.min(1, (20 * Math.log10(x + 1e-9) + 48) / 51)); // -48..+3 dB
@@ -43,7 +44,8 @@ function vuMeter() {
     const W = c.width, H = c.height, gap = Math.max(1, Math.round(H / SEGS * 0.22)), sh = (H - gap * (SEGS - 1)) / SEGS;
     g.clearRect(0, 0, W, H);
     for (let i = 0; i < SEGS; i++) {
-      const col = i >= SEGS - 2 ? cssVar('--meter-clip') : i >= SEGS - 6 ? cssVar('--meter-hot') : cssVar('--meter-ok');
+      const top = (i + 1) / SEGS * 51 - 48; // the segment's top in dB: red over 0 dB, amber over -10.5 dB
+      const col = top > 0 ? cssVar('--meter-clip') : top > -10.5 ? cssVar('--meter-hot') : cssVar('--meter-ok');
       const y = Math.round(H - (i + 1) * sh - i * gap);
       g.fillStyle = col;
       g.globalAlpha = i < lit ? 1 : i === pk && held > 0.02 ? 0.95 : 0.12;
@@ -91,17 +93,20 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     }));
     const strip = el('div', { class: 'strip', 'data-ch': i, style: { '--deck-color': DECK_COLORS[i] } },
       el('div', { class: 'strip-num' }, String(i + 1)),
-      v('v-trim', R(knob({ label: 'TRIM', ...S('trim'), def: 0, size: 'sm', format: (v) => `${v >= 0 ? '+' : ''}${(v * 12).toFixed(1)}dB` }))),
-      R(knob({ label: 'HI', ...S('eqHigh'), def: 0, size: 'sm', title: 'High EQ (fully left = kill)' })),
-      v('v-mid', R(knob({ label: 'MID', ...S('eqMid'), def: 0, size: 'sm' }))),
-      v('v-eq4', R(knob({ label: 'MID-HI', ...S('eqMidHigh'), def: 0, size: 'sm', title: '4-band EQ: mid-high' }))),
-      v('v-eq4', R(knob({ label: 'MID-LO', ...S('eqMidLow'), def: 0, size: 'sm', title: '4-band EQ: mid-low' }))),
-      v('v-sculpt', R(knob({ label: 'FREQ', min: 0, max: 1, def: 0.5, bipolar: false, ...S('eqFreq'), size: 'sm', title: 'Sculpt EQ frequency (70 Hz - 7 kHz)', format: (x) => { const f = 70 * Math.pow(100, x); return f >= 1000 ? `${(f / 1000).toFixed(1)}k` : `${Math.round(f)}`; } }))),
-      R(knob({ label: 'LOW', ...S('eqLow'), def: 0, size: 'sm' })),
-      v('v-filter', filterKnob),
-      v('v-dual', R(knob({ label: 'HP', min: 0, max: 1, def: 0, bipolar: false, ...S('filterHp'), size: 'sm', title: 'High-pass (cut only)' }))),
-      v('v-dual', R(knob({ label: 'LP', min: 0, max: 1, def: 0, bipolar: false, ...S('filterLp'), size: 'sm', title: 'Low-pass (cut only)' }))),
-      v('v-comp', R(knob({ label: 'COMP', min: 0, max: 1, def: 0, bipolar: false, ...S('comp'), size: 'sm', title: 'One-knob compressor' }))),
+      // two knob rows: TRIM and FILTER (gain and colour), then the EQ (HI / MID / LOW); labels under the knobs
+      el('div', { class: 'kn-row kn-aux' },
+        v('v-trim', R(knob({ label: 'TRIM', ...S('trim'), def: 0, size: 'sm', format: (v) => `${v >= 0 ? '+' : ''}${(v * 12).toFixed(1)}dB` }))),
+        v('v-filter', filterKnob),
+        v('v-dual', R(knob({ label: 'HP', min: 0, max: 1, def: 0, bipolar: false, ...S('filterHp'), size: 'sm', title: 'High-pass (cut only)' }))),
+        v('v-dual', R(knob({ label: 'LP', min: 0, max: 1, def: 0, bipolar: false, ...S('filterLp'), size: 'sm', title: 'Low-pass (cut only)' }))),
+        v('v-comp', R(knob({ label: 'COMP', min: 0, max: 1, def: 0, bipolar: false, ...S('comp'), size: 'sm', title: 'One-knob compressor' })))),
+      el('div', { class: 'kn-row kn-eq' },
+        R(knob({ label: 'HI', ...S('eqHigh'), def: 0, size: 'sm', title: 'High EQ (fully left = kill)' })),
+        v('v-eq4', R(knob({ label: 'MID-HI', ...S('eqMidHigh'), def: 0, size: 'sm', title: '4-band EQ: mid-high' }))),
+        v('v-mid', R(knob({ label: 'MID', ...S('eqMid'), def: 0, size: 'sm' }))),
+        v('v-eq4', R(knob({ label: 'MID-LO', ...S('eqMidLow'), def: 0, size: 'sm', title: '4-band EQ: mid-low' }))),
+        v('v-sculpt', R(knob({ label: 'FREQ', min: 0, max: 1, def: 0.5, bipolar: false, ...S('eqFreq'), size: 'sm', title: 'Sculpt EQ frequency (70 Hz - 7 kHz)', format: (x) => { const f = 70 * Math.pow(100, x); return f >= 1000 ? `${(f / 1000).toFixed(1)}k` : `${Math.round(f)}`; } }))),
+        R(knob({ label: 'LOW', ...S('eqLow'), def: 0, size: 'sm' }))),
       el('div', { class: 'stem-knobs' },
         R(knob({ label: 'VOC', min: 0, max: 1, def: 1, bipolar: false, ...S('vocal'), size: 'xs', title: 'Quick stems: vocal level (DSP centre-channel estimate)' })),
         R(knob({ label: 'INST', min: 0, max: 1, def: 1, bipolar: false, ...S('inst'), size: 'xs', title: 'Quick stems: instrumental level' }))),
@@ -117,13 +122,17 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   // Controller-style layout: a compact top bar (headphones, sampler, mic cluster, setup), identical channel columns
   // (TRIM / EQ / FILTER, CUE, long fader + meter, crossfader assign), a slim MASTER column (level, booth, stereo
   // meter) and the full-width crossfader at the bottom. Setup menus live behind the gear (advanced drawer).
-  const mvuL = vuMeter(), mvuR = vuMeter();
+  const mvuL = vuMeter(), mvuR = vuMeter(), mpkL = vuMeter(), mpkR = vuMeter(); // RMS (body) and peak columns per side
   const grLed = el('span', { class: 'gr-led', title: 'Limiter gain reduction' });
+  // dB scale beside the master meter (the meter spans -48 .. +3 dB)
+  const scale = el('div', { class: 'm-scale', 'aria-hidden': 'true' }, ...[0, -6, -12, -24, -48].map((db) => el('span', { style: { bottom: `${((db + 48) / 51) * 100}%` } }, String(db))));
   let mcBtnEl = null;
+  // MASTER column: title and level on top, the tall stereo meter in the middle, headphones / sampler / mic and the
+  // buttons at the bottom (level with the channel faders and CUE buttons)
   const master = el('div', { class: 'mixer-master' },
     el('div', { class: 'strip-num m-title' }, 'MASTER'),
-    el('div', { class: 'm-meter' }, el('div', { class: 'master-vu' }, mvuL, mvuR), grLed),
     el('div', { class: 'm-level' }, R(knob({ label: 'LEVEL', min: 0, max: 1, def: 0.8, size: 'sm', title: 'Master level', get: () => eng.masterVolume ?? 0.8, set: (x) => eng.setMasterVolume(x) }))),
+    el('div', { class: 'm-meter' }, scale, el('div', { class: 'master-vu' }, el('div', { class: 'mv-side', title: 'Left: peak / RMS' }, mpkL, mvuL), el('div', { class: 'mv-side', title: 'Right: RMS / peak' }, mvuR, mpkR)), grLed),
     v('v-booth', el('div', { class: 'm-booth' }, R(knob({ label: 'BOOTH', min: 0, max: 1, def: 0.8, bipolar: false, size: 'xs', title: 'Booth level', get: () => eng.boothVolume, set: (x) => { eng.ensureBooth(); eng.setBoothVolume(x); } })))),
     el('div', { class: 'm-pair' },
       R(knob({ label: 'CUE/MST', min: 0, max: 1, def: 0, bipolar: false, size: 'xs', title: 'Headphones: cue ↔ master', get: () => eng.cueMix ?? 0, set: (x) => eng.setCueMix(x) })),
@@ -241,22 +250,24 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   let lastW = 0, lastH = 0;
   const shown = (e) => e.style.display !== 'none' && getComputedStyle(e).display !== 'none';
   /**
-   * Knob size from the strip height: the channel fader keeps at least 42 % of the strip, the knob rows share the rest
-   * (all strips have the same rows, so they stay aligned). VOC / INST only show when there is room (also in the drawer).
+   * Knob size from the strip size: two knob rows (TRIM / FILTER, then the EQ) with labels under the knobs; the channel
+   * fader keeps at least 45 % of the strip, and a knob is never wider than its share of the row.
+   * VOC / INST only show when there is room (also in the drawer).
    */
   const fitKnobs = () => {
     if (document.documentElement.classList.contains('compact')) { root.style.setProperty('--kn', '26px'); root.classList.remove('mx-nostems'); return; }
-    const s = strips.find((x) => x.style.display !== 'none'); const H = s?.clientHeight; if (!H) return;
-    const rows = [...s.children].filter((c) => c.classList.contains('knob-wrap') && !c.classList.contains('v-trim') && shown(c)).length || 4; // (TRIM counted below)
-    // tight strips: 1 px row gaps, a slimmer CUE; the knob rows get what is left after 45 % for the fader
+    const s = strips.find((x) => x.style.display !== 'none'); const H = s?.clientHeight, W = s?.clientWidth; if (!H) return;
     // very short strips: CUE shares the assign row and TRIM moves to the drawer (Channel tab)
     const tight = H < 360, tiny = H < 290, gap = tight ? 1 : 3, fixed = tiny ? 10 + 18 + 8 : tight ? 10 + 18 + 18 + 8 : 12 + 22 + 20 + 9;
-    const n0 = rows + (tiny ? 0 : 1);
-    const per = (n) => (H - fixed - 0.45 * H - (n + 4) * gap) / n;
-    const stems = !document.body.classList.contains('four-decks') && per(n0 + 1) >= 24, r = stems ? per(n0 + 1) : per(n0);
-    const max = document.body.classList.contains('four-decks') ? 18 : 20; // the fader gets the rest
-    root.style.setProperty('--kn', `${Math.max(11, Math.min(max, Math.floor(r - 2)))}px`);
-    root.classList.toggle('mx-nostems', !stems); root.classList.toggle('mx-tight', tight); root.classList.toggle('mx-tiny2', tiny);
+    const four = document.body.classList.contains('four-decks'), LBL = 10;
+    root.classList.toggle('mx-tight', tight); root.classList.toggle('mx-tiny2', tiny);
+    const n = Math.max(1, ...[...s.querySelectorAll(':scope > .kn-row')].map((r) => [...r.children].filter(shown).length));
+    const byW = (W - (four ? 8 : 16) - (n - 1) * (four ? 10 : 15)) / n; // the value ring is drawn 4 px outside each knob: 15 px apart leaves ~7 px between rings
+    const per = (rows) => (H - fixed - 0.45 * H - (rows + 4) * gap) / rows - LBL;
+    const stems = !four && per(3) >= 28, r = stems ? per(3) : per(2);
+    const max = four ? 24 : 32;
+    root.style.setProperty('--kn', `${Math.max(12, Math.min(max, Math.floor(Math.min(r, byW))))}px`);
+    root.classList.toggle('mx-nostems', !stems);
     for (const st of strips) { // very short: CUE beside the crossfader assign under the fader
       if (tiny && st.cueBtn.parentNode !== st.foot) st.foot.prepend(st.cueBtn);
       else if (!tiny && st.cueBtn.parentNode === st.foot) st.faderRow.before(st.cueBtn);
@@ -272,17 +283,10 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     fitKnobs();
   };
   new ResizeObserver((ents) => { const e = ents[0], b = e.contentBoxSize?.[0]; fit(b?.blockSize ?? e.contentRect.height, b?.inlineSize ?? e.contentRect.width); }).observe(root);
-  // MASTER column: knobs and buttons grow with its height (1080 p windows: 1.35x), the rows spread out in CSS (mixer.css)
-  const fitMaster = () => {
-    const H = master.clientHeight; if (!H) return;
-    const ms = Math.max(1, Math.min(document.body.classList.contains('four-decks') ? 1.12 : 1.35, (H - 40) / 280)).toFixed(3);
-    if (root.style.getPropertyValue('--ms') !== ms) root.style.setProperty('--ms', ms);
-  };
-  new ResizeObserver(fitMaster).observe(master);
-  root.setDeckCount = (n) => { for (const s of strips) s.style.display = s.idx < n ? '' : 'none'; requestAnimationFrame(() => { fit(lastH, lastW, true); fitMaster(); }); };
+  root.setDeckCount = (n) => { for (const s of strips) s.style.display = s.idx < n ? '' : 'none'; requestAnimationFrame(() => fit(lastH, lastW, true)); };
   root.frame = () => {
     for (const s of strips) if (s.style.display !== 'none') s.vu.draw(s.ch.level());
-    const m = eng.masterMeter(); mvuL.draw(m.peak[0], undefined, m.rms[0]); mvuR.draw(m.peak[1], undefined, m.rms[1]);
+    const m = eng.masterMeter(); mvuL.draw(m.peak[0], undefined, m.rms[0]); mvuR.draw(m.peak[1], undefined, m.rms[1]); mpkL.draw(m.peak[0]); mpkR.draw(m.peak[1]);
     const gr = eng.limiterGr() < 0.98; if (gr !== grLed._on) { grLed._on = gr; grLed.classList.toggle('on', gr); }
   };
   root.renderAll = () => { for (const r of renderers) r.render(); };
