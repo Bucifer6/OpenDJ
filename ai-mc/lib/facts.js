@@ -1,12 +1,9 @@
-// Real facts for the radio host, so it talks about the song / band / period without inventing them.
-// Wikipedia (Romanian first, then English) summary of the artist and, when there is one, of the song.
-// Only the artist name and song title leave this computer. Gentle with the API: one request at a time, a pause
-// between them, direct page lookups before searching, a 10-minute pause after HTTP 429, results cached.
+// Real facts for the radio host, so it talks about the song / band / period without inventing them:
+// Wikipedia search (English and Romanian), the weather and news headlines. Only the search words leave this computer.
+// Gentle with Wikipedia: one request at a time, a pause between them, a 10-minute pause after HTTP 429, results cached.
 
 const cache = new Map();
 const UA = { 'User-Agent': 'AI-MC/1.0 (OpenDJ add-on; https://github.com/Bucifer6/OpenDJ)', Accept: 'application/json' };
-const MUSIC = /band|group|singer|musician|rapper|duo|trio|\bdj\b|composer|songwriter|vocalist|orchestra|formație|formatie|cântăreț|cantaret|cântăreață|muzician|trupă|trupa|grup|interpret|compozitor|lăutar|manele/i;
-const SONG = /song|single|cântec|cantec|piesă|piesa|melodie|hit/i;
 const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
 let chain = Promise.resolve(), pausedUntil = 0;
@@ -25,28 +22,6 @@ function getJson(url) {
   const p = chain.then(run, run);
   chain = p.catch(() => {});
   return p;
-}
-
-function accept(sum, want, must) {
-  if (!sum?.extract || sum.type === 'disambiguation') return '';
-  const text = norm(`${sum.title} ${sum.extract}`);
-  if (must.some((w) => w && !text.includes(norm(w)))) return '';
-  return want.test(`${sum.description || ''} ${sum.extract.slice(0, 300)}`) ? sum.extract.replace(/\s+/g, ' ').slice(0, 700) : '';
-}
-
-/** Tries the page titles directly (1 request each), then a search; `must` words must appear (no namesakes). */
-async function lookup(lang, titles, query, want, must = []) {
-  const base = `https://${lang}.wikipedia.org/api/rest_v1/page/summary/`;
-  for (const title of titles) {
-    const hit = accept(await getJson(base + encodeURIComponent(title.replace(/ /g, '_'))), want, must);
-    if (hit) return hit;
-  }
-  const s = await getJson(`https://${lang}.wikipedia.org/w/rest.php/v1/search/page?q=${encodeURIComponent(query)}&limit=3`);
-  for (const p of (s?.pages || []).slice(0, 2)) {
-    const hit = accept(await getJson(base + encodeURIComponent(p.key)), want, must);
-    if (hit) return hit;
-  }
-  return '';
 }
 
 /** Caches answers, including "nothing found"; temporary failures (network, 429) are not cached. */
@@ -121,20 +96,4 @@ export async function headlines(topic = 'sport') {
     return [...xml.matchAll(/<item>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?(?:<pubDate>([\s\S]*?)<\/pubDate>)?/g)]
       .slice(0, 6).map((m) => dec(m[1]).trim());
   });
-}
-
-/** { artist: '...', song: '...' } with whatever Wikipedia knows ('' when nothing reliable was found). */
-export async function factsFor(artist, title) {
-  // main artist only ("A feat. B", "A, B"); "&" stays, it is part of names like "Kool & The Gang"
-  const a = String(artist || '').split(/\s*(?:,|;|\bfeat\.?|\bft\.?|\bvs\.?|\sx\s)\s*/i)[0].trim();
-  // "Title (Radio Edit)" / "Title - 2010 Remaster" → "Title"
-  const t = String(title || '').replace(/\s*[([].*?[)\]]\s*/g, ' ').replace(/\s+-\s+.*$/, '').trim();
-  if (!a) return { artist: '', song: '' };
-  // the most distinctive word of the artist's name must appear in the page ("Guță", "Kool", "O-Zone")
-  const key = a.split(/\s+/).filter((w) => !/^(the|and|&|de|la|din|si|și)$/i.test(w)).sort((x, y) => y.length - x.length)[0] || a;
-  const artistFacts = await cached(`a:${norm(a)}`, async () =>
-    (await lookup('ro', [a], a, MUSIC, [key])) || lookup('en', [a, `${a} (band)`, `${a} (singer)`], `${a} music`, MUSIC, [key]));
-  const songFacts = t ? await cached(`s:${norm(a)}|${norm(t)}`, async () =>
-    (await lookup('en', [`${t} (${a} song)`, `${t} (song)`, t], `${t} ${a} song`, SONG, [key, t])) || lookup('ro', [t], `${t} ${a}`, SONG, [key, t])) : '';
-  return { artist: artistFacts, song: songFacts };
 }
