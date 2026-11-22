@@ -2,7 +2,7 @@
 import { el } from '../util.js';
 
 const put = (body) => fetch('/api/mcp/config', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => { const j = await r.json(); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; });
-const SCOPES = [['read', 'Read status and search the library (metadata only)'], ['playback', 'Control playback: decks, automix, crossfader, sampler, dedications'], ['broadcast', 'Start and stop the configured broadcast targets (by id; credentials never leave OpenDJ)']];
+const SCOPES = [['read', 'Read status and search the library (metadata only)'], ['playback', 'Control playback and mixing: decks, automix and transitions, mixer, EQ, FX, tempo, key, loops, AI stems, sampler, spoken MC lines'], ['broadcast', 'Start and stop the configured broadcast targets (by id; credentials never leave OpenDJ)']];
 
 export function remoteSettingsPane(app) {
   const root = el('div', { class: 'form remote-settings' });

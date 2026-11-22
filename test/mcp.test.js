@@ -9,6 +9,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { start } from '../server/index.js';
 import { validateArgs, TOOLS, publicTrack } from '../server/mcp.js';
+import { encodeVocalMap } from '../public/js/shared/vocal-map.js';
 
 const quiet = { log() {}, warn() {}, error() {} };
 const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'odj-mcp-'));
@@ -124,7 +125,7 @@ test('protocol: initialize, session id, tools/list, ping, notifications, GET 405
     assert.equal((await s.rpc(null, null, { raw: { jsonrpc: '2.0', method: 'notifications/initialized' } })).status, 202);
     assert.deepEqual((await s.rpc('ping')).body.result, {});
     const tools = (await s.rpc('tools/list')).body.result.tools.map((t) => t.name).sort();
-    assert.deepEqual(tools, ['get_status', 'search_library'], 'only the tools the scopes allow are listed');
+    assert.deepEqual(tools, ['get_deck', 'get_status', 'get_track_details', 'list_genres', 'plan_transition', 'search_library'], 'only the tools the scopes allow are listed');
     assert.equal((await s.rpc('nope/method')).body.error.code, -32601);
     assert.equal((await s.rpc(null, null, { raw: [{ jsonrpc: '2.0', id: 1, method: 'ping' }] })).status, 400, 'no batching');
     assert.equal((await s.rpc('ping', null, { headers: { 'MCP-Protocol-Version': '1999-01-01' } })).status, 400);
@@ -198,7 +199,11 @@ test('injection-safe input schemas: unknown properties, wrong types, bounds, pat
   assert.equal(v('broadcast_start', { target_id: 'a; rm -rf /' }).ok, false);
   assert.equal(v('automix_start', { track_ids: Array(201).fill('a') }).ok, false);
   assert.equal(v('automix_start', { track_ids: [{}] }).ok, false);
-  assert.deepEqual(v('search_library', {}).value, { limit: 20 });
+  assert.deepEqual(v('search_library', {}).value, { random: false, limit: 20 });
+  assert.equal(v('search_library', { key: '13A' }).ok, false);
+  assert.equal(v('set_mixer', { deck: 1, eq_low: -2 }).ok, false);
+  assert.equal(v('set_fx', { deck: 1, type: 'eval' }).ok, false);
+  assert.equal(v('set_loop', { deck: 1, beats: 64 }).ok, false);
   assert.equal(v('get_status', ['x']).ok, false);
   const s = await setup({ port: 7910 });
   try {
@@ -223,10 +228,10 @@ test('no secret leakage: library search returns metadata only; broadcast targets
     await s.init();
     const r = (await s.call('search_library', { query: 'night' })).body.result.structuredContent;
     assert.equal(r.total, 2);
-    for (const x of r.tracks) assert.deepEqual(Object.keys(x).sort(), ['album', 'artist', 'bpm', 'duration', 'genre', 'id', 'key', 'title']);
+    for (const x of r.tracks) assert.deepEqual(Object.keys(x).sort(), ['album', 'artist', 'bpm', 'camelot', 'duration', 'energy', 'genre', 'has_stems', 'id', 'key', 'title', 'year']);
     const all = JSON.stringify(r);
     assert.ok(!all.includes('Secret Folder') && !all.includes('SECRET123') && !all.includes('night.mp3'));
-    assert.deepEqual(Object.keys(publicTrack(t.data.tracks.t2)).sort(), ['album', 'artist', 'bpm', 'duration', 'genre', 'id', 'key', 'title']);
+    assert.deepEqual(Object.keys(publicTrack(t.data.tracks.t2)).sort(), ['album', 'artist', 'bpm', 'camelot', 'duration', 'energy', 'genre', 'has_stems', 'id', 'key', 'title', 'year']);
     // a target that does not exist is refused before anything is relayed
     const nope = await s.call('broadcast_start', { target_id: 'other' });
     assert.equal(nope.body.result.isError, true); assert.match(nope.body.result.content[0].text, /No stream target/);
@@ -285,4 +290,43 @@ test('hosted mode: no separate listener; /api/mcp/rpc needs the login session AN
     assert.equal(ok.status, 200);
     assert.equal((await ok.json()).result.serverInfo.name, 'OpenDJ');
   } finally { app.shutdown(); await app.mcp.close(); app.server.closeAllConnections?.(); await new Promise((r) => app.server.close(r)); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('AI DJ tools: search filters, genres, track details with sections and vocal sections', async () => {
+  const s = await setup({ port: 7912 });
+  try {
+    const t = s.app.library;
+    const vocals = encodeVocalMap(Array.from({ length: 40 }, (_, i) => (i >= 10 && i < 20 ? 1 : 0)));
+    t.data.tracks.a = { id: 'a', title: 'Alpha', artist: 'X', genre: 'House; Deep House', bpm: 124, key: '8A', energy: 6, year: 2019, duration: 200, sourceType: 'local', path: 'C:/m/a.mp3', addedAt: 3,
+      phrases: [{ start: 0, end: 30, type: 'intro', bars: 16 }, { start: 30, end: 170, type: 'drop', bars: 72 }, { start: 170, end: 200, type: 'outro', bars: 16 }], mixIn: 0, mixOut: 170,
+      cues: [{ index: 0, type: 'hot', position: 30, name: 'Drop' }], stems: { ready: true, model: 'htdemucs-v4', vocals } };
+    t.data.tracks.b = { id: 'b', title: 'Beta', artist: 'Y', genre: 'Techno', bpm: 132, key: '3B', energy: 8, year: 2023, duration: 300, sourceType: 'local', path: 'C:/m/b.mp3', addedAt: 2 };
+    t.data.tracks.c = { id: 'c', title: 'Gamma', artist: 'Z', genre: 'House', bpm: 122, key: '9A', energy: 4, duration: 250, sourceType: 'local', path: 'C:/m/c.mp3', addedAt: 1 };
+    await s.init();
+    const ids = async (a) => (await s.call('search_library', a)).body.result.structuredContent.tracks.map((x) => x.id);
+    assert.deepEqual(await ids({ genre: 'house' }), ['a', 'c']);
+    assert.deepEqual(await ids({ bpm_min: 125 }), ['b']);
+    assert.deepEqual((await ids({ compatible_with_key: '8A' })).sort(), ['a', 'c']);
+    assert.deepEqual(await ids({ key: '3B' }), ['b']);
+    assert.deepEqual(await ids({ energy_max: 5 }), ['c']);
+    assert.deepEqual(await ids({ has_stems: true }), ['a']);
+    assert.deepEqual(await ids({ year_from: 2020 }), ['b']);
+    const g = (await s.call('list_genres', {})).body.result.structuredContent;
+    assert.deepEqual(g.genres[0], { genre: 'House', tracks: 2 });
+    assert.ok(g.genres.some((x) => x.genre === 'Deep House'));
+    const d = (await s.call('get_track_details', { track_id: 'a' })).body.result.structuredContent;
+    assert.equal(d.camelot, '8A'); assert.equal(d.mix_out, 170); assert.equal(d.sections.length, 3); assert.equal(d.sections[1].type, 'drop');
+    assert.deepEqual(d.hot_cues, [{ cue: 1, position: 30, name: 'Drop' }]);
+    assert.deepEqual(d.stems, { ready: true, model: 'htdemucs-v4' });
+    assert.deepEqual(d.vocal_sections, [[10, 20]]);
+    assert.ok(!JSON.stringify(d).includes('a.mp3'), 'no file paths');
+    assert.equal((await s.call('get_track_details', { track_id: 'zzz' })).body.result.isError, true);
+    // page tools are relayed with validated arguments
+    const page = await fakePage(s.app, async (tool, args) => ({ tool, args }));
+    const r = (await s.call('set_mixer', { deck: 2, eq_low: -1, vocal: 0 })).body.result.structuredContent;
+    assert.deepEqual(r, { tool: 'set_mixer', args: { deck: 2, eq_low: -1, vocal: 0 } });
+    const q = (await s.call('queue_dedication', { text: 'Make some noise', when: 'now' })).body.result.structuredContent;
+    assert.equal(q.args.when, 'now');
+    page.close?.();
+  } finally { await s.close(); }
 });

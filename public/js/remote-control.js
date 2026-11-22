@@ -3,11 +3,12 @@
 // the action on the live app, shows a notice, and answers through POST /api/mcp/result. Only metadata goes back:
 // no file paths, no source URLs, no stream credentials.
 import { platform } from './platform.js';
+import { planBestTransition } from './mix-planner.js';
 
 const pageId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
 const post = (url, body) => fetch(url, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const deckOf = (app, n) => { const i = Number(n) - 1; if (!Number.isInteger(i) || i < 0 || i >= (app.deckCount || 2) || i > 3) throw new Error(`Deck ${n} is not shown (OpenDJ has ${app.deckCount || 2} decks)`); return app.engine.decks[i]; };
-const LABEL = { play: 'play', pause: 'pause', cue: 'cue', load_track: 'load a track', automix_start: 'start automix', automix_stop: 'stop automix', automix_skip: 'mix to the next track', set_crossfader: 'move the crossfader', trigger_sample: 'fire a sampler pad', queue_dedication: 'queue a dedication', broadcast_start: 'start a broadcast', broadcast_stop: 'stop a broadcast' };
+const LABEL = { set_mixer: 'change the mixer', set_stems: 'change stem levels', prepare_stems: 'prepare AI stems', set_tempo: 'change the tempo', set_key: 'change the key', set_loop: 'set a loop', seek: 'move a deck', set_fx: 'change an effect', automix_queue_next: 'queue tracks next', set_transition: 'choose the next transition', play: 'play', pause: 'pause', cue: 'cue', load_track: 'load a track', automix_start: 'start automix', automix_stop: 'stop automix', automix_skip: 'mix to the next track', set_crossfader: 'move the crossfader', trigger_sample: 'fire a sampler pad', queue_dedication: 'queue a dedication', broadcast_start: 'start a broadcast', broadcast_stop: 'stop a broadcast' };
 
 /** Status snapshot for get_status (metadata only). */
 export async function remoteStatus(app) {
@@ -38,6 +39,124 @@ export async function runRemote(app, tool, args = {}) {
   const E = app.engine;
   switch (tool) {
     case 'get_status': return remoteStatus(app);
+    case 'get_deck': {
+      const d = deckOf(app, args.deck), ch = E.channels[d.index].state, r2 = (x) => (Number.isFinite(x) ? Math.round(x * 100) / 100 : null);
+      return {
+        deck: args.deck, loaded: !!d.track, track: d.track ? { id: d.track.id, title: d.track.title || null, artist: d.track.artist || null } : null,
+        playing: !!d.playing, position: r2(d.position || 0), duration: r2(d.duration || 0), bpm: r2(d.bpm), playing_bpm: r2(d.effectiveBpm || d.bpm), tempo_percent: r2(d.tempo || 0),
+        key: d.track?.key || null, playing_key: d.playingCamelot || null, key_shift: r2(d.keyShift || 0), sync: !!d.syncOn, master: !!d.isMaster,
+        loop: d.loop?.active ? { start: r2(d.loop.start), end: r2(d.loop.end) } : null,
+        hot_cues: (d.hotCues || []).slice(0, 8).map((c) => ({ cue: c.index + 1, position: r2(c.position), name: c.name || null })),
+        stems: { loaded: !!d.stemsReady, loading: !!d.stemsLoading, prepared: !!d.track?.stems?.ready, levels: Object.fromEntries(['vocals', 'drums', 'bass', 'other'].map((n, i) => [n, r2(d.stemLevels?.[i] ?? 1)])) },
+        mixer: { volume: r2(ch.volume), eq_low: r2(ch.eqLow), eq_mid: r2(ch.eqMid), eq_high: r2(ch.eqHigh), filter: r2(ch.filter), vocal: r2(ch.vocal), instrumental: r2(ch.inst), fx: { on: !!ch.fxOn, type: ch.fxType, mix: r2(ch.fxMix), param: r2(ch.fxParam) } },
+      };
+    }
+    case 'plan_transition': {
+      const a = app.automix, lib = app.library;
+      if (args.from_track_id || args.to_track_id) {
+        const from = lib.track(String(args.from_track_id || '')), to = lib.track(String(args.to_track_id || ''));
+        if (!from || !to) throw new Error('Give both from_track_id and to_track_id (ids from search_library)');
+        const auto = app.engine.settings?.stemsAutoLoad !== false;
+        const p = planBestTransition(from, to, { stemsOut: auto && !!from.stems?.ready, stemsIn: auto && !!to.stems?.ready, keySync: !!a.opts.keySync, learning: app.settings.mixLearning });
+        return { from: from.title, to: to.title, ...p };
+      }
+      if (!a.enabled) throw new Error('Automix is not running: give from_track_id and to_track_id');
+      const n = a.nextTransition();
+      if (!n) throw new Error('Nothing queued after the playing track');
+      const planned = a.plans.get(a.nextTrack());
+      return { style: n.style, why: n.why, override: !!n.override, bars: n.length?.bars ?? null, begins_in_seconds: Math.round(n.beginsIn), vocals: planned?.style === n.style ? planned.vocals : null, options: planned?.options || [] };
+    }
+    case 'automix_queue_next': {
+      if (!app.automix.enabled) throw new Error('Automix is not running (automix_start first)');
+      const tracks = args.track_ids.map((id) => app.library.track(String(id))).filter(Boolean);
+      if (!tracks.length) throw new Error('None of those track ids are in the library');
+      app.automix.insertNext(tracks);
+      return { queued_next: tracks.map((t) => t.title) };
+    }
+    case 'set_transition': {
+      const a = app.automix;
+      if (!a.enabled || !a.nextTrack()) throw new Error('Automix has no next transition');
+      if (a.transition) throw new Error('A transition is already running; this sets the next one after it');
+      a.setOverride(a.idx, args.style);
+      const n = a.nextTransition();
+      return { style: n?.style, why: n?.why, bars: n?.length?.bars ?? null };
+    }
+    case 'set_mixer': {
+      const d = deckOf(app, args.deck), ch = E.channels[d.index];
+      const map = { volume: 'volume', eq_low: 'eqLow', eq_mid: 'eqMid', eq_high: 'eqHigh', filter: 'filter', vocal: 'vocal', instrumental: 'inst' };
+      const done = {};
+      for (const [k, key] of Object.entries(map)) if (args[k] != null) { ch.set(key, args[k]); done[k] = ch.state[key]; }
+      if (!Object.keys(done).length) throw new Error('Nothing to change: give volume, eq_low, eq_mid, eq_high, filter, vocal or instrumental');
+      return { deck: args.deck, ...done, ai_stems: !!d.stemsReady };
+    }
+    case 'set_stems': {
+      const d = deckOf(app, args.deck);
+      if (!d.track) throw new Error(`Deck ${args.deck} is empty`);
+      if (!d.stemsReady) {
+        if (d.track.stems?.ready && !d.stemsLoading) d.loadStems().catch(() => {});
+        throw new Error(d.track.stems?.ready ? 'AI stems are loading on this deck: try again in a few seconds' : 'No AI stems for this track yet: prepare_stems first (or use set_mixer vocal / instrumental)');
+      }
+      ['vocals', 'drums', 'bass', 'other'].forEach((n, i) => { if (args[n] != null) { d.setStemMute?.(i, false); d.setStemLevel(i, args[n]); } });
+      return { deck: args.deck, levels: Object.fromEntries(['vocals', 'drums', 'bass', 'other'].map((n, i) => [n, d.stemLevels[i]])) };
+    }
+    case 'prepare_stems': {
+      if (!app.stems) throw new Error('AI stems are not available here');
+      const ids = args.track_ids.filter((id) => app.library.track(String(id)));
+      if (!ids.length) throw new Error('None of those track ids are in the library');
+      const n = await app.stems.enqueue(ids, { interactive: false });
+      return { queued: n || 0, already_prepared: ids.filter((id) => app.library.track(id)?.stems?.ready).length };
+    }
+    case 'set_tempo': {
+      const d = deckOf(app, args.deck);
+      if (!d.track) throw new Error(`Deck ${args.deck} is empty`);
+      const given = ['bpm', 'percent', 'sync'].filter((k) => args[k] != null);
+      if (given.length !== 1) throw new Error('Give exactly one of bpm, percent, sync');
+      if (args.sync) { if (!d.matchTempo()) throw new Error('No master deck with a BPM to sync to'); d.syncOn = true; }
+      else if (args.sync === false) d.syncOn = false;
+      else if (args.bpm != null) { if (!d.bpm) throw new Error('This track has no BPM'); d.syncOn = false; d.setTempo((args.bpm / d.bpm - 1) * 100); }
+      else { d.syncOn = false; d.setTempo(args.percent); }
+      d.emit?.('state');
+      return { deck: args.deck, playing_bpm: Math.round((d.effectiveBpm || d.bpm || 0) * 100) / 100, tempo_percent: Math.round((d.tempo || 0) * 100) / 100, sync: !!d.syncOn };
+    }
+    case 'set_key': {
+      const d = deckOf(app, args.deck);
+      if (!d.track) throw new Error(`Deck ${args.deck} is empty`);
+      if (args.match) { if (!d.keySyncTo()) throw new Error('No key to match (both tracks need a key)'); }
+      else if (args.semitones != null) { if (!d.keyLock) d.setKeyLock(true); d.setKeyShift(args.semitones); }
+      else throw new Error('Give semitones or match: true');
+      return { deck: args.deck, key_shift: d.keyShift, playing_key: d.playingCamelot || null };
+    }
+    case 'set_loop': {
+      const d = deckOf(app, args.deck);
+      if (!d.track) throw new Error(`Deck ${args.deck} is empty`);
+      if (!args.beats) { d.exitLoop(); return { deck: args.deck, loop: null }; }
+      if (!d.bpm) throw new Error('This track has no beat grid');
+      const s = d.floorBeat ? d.floorBeat(d.position) : d.position;
+      d.setLoop(s, s + args.beats * d.beatLen);
+      return { deck: args.deck, loop: { start: Math.round(s * 100) / 100, beats: args.beats } };
+    }
+    case 'seek': {
+      const d = deckOf(app, args.deck);
+      if (!d.track) throw new Error(`Deck ${args.deck} is empty`);
+      const onAir = d.playing && E.channels[d.index].state.volume > 0.05;
+      if (onAir && !args.force) throw new Error(`Deck ${args.deck} is playing on air: give force: true to jump anyway`);
+      let to = null;
+      if (args.seconds != null) to = args.seconds;
+      else if (args.hot_cue != null) { const c = d.hotCue(args.hot_cue - 1); if (!c) throw new Error(`No hot cue ${args.hot_cue} on this track`); to = c.position; }
+      else if (args.section != null) { const p = app.library.track(d.track.id)?.phrases?.[args.section]; if (!p) throw new Error('No such section (see get_track_details)'); to = p.start; }
+      else throw new Error('Give seconds, hot_cue or section');
+      d.seek(Math.min(to, Math.max(0, (d.duration || to) - 0.5)));
+      return { deck: args.deck, position: Math.round((d.position || 0) * 100) / 100 };
+    }
+    case 'set_fx': {
+      const d = deckOf(app, args.deck), ch = E.channels[d.index];
+      if (args.type != null) ch.set('fxType', args.type);
+      if (args.mix != null) ch.set('fxMix', args.mix);
+      if (args.param != null) ch.set('fxParam', args.param);
+      if (args.beats != null) ch.set('fxBeats', args.beats);
+      if (args.on != null) ch.set('fxOn', args.on);
+      return { deck: args.deck, on: !!ch.state.fxOn, type: ch.state.fxType, mix: ch.state.fxMix, param: ch.state.fxParam, beats: ch.state.fxBeats };
+    }
     case 'play': { const d = deckOf(app, args.deck); if (!d.track) throw new Error(`Deck ${args.deck} is empty`); await E.resume(); if (!d.playing) d.play(); return { deck: args.deck, playing: true }; }
     case 'pause': { const d = deckOf(app, args.deck); if (d.playing) d.pause(); return { deck: args.deck, playing: false }; }
     case 'cue': { const d = deckOf(app, args.deck); if (!d.track) throw new Error(`Deck ${args.deck} is empty`); if (d.playing) d.pause(); d.seek(d.cuePoint || 0); return { deck: args.deck, position: +(d.position || 0).toFixed(2) }; }
@@ -68,8 +187,8 @@ export async function runRemote(app, tool, args = {}) {
     case 'set_crossfader': { const v = Number(args.position); if (!(v >= -1 && v <= 1)) throw new Error('position must be -1..1'); E.setCrossfader(v); return { crossfader: E.crossfader }; }
     case 'trigger_sample': { const i = Number(args.pad) - 1; if (!(i >= 0 && i < 8)) throw new Error('pad must be 1-8'); await E.resume(); E.sampler.trigger(i); return { pad: args.pad, name: E.sampler.slots[i]?.name }; }
     case 'queue_dedication': {
-      const d = app.queueDedication(String(args.text || ''), { lang: args.language === 'ro' ? 'ro' : 'en', overlay: args.show_on_screen !== false, meta: args.stream_metadata !== false, from: 'mcp' });
-      return { queued: true, text: d.text, language: d.lang };
+      const d = app.queueDedication(String(args.text || ''), { lang: args.language === 'ro' ? 'ro' : 'en', when: args.when === 'now' ? 'now' : 'phrase', overlay: args.show_on_screen !== false, meta: args.stream_metadata !== false, from: 'mcp' });
+      return { queued: true, text: d.text, language: d.lang, when: d.when };
     }
     case 'broadcast_start': case 'broadcast_stop': {
       const b = app.recording?.broadcaster; if (!b) throw new Error('Broadcasting is not available here');
@@ -96,7 +215,7 @@ export async function setupRemoteControl(app, api) {
       if (page !== pageId || typeof id !== 'string') return;
       try {
         const result = await runRemote(app, tool, args || {});
-        if (tool !== 'get_status') app.toast?.(`AI assistant: ${LABEL[tool] || tool}`);
+        if (!['get_status', 'get_deck', 'plan_transition'].includes(tool)) app.toast?.(`AI assistant: ${LABEL[tool] || tool}`);
         await post('/api/mcp/result', { id, result });
       } catch (e) { await post('/api/mcp/result', { id, error: String(e?.message || e).slice(0, 300) }); }
     },
