@@ -23,6 +23,15 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.5.2
+- **Smarter Automix transitions.** The *Auto* style now plans every transition: it tries each style at 4 to 32 bars and keeps the one that fits the two tracks best: tempo gap, key, energy, genre, the outro and intro phrases, and where the vocals are. Two voices no longer clash: the incoming vocals wait until the bass swap. The queue shows why each transition was chosen. It runs on any device, with no graphics card needed.
+- **Stem swap** transition style: with AI stems on both decks, the incoming drums come in first, then the bass, and the vocals last.
+- **Automix learns your taste:** when you change a planned transition in the queue, Auto leans your way next time (Settings → Automix can forget it).
+- **AI stems for your whole library, in the background** (Settings → AI stems, off by default): OpenDJ separates the tracks you play most first, once per track, up to a disk limit you set. Tracks you load or Automix needs always go first. A new *Faster* quality option separates about 15 % quicker.
+- **Remote control (MCP) for AI assistants:** many new tools, so an assistant you connect can pick tracks by genre, BPM, key and energy, read a track's sections and vocals, plan transitions, mix (EQ, filter, FX, tempo, key, loops), build mashups with AI stems, and speak over the mix like an MC. OpenDJ itself contains no AI: it only offers the tools, with the same token, scopes and audit log as before.
+- **4 decks:** the MASTER section is no longer hidden under decks 2 and 4.
+- **Mixer:** the MC button is gone, giving MIC / TALK more room; the SMART row is no longer cut off. FX assign buttons show the right state.
+
 ### New in 0.5.1
 - **AI stems prepared by OpenDJ itself, ahead of time.** The desktop app and the web server (Docker included) now separate stems natively in a background process, on the graphics card when there is one (DirectML on Windows, CoreML on Apple Silicon, CUDA on Linux) or on all CPU cores. Phones and browsers connected to it just ask, so the page no longer freezes while stems are prepared. Automix's next two tracks and every track you load on a deck are prepared automatically (Settings → AI stems). The browser engine remains as the fallback.
 - **Romanian interface.** Settings → Appearance → Language: Auto, English or Română. The whole app is translated, including the login page, video output and Controller Mapper.
