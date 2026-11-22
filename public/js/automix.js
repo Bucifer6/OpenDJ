@@ -4,7 +4,9 @@
 // shuffled, ordered by smart mix (compatibility score, see smartmix.js) or picked live while playing.
 // Uses the track structure (phrases, mixIn / mixOut from analysis-core) when available: transitions start at the
 // outgoing track's outro, the incoming track starts at its first downbeat so phrase boundaries line up, and the
-// transition length adapts to the outro (bounded by settings.automix.transitionBeats).
+// transition length adapts to the outro (bounded by settings.automix.transitionBeats), or with
+// settings.automix.lengthMode 'auto' is chosen per transition from the outro / intro phrases, BPM gap, energy and key
+// (autoTransitionLength).
 import { Emitter } from './util.js';
 import { toCamelot, camelotCompatible, analyzeStructure } from './audio/analysis-core.js';
 import { smartMix, liveNext, shuffle, camelotRelation, genreSimilarity } from './smartmix.js';
@@ -117,6 +119,77 @@ export function planMixOut(t, { transitionBeats = 32, skipSilence = true } = {})
   const minStart = end - Math.min(lenSec, dur * 0.4);
   if (!(start <= minStart)) start = Math.max(0, minStart);
   return { start, len: Math.max(0, end - start), end, phrase: false };
+}
+
+/** Bounds of the automatic transition length (bars). */
+export const AUTO_LENGTH_MIN_BARS = 4, AUTO_LENGTH_MAX_BARS = 32;
+/** Auto length per style: [usual bars without structure info, most bars it is stretched to]. */
+const AUTO_LENGTH_STYLE = { blend: [16, 32], filter: [16, 16], crossfade: [8, 16], bassswap: [4, 4] }; // bass swap: planTransition keeps it to 16 beats
+/** Round down to a phrase: multiples of 8 bars from 8 bars up, else 4 bars. */
+const phraseBars = (b) => (b >= 8 ? Math.floor(b / 8 + 1e-6) * 8 : AUTO_LENGTH_MIN_BARS);
+
+/** Bars of the trailing outro of an outgoing track (from the analysed phrases / mix-out point), or null if unknown. */
+export function outroBars(t) {
+  if (!t?.bpm) return null;
+  const bar = 240 / t.bpm, end = Number(t.endTime) || Number(t.duration) || 0;
+  if (!end) return null;
+  const ph = Array.isArray(t.phrases) ? t.phrases : [];
+  let start = null;
+  if (ph.length && ph.at(-1).type === 'outro') { let i = ph.length - 1; while (i > 0 && ph[i - 1].type === 'outro') i--; if (i > 0) start = ph[i].start; }
+  if (start == null && Number.isFinite(Number(t.mixOut)) && Number(t.mixOut) > 0) start = Number(t.mixOut);
+  if (start == null || !(end > start)) return null;
+  return Math.round((end - start) / bar);
+}
+
+/** Bars of the intro of an incoming track, counted from where automix starts it; 0 = it starts on a main phrase; null = unknown. */
+export function introBars(t) {
+  if (!t?.bpm) return null;
+  const ph = Array.isArray(t.phrases) ? t.phrases : [];
+  if (!ph.length) return null;
+  if (ph[0].type !== 'intro') return 0;
+  const main = ph.find((p) => p.type !== 'intro');
+  if (!main) return null;
+  return Math.max(0, Math.round((main.start - incomingStart(t)) / (240 / t.bpm)));
+}
+
+/**
+ * Automatic transition length for one transition ("Auto (from the tracks)"): as long as the outgoing outro and the
+ * incoming intro allow (the shorter one), capped per style and shortened for big tempo differences, energy jumps and
+ * key clashes; whole phrases (4 bars, then multiples of 8) between 4 and 32 bars.
+ * out / inn: { bpm, duration, endTime, mixIn, mixOut, phrases, energy, key }.
+ * @returns {{ bars: number, beats: number, why: string }}
+ */
+export function autoTransitionLength(out, inn, style, { keySync = false } = {}) {
+  style = normStyle(style);
+  const drop = DROP_STYLES.has(style);
+  const [usual, most] = AUTO_LENGTH_STYLE[style] || [8, 16];
+  const ob = outroBars(out), ib = drop ? null : introBars(inn);
+  const reasons = [];
+  let bars, cap = drop ? AUTO_LENGTH_MAX_BARS : most;
+  if (ob == null && ib == null) { bars = usual; reasons.push(drop ? 'no outro analysis' : 'no phrase analysis: usual length for the style'); }
+  else {
+    const known = [ob, ib].filter((x) => x != null);
+    bars = Math.min(...known);
+    if (ob != null) reasons.push(`${ob}-bar outro`);
+    if (ib != null) reasons.push(ib === 0 ? 'incoming track starts without an intro' : `${ib}-bar intro`);
+    if (ib === 0) bars = Math.min(ob ?? 8, 8);
+    if (bars > cap) reasons.push(`${STYLE_LABEL[style]} max ${cap} bars`);
+  }
+  if (!drop) {
+    const ba = Number(out?.bpm) || 0, bb = Number(inn?.bpm) || 0, d = ba && bb ? tempoDistance(ba, bb) : 0;
+    const pct = Math.round((Math.exp(d) - 1) * 100);
+    if (d > 0.04 && cap > 8) { cap = 8; reasons.push(`${pct} % BPM gap: shorter`); }
+    else if (d > 0.02 && cap > 16) { cap = 16; reasons.push(`${pct} % BPM gap`); }
+    const ea = Number(out?.energy), eb = Number(inn?.energy);
+    if (Number.isFinite(ea) && Number.isFinite(eb) && ea > 0 && eb > 0) {
+      const de = Math.abs(eb - ea);
+      if (de >= 3 && cap > 8) { cap = 8; reasons.push(`energy ${eb > ea ? 'jump' : 'drop'} ${Math.round(ea)} → ${Math.round(eb)}`); }
+      else if (de >= 2 && cap > 16) { cap = 16; reasons.push(`energy ${Math.round(ea)} → ${Math.round(eb)}`); }
+    }
+    if (!keySync && camelotRelation(out?.key, inn?.key).kind === 'clash' && cap > 8) { cap = 8; reasons.push('key clash: short overlap'); }
+  }
+  bars = phraseBars(Math.max(AUTO_LENGTH_MIN_BARS, Math.min(bars, cap, AUTO_LENGTH_MAX_BARS)));
+  return { bars, beats: bars * 4, why: reasons.join(', ') };
 }
 
 /** Position (track seconds) to start the incoming track: its mix-in point (first downbeat), else first beat. */
@@ -548,17 +621,52 @@ export class AutoMix extends Emitter {
 
   mixOutPoint(deck) { return planMixOut(this.info(deck), this.opts); }
 
+  /** Library copy of a track (analysed fields: energy, key, phrases), else the given object. */
+  fresh(t) { return (t && this.app.library?.track?.(t.id)) || t; }
+
+  /**
+   * Transition length for a pair: { beats, bars, auto, why }. Fixed: settings.automix.transitionBeats; auto
+   * (lengthMode 'auto'): picked from the tracks. out / inn: structure info ({ bpm, phrases, mixOut, ... }), merged
+   * over the library copies for energy and key.
+   */
+  lengthFor(out, inn, style, outTrack = null, innTrack = null) {
+    const beats = Number(this.opts.transitionBeats) || 32;
+    if (this.opts.lengthMode !== 'auto') return { beats, bars: beats / 4, auto: false, why: '' };
+    const o = { ...this.fresh(outTrack), ...out }, i = { ...this.fresh(innTrack), ...inn };
+    for (const k of ['energy', 'key']) { if (o[k] == null) o[k] = this.fresh(outTrack)?.[k]; if (i[k] == null) i[k] = this.fresh(innTrack)?.[k]; }
+    return { ...autoTransitionLength(o, i, style, { keySync: !!this.opts.keySync }), auto: true };
+  }
+
+  /** Structure info for a queued track that is not on a deck yet (library copy). */
+  trackInfo(t) {
+    const f = this.fresh(t) || {};
+    return { bpm: f.bpm, gridOffset: f.gridOffset, duration: f.duration, startTime: f.startTime, endTime: f.endTime, mixIn: f.mixIn, mixOut: f.mixOut, downbeat: f.downbeat, phrases: f.phrases, energy: f.energy, key: f.key };
+  }
+
+  /** Length of the transition into queue entry i with the given style (for the queue panel). */
+  lengthForQueue(i, style) {
+    const t = this.queue[i]; if (!t || !style) return null;
+    const cur = this.current, nextDeck = cur ? this.other(cur) : null;
+    const out = i === this.idx && cur?.track ? this.info(cur) : this.trackInfo(this.queue[i - 1]);
+    const outTrack = i === this.idx && cur?.track ? cur.track : this.queue[i - 1];
+    const inn = i === this.idx && nextDeck?.track?.id === t.id && !nextDeck.loading ? this.info(nextDeck) : this.trackInfo(t);
+    return this.lengthFor(out, inn, style, outTrack, t);
+  }
+
   /** The next transition: { style, why, begin (outgoing position), drop?, beginsIn (s) } (cached until something changes). */
   nextTransition() {
     const cur = this.current, next = this.nextTrack();
     if (!this.enabled || !cur?.track || !next) return null;
-    const key = `${cur.track.id}>${next.id}|${this.opts.style}|${this.opts.transitionBeats}|${this.opts.varyStyles}|${this.overrides.get(next) || ''}|${cur.bpm}|${cur.gridOffset}`;
+    const nd = this.other(cur), innReady = nd?.track?.id === next.id && !nd.loading;
+    const key = `${cur.track.id}>${next.id}|${this.opts.style}|${this.opts.transitionBeats}|${this.opts.lengthMode}|${this.opts.keySync}|${this.opts.varyStyles}|${this.overrides.get(next) || ''}|${cur.bpm}|${cur.gridOffset}|${innReady}`;
     if (!this.upcoming || this.upcoming.key !== key) {
       const s = this.styleFor(this.idx, this.app.library?.track?.(cur.track.id) || cur.track);
-      this.upcoming = { key, ...s, plan: planTransition(this.info(cur), s.style, this.opts) };
+      const oi = this.info(cur);
+      const length = this.lengthFor(oi, innReady ? this.info(nd) : this.trackInfo(next), s.style, cur.track, next);
+      this.upcoming = { key, ...s, length, plan: planTransition(oi, s.style, { ...this.opts, transitionBeats: length.beats }) };
     }
     const u = this.upcoming;
-    return { style: u.style, why: u.why, override: u.override, begin: u.plan.begin, drop: u.plan.drop, beginsIn: Math.max(0, (u.plan.begin - cur.position) / (cur.rate || 1)) };
+    return { style: u.style, why: u.why, override: u.override, begin: u.plan.begin, drop: u.plan.drop, length: u.length, beginsIn: Math.max(0, (u.plan.begin - cur.position) / (cur.rate || 1)) };
   }
 
   tick() {
@@ -631,7 +739,8 @@ export class AutoMix extends Emitter {
       style = de >= 2 ? 'cut' : 'echo';
       why = `${why ? why + '; ' : ''}${Math.round(outBpm)} → ${Math.round(inn.bpm)} BPM is too far to beat-match: ${STYLE_LABEL[style]} instead of ${was}`;
     }
-    const plan = planTransition(oi, style, this.opts, { pos, immediate: immediate || !out.playing });
+    const length = this.lengthFor(oi, ii, style, out.track, inn.track);
+    const plan = planTransition(oi, style, { ...this.opts, transitionBeats: length.beats }, { pos, immediate: immediate || !out.playing });
     this.prepare(inn);
     const chI = this.engine.channels[inn.index], chO = this.engine.channels[out.index];
     chI.set('volume', 0);
@@ -643,7 +752,7 @@ export class AutoMix extends Emitter {
       if (keysClash(outKey, inn.camelot || inn.track?.key)) { try { inn.keySyncTo(out); } catch (e) { console.warn('keySyncTo failed', e); } }
     }
     const fx = { ...chO.state }; // FX / EQ settings to restore on the outgoing channel afterwards
-    const tr = { out, inn, style, why, t0: performance.now(), fxSaved: { fxType: fx.fxType, fxMix: fx.fxMix, fxParam: fx.fxParam, fxBeats: fx.fxBeats, fxOn: fx.fxOn } };
+    const tr = { out, inn, style, why, length: immediate || !out.playing ? null : length, t0: performance.now(), fxSaved: { fxType: fx.fxType, fxMix: fx.fxMix, fxParam: fx.fxParam, fxBeats: fx.fxBeats, fxOn: fx.fxOn } };
     if (DROP_STYLES.has(style)) {
       // the incoming track waits at its first downbeat and drops in on the outgoing track's bar line
       inn.seek(incomingStart(ii));
@@ -673,7 +782,7 @@ export class AutoMix extends Emitter {
     this._lastStyle = style;
     this.idx++;
     this.upcoming = null;
-    this.emit('transition', { style, why });
+    this.emit('transition', { style, why, length: tr.length });
     this.emit('state');
   }
 

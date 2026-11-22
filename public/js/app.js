@@ -10,7 +10,7 @@ import { buildMixer } from './ui/mixer-ui.js';
 import { DetailWaveform } from './ui/waveform.js';
 import { LibraryUI } from './ui/library-ui.js';
 import { Dialogs } from './ui/dialogs.js';
-import { AutoMix, STYLES, STYLE_LABEL } from './automix.js';
+import { AutoMix, STYLES, STYLE_LABEL, DROP_STYLES } from './automix.js';
 import { MidiManager } from './midi/midi.js';
 import { Sequencer } from './audio/sequencer.js';
 import { applyTheme } from './ui/themes.js';
@@ -548,21 +548,31 @@ class App {
       const n = a.shuffleRemaining();
       this.toast(n ? `Shuffled ${n} upcoming track(s)` : a.live && a.enabled ? 'Live smart mix picks each next track itself: nothing to shuffle' : 'Nothing to shuffle');
     } }, icon('shuffle'), 'Shuffle');
+    // chosen transition length: "16 bars (auto: 16-bar outro, 32-bar intro)"; drop styles: where the drop lands
+    const lengthText = (len, style) => {
+      if (!len || !style) return '';
+      const bars = `${len.bars} bar${len.bars === 1 ? '' : 's'}`;
+      const what = DROP_STYLES.has(style) ? `drop after ${bars} of outro` : bars;
+      return len.auto ? `${what} (auto${len.why ? ': ' + len.why : ''})` : what;
+    };
     const render = () => {
       shuffleBtn.disabled = (!!a.live && a.enabled) || a.queue.length - a.idx < 2;
       const nt = a.enabled ? a.nextTransition() : null;
-      const key = `${a.enabled}|${a.idx}|${a.queue.length}|${a.queue.slice(a.idx, a.idx + 50).map((t) => t.id).join()}|${[...a.overrides.values()].join()}|${a.opts.style}|${!!a.transition}`;
-      head.textContent = !a.enabled ? 'Automix is off' : a.transition ? `Mixing now: ${STYLE_LABEL[a.transition.style]}${a.transition.why ? ` (${a.transition.why})` : ''}`
-        : nt ? `Next transition: ${STYLE_LABEL[nt.style]} in ${fmtTime(nt.beginsIn).slice(0, 5)} — ${nt.why}` : 'No next track';
+      const key = `${a.enabled}|${a.idx}|${a.queue.length}|${a.queue.slice(a.idx, a.idx + 50).map((t) => t.id).join()}|${[...a.overrides.values()].join()}|${a.opts.style}|${a.opts.lengthMode}|${a.opts.transitionBeats}|${!!a.transition}|${nt?.length?.bars}|${nt?.length?.why}`;
+      const trLen = a.transition?.length ? `, ${lengthText(a.transition.length, a.transition.style)}` : '';
+      head.textContent = !a.enabled ? 'Automix is off' : a.transition ? `Mixing now: ${STYLE_LABEL[a.transition.style]}${trLen}${a.transition.why ? ` (${a.transition.why})` : ''}`
+        : nt ? `Next transition: ${STYLE_LABEL[nt.style]}, ${lengthText(nt.length, nt.style)} in ${fmtTime(nt.beginsIn).slice(0, 5)} — ${nt.why}` : 'No next track';
       if (key === lastKey) return;
       lastKey = key;
       const rows = [];
       for (let i = a.idx; i < Math.min(a.queue.length, a.idx + 50); i++) {
         const t = a.queue[i], st = a.styleFor(i, i === a.idx ? (a.current?.track && this.library.track(a.current.track.id)) || a.current?.track : null);
+        const len = i === a.idx && nt ? nt.length : i > 0 ? a.lengthForQueue(i, st?.style) : null;
+        const lenText = lengthText(len, st?.style);
         const name = `${t.artist ? t.artist + ' – ' : ''}${t.title}`;
         const li = el('li', { class: 'am-q-item', 'data-id': t.id, 'data-i': i, draggable: 'true', tabindex: '0', title: `${name}\nDrag to reorder (or Alt+↑/↓)` },
           el('div', { class: 'am-q-title' }, name),
-          el('div', { class: 'am-q-meta' }, styleSelect(i), el('span', { class: 'hint' }, ` ${STYLE_LABEL[st?.style] || ''}${st?.why && /too far/.test(st.why) ? ` (${st.why.split('; ').pop()})` : ''}${a.reasons.get(t) ? ` · ${a.reasons.get(t)}` : ''}`)),
+          el('div', { class: 'am-q-meta' }, styleSelect(i), el('span', { class: 'hint' }, ` ${STYLE_LABEL[st?.style] || ''}${st?.why && /too far/.test(st.why) ? ` (${st.why.split('; ').pop()})` : ''}${lenText ? ` · ${lenText}` : ''}${a.reasons.get(t) ? ` · ${a.reasons.get(t)}` : ''}`)),
           el('div', { class: 'am-q-acts' },
             i > a.idx ? el('button', { class: 'btn xs icon-only', title: 'Play next', 'aria-label': 'Play next', onclick: () => a.move(i, a.idx) }, icon('chevron-up')) : null,
             el('button', { class: 'btn xs icon-only', title: 'Remove from the queue', 'aria-label': 'Remove from the queue', onclick: () => a.remove(i) }, icon('x'))));
