@@ -1,6 +1,9 @@
 // Pop-out output window (public/video.html): shows the main window's master video canvas stream full-size,
 // plus its own muted YouTube IFrame player kept in sync by postMessage. Black when nothing plays.
 import { loadYouTubeApi } from './youtube.js';
+import { initI18n } from '../i18n.js';
+
+initI18n(); // interface language stored by the main window
 
 const video = document.getElementById('out');
 const ytBox = document.getElementById('yt');

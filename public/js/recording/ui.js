@@ -7,6 +7,7 @@ import { Broadcaster } from './broadcaster.js';
 import { recApi, castApi } from './http.js';
 import { hms, liveDetail } from './status.js';
 import { platform, unavailable } from '../platform.js';
+import { t } from '../i18n.js';
 
 const mb = (n) => (n >= 1073741824 ? `${(n / 1073741824).toFixed(2)} GB` : `${(n / 1048576).toFixed(1)} MB`);
 const fill = (node, ...kids) => node.replaceChildren(...kids.flat().filter((k) => k != null && k !== false));
@@ -48,7 +49,8 @@ export function setupRecording(app) {
     // ON AIR only once at least one output really is live; until then say what is happening
     const onAir = outs.some((o) => o.state === 'live');
     const liveTxt = !broadcaster.live ? 'LIVE' : onAir ? `ON AIR${listeners ? ` · ${listeners}` : ''}` : outs.some((o) => o.state === 'reconnecting' || o.state === 'error') ? 'RECONNECTING…' : 'CONNECTING…';
-    if (liveLbl.textContent !== liveTxt) liveLbl.textContent = liveTxt;
+    const liveShown = t(liveTxt); // translated before the comparison (see i18n.js)
+    if (liveLbl.textContent !== liveShown) liveLbl.textContent = liveShown;
     if (sizeEl.textContent !== (recorder.recording ? mb(recorder.bytes) : '')) sizeEl.textContent = recorder.recording ? mb(recorder.bytes) : '';
     if (broadcaster.live && !onAir && outs[0]?.error && outs[0].error !== lastCastError) { lastCastError = outs[0].error; toast(`⚠ Broadcast: ${outs[0].error}`); }
     if (onAir) lastCastError = null;

@@ -43,6 +43,7 @@ const SCHEMA = {
   },
   accentColor: (v) => (v === '' || v == null ? '' : typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : undefined),
   uiScale: num(50, 200),
+  language: oneOf('auto', 'en', 'ro'), // interface language (public/js/i18n.js); 'auto' = the browser's
   layoutMode: oneOf('classic', 'performance', 'waveform'),
   libraryRows: oneOf('compact', 'art'),
   masterDeviceId: str(512), cueDeviceId: str(512), micDeviceId: str(512), midiClockOutput: str(512),
