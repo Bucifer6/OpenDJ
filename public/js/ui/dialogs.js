@@ -25,6 +25,10 @@ const MIX_PROFILES = [
   { id: 'quick', label: 'Quick cuts', priority: 'variety', shape: 'steady', style: 'cut', bars: 4, vary: false, keySync: false },
 ];
 const BAR_CHOICES = [4, 8, 16, 32];
+/** Transition length menu: "Auto (from the tracks)" plus the fixed lengths; value 'auto' or a bar count. */
+const LENGTH_CHOICES = [['auto', 'Auto (from the tracks)'], ...BAR_CHOICES.map((b) => [String(b), `${b} bars`])];
+const lengthValue = (o) => (o.lengthMode === 'auto' ? 'auto' : String(BAR_CHOICES.reduce((a, b) => (Math.abs(b * 4 - o.transitionBeats) < Math.abs(a * 4 - o.transitionBeats) ? b : a), 8)));
+const lengthPatch = (v, o) => (v === 'auto' ? { lengthMode: 'auto', transitionBeats: o.transitionBeats } : { lengthMode: 'fixed', transitionBeats: Number(v) * 4 });
 const styleValue = (s) => (s === 'auto' ? 'auto' : normStyle(s));
 let modalSeq = 0;
 
@@ -297,8 +301,8 @@ export class Dialogs {
     const keySync = el('input', { type: 'checkbox', checked: !!o.keySync });
     const vary = el('input', { type: 'checkbox', checked: !!o.varyStyles, 'data-am': 'vary' });
     const smartStart = el('input', { type: 'checkbox', checked: o.smartStart !== false });
-    const bars = el('select', { class: 'sel', 'data-am': 'bars' }, ...BAR_CHOICES.map((b) => el('option', { value: b }, `${b} bars`)));
-    bars.value = String(BAR_CHOICES.reduce((a, b) => (Math.abs(b * 4 - o.transitionBeats) < Math.abs(a * 4 - o.transitionBeats) ? b : a), 8));
+    const bars = el('select', { class: 'sel', 'data-am': 'bars' }, ...LENGTH_CHOICES.map(([v, l]) => el('option', { value: v }, l)));
+    bars.value = lengthValue(o);
     const big = tracks.length > 200;
     const limit = el('input', { class: 'inp', type: 'number', min: 2, max: tracks.length, value: big ? 40 : tracks.length, 'data-am': 'limit' });
     const smartBox = smartControls(o);
@@ -373,7 +377,7 @@ export class Dialogs {
       } catch (error) { this.app.toast('Local DJ: ' + error.message); return; }
     }
     const sm = smartBox.value();
-    await this.app.setSetting('automix', { ...o, style: style.value, transitionBeats: Number(bars.value) * 4, keySync: keySync.checked,
+    await this.app.setSetting('automix', { ...o, style: style.value, ...lengthPatch(bars.value, o), keySync: keySync.checked,
       varyStyles: vary.checked, shape: shape.value, preset: sm.preset, sliders: sm.sliders,
       shuffle: modeSel.value === 'shuffle', smartStart: smartStart.checked, profile: profile.value });
     return this.app.startAutomix(tracks, { mode: modeSel.value, shape: shape.value, sliders: sm.sliders, limit: Number(limit.value) || undefined });
@@ -445,7 +449,7 @@ export class Dialogs {
     const amSmart = smartControls(am, () => amSet(amSmart.value()));
     const automix = el('div', { class: 'form' },
       field('Default transition style', sel(styleValue(am.style), STYLES, (v) => amSet({ style: v })), 'Auto picks a style per transition from the BPM difference, energy change, key and genre. You can override single transitions in the automix queue.'),
-      field('Transition length', sel(BAR_CHOICES.reduce((a, b) => (Math.abs(b * 4 - am.transitionBeats) < Math.abs(a * 4 - am.transitionBeats) ? b : a), 8), BAR_CHOICES.map((b) => [b, `${b} bars`]), (v) => amSet({ transitionBeats: Number(v) * 4 }))),
+      field('Transition length', sel(lengthValue(am), LENGTH_CHOICES, (v) => amSet(lengthPatch(v, app.settings.automix))), 'Auto picks the length of each transition from the tracks: the outgoing outro and incoming intro phrases, the BPM gap, energy change and key (4 to 32 bars, whole phrases). The automix queue shows the chosen length and why.'),
       el('label', { class: 'check' }, chk(am.varyStyles, (v) => amSet({ varyStyles: v })), ' Vary styles (alternate between styles that suit each transition)'),
       el('label', { class: 'check' }, chk(am.keepSync, (v) => amSet({ keepSync: v })), ' Beat-match transitions'),
       el('label', { class: 'check' }, chk(am.skipSilence, (v) => amSet({ skipSilence: v })), ' Skip silence at track ends'),
