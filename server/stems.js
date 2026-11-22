@@ -20,6 +20,25 @@ import { createRequire } from 'node:module';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { guardedFetch } from './netguard.js';
+import { vocalPresence, encodeVocalMap } from '../public/js/shared/vocal-map.js';
+
+/** Mean square (0..1) of each second of an interleaved stereo s16le file. */
+export async function meanSquarePerSecond(file, rate = STEM_RATE) {
+  const out = [];
+  let acc = 0, n = 0, carry = null;
+  for await (let chunk of fs.createReadStream(file, { highWaterMark: 1 << 20 })) {
+    if (carry) { chunk = Buffer.concat([carry, chunk]); carry = null; }
+    const usable = chunk.length - (chunk.length % 4);
+    if (usable < chunk.length) carry = chunk.subarray(usable);
+    for (let i = 0; i < usable; i += 4) {
+      const l = chunk.readInt16LE(i) / 32768, r = chunk.readInt16LE(i + 2) / 32768;
+      acc += (l * l + r * r) * 0.5;
+      if (++n === rate) { out.push(acc / n); acc = 0; n = 0; }
+    }
+  }
+  if (n > rate / 4) out.push(acc / n);
+  return out;
+}
 
 export const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'];
 export const STEM_RATE = 44100;
@@ -383,9 +402,18 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     const ff = ffmpeg();
     const flac = !!ff?.encoders?.flac;
     for (const s of STEM_NAMES) {
+      const st = await fs.promises.stat(path.join(u.dir, `${s}.raw`));
+      if (st.size !== u.frames * 4) throw bad(`Stem "${s}" is incomplete (${st.size} of ${u.frames * 4} bytes)`);
+    }
+    // where the vocals are (one value per second): Automix's transition planner keeps two vocals from overlapping
+    let vocals = null;
+    try {
+      const ms = await Promise.all(STEM_NAMES.map((s) => meanSquarePerSecond(path.join(u.dir, `${s}.raw`), u.sampleRate)));
+      vocals = encodeVocalMap(vocalPresence(ms[STEM_NAMES.indexOf('vocals')], ms));
+    } catch (e) { console.warn('[stems] vocal map', e.message); }
+    for (const s of STEM_NAMES) {
       const raw = path.join(u.dir, `${s}.raw`);
       const st = await fs.promises.stat(raw);
-      if (st.size !== u.frames * 4) throw bad(`Stem "${s}" is incomplete (${st.size} of ${u.frames * 4} bytes)`);
       if (flac) await run(ff.path, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 's16le', '-ar', String(u.sampleRate), '-ac', '2', '-i', raw, '-c:a', 'flac', '-compression_level', '5', path.join(u.dir, `${s}.flac`)]);
       else {
         const out = fs.createWriteStream(path.join(u.dir, `${s}.wav`));
@@ -394,13 +422,13 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
       }
       await fs.promises.rm(raw, { force: true });
     }
-    const meta = { model: u.model, backend: u.backend, format: flac ? 'flac' : 'wav', sampleRate: u.sampleRate, frames: u.frames, stems: STEM_NAMES, at: Date.now() };
+    const meta = { model: u.model, backend: u.backend, format: flac ? 'flac' : 'wav', sampleRate: u.sampleRate, frames: u.frames, stems: STEM_NAMES, at: Date.now(), ...(vocals ? { vocals } : {}) };
     await fs.promises.writeFile(path.join(u.dir, 'meta.json'), JSON.stringify(meta));
     const dest = trackDir(t.id);
     await fs.promises.rm(dest, { recursive: true, force: true });
     await fs.promises.rename(u.dir, dest);
     uploads.delete(t.id);
-    const value = { model: u.model, ready: true, format: meta.format, at: meta.at };
+    const value = { model: u.model, ready: true, format: meta.format, at: meta.at, ...(vocals ? { vocals } : {}) };
     setTrackStems(t.id, value);
     emit('stems', { id: t.id, ready: true, stems: value });
     return value;
