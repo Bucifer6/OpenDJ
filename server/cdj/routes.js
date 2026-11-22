@@ -8,7 +8,6 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { evaluateSmart } from '../smart.js';
 import { exportToCdj, inspectCdjExport } from './export.js';
-import { PROFILES } from './formats.js';
 
 const httpError = (status, message) => Object.assign(new Error(message), { status });
 
@@ -38,7 +37,6 @@ export function registerCdjRoutes({ route, library, emit = () => {}, allowPath =
   };
   const ctx = async (signal) => ({ library, emit, readable, signal, playlistTrackIds: trackIds, ffmpeg: await ffmpeg() });
 
-  route('GET', '/api/cdj/profiles', () => Object.entries(PROFILES).map(([id, p]) => ({ id, label: p.label })));
 
   route('POST', '/api/cdj/estimate', async ({ body }) => exportToCdj(await ctx(), { ...request(body), dryRun: true }));
 

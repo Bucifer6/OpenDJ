@@ -10,7 +10,6 @@ import { bandSplitter, ISO_XOVER } from './eq.js';
 
 /** Beat divisions on the FX strip, left to right. */
 export const STRIP_DIVISIONS = [1 / 4, 1 / 2, 3 / 4, 1, 2, 4];
-export const FX_ASSIGNS = ['off', 'ch1', 'ch2', 'ch3', 'ch4', 'master', 'xfA', 'xfB'];
 const BANDS = ['low', 'mid', 'high'];
 
 export class FxBus {

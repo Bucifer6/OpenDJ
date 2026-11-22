@@ -78,8 +78,6 @@ export class TimecodeDecoder {
   _resetBlock() { this.Pre = 0; this.Pim = 0; this.Mag = 0; this.E = 0; this.n = 0; this.Sll = 0; this.Srr = 0; this.Slr = 0; }
   _resetBits() { this.reg = 0; this.wHi = 0; this.wLo = 1; this.valid = 0; this.lock = false; this.position = -1; this._idx = -1; }
 
-  /** Seconds of record (at 33⅓ / nominal speed) under the needle, or -1 when unknown. */
-  get recordSeconds() { return this.position >= 0 ? this.position / this.def.carrier : -1; }
   /** Deck velocity: speed corrected for the platter rpm setting (45 rpm plays 1.35× faster). */
   get velocity() { return this.speed / this.rpmFactor; }
   get carrierHz() { return this.speed * this.def.carrier; }

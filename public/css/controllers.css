@@ -13,7 +13,6 @@
 .ctl-badge.k-midi { color: var(--green); }
 .ctl-badge.k-hid { color: var(--purple); }
 .ctl-badge.k-gamepad { color: var(--amber); }
-.ctl-badge.k-midi-out { color: var(--text-3); }
 .ctl-act { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); transition: background .1s, box-shadow .1s; }
 .ctl-card.busy .ctl-act { background: var(--green); box-shadow: 0 0 6px var(--green); }
 .ctl-empty { grid-column: 1 / -1; padding: 10px; border: 1px dashed var(--line-2); border-radius: 8px; }

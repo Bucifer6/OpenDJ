@@ -21,7 +21,7 @@
 // two full-length channel copies and the transfer ran as one 120–150 ms task while a deck played.
 import { Emitter } from '../util.js';
 import { api } from '../api.js';
-import { encodeWaveform, analysisPatch } from './analysis-core.js';
+import { analysisPatch } from './analysis-core.js';
 import { AnalysisQueue, needsAnalysis, isUndecodable } from './analysis-queue.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

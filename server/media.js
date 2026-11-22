@@ -11,7 +11,7 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { normCodec, mmVideoInfo, VIDEO_CODEC_IDS } from '../public/js/shared/codec.js';
+import { normCodec, mmVideoInfo } from '../public/js/shared/codec.js';
 
 export { normCodec, mmVideoInfo };
 const require = createRequire(import.meta.url);

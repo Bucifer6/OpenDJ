@@ -923,9 +923,6 @@ Personalities pick a preset: Club → Isolator, Classic → Club Classic, Rotary
 
 ```js
 const v = engine.voiceInput();         // GainNode: connect any AudioNode to it
-const off = engine.connectVoice(node); // same, returns a disconnect function
-engine.setVoiceLevel(1);               // 0..1.5
-engine.setVoiceFx(true);               // send the voice through the mic FX (echo / reverb / megaphone)
 ```
 
 The voice joins the **mic bus**, so it goes everywhere the mic does:

@@ -613,8 +613,6 @@ export const EFFECTS = Object.entries(FX).map(([id, e]) => ({ id, label: e.label
 export const effectParams = (id) => FX[id]?.params || ['Param', 'Param 2'];
 /** What a beat division means for an effect: delay time (echo) or LFO cycle (flanger: 8x, phaser 4x, ...), in beats. */
 export const effectBeats = (id, division) => division * (FX[id]?.cycle || 1);
-// Deck-level performance effects handled by the deck itself (not audio nodes)
-export const DECK_FX = [{ id: 'roll', label: 'Loop Roll' }, { id: 'brake', label: 'Vinyl Brake' }, { id: 'backspin', label: 'Backspin' }, { id: 'censor', label: 'Reverse (Censor)' }];
 export const BEAT_DIVISIONS = [1 / 8, 1 / 4, 1 / 2, 3 / 4, 1, 2, 4, 8];
 
 const FADE = 0.012; // on/off and type-change cross-fade time constant (s)

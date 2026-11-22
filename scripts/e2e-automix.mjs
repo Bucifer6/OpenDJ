@@ -155,7 +155,6 @@ try {
     const r = await page.evaluate(({ c0, tStart }) => {
       const a = window.opendj.automix, f = window.__frames;
       const pre = f.filter((x) => x[0] > c0 + 0.3 && x[0] < tStart - 0.1), during = f.filter((x) => x[0] >= tStart);
-      const med = (arr) => { const s = [...arr].sort((p, q) => p - q); return s[Math.floor(s.length / 2)] || 0; };
       const rms = (fr) => Math.sqrt(fr.reduce((s, x) => s + x[1] * x[1], 0) / Math.max(1, fr.length));
       const steady = rms(pre);
       // 500 ms RMS windows (about a beat: kicks and gaps average out) during and after the transition

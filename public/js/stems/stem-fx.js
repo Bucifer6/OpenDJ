@@ -19,6 +19,4 @@ export class StemEcho {
     const t = Math.min(3.9, Math.max(0.02, sec * this.beats));
     this.delay.delayTime.setTargetAtTime(t, this.ctx.currentTime, 0.02);
   }
-  setFeedback(v) { this.fb.gain.setTargetAtTime(Math.min(0.9, Math.max(0, v)), this.ctx.currentTime, 0.02); }
-  setWet(v) { this.output.gain.setTargetAtTime(Math.max(0, v), this.ctx.currentTime, 0.02); }
 }

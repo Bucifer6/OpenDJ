@@ -10,7 +10,6 @@ import { deckOptions } from '../audio/vinyl.js';
 import { DECK_COLORS } from './deck-ui.js';
 
 let open = null;
-export const scratchViewOpen = () => open;
 
 /** Crossfader position that opens (v = 1) or closes (v = 0) this deck's channel; THRU channels use the channel fader. */
 function stripApi(app, deck) {

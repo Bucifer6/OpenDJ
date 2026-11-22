@@ -23,8 +23,6 @@ import { normalizeMixer } from './mixer-config.js';
 const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 /** EQ knob -1..1 -> band gain: +6 dB at the right, 0 dB at 12 o'clock, -26 dB at 8 o'clock fading to a full kill. */
 export const eqKnobGain = isoKnobGain;
-/** EQ crossover points (Hz): isolator bands low < 200 < mid < 2500 < high. */
-export const EQ_XOVER = ISO_XOVER;
 /** Filter knob dead zone around 12 o'clock. */
 const FILTER_DEAD = 0.03;
 
@@ -486,7 +484,7 @@ export class Engine extends Emitter {
     for (const u of [0, 1]) {
       const k = `fx${u + 1}`, c = mx[k];
       if (!changed(k)) continue;
-      if (c.assign !== 'off' || this.fxBuses[u]) { const b = this.fxBus(u); b.setType(c.type); b.setQuantize(c.quantize); if (b.assign !== c.assign) this.setFxAssign(u, c.assign, false); }
+      if (c.assign !== 'off' || this.fxBuses[u]) { const b = this.fxBus(u); b.setType(c.type); b.setQuantize(c.quantize); if (b.assign !== c.assign) this.setFxAssign(u, c.assign); }
     }
     if (!initial && changed('boothRoute', 'boothDeviceId', 'hp2Route', 'hp2DeviceId')) this.applyOutputs();
     this._mxApplied = { ...mx };
@@ -574,18 +572,9 @@ export class Engine extends Emitter {
    * in booth" is on, the recording when "mic in recording" is on, and it triggers auto talkover. Returns the GainNode.
    */
   voiceInput() {
-    if (this.voiceIn) return this.voiceIn;
-    const c = this.ctx;
-    this.voiceIn = c.createGain(); this.voiceLevel = c.createGain(); this.voiceFxSend = c.createGain(); this.voiceFxSend.gain.value = 0;
-    this.voiceIn.connect(this.voiceLevel); this.voiceLevel.connect(this.micBus); this.voiceLevel.connect(this.voiceFxSend);
+    if (!this.voiceIn) { this.voiceIn = this.ctx.createGain(); this.voiceIn.connect(this.micBus); }
     return this.voiceIn;
   }
-  /** Connect a node to the voice bus; returns a function that disconnects it. */
-  connectVoice(node, { fx = false } = {}) { const v = this.voiceInput(); node.connect(v); if (fx) this.setVoiceFx(true); return () => { try { node.disconnect(v); } catch { /* */ } }; }
-  /** Voice bus level (0..1.5 linear). */
-  setVoiceLevel(v) { this.voiceInput(); this.voiceLevel.gain.setTargetAtTime(clamp(Number(v) || 0, 0, 1.5), this.ctx.currentTime, 0.02); }
-  /** Send the voice through the mic FX (echo / reverb / megaphone). */
-  setVoiceFx(on) { this.voiceInput(); const m = this.ensureMic(); if (!this._voiceFxWired) { this.voiceFxSend.connect(m.fxSend); this._voiceFxWired = true; } this.voiceFxSend.gain.setTargetAtTime(on ? 1 : 0, this.ctx.currentTime, 0.01); }
 
   resume() { if (this.ctx.state !== 'running') return this.ctx.resume(); }
 
@@ -748,9 +737,9 @@ export class Engine extends Emitter {
     return b;
   }
   /** Assign FX unit u (0/1) to 'off' | 'ch1'..'ch4' | 'master' | 'xfA' | 'xfB'. A target held by the other unit moves. */
-  setFxAssign(u, target, notify = true) {
+  setFxAssign(u, target) {
     const b = this.fxBus(u), other = this.fxBuses[1 - u];
-    if (target !== 'off' && other?.assign === target) this.setFxAssign(1 - u, 'off', notify);
+    if (target !== 'off' && other?.assign === target) this.setFxAssign(1 - u, 'off');
     const prev = b.assign; b.assign = target;
     if (prev === 'master' && target !== 'master') {
       this.slotFx.bypass(0.02);
@@ -762,7 +751,6 @@ export class Engine extends Emitter {
       this.slotFx.attach(b.input, b.output); this.slotFx.engage(0.02);
     }
     this.routeFx();
-    if (notify) this.emit('fx-assign', u, target);
   }
   /** Which unit (if any) takes each channel's post-crossfader signal: a channel assign beats a crossfader-side one. */
   routeFx() {
@@ -783,7 +771,6 @@ export class Engine extends Emitter {
     return this.meterNode;
   }
   resetLoudness() { this.meterNode?.port.postMessage({ cmd: 'reset' }); }
-  stopMeter() { if (!this.meterNode) return; try { this.masterOut.disconnect(this.meterNode); } catch { /* */ } this.meterNode = null; this.loudness = null; }
 
   async listOutputs() {
     try {
@@ -854,8 +841,6 @@ export class Engine extends Emitter {
 
   // ---------- crossfader ----------
   setCrossfader(x) { this.crossfader = clamp(x, -1, 1); this.applyCrossfader(); this.emit('master', 'crossfader', this.crossfader); }
-  /** Crossfader gain of an assignment at the current position (curve, cut-in, hamster reverse). */
-  xfGainFor(assign, pos = this.crossfader) { return xfGain(pos, assign, this.mx); }
   applyCrossfader() {
     const mx = this.mx;
     for (const ch of this.channels) ch.setXfGain(xfGain(this.crossfader, ch.state.xfAssign, mx));

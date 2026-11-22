@@ -52,7 +52,6 @@ const SCHEMA = {
   tempoRange: oneOf(6, 8, 10, 16, 25, 50, 100),
   keyLockDefault: bool(), quantize: bool(), autoGain: bool(), limiter: bool(), fxPostFader: bool(), autoCues: bool(), stemsAutoLoad: bool(), highPrecisionAudio: bool(),
   syncMode: oneOf('beat', 'tempo'),
-  waveformZoom: num(1, 120),
   waveformColors: oneOf('rgb', 'blue', 'mono', 'player-blue', 'player-rgb'),
   downloadDir: str(), uploadDir: str(),
   automix: shape({

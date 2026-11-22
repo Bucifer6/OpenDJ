@@ -466,8 +466,6 @@ export class Deck extends Emitter {
     this._bendRamp = setInterval(() => { const h = (performance.now() - t0) / 1000; this.setBend(bendAt(h) * dir); if (h >= 1) clearInterval(this._bendRamp); }, 25);
   }
   bendStop() { clearInterval(this._bendRamp); this.setBend(0); }
-  /** Quartz lock (T1): tempo pinned at 0 % while on; the tempo fader is ignored. */
-  setQuartz(on) { this.vinyl = { ...this.vinyl, quartz: !!on }; if (on) this.setTempo(0); this.emit('state'); }
 
   // ---------- tempo glide (T5) ----------
   /**
@@ -806,7 +804,6 @@ export class Deck extends Emitter {
   }
   gridSetDownbeatHere() { this.setGrid(this.bpm, this.position); }
   gridShift(sec) { this.setGrid(this.bpm, this.gridOffset + sec); }
-  gridScale(f) { this.setGrid(Math.round(this.bpm * f * 100) / 100, this.gridOffset); }
 
   get camelot() { return toCamelot(this.track?.key); }
 

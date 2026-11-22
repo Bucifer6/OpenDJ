@@ -34,7 +34,6 @@ export const EQ_PRESETS = [
   { id: 'vintage', label: 'Vintage Warm', type: 'shelving', knobs: ['eqHigh', 'eqMid', 'eqLow'], opts: { freqs: [100, 800, 8000], q: 0.5, boost: 10, cut: 20, kill: [300, 4000], color: 'warm' } },
   { id: 'sculpt', label: 'Sculpt', type: 'sculpt', knobs: ['eqHigh', 'eqMid', 'eqFreq', 'eqLow'], opts: {} },
 ];
-export const EQ_TYPES = EQ_PRESETS; // (older name)
 export const EQ_TYPE_IDS = EQ_PRESETS.map((t) => t.id);
 export const eqPreset = (id) => EQ_PRESETS.find((p) => p.id === id) || EQ_PRESETS[0];
 /** Default isolator crossovers (Hz): low < 200 < mid < 2500 < high (today's). */

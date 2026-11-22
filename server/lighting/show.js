@@ -1,6 +1,7 @@
 // Pure lighting show model: fixtures, config normalisation, beat clock and the frame renderer.
 // Nothing in here touches the network or timers, so every frame is a deterministic function of
 // (show, state, timeMs) and can be unit-tested.
+import { ARTNET_PORT, SACN_PORT, WLED_PORT } from './protocols.js';
 
 export const PHRASES = ['intro', 'verse', 'buildup', 'drop', 'breakdown', 'outro'];
 export const FIXTURE_TYPES = ['rgb', 'rgbw', 'dimmer', 'strobe', 'moving-head-basic', 'wled-strip', 'hue-light'];
@@ -48,9 +49,9 @@ export function defaultConfig() {
       master: 1, speed: 1, latencyMs: 0,
     },
     outputs: {
-      artnet: { enabled: false, host: '255.255.255.255', port: 6454, net: 0, subnet: 0, universe: 0 },
-      sacn: { enabled: false, multicast: true, host: '', port: 5568, universe: 1, priority: 100, sourceName: 'OpenDJ', cid: '' },
-      wled: { enabled: false, port: 21324, timeout: 2 },
+      artnet: { enabled: false, host: '255.255.255.255', port: ARTNET_PORT, net: 0, subnet: 0, universe: 0 },
+      sacn: { enabled: false, multicast: true, host: '', port: SACN_PORT, universe: 1, priority: 100, sourceName: 'OpenDJ', cid: '' },
+      wled: { enabled: false, port: WLED_PORT, timeout: 2 },
       hue: { enabled: false, bridge: '', username: '', rate: 10, transition: 2 },
       osc: { enabled: false, host: '127.0.0.1', port: 7000, prefix: '/opendj' },
       usbdmx: { enabled: false, universe: 1 },
@@ -108,11 +109,11 @@ export function normalizeConfig(c) {
   for (const f of out.fixtures) { while (ids.has(f.id)) f.id += '_'; ids.add(f.id); }
   const merge = (k) => ({ ...d.outputs[k], ...(o[k] || {}), enabled: !!o[k]?.enabled });
   const a = merge('artnet');
-  out.outputs.artnet = { ...a, host: str(a.host, '255.255.255.255') || '255.255.255.255', port: Math.round(num(a.port, 6454, 1, 65535)), net: Math.round(num(a.net, 0, 0, 127)), subnet: Math.round(num(a.subnet, 0, 0, 15)), universe: Math.round(num(a.universe, 0, 0, 15)) };
+  out.outputs.artnet = { ...a, host: str(a.host, '255.255.255.255') || '255.255.255.255', port: Math.round(num(a.port, ARTNET_PORT, 1, 65535)), net: Math.round(num(a.net, 0, 0, 127)), subnet: Math.round(num(a.subnet, 0, 0, 15)), universe: Math.round(num(a.universe, 0, 0, 15)) };
   const sa = merge('sacn');
-  out.outputs.sacn = { ...sa, multicast: sa.multicast !== false, host: str(sa.host), port: Math.round(num(sa.port, 5568, 1, 65535)), universe: Math.round(num(sa.universe, 1, 1, 63999)), priority: Math.round(num(sa.priority, 100, 0, 200)), sourceName: str(sa.sourceName, 'OpenDJ').slice(0, 63) || 'OpenDJ', cid: /^[0-9a-f]{32}$/i.test(sa.cid) ? sa.cid.toLowerCase() : randomCid() };
+  out.outputs.sacn = { ...sa, multicast: sa.multicast !== false, host: str(sa.host), port: Math.round(num(sa.port, SACN_PORT, 1, 65535)), universe: Math.round(num(sa.universe, 1, 1, 63999)), priority: Math.round(num(sa.priority, 100, 0, 200)), sourceName: str(sa.sourceName, 'OpenDJ').slice(0, 63) || 'OpenDJ', cid: /^[0-9a-f]{32}$/i.test(sa.cid) ? sa.cid.toLowerCase() : randomCid() };
   const w = merge('wled');
-  out.outputs.wled = { enabled: w.enabled, port: Math.round(num(w.port, 21324, 1, 65535)), timeout: Math.round(num(w.timeout, 2, 1, 255)) };
+  out.outputs.wled = { enabled: w.enabled, port: Math.round(num(w.port, WLED_PORT, 1, 65535)), timeout: Math.round(num(w.timeout, 2, 1, 255)) };
   const h = merge('hue');
   out.outputs.hue = { enabled: h.enabled, bridge: str(h.bridge).replace(/^https?:\/\//, '').replace(/\/.*$/, ''), username: str(h.username), rate: num(h.rate, 10, 1, 10), transition: Math.round(num(h.transition, 2, 0, 20)) };
   const os = merge('osc');

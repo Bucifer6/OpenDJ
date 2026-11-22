@@ -103,17 +103,9 @@ export class LyricsManager {
     });
   }
 
-  /** A lyrics widget for the deck panel (alternative placement, e.g. under the deck header in deck-ui.js). */
-  deckWidget(deckIndex) {
-    const cur = el('span', { class: 'lyr-cur' }), next = el('span', { class: 'lyr-next' });
-    const root = el('div', { class: 'lyr-line lyr-inline', onclick: () => this.openEditor(deckIndex) }, el('div', { class: 'lyr-text' }, cur, next));
-    (this.extra ||= []).push({ deckIndex, root, cur, next });
-    return root;
-  }
-
   renderRow(i, force = false) {
     const deck = this.engine.decks[i];
-    const targets = [this.rows[i], ...(this.extra || []).filter((x) => x.deckIndex === i)].filter(Boolean);
+    const targets = [this.rows[i]].filter(Boolean);
     if (!targets.length) return;
     const l = deck.track ? this.get(deck.track.id) : null;
     const show = this.prefs.deckLine && !!deck.track;
