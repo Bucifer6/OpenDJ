@@ -497,6 +497,7 @@ export function analysisPatch(track, r, { duration, autoCues = true } = {}) {
     gridOffset: locked && track.gridOffset != null ? track.gridOffset : r.gridOffset,
     key: track.key || r.key, gain: r.gain, startTime: r.startTime, endTime: r.endTime,
     energy: r.energy, duration: duration ?? r.duration, analyzed: true, unreadable: false,
+    bpmConfidence: locked ? 1 : r.bpmConfidence,
   };
   for (const k of ['phrases', 'mixIn', 'mixOut', 'downbeat']) if (r[k] !== undefined) patch[k] = r[k];
   if (locked && track.downbeat != null) patch.downbeat = track.downbeat;

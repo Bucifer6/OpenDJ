@@ -1,5 +1,6 @@
 // Regression tests for the pre-release QA pass (deck audio, loops, worklet, library helpers, settings schema…).
 import { test } from 'node:test';
+import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 import { deckChannel, peakAbs } from '../public/js/audio/deck.js';
 import { floatToInt16 } from '../public/js/stems/stem-dsp.js';
@@ -83,7 +84,7 @@ test('M7: rekordbox import marks the imported grid as authoritative (gridLocked)
   const b = Buffer.alloc(44 + 400); b.write('RIFF', 0); b.writeUInt32LE(36 + 400, 4); b.write('WAVEfmt ', 8);
   b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(8000, 24); b.writeUInt32LE(16000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(400, 40);
   fs.writeFileSync(file, b);
-  const loc = 'file://localhost' + file.split('/').map(encodeURIComponent).join('/');
+  const loc = pathToFileURL(file).href;
   fs.writeFileSync(path.join(dir, 'rb.xml'), `<?xml version="1.0" encoding="UTF-8"?><DJ_PLAYLISTS Version="1.0.0"><COLLECTION Entries="1">
 <TRACK TrackID="1" Name="A" AverageBpm="126.00" Tonality="Gm" Location="${loc}"><TEMPO Inizio="0.300" Bpm="126.00" Metro="4/4" Battito="1"/></TRACK></COLLECTION><PLAYLISTS><NODE Type="0" Name="ROOT" Count="0"></NODE></PLAYLISTS></DJ_PLAYLISTS>`);
   const app = await start({ port: 0, dataDir: path.join(dir, 'data') });
@@ -149,7 +150,7 @@ test('UAT M4/N4/N5: rekordbox import keeps cues & rating when the XML has none, 
   const b = Buffer.alloc(44 + 400); b.write('RIFF', 0); b.writeUInt32LE(36 + 400, 4); b.write('WAVEfmt ', 8);
   b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(8000, 24); b.writeUInt32LE(16000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(400, 40);
   fs.writeFileSync(file, b);
-  const loc = 'file://localhost' + file.split('/').map(encodeURIComponent).join('/');
+  const loc = pathToFileURL(file).href;
   fs.writeFileSync(path.join(dir, 'rb.xml'), `<?xml version="1.0"?><DJ_PLAYLISTS><COLLECTION><TRACK TrackID="1" Name="RB Title" Genre="Techno" Location="${loc}"/></COLLECTION><PLAYLISTS/></DJ_PLAYLISTS>`);
   fs.writeFileSync(path.join(dir, 'bad.nml'), '<foo/>');
   const app = await start({ port: 0, dataDir: path.join(dir, 'data') });

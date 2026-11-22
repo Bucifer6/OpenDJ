@@ -128,6 +128,7 @@ export class Deck extends Emitter {
 
   // ---------- loading ----------
   async load(track) {
+    this._autoMixEntry = 0;
     if (this.playing && (this.engine.settings.lockPlayingDecks || this.hardLock || this.engine.settings.deckOptions?.hardLock)) throw new Error('Deck is playing');
     if (this.scratchSample) this.post('altReturn', { frame: 0 }); // the worklet's saved track is dropped by the load below
     this.post('play', { value: false }); this.post('loop', { value: null }); this.post('unload');

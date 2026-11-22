@@ -180,6 +180,9 @@ export function smartMix(pool, opts = {}) {
   const baseArtists = [...history, ...(start ? [start] : [])].map(artistKey).filter(Boolean);
   const B = Math.max(1, opts.beam ?? 6), K = Math.max(1, opts.branch ?? 6);
   const now = opts.now ?? Date.now();
+  const openingTarget = shapeTarget(shape, 0, lo, hi);
+  const openingDistance = (t) => num(t.energy) == null || openingTarget == null ? Infinity : Math.abs(num(t.energy) - openingTarget);
+  const closestOpening = list.reduce((best, t) => Math.min(best, openingDistance(t)), Infinity);
   let beams = [{ seq: [], used: new Set(), total: 0 }];
   for (let i = 0; i < L; i++) {
     const x = L > 1 ? i / (L - 1) : 0;
@@ -190,6 +193,8 @@ export function smartMix(pool, opts = {}) {
       const cands = [];
       for (const t of list) {
         if (b.used.has(t.id)) continue;
+        // Preserve the requested opening energy: future compatibility must not turn a warm-up into a peak opener.
+        if (!prev && Number.isFinite(closestOpening) && openingDistance(t) > closestOpening) continue;
         let s;
         if (!prev) { // opening track: fit the start of the shape, prefer tracks with an intro
           const e = num(t.energy), tgt = shapeTarget(shape, 0, lo, hi);
@@ -215,7 +220,7 @@ export function smartMix(pool, opts = {}) {
  * Live mode: the best next track from `pool` after `cur`, given what was played. position = tracks played so far,
  * setLength = planned set length (for the shape). @returns {{ track, reason, score } | null}
  */
-export function liveNext(cur, pool, { history = [], shape = 'warmup', sliders, weights, position = 0, setLength = 20, now } = {}) {
+export function liveNext(cur, pool, { history = [], shape = 'warmup', sliders, weights, position = 0, setLength = 20, now, transitionScore } = {}) {
   const W = weights || weightsFrom(sliders);
   const playedIds = new Set([...history.map((t) => t.id), cur?.id].filter(Boolean));
   const list = pool.filter((t) => t && !playedIds.has(t.id)).map(prep);
@@ -224,12 +229,19 @@ export function liveNext(cur, pool, { history = [], shape = 'warmup', sliders, w
   const [lo, hi] = energyRange([...list, ...(cur ? [cur] : [])]);
   const x = Math.min(1, position / Math.max(1, setLength - 1));
   const recentArtists = [...history, ...(cur ? [cur] : [])].map(artistKey).filter(Boolean);
-  let best = null;
+  const ranked = [];
   for (const t of list) {
     const { score } = scoreTransition(cur, t, { weights: W, shape, x, lo, hi, recentArtists, playedIds, now });
-    if (!best || score > best.score) best = { track: t, score };
+    ranked.push({ track: t, score });
   }
-  return { ...best, reason: explain(cur, best.track) };
+  ranked.sort((a, b) => b.score - a.score);
+  const finalists = ranked.slice(0, 6).map((r) => {
+    const q = transitionScore?.(r.track);
+    return { ...r, score: r.score + (Number.isFinite(q?.score) ? q.score : 0), transitionReason: q?.reason };
+  });
+  finalists.sort((a, b) => b.score - a.score);
+  const best = finalists[0];
+  return { ...best, reason: [explain(cur, best.track), best.transitionReason].filter(Boolean).join('; ') };
 }
 
 /** Fisher-Yates shuffle (copy). rand() defaults to Math.random. */

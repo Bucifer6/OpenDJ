@@ -17,12 +17,13 @@ const nmlDir = (dir) => dir.split('/').filter(Boolean).map((s) => '/:' + s).join
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
 function nml(dir) {
-  const d = esc(nmlDir(dir));
+  const volume = /^[A-Za-z]:/.exec(dir)?.[0] || '';
+  const d = esc(nmlDir(dir.slice(volume.length).replaceAll('\\', '/')));
   return `<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 <NML VERSION="19"><HEAD COMPANY="www.native-instruments.com" PROGRAM="Traktor"></HEAD>
 <COLLECTION ENTRIES="2">
 <ENTRY MODIFIED_DATE="2024/1/1" TITLE="Track &amp; One" ARTIST="Artist A">
-<LOCATION DIR="${d}" FILE="one.wav" VOLUME="" VOLUMEID=""></LOCATION>
+<LOCATION DIR="${d}" FILE="one.wav" VOLUME="${volume}" VOLUMEID=""></LOCATION>
 <ALBUM TITLE="Album X"></ALBUM>
 <INFO BITRATE="320000" GENRE="Techno" COMMENT="nice" RANKING="204" PLAYCOUNT="7" KEY="8A"></INFO>
 <TEMPO BPM="128.000061" BPM_QUALITY="100.000000"></TEMPO>
@@ -38,7 +39,7 @@ function nml(dir) {
 <PLAYLISTS><NODE TYPE="FOLDER" NAME="$ROOT"><SUBNODES COUNT="1">
 <NODE TYPE="FOLDER" NAME="Gigs"><SUBNODES COUNT="1">
 <NODE TYPE="PLAYLIST" NAME="Friday"><PLAYLIST ENTRIES="2" TYPE="LIST" UUID="1">
-<ENTRY><PRIMARYKEY TYPE="TRACK" KEY="${d}one.wav"></PRIMARYKEY></ENTRY>
+<ENTRY><PRIMARYKEY TYPE="TRACK" KEY="${volume}${d}one.wav"></PRIMARYKEY></ENTRY>
 <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="/:nowhere/:gone.mp3"></PRIMARYKEY></ENTRY>
 </PLAYLIST></NODE></SUBNODES></NODE>
 </SUBNODES></NODE></PLAYLISTS></NML>`;

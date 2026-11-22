@@ -117,7 +117,8 @@ export function planBestTransition(out, inn, opts = {}) {
     if (opts.recent?.includes(style)) base.push([-0.8, null]);
 
     if (blend) {
-      const lengths = opts.fixedBars ? [opts.fixedBars] : LENGTHS.filter((b) => b <= (MAX_BARS[style] || 16));
+      const lengths = opts.fixedBars ? [opts.fixedBars] : [...new Set([...LENGTHS, ...(opts.candidateBars || [])])]
+        .filter((b) => Number.isInteger(b) && b >= 4 && b <= (MAX_BARS[style] || 16));
       for (const bars of lengths) {
         const p = [...base];
         // tempo: the incoming track plays at the outgoing tempo for the whole overlap

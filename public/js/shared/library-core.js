@@ -76,6 +76,7 @@ export const normTags = (v) => {
 const NUM_FIELDS = new Set(['bpm', 'energy', 'rating', 'year', 'duration', 'gridOffset', 'startTime', 'endTime', 'mixIn', 'mixOut', 'downbeat', 'keyShift', 'gain', 'playCount', 'lastPlayed']);
 const STR_FIELDS = { title: 500, artist: 500, album: 500, genre: 200, comment: 2000, key: 16, color: 32 };
 export function sanitizeField(k, v) {
+  if (k === 'bpmConfidence') return v == null || v === '' || !Number.isFinite(Number(v)) ? null : Math.max(0, Math.min(1, Number(v)));
   if (NUM_FIELDS.has(k)) { if (v === null || v === undefined || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
   if (Object.hasOwn(STR_FIELDS, k)) return v === null || v === undefined ? (k === 'key' || k === 'color' ? null : '') : String(v).slice(0, STR_FIELDS[k]);
   if (k === 'analyzed' || k === 'bpmLocked' || k === 'gridLocked' || k === 'unreadable') return !!v;
@@ -90,7 +91,7 @@ export const okId = (id) => typeof id === 'string' && id.length > 0 && !BAD_IDS.
 /** Track fields the API may edit (PATCH /api/tracks/:id). */
 export const EDITABLE_TRACK_FIELDS = ['title', 'artist', 'album', 'genre', 'year', 'bpm', 'key', 'rating', 'comment', 'cues', 'loops',
   'gridOffset', 'analyzed', 'gain', 'color', 'playCount', 'lastPlayed', 'duration', 'endTime', 'startTime', 'energy', 'bpmLocked', 'gridLocked',
-  'phrases', 'tags', 'hotLoops', 'keyShift', 'mixIn', 'mixOut', 'downbeat', 'unreadable'];
+  'phrases', 'tags', 'hotLoops', 'keyShift', 'mixIn', 'mixOut', 'downbeat', 'unreadable', 'bpmConfidence'];
 
 export class LibraryCore {
   constructor() {
@@ -138,7 +139,7 @@ export class LibraryCore {
     const prev = this.getTrack(t.id);
     // Never overwrite the user's analysis / cue work with re-scanned tag data.
     const keep = prev ? {
-      cues: prev.cues, loops: prev.loops, gridOffset: prev.gridOffset, analyzed: prev.analyzed,
+      cues: prev.cues, loops: prev.loops, gridOffset: prev.gridOffset, analyzed: prev.analyzed, bpmConfidence: prev.bpmConfidence,
       rating: prev.rating, playCount: prev.playCount, lastPlayed: prev.lastPlayed, addedAt: prev.addedAt,
       localPath: prev.localPath, gain: prev.gain, color: prev.color, comment: prev.comment || t.comment,
       tags: prev.tags, phrases: prev.phrases, mixIn: prev.mixIn, mixOut: prev.mixOut, downbeat: prev.downbeat, hotLoops: prev.hotLoops, keyShift: prev.keyShift, bpmLocked: prev.bpmLocked, gridLocked: prev.gridLocked,

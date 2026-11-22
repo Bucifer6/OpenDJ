@@ -78,6 +78,8 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 
 ### Automix
 
+**Adaptive Auto DJ:** Auto style searches section boundaries throughout both tracks for compatible handovers, including interior entry points. Live mode also compares executable transition quality when choosing the next track. See [the adaptive DJ guide](docs/ADAPTIVE_DJ.md) for setup, research, architecture, licensing and limitations.
+
 <img src="docs/images/automix.png" alt="Automix dialog with smart ordering, energy curve and transition options" width="60%">
 
 - Non-stop mixing of any playlist or library view on decks 1 and 2. **One click on AUTOMIX** starts a smart mix of the queue (or, without one, of the playlist / library view shown) with your saved preferences; click it again to stop. **Shift-click or right-click AUTOMIX** (or **Automix view** above the track list, or a playlist's menu) opens the Automix dialog with order, mix profile, transition style and length. While automix runs, each deck's **MIX NOW** starts the next transition at once
