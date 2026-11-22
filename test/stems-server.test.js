@@ -10,7 +10,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { Library } from '../server/library.js';
-import { registerStemRoutes, DEFAULT_MODEL, modelSpec, extractTarEntry, wavHeader, bgOrder } from '../server/stems.js';
+import { registerStemRoutes, DEFAULT_MODEL, modelSpec, extractTarEntry, wavHeader, bgOrder, STEM_CHECK } from '../server/stems.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-hide_banner', '-version']).status === 0;
 
@@ -21,6 +21,7 @@ async function harness(opts = {}) {
   library.upsertTrack({ id: 'trk1', title: 'Song', sourceType: 'local', path: path.join(dir, 'song.wav') });
   if (opts.ffmpeg) library.media = { ffmpeg: () => ({ path: 'ffmpeg', encoders: { flac: true } }) };
   Object.assign(library.settings, opts.settings || {});
+  opts.setup?.(dir, library);
   const routes = [], events = [];
   const route = (method, pattern, handler, o = {}) => {
     const keys = [];
@@ -101,7 +102,7 @@ test('stems server: upload, finish (WAV), serve with Range, mark the track, dele
     assert.equal(h.library.getTrack('trk1').stems.ready, true);
     assert.ok(h.events.some(([t, p]) => t === 'stems' && p.ready));
     const info = await h.json('GET', '/api/stems/trk1');
-    assert.equal(info.ready, true); assert.equal(info.frames, frames); assert.equal(info.sampleRate, 44100);
+    assert.equal(info.checked, STEM_CHECK, 'new stems are marked as checked'); assert.equal(info.ready, true); assert.equal(info.frames, frames); assert.equal(info.sampleRate, 44100);
     for (const s of ['vocals', 'drums', 'bass', 'other']) {
       const r = await h.call('GET', `/api/stems/trk1/${s}`);
       assert.equal(r.headers.get('content-type'), 'audio/wav');
@@ -117,6 +118,26 @@ test('stems server: upload, finish (WAV), serve with Range, mark the track, dele
     assert.equal((await h.json('DELETE', '/api/stems/trk1')).status, 200);
     assert.equal(h.library.getTrack('trk1').stems, undefined);
     assert.equal(fs.existsSync(path.join(h.dir, 'stems', 'trk1')), false);
+  } finally { h.close(); }
+});
+
+test('stems server: GPU stems saved before the output check are dropped at start-up, others kept', async () => {
+  const kinds = { gdml: { backend: 'server dml' }, gweb: { backend: 'webgpu' }, gok: { backend: 'server dml', checked: STEM_CHECK }, gcpu: { backend: 'server cpu x6' }, gwasm: { backend: 'wasm' } };
+  const h = await harness({ setup: (dir, library) => {
+    for (const [id, m] of Object.entries(kinds)) {
+      library.upsertTrack({ id, title: id, sourceType: 'local', path: path.join(dir, `${id}.wav`), stems: { model: 'm', ready: true, format: 'wav', at: 1 } });
+      fs.mkdirSync(path.join(dir, 'stems', id), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'stems', id, 'meta.json'), JSON.stringify({ model: 'm', format: 'wav', sampleRate: 44100, frames: 10, at: 1, ...m }));
+    }
+  } });
+  try {
+    assert.equal(await h.stems.purged, 2);
+    for (const id of ['gdml', 'gweb']) {
+      assert.equal(h.library.getTrack(id).stems, undefined, `${id} unmarked`);
+      assert.equal(fs.existsSync(path.join(h.dir, 'stems', id)), false, `${id} removed`);
+      assert.ok(h.events.some(([t, p]) => t === 'stems' && p.id === id && !p.ready));
+    }
+    for (const id of ['gok', 'gcpu', 'gwasm']) assert.equal(h.library.getTrack(id).stems?.ready, true, `${id} kept`);
   } finally { h.close(); }
 });
 

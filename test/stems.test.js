@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  fftPlan, demucsSpec, demucsISpec, planChunks, chunkInput, separateChunked, transitionWeight,
+  fftPlan, demucsSpec, demucsISpec, planChunks, chunkInput, separateChunked, transitionWeight, mixtureError, MAX_MIXTURE_ERROR,
   interleaveInt16, floatToInt16, specFrames, BINS, STEMS, DEMUCS_SOURCES,
 } from '../public/js/stems/stem-dsp.js';
 import { createRunner, createStubSession, StubTensor } from '../public/js/stems/stems-model.js';
@@ -84,8 +84,26 @@ test('stems: cancellation stops between chunks', async () => {
   let n = 0;
   await assert.rejects(separateChunked({
     channels: [noise(5000), noise(5000)], length: 5000, segment: 1000, sources: 1,
-    runChunk: async () => new Float32Array(2000), shouldStop: () => ++n > 2,
+    runChunk: async (mix) => new Float32Array(mix), shouldStop: () => ++n > 2,
   }), { name: 'AbortError' });
+});
+
+test('stems: output that does not add up to the input (broken GPU backend) is rejected before any block', async () => {
+  const len = 5000, seg = 1000;
+  for (const bad of [
+    (mix) => new Float32Array(4 * mix.length).fill(1), // full-scale garbage, what DirectML returned for HT-Demucs
+    (mix) => new Float32Array(4 * mix.length), // silence for a non-silent input
+    (mix) => { const o = new Float32Array(4 * mix.length); o.set(mix); o[7] = NaN; return o; },
+  ]) {
+    let blocks = 0;
+    await assert.rejects(separateChunked({ channels: [noise(len, 5), noise(len, 6)], length: len, segment: seg, sources: 4, runChunk: async (m) => bad(m), onBlock: () => { blocks++; } }), { code: 'BAD_STEM_OUTPUT' });
+    assert.equal(blocks, 0, 'nothing written');
+  }
+  // a real model is not exact: a few % of error energy passes, and so does a silent chunk with rounding noise
+  const mix = noise(2 * seg, 9), near = new Float32Array(4 * 2 * seg);
+  for (let i = 0; i < 2 * seg; i++) { near[i] = mix[i] * 0.97; near[2 * seg + i] = 1e-5; }
+  assert.ok(mixtureError(mix, near, 4, 2, seg) < MAX_MIXTURE_ERROR);
+  assert.ok(mixtureError(new Float32Array(2 * seg), new Float32Array(8 * seg).fill(1e-4), 4, 2, seg) < MAX_MIXTURE_ERROR);
 });
 
 test('stems: hybrid runner + stub model separates into bands that sum to the input', async () => {
