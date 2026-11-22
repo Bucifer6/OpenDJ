@@ -551,9 +551,9 @@ class App {
     // chosen transition length: "16 bars (auto: 16-bar outro, 32-bar intro)"; drop styles: where the drop lands
     const lengthText = (len, style) => {
       if (!len || !style) return '';
-      const bars = `${len.bars} bar${len.bars === 1 ? '' : 's'}`;
-      const what = DROP_STYLES.has(style) ? `drop after ${bars} of outro` : bars;
-      return len.auto ? `${what} (auto${len.why ? ': ' + len.why : ''})` : what;
+      const bars = t(len.bars === 1 ? '{n} bar' : '{n} bars', { n: len.bars });
+      const what = DROP_STYLES.has(style) ? t('drop after {bars} of outro', { bars }) : bars;
+      return len.auto ? (len.why ? t('{what} (auto: {why})', { what, why: len.why }) : t('{what} (auto)', { what })) : what;
     };
     const render = () => {
       shuffleBtn.disabled = (!!a.live && a.enabled) || a.queue.length - a.idx < 2;

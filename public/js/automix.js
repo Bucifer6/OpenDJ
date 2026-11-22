@@ -10,6 +10,7 @@
 import { Emitter } from './util.js';
 import { toCamelot, camelotCompatible, analyzeStructure } from './audio/analysis-core.js';
 import { smartMix, liveNext, shuffle, camelotRelation, genreSimilarity } from './smartmix.js';
+import { t } from './i18n.js';
 
 const LOG_BPM_JUMP = Math.log(1.08); // > 8 % tempo change (after half/double matching) is a "big jump"
 
@@ -166,27 +167,27 @@ export function autoTransitionLength(out, inn, style, { keySync = false } = {}) 
   const ob = outroBars(out), ib = drop ? null : introBars(inn);
   const reasons = [];
   let bars, cap = drop ? AUTO_LENGTH_MAX_BARS : most;
-  if (ob == null && ib == null) { bars = usual; reasons.push(drop ? 'no outro analysis' : 'no phrase analysis: usual length for the style'); }
+  if (ob == null && ib == null) { bars = usual; reasons.push(t(drop ? 'no outro analysis' : 'no phrase analysis: usual length for the style')); }
   else {
     const known = [ob, ib].filter((x) => x != null);
     bars = Math.min(...known);
-    if (ob != null) reasons.push(`${ob}-bar outro`);
-    if (ib != null) reasons.push(ib === 0 ? 'incoming track starts without an intro' : `${ib}-bar intro`);
+    if (ob != null) reasons.push(t('{n}-bar outro', { n: ob }));
+    if (ib != null) reasons.push(ib === 0 ? t('incoming track starts without an intro') : t('{n}-bar intro', { n: ib }));
     if (ib === 0) bars = Math.min(ob ?? 8, 8);
-    if (bars > cap) reasons.push(`${STYLE_LABEL[style]} max ${cap} bars`);
+    if (bars > cap) reasons.push(t('{style} max {n} bars', { style: t(STYLE_LABEL[style]), n: cap }));
   }
   if (!drop) {
     const ba = Number(out?.bpm) || 0, bb = Number(inn?.bpm) || 0, d = ba && bb ? tempoDistance(ba, bb) : 0;
     const pct = Math.round((Math.exp(d) - 1) * 100);
-    if (d > 0.04 && cap > 8) { cap = 8; reasons.push(`${pct} % BPM gap: shorter`); }
-    else if (d > 0.02 && cap > 16) { cap = 16; reasons.push(`${pct} % BPM gap`); }
+    if (d > 0.04 && cap > 8) { cap = 8; reasons.push(t('{pct} % BPM gap: shorter', { pct })); }
+    else if (d > 0.02 && cap > 16) { cap = 16; reasons.push(t('{pct} % BPM gap', { pct })); }
     const ea = Number(out?.energy), eb = Number(inn?.energy);
     if (Number.isFinite(ea) && Number.isFinite(eb) && ea > 0 && eb > 0) {
       const de = Math.abs(eb - ea);
-      if (de >= 3 && cap > 8) { cap = 8; reasons.push(`energy ${eb > ea ? 'jump' : 'drop'} ${Math.round(ea)} → ${Math.round(eb)}`); }
-      else if (de >= 2 && cap > 16) { cap = 16; reasons.push(`energy ${Math.round(ea)} → ${Math.round(eb)}`); }
+      if (de >= 3 && cap > 8) { cap = 8; reasons.push(t(eb > ea ? 'energy jump {a} → {b}' : 'energy drop {a} → {b}', { a: Math.round(ea), b: Math.round(eb) })); }
+      else if (de >= 2 && cap > 16) { cap = 16; reasons.push(t('energy {a} → {b}', { a: Math.round(ea), b: Math.round(eb) })); }
     }
-    if (!keySync && camelotRelation(out?.key, inn?.key).kind === 'clash' && cap > 8) { cap = 8; reasons.push('key clash: short overlap'); }
+    if (!keySync && camelotRelation(out?.key, inn?.key).kind === 'clash' && cap > 8) { cap = 8; reasons.push(t('key clash: short overlap')); }
   }
   bars = phraseBars(Math.max(AUTO_LENGTH_MIN_BARS, Math.min(bars, cap, AUTO_LENGTH_MAX_BARS)));
   return { bars, beats: bars * 4, why: reasons.join(', ') };
