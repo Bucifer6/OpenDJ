@@ -194,6 +194,9 @@ button, input, select { font: inherit; color: inherit; }
 /* four-deck compact mode */
 .four-decks .jog { display: none; }
 .four-decks .deck-left { justify-content: center; }
+/* four channel strips + MASTER need ~410 px: at 340 px MASTER was pushed under decks 2 and 4. 40 % of the row keeps very
+   narrow windows (or big interface zoom) at the old 340 px so the decks still fit; phones keep mobile.css */
+@media (min-width: 900px) and (min-height: 561px) { .four-decks .deck-area { grid-template-columns: minmax(0, 1fr) clamp(340px, 40%, 420px) minmax(0, 1fr); } }
 .four-decks .transport { grid-template-columns: 1fr; }
 .four-decks .deck-toggles { display: none; }
 .four-decks .overview-wrap { height: 28px; }
