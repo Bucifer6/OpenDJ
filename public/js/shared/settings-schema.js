@@ -56,7 +56,7 @@ const SCHEMA = {
   downloadDir: str(), uploadDir: str(),
   automix: shape({
     transitionBeats: num(1, 256), lengthMode: oneOf('fixed', 'auto'), smartStart: bool(), profile: oneOf('club', 'harmonic', 'peak', 'open', 'quick', 'custom'),
-    style: oneOf('auto', 'blend', 'bassswap', 'crossfade', 'filter', 'echo', 'cut', 'backspin', 'brake', 'loop', 'reverb', 'phrase', 'eqswap'),
+    style: oneOf('auto', 'blend', 'bassswap', 'stemswap', 'crossfade', 'filter', 'echo', 'cut', 'backspin', 'brake', 'loop', 'reverb', 'phrase', 'eqswap'),
     keepSync: bool(), skipSilence: bool(), shuffle: bool(), keySync: bool(), order: oneOf('harmonic', 'build', 'peak', 'wave'),
     varyStyles: bool(), onAirLoad: oneOf('ask', 'queue', 'stop'), shape: oneOf('warmup', 'rising', 'steady', 'peak', 'wave'),
     preset: oneOf('balanced', 'harmonic', 'energy', 'variety', 'custom'), liveSetLength: num(2, 1000),
@@ -100,7 +100,8 @@ const SCHEMA = {
   },
   link: shape({ enabled: bool(), quantum: num(1, 16), startStopSync: bool() }),
   lyrics: shape({ online: bool(), writeLrc: bool() }),
-  stemsModelUrl: str(), stemsModelSha256: str(128), stemsBackend: oneOf('auto', 'wasm'), stemsEngine: oneOf('auto', 'browser'), stemsAutoPrepare: bool(), stemsOverlap: num(0, 0.75),
+  stemsModelUrl: str(), stemsModelSha256: str(128), stemsBackend: oneOf('auto', 'wasm'), stemsEngine: oneOf('auto', 'browser'), stemsAutoPrepare: bool(), stemsOverlap: num(0, 0.75), stemsBackground: bool(), stemsCacheGB: num(1, 4000),
+  mixLearning: (v) => (v && typeof v === 'object' && !Array.isArray(v) ? { n: num(0, 1e9)(v.n) ?? 0, bias: Object.fromEntries(Object.entries(v.bias && typeof v.bias === 'object' ? v.bias : {}).filter(([k]) => /^[a-z]{1,16}$/.test(k)).slice(0, 20).map(([k, x]) => [k, num(-5, 5)(x) ?? 0])) } : undefined),
   recording: objOrNull(), broadcast: objOrNull(), lighting: objOrNull(),
   transcodeCacheGB: num(0, 10000),
   uploadMaxMB: num(0.001, 1024 * 1024),

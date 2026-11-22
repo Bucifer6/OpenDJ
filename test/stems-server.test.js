@@ -10,7 +10,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { Library } from '../server/library.js';
-import { registerStemRoutes, DEFAULT_MODEL, modelSpec, extractTarEntry, wavHeader } from '../server/stems.js';
+import { registerStemRoutes, DEFAULT_MODEL, modelSpec, extractTarEntry, wavHeader, bgOrder } from '../server/stems.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-hide_banner', '-version']).status === 0;
 
@@ -346,4 +346,67 @@ test('stems server: hosted mode refuses model URLs that resolve to this server /
     assert.equal((await u.call('POST', '/api/stems/model/download')).status, 400);
     assert.equal((await u.call('GET', '/api/stems/model')).status, 400);
   } finally { u.close(); }
+});
+
+// ---------------- background preparation (settings.stemsBackground) ----------------
+test('stems server: background order is most played, then rated, then recent', () => {
+  const list = [{ id: 'a', playCount: 1, addedAt: 5 }, { id: 'b', playCount: 9 }, { id: 'c', playCount: 1, rating: 5 }, { id: 'd', playCount: 1, addedAt: 9 }];
+  assert.deepEqual(list.sort(bgOrder).map((t) => t.id), ['b', 'c', 'd', 'a']);
+});
+
+test('stems server: background preparation runs the library most played first and skips tracks it cannot read', { skip: !hasFfmpeg && 'ffmpeg not installed' }, async () => {
+  const done = [];
+  let finish;
+  const all = new Promise((r) => { finish = r; });
+  let h;
+  h = await harness({
+    ffmpeg: true, native: { stub: true, idleMs: 50, bgPollMs: 40 },
+    input: async (t) => (t.id === 'nofile' ? null : { file: path.join(h.dir, 'song.wav') }),
+    onEvent: (t, p) => { if (t === 'stems-done') { done.push(p); if (done.length === 2) finish(); } },
+  });
+  try {
+    const frames = 44100 * 2;
+    fs.writeFileSync(path.join(h.dir, 'song.wav'), Buffer.concat([wavHeader(frames * 4), pcm(frames, 3)]));
+    h.library.upsertTrack({ id: 'hot', title: 'Hot', sourceType: 'local', path: path.join(h.dir, 'song.wav'), playCount: 7 });
+    h.library.upsertTrack({ id: 'nofile', title: 'Remote', sourceType: 'local', path: path.join(h.dir, 'x.wav'), playCount: 3 });
+    let st = await h.json('GET', '/api/stems/status');
+    assert.equal(st.native.background.enabled, false); assert.equal(st.native.current, null);
+    h.library.settings.stemsBackground = true;
+    await h.json('POST', '/api/stems/background', {});
+    await all;
+    assert.deepEqual(done.map((d) => d.id), ['hot', 'trk1'], 'most played first; the unreadable one is skipped');
+    assert.ok(done.every((d) => d.background));
+    await new Promise((r) => setTimeout(r, 120));
+    st = await h.json('GET', '/api/stems/status');
+    assert.equal(st.native.background.remaining, 0); assert.equal(st.native.background.failed, 1); assert.equal(st.native.background.done, 2);
+    assert.ok(st.native.background.cacheBytes > 0);
+  } finally { h.close(); }
+});
+
+test('stems server: a requested track interrupts a background one', { skip: !hasFfmpeg && 'ffmpeg not installed' }, async () => {
+  const events = [];
+  let h;
+  h = await harness({
+    ffmpeg: true, native: { stub: true, idleMs: 50, bgPollMs: 1e6 }, settings: { stemsBackground: true },
+    input: async (t) => ({ file: path.join(h.dir, t.id === 'trk1' ? 'long.wav' : 'short.wav') }),
+    onEvent: (t, p) => { if (t === 'stems-done' || t === 'stems-failed') events.push([t, p.id, !!p.background]); },
+  });
+  try {
+    fs.writeFileSync(path.join(h.dir, 'long.wav'), Buffer.concat([wavHeader(44100 * 25 * 4), pcm(44100 * 25, 3)]));
+    fs.writeFileSync(path.join(h.dir, 'short.wav'), Buffer.concat([wavHeader(44100 * 4), pcm(44100, 3)]));
+    h.library.upsertTrack({ id: 'asked', title: 'Asked', sourceType: 'local', path: path.join(h.dir, 'short.wav'), playCount: 0 });
+    h.library.updateTrack('trk1', { playCount: 5 });
+    await h.json('POST', '/api/stems/background', {});
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal((await h.json('GET', '/api/stems/status')).native.current?.id, 'trk1');
+    assert.equal((await h.json('POST', '/api/stems/queue', { ids: ['asked'] })).added, 1);
+    const t0 = Date.now();
+    while (!events.some((e) => e[1] === 'asked') && Date.now() - t0 < 60e3) await new Promise((r) => setTimeout(r, 50));
+    assert.deepEqual(events[0], ['stems-done', 'asked', false], 'the asked track finished first, without a failure for the interrupted one');
+    // the interrupted background track is picked up again afterwards
+    while (!events.some((e) => e[1] === 'trk1') && Date.now() - t0 < 120e3) await new Promise((r) => setTimeout(r, 50));
+    assert.deepEqual(events.find((e) => e[1] === 'trk1'), ['stems-done', 'trk1', true]);
+    const st = await h.json('GET', '/api/stems/status');
+    assert.equal(st.native.background.full, false); assert.equal(st.native.background.capBytes, 40 * 2 ** 30);
+  } finally { h.close(); }
 });
