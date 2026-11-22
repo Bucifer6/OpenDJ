@@ -246,7 +246,7 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   const shown = (e) => e.style.display !== 'none' && getComputedStyle(e).display !== 'none';
   /**
    * Knob size from the strip size: two knob rows (TRIM / FILTER, then the EQ) with labels under the knobs; the channel
-   * fader keeps at least 45 % of the strip, and a knob is never wider than its share of the row.
+   * fader keeps at least 50 % of the strip (including its cap), and a knob is never wider than its share of the row.
    * VOC / INST only show when there is room (also in the drawer).
    */
   const fitKnobs = () => {
@@ -258,7 +258,7 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
     root.classList.toggle('mx-tight', tight); root.classList.toggle('mx-tiny2', tiny);
     const n = Math.max(1, ...[...s.querySelectorAll(':scope > .kn-row')].map((r) => [...r.children].filter(shown).length));
     const byW = (W - (four ? 8 : 16) - (n - 1) * (four ? 10 : 15)) / n; // the value ring is drawn 4 px outside each knob: 15 px apart leaves ~7 px between rings
-    const per = (rows) => (H - fixed - 0.45 * H - (rows + 4) * gap) / rows - LBL;
+    const per = (rows) => (H - fixed - 0.5 * H - (rows + 4) * gap) / rows - LBL;
     const stems = !four && per(3) >= 28, r = stems ? per(3) : per(2);
     const max = four ? 24 : 32;
     root.style.setProperty('--kn', `${Math.max(12, Math.min(max, Math.floor(Math.min(r, byW))))}px`);

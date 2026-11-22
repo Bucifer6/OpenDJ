@@ -113,7 +113,7 @@ try {
     await am.start([...app.library.tracks.values()].slice(0, 2), { mode: 'order' });
   });
   await waitNextLoaded();
-  const adaptivePlan = await page.evaluate(() => {
+  const adaptivePlan = await page.evaluate(async () => {
     const am = window.opendj.automix;
     window.__adaptiveOriginal = new Map();
     for (const d of [am.current, am.other(am.current)]) {
@@ -123,6 +123,7 @@ try {
         phrases: Array.from({ length: 4 }, (_, i) => ({ start: i * 16, end: (i + 1) * 16, type: i === 0 ? 'intro' : 'breakdown', energy: 0.6 })),
         vocalMap: Array.from({ length: 75 }, (_, i) => d === am.current ? 1 : i >= 16 && i < 48 ? 0 : 1) };
       window.opendj.library.tracks.set(d.track.id, d.track);
+      await fetch(`/api/tracks/${d.track.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d.track) });
     }
     am.current.seek(10); am.upcoming = null;
     const nt = am.nextTransition(), p = am.upcoming.adaptive;
@@ -135,10 +136,13 @@ try {
   const heard = await page.evaluate(() => window.__adaptiveHeard);
   check(heard.style === adaptivePlan.style && Math.abs(heard.cue - adaptivePlan.cue) < 0.25, 'real deck transport follows the selected adaptive cue');
   await page.waitForFunction(() => !window.opendj.automix.transition, null, { timeout: 40000 });
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
     const app = window.opendj; app.automix.stop();
     for (const d of app.engine.decks.slice(0, 2)) d.pause();
-    for (const [id, track] of window.__adaptiveOriginal) app.library.tracks.set(id, track);
+    for (const [id, track] of window.__adaptiveOriginal) {
+      app.library.tracks.set(id, track);
+      await fetch(`/api/tracks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(track) });
+    }
     app.settings.automix = window.__adaptiveSaved.automix; app.settings.mixLearning = window.__adaptiveSaved.learning;
   });
 

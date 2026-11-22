@@ -112,6 +112,7 @@ try {
     return out;
   });
   const worstAbs = Math.max(...abs.map((x) => Math.abs(x.rec - x.deck)));
+  if (process.env.DEBUG_DVS) console.log('ABS samples', JSON.stringify(abs));
   check(abs.every((x) => x.lock) && abs[0].rec > TC_START_SEC - 0.5, `ABS: decoder locked to the record position (${abs[0].rec.toFixed(2)} s into the record)`);
   check(worstAbs < 0.06, `ABS: deck position follows the record (worst offset ${(worstAbs * 1000).toFixed(0)} ms)`);
 

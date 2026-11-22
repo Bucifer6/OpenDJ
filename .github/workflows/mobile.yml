@@ -229,4 +229,15 @@ jobs:
             [ "$i" = 120 ] && { echo "::error::No GitHub Release for $TAG after an hour"; exit 1; }
             sleep 30
           done
-          gh release upload "$TAG" artifacts/*.apk --repo "$GITHUB_REPOSITORY" --clobber
+          # The desktop job creates the checksum manifest. Include the later Android upload in it too.
+          # A release can exist before all desktop assets have finished uploading.
+          for i in $(seq 1 60); do
+            gh release download "$TAG" --pattern SHA256SUMS.txt --dir artifacts --clobber --repo "$GITHUB_REPOSITORY" && break
+            [ "$i" = 60 ] && { echo "::error::No desktop checksum manifest for $TAG"; exit 1; }
+            sleep 5
+          done
+          # Reruns replace previous APK hashes instead of leaving conflicting entries.
+          awk '$2 !~ /^OpenDJ-.*-android-.*[.]apk$/' artifacts/SHA256SUMS.txt > artifacts/SHA256SUMS.desktop.txt
+          mv artifacts/SHA256SUMS.desktop.txt artifacts/SHA256SUMS.txt
+          (cd artifacts && sha256sum *.apk >> SHA256SUMS.txt)
+          gh release upload "$TAG" artifacts/*.apk artifacts/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --clobber
