@@ -74,7 +74,9 @@ export class Deck extends Emitter {
 
   onWorklet(m) {
     if (m.type === 'pos') {
-      if (m.time < this._seekGuard) return; // report produced before our last seek reached the audio thread
+      // AudioContext time can be shared by a seek and an already queued worklet report.
+      // Sequence acknowledgements keep that old report from undoing the user's new position.
+      if (m.seekSeq != null ? m.seekSeq !== (this._seekSeq || 0) : m.time < this._seekGuard) return;
       this._pos = m.frame / this.sr; this._t = Math.min(m.time, this.ctx.currentTime); this._rate = m.rate; this._shadow = m.shadow / this.sr;
       if (this._glide && m.tempo > 0) { this.tempo = (m.tempo / ((1 + this.bend) * this.rateMul) - 1) * 100; this.emit('tempo'); }
       if (this.playing !== m.playing && !this._pendingPlay) { this.playing = m.playing; this.emit('state'); }
@@ -243,7 +245,8 @@ export class Deck extends Emitter {
     if (!this.track) return;
     t = clamp(t, 0, Math.max(0, this.duration - 0.001));
     this._pos = t; this._t = this.ctx.currentTime; this._seekGuard = this.ctx.currentTime;
-    this.post('seek', { frame: t * this.sr, at: this.ctx.currentTime });
+    this._seekSeq = (this._seekSeq || 0) + 1;
+    this.post('seek', { frame: t * this.sr, at: this.ctx.currentTime, seq: this._seekSeq });
     this.emit('seek', t);
     this.armActiveLoop(t);
   }

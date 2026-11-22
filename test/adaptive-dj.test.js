@@ -126,4 +126,36 @@ test('beat confidence survives analysis, API edits and rescans; locked grids are
   lib.upsertTrack(track('a', { bpmConfidence: 1 })); assert.equal(lib.getTrack('a').bpmConfidence, 0.12);
   lib.updateTrack('a', { bpmConfidence: 3 }); assert.equal(lib.getTrack('a').bpmConfidence, 1);
   assert.equal(analysisPatch({ bpm: 120, gridLocked: true }, { bpm: 121, bpmConfidence: 0.1 }).bpmConfidence, 1);
+  const locked = planAdaptiveTransition(track('a', { bpmConfidence: 0.1, gridLocked: true }), track('b'), { styles: ['blend'] });
+  assert.equal(locked.style, 'blend', 'manual grid corrections override old detector confidence');
+});
+
+test('fresh library analysis replaces stale deck metadata and invalidates planning', () => {
+  const { am, app, a, b } = session(), library = new Map([[a.id, a], [b.id, b]]);
+  app.library = { track: (id) => library.get(id) };
+  am.nextTransition(); const first = am.upcoming;
+  library.set(a.id, { ...a, bpmConfidence: 0.1, key: '3B', energy: 2 });
+  am.nextTransition();
+  assert.notEqual(am.upcoming, first);
+  assert.equal(am.info(am.current).key, '3B');
+  assert.ok(DROP_STYLES.has(am.upcoming.style));
+  assert.equal(am.lengthForQueue(am.idx, am.upcoming.style), am.upcoming.length);
+});
+
+test('randomised section layouts keep all scheduled windows inside playable audio without mutating input', () => {
+  let seed = 71;
+  const random = () => ((seed = Math.imul(seed, 1664525) + 1013904223 >>> 0) / 2 ** 32);
+  for (let i = 0; i < 100; i++) {
+    const duration = 48 + Math.floor(random() * 400), bpm = [0, 60, 87, 120, 124, 174, 240][Math.floor(random() * 7)];
+    const out = track('a', { bpm, duration, endTime: duration - 1, phrases: Array.from({ length: 10 }, (_, k) => ({ start: k * duration / 10, end: (k + 1) * duration / 10, type: k % 2 ? 'verse' : 'breakdown' })) });
+    const inn = track('b', { bpm: [60, 120, 174][i % 3] }), before = structuredClone([out, inn]);
+    const p = planAdaptiveTransition(out, inn, { position: random() * duration });
+    if (p) {
+      assert.ok(p.evaluated <= 64 && Number.isFinite(p.score));
+      assert.ok(p.timing.begin >= 0 && p.inStart >= 0 && p.inStart < inn.duration);
+      assert.ok((p.timing.drop ?? p.timing.start + p.timing.len) <= out.endTime + 1e-6);
+      if (!DROP_STYLES.has(p.style)) assert.ok(p.timing.len > 0);
+    }
+    assert.deepEqual([out, inn], before);
+  }
 });

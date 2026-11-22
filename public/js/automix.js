@@ -614,7 +614,7 @@ export class AutoMix extends Emitter {
         stemsOut: stems(onCur ? cur : null, o), stemsIn: stems(onNext ? nd : null, n), keySync: !!this.opts.keySync,
         prevStyle, vary: !!this.opts.varyStyles, recent: this._recent, learning: this.app.settings?.mixLearning,
         fixedBars: this.opts.lengthMode === 'auto' ? null : (Number(this.opts.transitionBeats) || 32) / 4,
-        styles: this.opts.keepSync === false || [o, n].some((t) => Number.isFinite(t.bpmConfidence) && t.bpmConfidence < 0.35) ? ['echo', 'cut', 'reverb'] : undefined,
+        styles: this.opts.keepSync === false || [o, n].some((t) => !t.bpmLocked && !t.gridLocked && Number.isFinite(t.bpmConfidence) && t.bpmConfidence < 0.35) ? ['echo', 'cut', 'reverb'] : undefined,
       });
       this.plans.set(t, plan);
       return plan;
@@ -623,8 +623,8 @@ export class AutoMix extends Emitter {
 
   /** Structure info for the track on a deck: analysed fields, else derived from the deck's waveform (older analyses). */
   info(deck) {
-    const t = deck.track || {};
-    const base = { ...this.fresh(t), ...t, bpm: deck.bpm, gridOffset: deck.gridOffset, duration: deck.duration || t.duration, startTime: t.startTime, endTime: t.endTime };
+    const t = { ...deck.track, ...this.fresh(deck.track) };
+    const base = { ...t, bpm: deck.bpm, gridOffset: deck.gridOffset, duration: deck.duration || t.duration, startTime: t.startTime, endTime: t.endTime };
     if (t.mixOut != null || t.mixIn != null) return { ...base, mixIn: t.mixIn, mixOut: t.mixOut, downbeat: t.downbeat, phrases: t.phrases };
     if (!deck.bpm || !deck.waveform || !deck.track) return { ...base, phrases: t.phrases };
     const key = `${deck.bpm}|${deck.gridOffset}|${t.startTime}|${t.endTime}`;
@@ -685,12 +685,13 @@ export class AutoMix extends Emitter {
   /** Structure info for a queued track that is not on a deck yet (library copy). */
   trackInfo(t) {
     const f = this.fresh(t) || {};
-    return { bpm: f.bpm, gridOffset: f.gridOffset, duration: f.duration, startTime: f.startTime, endTime: f.endTime, mixIn: f.mixIn, mixOut: f.mixOut, downbeat: f.downbeat, phrases: f.phrases, energy: f.energy, key: f.key };
+    return { ...f };
   }
 
   /** Length of the transition into queue entry i with the given style (for the queue panel). */
   lengthForQueue(i, style) {
     const t = this.queue[i]; if (!t || !style) return null;
+    if (i === this.idx && this.upcoming?.adaptive && this.upcoming.style === style) return this.upcoming.length;
     const planned = this.plans.get(t);
     if (planned && planned.style === style && this.opts.lengthMode === 'auto') return { beats: planned.beats, bars: planned.bars, auto: true, why: planned.lengthWhy };
     const cur = this.current, nextDeck = cur ? this.other(cur) : null;

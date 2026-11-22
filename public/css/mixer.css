@@ -19,7 +19,7 @@
 .mixer.mx2 .mixer-adv-btn[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
 /* channel columns */
 :root body .mixer.mx2 .mixer-top { display: flex; gap: 6px; flex: 1; min-height: 0; overflow: visible; }
-:root body .mixer.mx2 .mixer-strips { display: flex; gap: 6px; flex: 1 1 auto; justify-content: stretch; min-height: 0; }
+:root body .mixer.mx2 .mixer-strips { display: flex; gap: 6px; flex: 1 1 auto; justify-content: stretch; min-height: 0; min-width: 0; }
 :root body .mixer.mx2 .strip { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 3px; flex: 1 1 0; min-width: 0; max-width: none; padding: 4px 4px 5px; row-gap: 3px; }
 :root body .mixer.mx2 .strip > .strip-num { text-align: center; line-height: 12px; height: 12px; }
 :root body .mixer.mx2 .strip > .stem-knobs { display: flex; flex-direction: row; justify-content: center; gap: 8px; flex: none; }
@@ -181,7 +181,7 @@
 :root body .mixer.mx2 .strip .xf-assign { gap: 4px; }
 :root body.four-decks .mixer.mx2 .strip .xf-assign { gap: 2px; }
 /* channel knob rows: space between the knobs; VOC / INST laid out like the rows above (label under the knob) */
-:root body .mixer.mx2 .strip > .kn-row { justify-content: center; gap: 15px; }
+:root body .mixer.mx2 .strip > .kn-row { justify-content: center; gap: min(15px, max(2px, calc((100% - 3 * var(--kn)) / 2))); }
 :root body.four-decks .mixer.mx2 .strip > .kn-row { gap: 10px; }
 :root body .mixer.mx2 .strip > .stem-knobs { justify-content: center; gap: 18px; padding-top: 3px; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
 :root body .mixer.mx2 .strip > .stem-knobs .knob-wrap { flex-direction: column; align-items: center; gap: 2px; }

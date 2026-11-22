@@ -4,6 +4,7 @@
 // no file paths, no source URLs, no stream credentials.
 import { platform } from './platform.js';
 import { planBestTransition } from './mix-planner.js';
+import { planAdaptiveTransition } from './adaptive-dj.js';
 
 const pageId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
 const post = (url, body) => fetch(url, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -57,14 +58,15 @@ export async function runRemote(app, tool, args = {}) {
         const from = lib.track(String(args.from_track_id || '')), to = lib.track(String(args.to_track_id || ''));
         if (!from || !to) throw new Error('Give both from_track_id and to_track_id (ids from search_library)');
         const auto = app.engine.settings?.stemsAutoLoad !== false;
-        const p = planBestTransition(from, to, { stemsOut: auto && !!from.stems?.ready, stemsIn: auto && !!to.stems?.ready, keySync: !!a.opts.keySync, learning: app.settings.mixLearning });
+        const p = planAdaptiveTransition(from, to, { keepSync: a.opts.keepSync, learning: app.settings.mixLearning })
+          || planBestTransition(from, to, { stemsOut: auto && !!from.stems?.ready, stemsIn: auto && !!to.stems?.ready, keySync: !!a.opts.keySync, learning: app.settings.mixLearning });
         return { from: from.title, to: to.title, ...p };
       }
       if (!a.enabled) throw new Error('Automix is not running: give from_track_id and to_track_id');
       const n = a.nextTransition();
       if (!n) throw new Error('Nothing queued after the playing track');
-      const planned = a.plans.get(a.nextTrack());
-      return { style: n.style, why: n.why, override: !!n.override, bars: n.length?.bars ?? null, begins_in_seconds: Math.round(n.beginsIn), vocals: planned?.style === n.style ? planned.vocals : null, options: planned?.options || [] };
+      const planned = a.upcoming?.adaptive || a.plans.get(a.nextTrack());
+      return { style: n.style, why: n.why, override: !!n.override, bars: n.length?.bars ?? null, begins_in_seconds: Math.round(n.beginsIn), outgoing_seconds: n.begin, incoming_seconds: a.upcoming?.adaptive?.inStart ?? null, vocals: planned?.style === n.style ? planned.vocals : null, options: planned?.options || [] };
     }
     case 'automix_queue_next': {
       if (!app.automix.enabled) throw new Error('Automix is not running (automix_start first)');

@@ -24,7 +24,7 @@ fs.mkdirSync(music);
 
 // ---------------------------------------------------------------- test audio (ffmpeg-static, like e2e-video)
 function ffmpegBin() {
-  try { return require('ffmpeg-static'); } catch { /* not installed */ }
+  try { const bin = require('ffmpeg-static'); if (bin && fs.existsSync(bin)) return bin; } catch { /* not installed */ }
   try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return 'ffmpeg'; } catch { /* not on PATH */ }
   throw new Error('ffmpeg not found: run `npm i --no-save ffmpeg-static` or install ffmpeg');
 }

@@ -44,7 +44,7 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
   const rawRatio = out.bpm * rate / inn.bpm;
   // Mirror Deck.syncTargetRatio: matching half/double BPM does not double the audio's playback speed.
   const ratio = [rawRatio, rawRatio * 2, rawRatio / 2].reduce((a, b) => Math.abs(Math.log(b)) < Math.abs(Math.log(a)) ? b : a);
-  const lowConfidence = [out, inn].some((t) => finite(t.bpmConfidence) && t.bpmConfidence < 0.35);
+  const lowConfidence = [out, inn].some((t) => !t.bpmLocked && !t.gridLocked && finite(t.bpmConfidence) && t.bpmConfidence < 0.35);
   const noOverlap = lowConfidence || opts.keepSync === false || !out.bpm || !inn.bpm || Math.abs(Math.log(ratio)) > Math.log(1.08);
   const styles = noOverlap ? (opts.styles || ['echo', 'cut', 'reverb']).filter((s) => ['echo', 'cut', 'reverb'].includes(s)) : opts.styles;
   if (styles && !styles.length) return null;
@@ -88,6 +88,7 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
       - (exit - earliest) / Math.max(1, end - earliest) * 1.5 - cue / inEnd * 0.5;
     evaluated++;
     if (!best || score > best.score) best = { ...p, score, timing, inStart: cue,
+      vocals: !drop && !['stemswap', 'crossfade'].includes(p.style) && Math.min(vo.v, vi.v) > 0.2 ? 'hold-in' : null,
       confidence: lowConfidence ? 'low' : vo.known && vi.known ? 'measured-vocals' : 'estimated',
       why: `${p.why}; section search: ${timing.begin.toFixed(1)}s → ${cue.toFixed(1)}s${lowConfidence ? '; uncertain grid: no beat-matched overlap' : ''}` };
   }
