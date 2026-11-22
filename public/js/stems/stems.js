@@ -1,5 +1,10 @@
-// AI stems manager (UI thread): model consent + download, a preparation queue, the separation worker,
-// upload of the results to the server, and attaching new stems to decks that have the track loaded.
+// AI stems manager (UI thread): model consent + download, a preparation queue, and attaching new stems to decks that
+// have the track loaded. Two engines:
+//  - server (preferred): the OpenDJ server separates natively in its own queue (server/stems-child.js); this page
+//    only asks and mirrors the server's queue from its events, so phones and slow browsers never do the heavy work
+//    and Automix's next tracks are prepared ahead of time;
+//  - browser (fallback: no onnxruntime-node / FFmpeg on the server, or chosen in the settings): the separation worker
+//    here, with the results uploaded to the server.
 // Created once by the app: `app.stems = new StemsManager(app)` (see stems-ui.js setupStems()).
 import { Emitter } from '../util.js';
 import { STEMS, MODEL_RATE } from './stem-dsp.js';
@@ -22,7 +27,12 @@ export const stemsApi = {
   part: (id, token, stem, frame, data) => j('PUT', `/api/stems/${encodeURIComponent(id)}/part?token=${token}&stem=${stem}&frame=${frame}`, new Uint8Array(data.buffer, data.byteOffset, data.byteLength)),
   finish: (id, token) => j('POST', `/api/stems/${encodeURIComponent(id)}/finish?token=${token}`),
   remove: (id) => j('DELETE', `/api/stems/${encodeURIComponent(id)}`),
+  queue: (ids, { force = false, front = false } = {}) => j('POST', '/api/stems/queue', { ids, force, front }),
+  cancelQueued: (id) => j('POST', '/api/stems/queue/cancel', id ? { id } : { all: true }),
 };
+
+/** Human name of a separation backend. */
+export const backendName = (b) => ({ dml: 'GPU · DirectML', coreml: 'GPU · CoreML', cuda: 'GPU · CUDA', cpu: 'CPU', webgpu: 'WebGPU', wasm: 'CPU (browser)', stub: 'test' }[b] || b || '');
 
 const abortError = () => Object.assign(new Error('Cancelled'), { name: 'AbortError' });
 
@@ -41,11 +51,53 @@ export class StemsManager extends Emitter {
   get settings() { return this.app.settings || {}; }
   hasStems(t) { return !!t?.stems?.ready; }
   get busy() { return !!this.current || this.queue.length > 0; }
+  /** The server separates (onnxruntime-node there), unless the settings ask for the browser engine. */
+  get serverEngine() { return !this.stub && !!this._status?.native?.installed && this.settings.stemsEngine !== 'browser'; }
   state() { return { current: this.current && { ...this.current }, queue: [...this.queue] }; }
   /** Test hook: use the band-splitting stub instead of the real model (no download). */
   useStub(kind = 'bands') { this.stub = kind; this.disposeWorker(); }
 
-  async status() { this._status = await stemsApi.status(); return this._status; }
+  async status() {
+    this._status = await stemsApi.status();
+    if (this.serverEngine && !this._pumping) this.serverState(this._status.native);
+    return this._status;
+  }
+
+  // ---------------- server engine ----------------
+  /** Mirror the server's queue ({ current, queue } from /api/stems/status or the 'stems-queue' event). */
+  serverState(s) {
+    if (!s || this._pumping) return; // the browser engine is running here
+    const c = s.current;
+    this.current = c ? { id: c.id, title: c.title, phase: c.phase, done: c.done, total: c.total, backend: c.backend, started: performance.now() - (c.separating || c.elapsed || 0), server: true } : null;
+    this.queue = [...(s.queue || [])];
+    this.emit('progress', this.current && { ...this.current }); this.emit('queue', this.state());
+  }
+  /** Server events: 'stems-queue', 'stems-done', 'stems-failed', 'stems' (wired in app.js). */
+  serverEvent(type, e) {
+    if (type === 'stems-queue') return this.serverEngine && this.serverState(e);
+    if (type === 'stems') { if (e.ready && e.stems) this.updateTrack(e.id, e.stems); else if (e.ready === false) this.updateTrack(e.id, null); return; }
+    const mine = this._asked.delete(e.id); // only the page that asked gets the toast (Automix's own prefetches stay quiet)
+    if (type === 'stems-done') {
+      this.lastRun = { id: e.id, ms: e.ms, seconds: e.seconds, backend: e.backend, threads: e.threads, chunks: e.chunks };
+      if (mine) this.emit('finished', { id: e.id, title: e.title, ...this.lastRun });
+    } else if (type === 'stems-failed' && mine) {
+      if (e.cancelled) this.emit('cancelled', { id: e.id });
+      else this.emit('failed', { id: e.id, title: e.title, message: e.message });
+    }
+  }
+  _asked = new Set();
+
+  /**
+   * Prepare tracks ahead (Automix's next tracks, a track just loaded on a deck) on the server, quietly. Only with the
+   * server engine: in the browser this would compete with playback.
+   */
+  async prefetch(ids, { front = false } = {}) {
+    if (!this.serverEngine || this.settings.stemsAutoPrepare === false || !this._status?.native?.available) return 0;
+    const lib = this.app.library;
+    const list = [...new Set(ids)].filter((id) => { const t = lib?.track(id); return t && !this.hasStems(t) && (front || (this.current?.id !== id && !this.queue.includes(id))); });
+    if (!list.length) return 0;
+    try { const r = await stemsApi.queue(list, { front }); this.serverState(r); return r.added; } catch (e) { console.warn('[stems] prefetch', e.message); return 0; }
+  }
 
   /** Make sure the model is on the server; asks for consent (size, licence) before the one-time download. */
   async ensureModel({ interactive = true } = {}) {
@@ -79,6 +131,15 @@ export class StemsManager extends Emitter {
     });
     if (!list.length) return 0;
     if (!(await this.ensureModel({ interactive }))) return 0;
+    if (this.serverEngine) {
+      if (!this._status?.native?.available) await this.status();
+      if (this._status?.native?.available) {
+        for (const id of list) this._asked.add(id);
+        const r = await stemsApi.queue(list, { force, front: list.length === 1 });
+        this.serverState(r);
+        return r.added || list.length;
+      }
+    }
     this.queue.push(...list);
     this.emit('queue', this.state());
     this.pump();
@@ -86,13 +147,21 @@ export class StemsManager extends Emitter {
   }
 
   cancel(id) {
+    if (this.serverEngine && !this._pumping) {
+      const target = id || this.current?.id;
+      if (target) { this._asked.add(target); stemsApi.cancelQueued(target).then((s) => this.serverState(s)).catch((e) => console.warn('[stems] cancel', e.message)); }
+      return;
+    }
     if (id && this.current?.id !== id) { this.queue = this.queue.filter((x) => x !== id); this.emit('queue', this.state()); return; }
     if (!this.current) return;
     this._cancel = true;
     this.disposeWorker(); // stops the model mid-chunk; it is reloaded for the next track
     this._abort?.(abortError());
   }
-  cancelAll() { this.queue = []; this.cancel(); this.emit('queue', this.state()); }
+  cancelAll() {
+    if (this.serverEngine && !this._pumping) { stemsApi.cancelQueued(null).then((s) => this.serverState(s)).catch(() => {}); return; }
+    this.queue = []; this.cancel(); this.emit('queue', this.state());
+  }
 
   /** Delete a track's stems (server + decks). */
   async remove(id) {
@@ -216,6 +285,7 @@ export class StemsManager extends Emitter {
     if (t) lib.updateTrack({ ...t, stems: stems || undefined });
     for (const d of this.app.engine.decks) {
       if (d.track?.id !== id) continue;
+      if (stems?.ready && d.stemsReady && d.track.stems?.at === stems.at) continue; // same stems, already loaded (event + reply)
       d.track.stems = stems || undefined;
       if (stems?.ready) { if (d.stemsReady) d.unloadStems(); d.loadStems().catch((e) => console.warn('[stems] load', e)); }
       else d.unloadStems();

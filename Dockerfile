@@ -16,7 +16,11 @@ RUN apt-get update \
 WORKDIR /app
 COPY package.json package-lock.json ./
 # No Electron (devDependency) and no bundled ffmpeg-static (optional): the system FFmpeg above is used.
-RUN npm ci --omit=dev --omit=optional --ignore-scripts && npm cache clean --force
+# AI stems on the server (onnxruntime-node, CPU; Linux build only): every browser and phone just asks for stems.
+RUN npm ci --omit=dev --omit=optional --ignore-scripts \
+ && npm install --no-save --omit=dev --ignore-scripts onnxruntime-node@1.31.1 \
+ && find node_modules/onnxruntime-node/bin/napi-v6 -mindepth 1 -maxdepth 1 ! -name linux -exec rm -rf {} + \
+ && npm cache clean --force
 COPY server ./server
 COPY public ./public
 

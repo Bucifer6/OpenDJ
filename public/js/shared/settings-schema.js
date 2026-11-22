@@ -101,7 +101,7 @@ const SCHEMA = {
   },
   link: shape({ enabled: bool(), quantum: num(1, 16), startStopSync: bool() }),
   lyrics: shape({ online: bool(), writeLrc: bool() }),
-  stemsModelUrl: str(), stemsModelSha256: str(128), stemsBackend: oneOf('auto', 'wasm'), stemsOverlap: num(0, 0.75),
+  stemsModelUrl: str(), stemsModelSha256: str(128), stemsBackend: oneOf('auto', 'wasm'), stemsEngine: oneOf('auto', 'browser'), stemsAutoPrepare: bool(), stemsOverlap: num(0, 0.75),
   recording: objOrNull(), broadcast: objOrNull(), lighting: objOrNull(),
   transcodeCacheGB: num(0, 10000),
   uploadMaxMB: num(0.001, 1024 * 1024),
