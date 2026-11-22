@@ -42,6 +42,13 @@ export async function meanSquarePerSecond(file, rate = STEM_RATE) {
 
 export const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'];
 export const STEM_RATE = 44100;
+/**
+ * Stems saved since separateChunked checks every chunk (the sources must add up to the track) carry
+ * meta.checked = STEM_CHECK. GPU-made stems without it may be noise (DirectML returned full-scale garbage for
+ * HT-Demucs), so they are dropped at start-up and prepared again.
+ */
+export const STEM_CHECK = 1;
+export const uncheckedGpuStems = (meta) => !!meta && !(meta.checked >= STEM_CHECK) && /\b(dml|webgpu|coreml|cuda)\b/i.test(String(meta.backend || ''));
 
 /**
  * Default model: HT-Demucs v4 (4 stems, Meta's facebookresearch/demucs, MIT) exported to ONNX with the STFT
@@ -422,7 +429,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
       }
       await fs.promises.rm(raw, { force: true });
     }
-    const meta = { model: u.model, backend: u.backend, format: flac ? 'flac' : 'wav', sampleRate: u.sampleRate, frames: u.frames, stems: STEM_NAMES, at: Date.now(), ...(vocals ? { vocals } : {}) };
+    const meta = { model: u.model, backend: u.backend, format: flac ? 'flac' : 'wav', sampleRate: u.sampleRate, frames: u.frames, stems: STEM_NAMES, checked: STEM_CHECK, at: Date.now(), ...(vocals ? { vocals } : {}) };
     await fs.promises.writeFile(path.join(u.dir, 'meta.json'), JSON.stringify(meta));
     const dest = trackDir(t.id);
     await fs.promises.rm(dest, { recursive: true, force: true });
@@ -612,6 +619,17 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     };
   }
   const bgT = setInterval(() => engine.kick(), native?.bgPollMs ?? 60e3); bgT.unref?.();
+  // stems made on a GPU before the output check may be noise: drop them so they are prepared again
+  const purged = (async () => {
+    let n = 0;
+    for (const t of library.allTracks?.() || []) {
+      if (!t.stems?.ready || !ID_RE.test(String(t.id)) || !uncheckedGpuStems(readMeta(t.id))) continue;
+      await fs.promises.rm(trackDir(t.id), { recursive: true, force: true }).catch(() => {});
+      setTrackStems(t.id, null); emit('stems', { id: t.id, ready: false }); n++;
+    }
+    if (n) { console.warn(`[stems] ${n} track(s) had GPU stems made before the output check: preparing them again`); engine.retryBackground?.(); }
+    return n;
+  })().catch((e) => { console.warn('[stems] purge', e.message); return 0; });
   route('POST', '/api/stems/queue', ({ body }) => engine.add(Array.isArray(body?.ids) ? body.ids.slice(0, 5000) : [], { force: !!body?.force, front: !!body?.front }));
   route('POST', '/api/stems/background', ({ body }) => (body?.retry ? engine.retryBackground() : (engine.kick(), engine.state())));
   route('POST', '/api/stems/queue/cancel', ({ body }) => { if (body?.all) engine.cancelAll(); else engine.cancel(String(body?.id || '')); return engine.state(); });
@@ -637,7 +655,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     dir: root,
     ortDir: ORT,
     /** Remove a track's stems (call when tracks are deleted from the library). */
-    engine,
+    engine, purged, // purged: Promise<number> of unchecked GPU stems dropped at start-up
     evict: async (id) => { if (!ID_RE.test(id)) return; engine.cancel(id); await dropUpload(id); await fs.promises.rm(trackDir(id), { recursive: true, force: true }); },
     close() { clearInterval(sweep); download?.ctrl.abort(); engine.close(); },
   };

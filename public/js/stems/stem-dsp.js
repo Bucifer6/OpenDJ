@@ -224,9 +224,35 @@ export class StreamingOLA {
 }
 
 /**
+ * How far one chunk's sources are from adding back up to its input: error energy / input energy (Infinity when the
+ * output holds NaN / Infinity). HT-Demucs reconstructs the mix to within about 1 % of its energy; a GPU backend that
+ * computes garbage (seen with DirectML: full-scale noise in every stem) is off by orders of magnitude.
+ */
+export function mixtureError(input, out, sources, channels, segment) {
+  let err = 0, ref = 0;
+  for (let c = 0; c < channels; c++) {
+    const ib = c * segment;
+    for (let t = 0; t < segment; t++) {
+      let s = 0;
+      for (let k = 0; k < sources; k++) s += out[(k * channels + c) * segment + t];
+      const x = input[ib + t], d = s - x;
+      err += d * d; ref += x * x;
+    }
+  }
+  if (!Number.isFinite(err)) return Infinity;
+  return err / (ref + 1e-6 * channels * segment); // the floor keeps near-silent chunks from failing on rounding noise
+}
+/** Chunks whose sources miss the input by more than this (error / input energy, about -6 dB) are rejected. */
+export const MAX_MIXTURE_ERROR = 0.25;
+/** Thrown by separateChunked when the model output is not a separation of the input (broken backend). */
+export const badOutputError = (ratio) => Object.assign(new Error(`The stem model returned invalid audio (the stems do not add up to the track: error ${Number.isFinite(ratio) ? ratio.toFixed(2) : 'NaN'})`), { code: 'BAD_STEM_OUTPUT' });
+
+/**
  * Separate a whole track chunk by chunk.
  * runChunk(planar Float32Array [C][segment]) -> Promise<Float32Array> planar [S][C][segment]
  * onBlock({ frame, frames, data }) receives finished audio in order (planar [S][C][frames]).
+ * Every chunk is checked (mixtureError) before it is used: invalid output throws badOutputError, so the caller
+ * can redo the track on another backend instead of writing noise.
  */
 export async function separateChunked({ channels, length, segment, overlap = 0.25, sources, runChunk, onBlock, onProgress, shouldStop }) {
   const C = channels.length;
@@ -239,6 +265,8 @@ export async function separateChunked({ channels, length, segment, overlap = 0.2
     const { offset, length: n } = chunks[i];
     chunkInput(channels, length, offset, n, segment, input);
     const out = await runChunk(input);
+    const bad = mixtureError(input, out, sources, C, segment);
+    if (!(bad <= MAX_MIXTURE_ERROR)) throw badOutputError(bad);
     const block = ola.add(out, n);
     await onBlock?.(block);
     onProgress?.(i + 1, chunks.length);

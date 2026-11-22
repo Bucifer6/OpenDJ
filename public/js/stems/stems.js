@@ -260,6 +260,7 @@ export class StemsManager extends Emitter {
               if (uploadError || this._cancel) return;
               for (let s = 0; s < STEMS.length; s++) await stemsApi.part(t.id, token, STEMS[s], m.frame, m.stems[s]);
             }).catch((err) => { uploadError = err; reject(err); });
+          } else if (m.type === 'backend') this.backend = { ...this.backend, backend: m.backend, threads: m.threads }; // WebGPU output failed the check: WASM now
           } else if (m.type === 'done') resolve(m);
           else if (m.type === 'error') reject(new Error(m.message));
         };

@@ -10,7 +10,7 @@
 import { separateChunked, interleaveInt16, STEMS, DEMUCS_SOURCES } from './stem-dsp.js';
 import { createRunner, createStubSession, StubTensor } from './stems-model.js';
 
-let runner = null, info = null;
+let runner = null, info = null, toWasm = null;
 const order = STEMS.map((n) => DEMUCS_SOURCES.indexOf(n)); // model index for each OpenDJ stem
 
 async function fetchModel(url) {
@@ -49,6 +49,14 @@ async function init(m) {
     }
     if (!session) session = await ort.InferenceSession.create(bytes, { ...opts, executionProviders: ['wasm'] });
     runner = createRunner(session, ort.Tensor);
+    // WebGPU that runs but returns invalid stems (see mixtureError): separate() redoes the track on WASM
+    toWasm = backend === 'wasm' ? null : async () => {
+      await session.release?.().catch?.(() => {});
+      session = await ort.InferenceSession.create(bytes, { ...opts, executionProviders: ['wasm'] });
+      runner = createRunner(session, ort.Tensor);
+      info = { backend: 'wasm', threads: ort.env.wasm.numThreads, kind: runner.kind };
+      toWasm = null;
+    };
     info = { backend, threads: backend === 'wasm' ? ort.env.wasm.numThreads : 0, kind: runner.kind };
   }
   postMessage({ type: 'ready', ...info, loadMs: Math.round(performance.now() - t0) });
@@ -58,7 +66,7 @@ async function separate(m) {
   if (!runner) throw new Error('Model not loaded');
   const t0 = performance.now();
   const left = m.left, right = m.right || m.left;
-  const r = await separateChunked({
+  const run = () => separateChunked({
     channels: [left, right], length: m.length, segment: runner.segment, overlap: m.overlap ?? 0.25, sources: runner.sources.length,
     runChunk: runner.runChunk,
     onProgress: (done, total) => postMessage({ type: 'progress', id: m.id, done, total }),
@@ -67,6 +75,15 @@ async function separate(m) {
       postMessage({ type: 'block', id: m.id, frame, frames, stems }, stems.map((s) => s.buffer));
     },
   });
+  let r;
+  try { r = await run(); }
+  catch (e) {
+    if (e?.code !== 'BAD_STEM_OUTPUT' || !toWasm) throw e;
+    console.warn(`[stems] ${info.backend}: ${e.message}; using WASM`);
+    await toWasm();
+    postMessage({ type: 'backend', ...info });
+    r = await run(); // blocks are keyed by frame: the redo overwrites anything already sent
+  }
   postMessage({ type: 'done', id: m.id, ms: Math.round(performance.now() - t0), chunks: r.chunks, ...info });
 }
 
