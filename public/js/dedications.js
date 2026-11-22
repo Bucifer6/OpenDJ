@@ -52,7 +52,6 @@ export class Dedications extends Emitter {
     this._pump();
     return d;
   }
-  remove(id) { const i = this.queue.findIndex((d) => d.id === id && d.state === 'queued'); if (i >= 0) { this.queue.splice(i, 1); this.emit('change'); } }
   clear() { this.queue = this.queue.filter((d) => d.state !== 'queued'); this.emit('change'); }
   pending() { return this.queue.filter((d) => d.state === 'queued').length; }
 
@@ -115,53 +114,4 @@ export class Dedications extends Emitter {
     this._hideTimer = setTimeout(() => this._hide(), Math.max(4, seconds + 3) * 1000);
   }
   _hide() { clearTimeout(this._hideTimer); this._banner?.remove(); this._banner = null; }
-
-  /** The dialog: write, choose language and options, queue; the queue is listed below. */
-  open() {
-    const app = this.app;
-    const text = el('textarea', { class: 'inp dedication-input', rows: 3, maxlength: DEDICATION_MAX, placeholder: 'For Ana and Mihai, happy anniversary!', 'aria-label': 'Dedication text' });
-    const count = el('span', { class: 'hint' }, `0 / ${DEDICATION_MAX}`);
-    text.addEventListener('input', () => { count.textContent = `${text.value.length} / ${DEDICATION_MAX}`; });
-    const lang = el('select', { class: 'sel', 'aria-label': 'Language' }, ...Object.entries(VOICE_LANGS).map(([v, x]) => el('option', { value: v }, x.label)));
-    lang.value = app.settings.dedicationLang === 'ro' ? 'ro' : 'en';
-    const when = el('select', { class: 'sel', 'aria-label': 'When' }, el('option', { value: 'phrase' }, 'At the next phrase'), el('option', { value: 'now' }, 'Right away'));
-    const speak = el('input', { type: 'checkbox', checked: true }), overlay = el('input', { type: 'checkbox', checked: true }), meta = el('input', { type: 'checkbox', checked: true });
-    const status = el('p', { class: 'hint dedication-voice' }, 'Checking voices…');
-    const list = el('ol', { class: 'dedication-list' });
-    const renderList = () => {
-      list.replaceChildren(...this.queue.map((d) => el('li', { class: `ded-${d.state}` },
-        el('span', { class: 'ded-text' }, d.text), el('small', {}, ` ${d.lang.toUpperCase()} · ${d.state === 'waiting' && d.startsIn ? `in ${Math.ceil(d.startsIn)} s` : d.state}`),
-        d.state === 'queued' ? el('button', { class: 'btn xs', title: 'Remove', onclick: () => this.remove(d.id) }, '✕') : null)));
-      if (!this.queue.length) list.append(el('li', { class: 'hint', style: { listStyle: 'none', marginLeft: '-18px' } }, 'Nothing queued.'));
-    };
-    const off = this.on('change', renderList); renderList();
-    const voiceNote = async () => {
-      const caps = await this.voice?.capabilities().catch(() => null);
-      const l = lang.value, name = VOICE_LANGS[l].label;
-      if (!caps) { status.textContent = 'No voice available: the dedication will be shown as text.'; return; }
-      status.textContent = caps.mix[l] ? `Spoken in ${name} by ${caps.mix.label} into the master output: heard, recorded and broadcast, music ducked.`
-        : caps.local[l] ? `Spoken in ${name} by the system voice on this computer only (not recorded or broadcast: install ${l === 'ro' ? 'a Romanian speech voice' : 'a speech engine'} for that).`
-          : `No ${name} voice is installed: the dedication will be shown as text. ${l === 'ro' ? 'Windows: Settings > Time & language > Speech > Add voices > Romanian. macOS: Spoken Content > Ioana. Linux: install espeak-ng.' : ''}`;
-    };
-    lang.addEventListener('change', voiceNote); voiceNote();
-    const body = el('div', { class: 'form dedication-form' },
-      el('label', { class: 'field' }, el('span', {}, 'Dedication'), text), count,
-      el('div', { class: 'row' }, el('label', { class: 'field' }, el('span', {}, 'Language'), lang), el('label', { class: 'field' }, el('span', {}, 'When'), when)),
-      el('label', { class: 'check' }, speak, ' Speak it over the mix'),
-      el('label', { class: 'check' }, overlay, ' Show it on screen and on the video output'),
-      el('label', { class: 'check' }, meta, ' Show it in the stream\'s "now playing" while live'),
-      status, el('h4', {}, 'Queue'), list);
-    app.dialogs.modal('Dedication', body, [
-      { label: 'Close', value: null },
-      { label: 'Queue dedication', primary: true, action: () => {
-        try {
-          this.add(text.value, { lang: lang.value, when: when.value, speak: speak.checked, overlay: overlay.checked, meta: meta.checked });
-          app.setSetting?.('dedicationLang', lang.value);
-          text.value = ''; count.textContent = `0 / ${DEDICATION_MAX}`;
-          app.toast?.(when.value === 'now' ? 'Dedication coming up' : 'Dedication queued for the next phrase');
-        } catch (e) { app.toast?.(e.message); }
-        return false; // keep the dialog open for the queue
-      } },
-    ]).finally?.(off);
-  }
 }

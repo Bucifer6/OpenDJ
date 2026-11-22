@@ -74,7 +74,6 @@ export function buildMixer(app) {
 const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   /** Strip / master variant element: shown by the root classes set from the mixer config (applyVariants). */
   const v = (cls, e) => { e.classList.add('mxv', cls); return e; };
-  let mcBtn = null;
   const stripsWrap = el('div', { class: 'mixer-strips' });
 
   for (const i of order) {
@@ -126,7 +125,6 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   const grLed = el('span', { class: 'gr-led', title: 'Limiter gain reduction' });
   // dB scale beside the master meter (the meter spans -48 .. +3 dB)
   const scale = el('div', { class: 'm-scale', 'aria-hidden': 'true' }, ...[0, -6, -12, -24, -48].map((db) => el('span', { style: { bottom: `${((db + 48) / 51) * 100}%` } }, String(db))));
-  let mcBtnEl = null;
   // MASTER column: title and level on top, the tall stereo meter in the middle, headphones / sampler / mic and the
   // buttons at the bottom (level with the channel faders and CUE buttons)
   const master = el('div', { class: 'mixer-master' },
@@ -142,11 +140,9 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
       R(knob({ label: 'MIC', min: 0, max: 1, def: 0.7, bipolar: false, get: () => eng.micVolume ?? 0.7, set: (x) => eng.setMicVolume(x), size: 'xs', title: 'Mic level' }))),
     el('div', { class: 'mic-box' },
       R(button('MIC', { cls: 'xs mic-on', click: () => app.toggleMic(), active: () => eng.micOn, title: 'Microphone / aux input on/off' })),
-      R(button('TALK', { cls: 'xs talk', click: () => eng.setTalkover(!eng.talkover), active: () => eng.talkover, title: 'Talkover: duck the music while you speak' })),
-      (mcBtnEl = R(button('MC', { cls: 'xs mc-btn', click: () => app.dedications?.open(), active: () => !!app.dedications?.current, title: 'Dedication: a short message spoken over the mix at the next phrase (English or Romanian), with the music ducked' })))),
+      R(button('TALK', { cls: 'xs talk', click: () => eng.setTalkover(!eng.talkover), active: () => eng.talkover, title: 'Talkover: duck the music while you speak' }))),
     el('div', { class: 'm-setup' }),
   );
-  mcBtn = mcBtnEl;
   const xfader = R(fader({ min: -1, max: 1, def: 0, get: () => eng.crossfader, set: (x) => eng.setCrossfader(x), horizontal: true, cls: 'crossfader', title: 'Crossfader' }));
   // personality switches wait while a fast-cut crossfader is held mid-scratch
   xfader.addEventListener('pointerdown', () => { eng.xfTouched = true; });
@@ -245,7 +241,6 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   eng.on('mixer', (i, key) => { for (const r of byCh[i] || renderers) r.render(); if (!applyingEqPreset && EQ_KEYS.has(key)) eqPreset.value = eqPresetFor(); });
   eng.on('master', () => { for (const r of renderers) r.render(); });
   window.addEventListener('opendj-theme', () => requestAnimationFrame(() => fit(lastH, lastW, true)));
-  app.dedications?.on('change', () => { mcBtn?.render?.(); mcBtn?.setAttribute('data-count', String(app.dedications.pending() || '')); });
   eng.on('mic', () => { for (const r of renderers) r.render(); });
   let lastW = 0, lastH = 0;
   const shown = (e) => e.style.display !== 'none' && getComputedStyle(e).display !== 'none';

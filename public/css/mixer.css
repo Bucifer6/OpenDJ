@@ -162,9 +162,9 @@
 :root body .mixer.mx2 .mixer-master .knob-xs { width: 22px; height: 22px; }
 :root body .mixer.mx2 .mixer-master .knob-sm { width: 30px; height: 30px; }
 :root body .mixer.mx2 .mixer-master .knob-label { font-size: 7px; display: block; white-space: nowrap; letter-spacing: 0; }
-:root body .mixer.mx2 .mixer-master .mic-box { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 5px 5px; width: 100%; padding-top: 4px; border-top: 1px solid var(--line); }
+:root body .mixer.mx2 .mixer-master .mic-box { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 6px 10px; width: 100%; padding-top: 5px; border-top: 1px solid var(--line); }
 :root body .mixer.mx2 .mixer-master .mic-box .btn, :root body .mixer.mx2 .mixer-master .m-setup .btn { padding: 2px 4px; font-size: 9px; min-width: 0; }
-:root body .mixer.mx2 .mixer-master .m-setup { display: flex; gap: 5px; margin-top: 2px; justify-content: center; width: 100%; }
+:root body .mixer.mx2 .mixer-master .m-setup { display: flex; gap: 8px; margin-top: 5px; justify-content: center; width: 100%; }
 :root body .mixer.mx2 .mixer-master .mixer-adv-btn { font-size: 12px; line-height: 1; padding: 2px 6px; }
 /* 4 decks: narrower MASTER so four columns fit */
 :root body.four-decks .mixer.mx2 .mixer-master { flex-basis: 76px; width: 76px; }
@@ -176,6 +176,7 @@
 :root body.four-decks .mixer.mx2 .mixer-master .mic-box .btn { padding: 2px 2px; font-size: 8px; }
 /* short mixers: no dB scale, the buttons stay */
 :root body .mixer.mx2.mx-tiny2 .mixer-master .m-scale { display: none; }
+:root body .mixer.mx2.mx-tiny2 .mixer-master > .m-meter { min-height: 16px; } /* very short mixers: the meter gives way so the MIC / TALK and SMART rows stay visible */
 /* breathing room between the crossfader assign buttons (A / T / B) */
 :root body .mixer.mx2 .strip .xf-assign { gap: 4px; }
 :root body.four-decks .mixer.mx2 .strip .xf-assign { gap: 2px; }
