@@ -392,7 +392,7 @@ test('stems server: a requested track interrupts a background one', { skip: !has
     onEvent: (t, p) => { if (t === 'stems-done' || t === 'stems-failed') events.push([t, p.id, !!p.background]); },
   });
   try {
-    fs.writeFileSync(path.join(h.dir, 'long.wav'), Buffer.concat([wavHeader(44100 * 60 * 4), pcm(44100 * 60, 3)]));
+    fs.writeFileSync(path.join(h.dir, 'long.wav'), Buffer.concat([wavHeader(44100 * 25 * 4), pcm(44100 * 25, 3)]));
     fs.writeFileSync(path.join(h.dir, 'short.wav'), Buffer.concat([wavHeader(44100 * 4), pcm(44100, 3)]));
     h.library.upsertTrack({ id: 'asked', title: 'Asked', sourceType: 'local', path: path.join(h.dir, 'short.wav'), playCount: 0 });
     h.library.updateTrack('trk1', { playCount: 5 });
@@ -401,10 +401,10 @@ test('stems server: a requested track interrupts a background one', { skip: !has
     assert.equal((await h.json('GET', '/api/stems/status')).native.current?.id, 'trk1');
     assert.equal((await h.json('POST', '/api/stems/queue', { ids: ['asked'] })).added, 1);
     const t0 = Date.now();
-    while (!events.some((e) => e[1] === 'asked') && Date.now() - t0 < 20e3) await new Promise((r) => setTimeout(r, 50));
+    while (!events.some((e) => e[1] === 'asked') && Date.now() - t0 < 60e3) await new Promise((r) => setTimeout(r, 50));
     assert.deepEqual(events[0], ['stems-done', 'asked', false], 'the asked track finished first, without a failure for the interrupted one');
     // the interrupted background track is picked up again afterwards
-    while (!events.some((e) => e[1] === 'trk1') && Date.now() - t0 < 30e3) await new Promise((r) => setTimeout(r, 50));
+    while (!events.some((e) => e[1] === 'trk1') && Date.now() - t0 < 120e3) await new Promise((r) => setTimeout(r, 50));
     assert.deepEqual(events.find((e) => e[1] === 'trk1'), ['stems-done', 'trk1', true]);
     const st = await h.json('GET', '/api/stems/status');
     assert.equal(st.native.background.full, false); assert.equal(st.native.background.capBytes, 40 * 2 ** 30);

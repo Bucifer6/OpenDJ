@@ -115,7 +115,7 @@ test('pickStyle: auto rules', () => {
   const v = pickStyle(T('a'), T('b', { bpm: 125 }), { prev: 'blend', vary: true, seed: 'x' });
   assert.notEqual(v.style, 'blend'); assert.match(v.why, /varied/);
   assert.equal(normStyle('phrase'), 'blend'); assert.equal(normStyle('eqswap'), 'bassswap'); assert.equal(normStyle('nope'), 'blend');
-  assert.equal(STYLES.length, 11);
+  assert.equal(STYLES.length, 12);
 });
 
 test('planTransition: drop styles land on a bar line with their pre-roll; blend styles start at the mix-out point', () => {

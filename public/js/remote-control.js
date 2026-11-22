@@ -77,7 +77,7 @@ export async function runRemote(app, tool, args = {}) {
       const a = app.automix;
       if (!a.enabled || !a.nextTrack()) throw new Error('Automix has no next transition');
       if (a.transition) throw new Error('A transition is already running; this sets the next one after it');
-      a.setOverride(a.idx, args.style);
+      a.setOverride(a.idx, args.style, { learn: false }); // the DJ's learned taste is theirs, not the assistant's
       const n = a.nextTransition();
       return { style: n?.style, why: n?.why, bars: n?.length?.bars ?? null };
     }
@@ -104,7 +104,13 @@ export async function runRemote(app, tool, args = {}) {
       const ids = args.track_ids.filter((id) => app.library.track(String(id)));
       if (!ids.length) throw new Error('None of those track ids are in the library');
       const n = await app.stems.enqueue(ids, { interactive: false });
-      return { queued: n || 0, already_prepared: ids.filter((id) => app.library.track(id)?.stems?.ready).length };
+      const prepared = ids.filter((id) => app.library.track(id)?.stems?.ready).length;
+      let note;
+      if (!n && prepared < ids.length) {
+        const st = await app.stems.status().catch(() => null);
+        note = !st?.model?.ready ? 'The AI stems model is not downloaded yet: the user can install it in OpenDJ (Settings > AI stems)' : 'Already queued or being prepared';
+      }
+      return { queued: n || 0, already_prepared: prepared, ...(note ? { note } : {}) };
     }
     case 'set_tempo': {
       const d = deckOf(app, args.deck);

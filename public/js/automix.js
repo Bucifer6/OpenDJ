@@ -525,13 +525,16 @@ export class AutoMix extends Emitter {
     this.queue.splice(this.idx, 0, ...list);
     this.queueChanged();
   }
-  /** Style for the transition into queue entry i (absolute index): 'auto' / null clears the override. */
-  setOverride(i, style) {
+  /**
+   * Style for the transition into queue entry i (absolute index): 'auto' / null clears the override.
+   * learn: false for choices that are not the DJ's own (an AI assistant over MCP), so they don't train the planner.
+   */
+  setOverride(i, style, { learn = true } = {}) {
     const t = this.queue[i]; if (!t) return;
     const planned = this.plans.get(t);
     if (!style || style === 'default') this.overrides.delete(t); else this.overrides.set(t, style === 'auto' ? 'auto' : normStyle(style));
     // the DJ disagreed with the planner: remember it (settings.mixLearning), so its next plans lean their way
-    if (planned && style && style !== 'auto' && style !== 'default' && normStyle(style) !== planned.style) {
+    if (learn && planned && style && style !== 'auto' && style !== 'default' && normStyle(style) !== planned.style) {
       this.app.setSetting?.('mixLearning', learnChoice(this.app.settings.mixLearning, normStyle(style), planned.style));
     }
     this.upcoming = null; this.emit('state');
