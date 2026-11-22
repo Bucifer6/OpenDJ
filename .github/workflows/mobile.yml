@@ -2,6 +2,8 @@ name: Build mobile apps
 
 # Android: release APK + AAB (signed with the release keystore from secrets, else debug-signed so the APK still installs).
 # iOS: unsigned simulator build to prove it compiles; signed archive + TestFlight upload only when the Apple secrets exist.
+# Secrets that are set but unusable (not base64, wrong password, placeholder text) give a warning and the unsigned /
+# debug-signed build instead of a failed run. Tag pushes (v*) attach the APK to that tag's GitHub Release.
 # Signing secrets are environment secrets of `release`: only tag pushes (v*) and manual runs with release_tag use it.
 # Required secrets: see docs/MOBILE.md ("CI secrets").
 on:
@@ -66,9 +68,20 @@ jobs:
         if: env.HAVE_KEYSTORE == 'true'
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
-          echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          # only a keystore that decodes and opens with its password and alias is used (Gradle signs with it when
+          # ANDROID_KEYSTORE_FILE is set); anything else falls back to the debug key with a warning
+          ks="$RUNNER_TEMP/release.keystore"
+          if printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ks" 2>/dev/null \
+             && keytool -list -keystore "$ks" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" > /dev/null 2>&1; then
+            echo "ANDROID_KEYSTORE_FILE=$ks" >> "$GITHUB_ENV"
+            echo "KEYSTORE_OK=true" >> "$GITHUB_ENV"
+          else
+            rm -f "$ks"
+            echo "::warning::The Android signing secrets are set but unusable (ANDROID_KEYSTORE_BASE64 must be base64 of the .jks; the password and alias must open it). Building with the debug key instead. See docs/MOBILE.md, CI and secrets."
+          fi
       - name: Build APK + AAB
         working-directory: mobile/android
         env:
@@ -82,11 +95,11 @@ jobs:
       - name: Name the outputs
         run: |
           v=$(node -p "require('./package.json').version")
-          kind=$([ "$HAVE_KEYSTORE" = true ] && echo release || echo debug-signed)
+          kind=$([ "$KEYSTORE_OK" = true ] && echo release || echo debug-signed)
           mkdir -p dist-mobile
           cp mobile/android/app/build/outputs/apk/release/app-release.apk "dist-mobile/OpenDJ-$v-android-$kind.apk"
           cp mobile/android/app/build/outputs/bundle/release/app-release.aab "dist-mobile/OpenDJ-$v-android-$kind.aab"
-          [ "$HAVE_KEYSTORE" = true ] || echo "::warning::No release keystore secrets: the APK is signed with the debug key (fine for testing, not for Google Play)."
+          [ "$KEYSTORE_OK" = true ] || echo "::warning::No usable release keystore: the APK is signed with the debug key (fine for testing, not for Google Play)."
           ls -la dist-mobile
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -127,24 +140,32 @@ jobs:
           IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
           IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
         run: |
+          # unusable Apple secrets (not base64, wrong password, placeholder text): warn and keep the unsigned build
+          unusable() {
+            echo "::warning::The iOS signing secrets are set but unusable ($1). Skipping the signed archive and TestFlight upload. See docs/MOBILE.md, CI and secrets."
+            security delete-keychain "$RUNNER_TEMP/signing.keychain-db" > /dev/null 2>&1 || true
+            rm -f "$RUNNER_TEMP/dist.p12" "$RUNNER_TEMP/app.mobileprovision" "$RUNNER_TEMP/profile.plist"
+            exit 0
+          }
+          printf '%s' "$IOS_DIST_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/dist.p12" 2>/dev/null || unusable "IOS_DIST_CERT_P12_BASE64 is not base64"
+          printf '%s' "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/app.mobileprovision" 2>/dev/null || unusable "IOS_PROVISIONING_PROFILE_BASE64 is not base64"
+          security cms -D -i "$RUNNER_TEMP/app.mobileprovision" > "$RUNNER_TEMP/profile.plist" 2>/dev/null || unusable "the provisioning profile does not decode"
           KC="$RUNNER_TEMP/signing.keychain-db"; KCPW="$(uuidgen)"
           security create-keychain -p "$KCPW" "$KC"
           security set-keychain-settings -lut 21600 "$KC"
           security unlock-keychain -p "$KCPW" "$KC"
-          echo "$IOS_DIST_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/dist.p12"
-          security import "$RUNNER_TEMP/dist.p12" -P "$IOS_DIST_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KC"
+          security import "$RUNNER_TEMP/dist.p12" -P "$IOS_DIST_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KC" || unusable "the .p12 certificate or its password"
           security set-key-partition-list -S apple-tool:,apple: -k "$KCPW" "$KC" > /dev/null
           security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
           rm "$RUNNER_TEMP/dist.p12"
-          echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/app.mobileprovision"
-          security cms -D -i "$RUNNER_TEMP/app.mobileprovision" > "$RUNNER_TEMP/profile.plist"
           UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' "$RUNNER_TEMP/profile.plist")
           NAME=$(/usr/libexec/PlistBuddy -c 'Print Name' "$RUNNER_TEMP/profile.plist")
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           cp "$RUNNER_TEMP/app.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
           echo "PROFILE_NAME=$NAME" >> "$GITHUB_ENV"
+          echo "APPLE_OK=true" >> "$GITHUB_ENV"
       - name: Archive + export IPA
-        if: env.HAVE_APPLE == 'true'
+        if: env.APPLE_OK == 'true'
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
@@ -168,7 +189,7 @@ jobs:
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/OpenDJ.xcarchive" -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/ipa"
           ls -la "$RUNNER_TEMP/ipa"
       - name: Upload to TestFlight
-        if: env.HAVE_APPLE == 'true'
+        if: env.APPLE_OK == 'true'
         env:
           APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
@@ -185,7 +206,8 @@ jobs:
           rm -rf "$HOME/.appstoreconnect/private_keys" "$RUNNER_TEMP/app.mobileprovision" "$RUNNER_TEMP/profile.plist"
 
   release-android:
-    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+    # a tag push (the desktop workflow creates that tag's release) or Run workflow with release_tag
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     needs: android
     runs-on: ubuntu-latest
     permissions:
@@ -195,9 +217,16 @@ jobs:
         with:
           name: OpenDJ-Android
           path: artifacts
-      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
-        with:
-          tag_name: ${{ inputs.release_tag }}
-          target_commitish: ${{ github.sha }}
-          files: artifacts/*.apk
-          fail_on_unmatched_files: true
+      - name: Attach the APK to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          # the desktop workflow publishes the release for a tag push: wait for it (up to an hour) rather than
+          # creating a release of our own with only the APK
+          for i in $(seq 1 120); do
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 && break
+            [ "$i" = 120 ] && { echo "::error::No GitHub Release for $TAG after an hour"; exit 1; }
+            sleep 30
+          done
+          gh release upload "$TAG" artifacts/*.apk --repo "$GITHUB_REPOSITORY" --clobber

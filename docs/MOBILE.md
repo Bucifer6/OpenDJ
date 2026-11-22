@@ -161,7 +161,11 @@ npm run mobile:vendor      # rebuild public/vendor/opendj-vendor.js after updati
   secrets exist, otherwise with the debug key (installable for testing, not accepted by Google Play).
 - **ios**: unsigned simulator build (proves it compiles). With the Apple secrets also a signed App Store archive,
   exported IPA and a TestFlight upload.
-- **release-android**: on *Run workflow* with `release_tag`, attaches the APK to that GitHub Release.
+- **release-android**: on a tag push (`v*`), attaches the APK to that tag's GitHub Release once the desktop workflow
+  has published it; on *Run workflow* with `release_tag`, to that release.
+
+Signing secrets that are set but unusable (not base64, wrong password or alias, placeholder text) no longer fail the
+run: Android falls back to the debug key and iOS to the unsigned build, with a warning in the run summary.
 
 The signing secrets below are **environment secrets** of the `release` environment (Settings → Environments →
 `release`), which needs the maintainer's approval and only allows `v*` tags and `main`. The **android** and **ios**
