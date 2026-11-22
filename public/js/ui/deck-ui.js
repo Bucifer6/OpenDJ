@@ -10,6 +10,7 @@ import { buildStemControls } from '../stems/stems-ui.js';
 import { HOTCUE_COLORS, TEMPO_RANGES } from '../audio/deck.js';
 import { camelotCompatible, toCamelot } from '../audio/analysis-core.js';
 import { smoothTime } from './clock.js';
+import { t as tr } from '../i18n.js';
 import { vinylFor, deckOptions, VINYL_RANGES, fmtDiv, JUMP_SIZES, SCALES, GLIDE_BEATS } from '../audio/vinyl.js';
 import { ScratchSamples, SCRATCH_SOUNDS, SCRATCH_DOWNLOADS } from '../audio/scratch-samples.js';
 import { setDeckVinyl, needleLocked } from '../midi/deck-targets.js';
@@ -55,8 +56,9 @@ export function buildDeck(app, deck) {
 
   // ---------- header ----------
   const cover = el('div', { class: 'deck-cover' });
-  const title = el('div', { class: 'deck-title' }, 'Drop a track here');
-  const artist = el('div', { class: 'deck-artist' }, '');
+  // track title / artist are user data: never run through the DOM translator (the UI texts here use tr())
+  const title = el('div', { class: 'deck-title', translate: 'no' }, tr('Drop a track here'));
+  const artist = el('div', { class: 'deck-artist', translate: 'no' }, '');
   const artistNote = el('span', { class: 'deck-load-note', 'aria-live': 'polite' }); // load progress: Loading 42 % / Decoding… / Analysing…
   const keyBadge = el('span', { class: 'key-badge' });
   const bpmBig = el('div', { class: 'deck-bpm' }, '--');
@@ -410,11 +412,11 @@ export function buildDeck(app, deck) {
   const updateMeta = () => {
     const t = deck.track;
     const f = !t && deck.error ? deck.failedTrack : null; // failed load: keep the track's name, show the error under it
-    title.textContent = t ? t.title || 'Untitled' : f ? `⚠ ${f.title || 'Untitled'}` : (deck.error ? `⚠ ${deck.error}` : 'Drop a track here');
+    title.textContent = t ? t.title || tr('Untitled') : f ? `⚠ ${f.title || tr('Untitled')}` : (deck.error ? `⚠ ${tr(deck.error)}` : tr('Drop a track here'));
     const lp = deck.loading && deck.loadPhase;
     artistNote.textContent = lp ? `${lp.name}${lp.pct != null ? ` ${lp.pct} %` : '…'}` : '';
-    title.title = t ? `${t.title || ''}${t.artist ? ' — ' + t.artist : ''}` : f ? `Could not load ${f.path || f.title}: ${deck.error}` : '';
-    artist.textContent = t ? t.artist || '' : f ? `Could not load: ${deck.error}` : '';
+    title.title = t ? `${t.title || ''}${t.artist ? ' — ' + t.artist : ''}` : f ? tr('Could not load {0}: {1}', { 0: f.path || f.title, 1: tr(deck.error) }) : '';
+    artist.textContent = t ? t.artist || '' : f ? tr('Could not load: {0}', { 0: tr(deck.error) }) : '';
     cover.style.backgroundImage = t && !t.scratchSample ? `url(${api.coverUrl(t.id)})` : '';
     sampleBadge.hidden = !deck.scratchSample;
     const cam = toCamelot(t?.key);

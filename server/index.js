@@ -875,7 +875,8 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     const v = parseCookies(req.headers.cookie)[LAUNCH_COOKIE];
     return typeof v === 'string' && crypto.timingSafeEqual(crypto.createHash('sha256').update(v).digest(), launchKey);
   };
-  const PUBLIC_FILES = new Set(['login.html', 'icon.svg', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest', 'sw.js', 'favicon.ico', 'fonts/inter-latin-wght-normal.woff2', 'fonts/inter-latin-ext-wght-normal.woff2']); // the login page's UI font
+  const PUBLIC_FILES = new Set(['login.html', 'icon.svg', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest', 'sw.js', 'favicon.ico', 'fonts/inter-latin-wght-normal.woff2', 'fonts/inter-latin-ext-wght-normal.woff2', // the login page's UI font
+    'js/page-i18n.js', 'js/i18n.js', 'js/locales/ro.js']); // and its translation (static UI text only)
 
   const server = http.createServer(async (req, res) => {
     let url;

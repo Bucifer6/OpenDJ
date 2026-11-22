@@ -37,6 +37,8 @@
   --r-xs: 3px; --r-sm: 4px; --radius: 6px; --r-lg: 10px; --r-xl: 14px;
   --ease: cubic-bezier(.2, .7, .2, 1); --dur: 120ms;
   --browser-h: clamp(170px, calc(31vh / var(--ui-zoom, 1)), 340px); --wave-h: 66px;
+  /* the window size in zoomed CSS px (Settings → Interface size zooms the page; plain 100vw / 100vh would then overflow) */
+  --zvw: calc(100vw / var(--ui-zoom, 1)); --zvh: calc(100vh / var(--ui-zoom, 1));
   --font: "Inter OpenDJ", Inter, "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
   --mono: "JetBrains Mono OpenDJ", "JetBrains Mono", "SF Mono", Consolas, monospace;
   color-scheme: dark;
@@ -371,8 +373,8 @@ body:not(.four-decks) .deck-col > .deck:nth-child(2) { display: none; }
 @keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(.985); } }
 .big-start { font-size: 16px; padding: 14px 28px; border-radius: 30px; gap: 10px; }
 .big-start .ico { width: 18px; height: 18px; fill: currentColor; }
-.modal { background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--line-2); border-radius: var(--r-xl); width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 60px); display: flex; flex-direction: column; box-shadow: var(--elev-3), inset 0 1px 0 rgba(255,255,255,.04); animation: pop-in 140ms var(--ease); overflow: hidden; }
-.modal.wide { width: min(820px, calc(100vw - 32px)); }
+.modal { background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--line-2); border-radius: var(--r-xl); width: min(520px, calc(var(--zvw) - 32px)); max-height: calc(var(--zvh) - 60px); display: flex; flex-direction: column; box-shadow: var(--elev-3), inset 0 1px 0 rgba(255,255,255,.04); animation: pop-in 140ms var(--ease); overflow: hidden; }
+.modal.wide { width: min(820px, calc(var(--zvw) - 32px)); }
 .modal-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px 12px 18px; border-bottom: 1px solid var(--line); }
 .modal-head h2 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -.01em; }
 .modal-x { background: none; border: 0; color: var(--text-3); cursor: pointer; font-size: 15px; width: 28px; height: 28px; border-radius: var(--radius); display: grid; place-items: center; transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease); }
@@ -403,6 +405,8 @@ input[type="range"] { accent-color: var(--accent); }
 .browse-item { padding: 5px 9px; cursor: pointer; }
 .browse-item:hover { background: var(--sel-tree); }
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 14px; overflow-x: auto; scrollbar-width: none; }
+/* dialogs: wrap the tab row instead of hiding tabs past the dialog's right edge (scrollbar is hidden above) */
+.modal .tabs { flex-wrap: wrap; row-gap: 2px; }
 .tab { background: none; border: 0; padding: 8px 12px; cursor: pointer; color: var(--text-3); border-bottom: 2px solid transparent; font-weight: 650; white-space: nowrap; transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease); margin-bottom: -1px; }
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--text); border-bottom-color: var(--accent); }
@@ -468,8 +472,9 @@ kbd { background: var(--panel-3); border: 1px solid var(--line-2); border-bottom
 /* ---------- turntable and deck features (docs/MIXER_AND_TURNTABLES_PLAN.md §6) ---------- */
 .sample-badge { background: #22d3ee; color: #031418; flex-shrink: 0; }
 .scratch-view-btn { display: none; flex-shrink: 0; min-height: 24px; font-weight: 800; letter-spacing: .05em; }
-@media (pointer: coarse) { .scratch-view-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; margin-block: -12px; } }
-.deck-popup { position: fixed; z-index: 400; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 8px; max-width: min(320px, calc(100vw - 16px)); background: var(--panel-2); border: 1px solid var(--line-2); border-radius: var(--r-md, 8px); box-shadow: var(--elev-3, 0 12px 32px rgba(0,0,0,.55)); }
+/* touch: a 44 px hit area from an invisible ::after, so the visible button no longer covers the track title above it */
+@media (pointer: coarse) { .scratch-view-btn { display: inline-flex; align-items: center; justify-content: center; position: relative; min-height: 22px; min-width: 44px; } .scratch-view-btn::after { content: ''; position: absolute; inset: -11px 0; } }
+.deck-popup { position: fixed; z-index: 400; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 8px; max-width: min(320px, calc(var(--zvw) - 16px)); background: var(--panel-2); border: 1px solid var(--line-2); border-radius: var(--r-md, 8px); box-shadow: var(--elev-3, 0 12px 32px rgba(0,0,0,.55)); }
 .deck-popup-title { grid-column: 1 / -1; font-size: var(--fs-2xs); font-weight: 800; letter-spacing: .06em; color: var(--text-3); text-transform: uppercase; padding: 0 2px 2px; }
 .deck-popup .btn { min-height: 32px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (pointer: coarse) { .deck-popup .btn { min-height: 44px; } }

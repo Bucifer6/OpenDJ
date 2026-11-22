@@ -14,7 +14,7 @@ button.tag-chip:hover { border-color: var(--accent); color: #fff; }
 .lr.dup-a { background: #14181e; }
 .lr.dup-b { background: #181c23; }
 .lr.dup-a + .lr.dup-b, .lr.dup-b + .lr.dup-a { border-top: 1px solid var(--line-2); }
-.lr.dup-keep .c-title::before { content: 'KEEP'; font-size: 8.5px; font-weight: 800; color: var(--green); border: 1px solid var(--green); border-radius: 3px; padding: 0 3px; margin-right: 6px; vertical-align: 1px; }
+.lr.dup-keep .c-title::before { content: var(--txt-keep, 'KEEP'); font-size: 8.5px; font-weight: 800; color: var(--green); border: 1px solid var(--green); border-radius: 3px; padding: 0 3px; margin-right: 6px; vertical-align: 1px; }
 
 /* sidebar */
 .tree-item.has-missing .ti-count { color: var(--amber); }
@@ -47,7 +47,7 @@ button.tag-chip:hover { border-color: var(--accent); color: #fff; }
 /* smart playlist builder */
 .sm-match { align-items: center; color: var(--text-2); }
 .sm-rules { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: #0e1115; border: 1px solid var(--line); border-radius: 8px; }
-.sm-rules:empty::after { content: 'No rules: matches the whole collection.'; color: var(--text-3); font-size: 11px; }
+.sm-rules:empty::after { content: var(--txt-no-rules, 'No rules: matches the whole collection.'); color: var(--text-3); font-size: 11px; }
 .sm-rule { display: grid; grid-template-columns: 150px 170px minmax(0, 1fr) auto; gap: 6px; align-items: center; }
 .sm-rule .sel { height: 31px; }
 .sm-val { display: flex; gap: 6px; align-items: center; min-width: 0; }

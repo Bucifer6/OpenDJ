@@ -29,6 +29,7 @@ import { BackgroundAnalyser } from './audio/background-analysis.js';
 import { isUndecodable } from './audio/analysis-queue.js';
 import { platform, unavailable } from './platform.js';
 import { setupUpdates } from './ui/update.js';
+import { initI18n, storedLanguage, resolveLanguage, currentLanguage, t } from './i18n.js';
 
 /** The OpenDJ mark: a platter with a tone arm, drawn in the accent colour. */
 function logoMark() {
@@ -42,7 +43,9 @@ class App {
   constructor() { this.shift = false; this._shiftKey = false; }
 
   async init() {
-    this.settings = await api.settings();
+    // interface language: start with the stored choice (no wait for the settings), then follow the setting
+    [this.settings] = await Promise.all([api.settings(), initI18n(storedLanguage())]);
+    if (resolveLanguage(this.settings.language) !== currentLanguage() || storedLanguage() !== (this.settings.language || 'auto')) await initI18n(this.settings.language || 'auto');
     applyTheme(this.settings);
     this.deckCount = Number(this.settings.deckCount) === 4 ? 4 : 2; // only 2 or 4 decks exist
     this.engine = new Engine(this.settings);
@@ -164,7 +167,7 @@ class App {
     const shiftUp = () => { this.shift = this._shiftKey; shiftBtn.classList.remove('active'); };
     shiftBtn.addEventListener('pointerup', shiftUp); shiftBtn.addEventListener('pointerleave', shiftUp);
     const topbar = el('header', { class: 'topbar' },
-      el('div', { class: 'logo' }, logoMark(), el('span', { class: 'logo-word' }, 'Open', el('b', {}, 'DJ'))),
+      el('div', { class: 'logo', translate: 'no' }, logoMark(), el('span', { class: 'logo-word' }, 'Open', el('b', {}, 'DJ'))),
       deckSel, shiftBtn,
       el('div', { class: 'tb-group automix-actions' }, this.amBtn, this.amSkip, this.amQueueBtn), this.amInfo,
       el('div', { class: 'tb-spacer' }),
@@ -455,11 +458,12 @@ class App {
   }
   /** Older name (MCP / scripts): MIX NOW while automix runs, else the one-click start. */
   automixNow() { return this.automix.enabled ? this.mixNow() : this.automixStart(); }
-  queueAdd(tracks) {
-    if (!this.automix.enabled) { this.automix.queue = [...this.automix.queue.slice(this.automix.idx), ...tracks]; this.automix.idx = 0; }
-    else if (this.shift) this.automix.insertNext(tracks); // Shift = play next
+  queueAdd(tracks, { next = false } = {}) {
+    next = next || this.shift; // Shift = play next
+    if (!this.automix.enabled) { const rest = this.automix.queue.slice(this.automix.idx); this.automix.queue = next ? [...tracks, ...rest] : [...rest, ...tracks]; this.automix.idx = 0; }
+    else if (next) this.automix.insertNext(tracks);
     else this.automix.queue.push(...tracks);
-    this.toast(`${tracks.length} track(s) queued for automix`);
+    this.toast(next ? `${tracks.length} track(s) will play next in automix` : `${tracks.length} track(s) queued for automix`);
     this.updateAutomixUi();
   }
   updateAutomixUi() {
@@ -482,6 +486,7 @@ class App {
         info = `Next: ${next.artist ? next.artist + ' – ' : ''}${next.title}${nt ? ` · ${STYLE_LABEL[nt.style] || nt.style} in ${fmtTime(nt.beginsIn).slice(0, 5)}` : ''}`;
       } else info = 'Last track';
     } else if (a.queue.length) info = `${a.queue.length - a.idx} queued`;
+    info = t(info); // translated before the comparison, so the DOM translator does not rewrite it every tick
     if (this.amInfo.textContent !== info) this.amInfo.textContent = info;
     this.queuePanel?.render?.();
   }
@@ -518,7 +523,7 @@ class App {
 
   /** Automix queue: what plays next, with which transition style (overridable per transition) and why. */
   toggleQueuePanel() {
-    if (this.queuePanel) { this.queuePanel.remove(); this.queuePanel = null; return; }
+    if (this.queuePanel) { this.queuePanel.off?.(); this.queuePanel.remove(); this.queuePanel = null; return; }
     const a = this.automix;
     const list = el('ol', { class: 'am-queue' });
     const head = el('div', { class: 'am-queue-next' });
@@ -532,14 +537,26 @@ class App {
       s.addEventListener('change', () => a.setOverride(i, s.value));
       return s;
     };
+    // drag a row onto another to reorder; Alt+↑/↓ on a focused row does the same from the keyboard
+    let dragFrom = -1;
+    const moveTo = (from, to) => {
+      if (to < a.idx || to >= a.queue.length) return;
+      a.move(from, to);
+      requestAnimationFrame(() => list.querySelector(`[data-i="${to}"]`)?.focus());
+    };
+    const shuffleBtn = el('button', { class: 'btn sm', title: 'Shuffle the upcoming tracks (random order, still beat-matched)', onclick: () => {
+      const n = a.shuffleRemaining();
+      this.toast(n ? `Shuffled ${n} upcoming track(s)` : a.live && a.enabled ? 'Live smart mix picks each next track itself: nothing to shuffle' : 'Nothing to shuffle');
+    } }, icon('shuffle'), 'Shuffle');
     // chosen transition length: "16 bars (auto: 16-bar outro, 32-bar intro)"; drop styles: where the drop lands
     const lengthText = (len, style) => {
       if (!len || !style) return '';
-      const bars = `${len.bars} bar${len.bars === 1 ? '' : 's'}`;
-      const what = DROP_STYLES.has(style) ? `drop after ${bars} of outro` : bars;
-      return len.auto ? `${what} (auto${len.why ? ': ' + len.why : ''})` : what;
+      const bars = t(len.bars === 1 ? '{n} bar' : '{n} bars', { n: len.bars });
+      const what = DROP_STYLES.has(style) ? t('drop after {bars} of outro', { bars }) : bars;
+      return len.auto ? (len.why ? t('{what} (auto: {why})', { what, why: len.why }) : t('{what} (auto)', { what })) : what;
     };
     const render = () => {
+      shuffleBtn.disabled = (!!a.live && a.enabled) || a.queue.length - a.idx < 2;
       const nt = a.enabled ? a.nextTransition() : null;
       const key = `${a.enabled}|${a.idx}|${a.queue.length}|${a.queue.slice(a.idx, a.idx + 50).map((t) => t.id).join()}|${[...a.overrides.values()].join()}|${a.opts.style}|${a.opts.lengthMode}|${a.opts.transitionBeats}|${!!a.transition}|${nt?.length?.bars}|${nt?.length?.why}`;
       const trLen = a.transition?.length ? `, ${lengthText(a.transition.length, a.transition.style)}` : '';
@@ -552,12 +569,24 @@ class App {
         const t = a.queue[i], st = a.styleFor(i, i === a.idx ? (a.current?.track && this.library.track(a.current.track.id)) || a.current?.track : null);
         const len = i === a.idx && nt ? nt.length : i > 0 ? a.lengthForQueue(i, st?.style) : null;
         const lenText = lengthText(len, st?.style);
-        rows.push(el('li', { class: 'am-q-item', 'data-id': t.id },
-          el('div', { class: 'am-q-title' }, `${t.artist ? t.artist + ' – ' : ''}${t.title}`),
+        const name = `${t.artist ? t.artist + ' – ' : ''}${t.title}`;
+        const li = el('li', { class: 'am-q-item', 'data-id': t.id, 'data-i': i, draggable: 'true', tabindex: '0', title: `${name}\nDrag to reorder (or Alt+↑/↓)` },
+          el('div', { class: 'am-q-title' }, name),
           el('div', { class: 'am-q-meta' }, styleSelect(i), el('span', { class: 'hint' }, ` ${STYLE_LABEL[st?.style] || ''}${st?.why && /too far/.test(st.why) ? ` (${st.why.split('; ').pop()})` : ''}${lenText ? ` · ${lenText}` : ''}${a.reasons.get(t) ? ` · ${a.reasons.get(t)}` : ''}`)),
           el('div', { class: 'am-q-acts' },
             i > a.idx ? el('button', { class: 'btn xs icon-only', title: 'Play next', 'aria-label': 'Play next', onclick: () => a.move(i, a.idx) }, icon('chevron-up')) : null,
-            el('button', { class: 'btn xs icon-only', title: 'Remove from the queue', 'aria-label': 'Remove from the queue', onclick: () => a.remove(i) }, icon('x')))));
+            el('button', { class: 'btn xs icon-only', title: 'Remove from the queue', 'aria-label': 'Remove from the queue', onclick: () => a.remove(i) }, icon('x'))));
+        li.addEventListener('dragstart', (e) => { if (e.target.closest('select, button')) { e.preventDefault(); return; } dragFrom = i; li.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(i)); });
+        li.addEventListener('dragend', () => { dragFrom = -1; li.classList.remove('dragging'); });
+        li.addEventListener('dragover', (e) => { if (dragFrom < 0) return; e.preventDefault(); li.classList.add('drag-over'); });
+        li.addEventListener('dragleave', () => li.classList.remove('drag-over'));
+        li.addEventListener('drop', (e) => { if (dragFrom < 0) return; e.preventDefault(); li.classList.remove('drag-over'); const from = dragFrom; dragFrom = -1; if (from !== i) a.move(from, i); });
+        li.addEventListener('keydown', (e) => {
+          if (e.target !== li || !e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+          e.preventDefault(); e.stopPropagation();
+          moveTo(i, i + (e.key === 'ArrowUp' ? -1 : 1));
+        });
+        rows.push(li);
       }
       list.replaceChildren(...rows);
       if (!rows.length) list.append(el('li', { class: 'hint' }, 'Nothing queued. Right-click tracks → Add to automix queue, or start automix on a playlist.'));
@@ -565,9 +594,14 @@ class App {
     const panel = el('div', { class: 'am-queue-panel seq-panel', role: 'dialog', 'aria-label': 'Automix queue' },
       el('div', { class: 'seq-head' }, el('b', {}, 'AUTOMIX QUEUE'),
         el('button', { class: 'btn sm', onclick: () => a.skip(), title: 'Mix to the next track now' }, 'Mix now'),
+        shuffleBtn,
         el('button', { class: 'btn sm icon-only', title: 'Close', 'aria-label': 'Close', onclick: () => this.toggleQueuePanel() }, icon('x'))),
       head, list);
     panel.render = render;
+    // Escape closes the panel (unless a dialog or menu on top of it gets the key)
+    const onKey = (e) => { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.overlay, .ctx-menu')) this.toggleQueuePanel(); };
+    document.addEventListener('keydown', onKey);
+    panel.off = () => document.removeEventListener('keydown', onKey);
     render();
     document.body.append(panel);
     this.queuePanel = panel;
@@ -714,5 +748,5 @@ window.opendj = app;
 app.init().catch((e) => {
   console.error(e);
   const b = document.getElementById('boot');
-  if (b) b.textContent = `OpenDJ failed to start: ${e.message}`;
+  if (b) b.textContent = t('OpenDJ failed to start: {msg}', { msg: e.message });
 });

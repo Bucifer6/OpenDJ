@@ -10,7 +10,7 @@
 .dvs-mode.warn { box-shadow: 0 0 0 2px var(--red); animation: dvs-blink 1s steps(2) infinite; }
 @keyframes dvs-blink { 50% { box-shadow: 0 0 0 2px transparent; } }
 
-.modal.wide:has(.dvs-panel) { width: min(1140px, calc(100vw - 32px)); }
+.modal.wide:has(.dvs-panel) { width: min(1140px, calc(var(--zvw, 100vw) - 32px)); }
 .dvs-panel { display: flex; flex-direction: column; gap: 12px; }
 .dvs-top { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
 .dvs-top .field { min-width: 180px; }

@@ -9,7 +9,7 @@
 .upl-drop[hidden], .upl-panel[hidden] { display: none; }
 
 .upl-panel {
-  position: fixed; right: 16px; bottom: 16px; z-index: 1000; width: min(360px, calc(100vw - 32px)); max-height: 46vh;
+  position: fixed; right: 16px; bottom: 16px; z-index: 1000; width: min(360px, calc(var(--zvw, 100vw) - 32px)); max-height: 46vh;
   display: flex; flex-direction: column; overflow: hidden;
   background: var(--panel, #13161b); color: var(--text, #e6eaef); border: 1px solid var(--line-2, #313844);
   border-radius: calc(var(--radius, 6px) * 1.5); box-shadow: 0 12px 40px var(--shadow, rgba(0,0,0,.6)); font-size: 12px;

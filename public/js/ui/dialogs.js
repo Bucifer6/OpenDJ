@@ -9,6 +9,7 @@ import { remoteSettingsPane } from './remote-settings.js';
 import { platform, MOBILE_UNAVAILABLE, APP_VERSION } from '../platform.js';
 import { STYLES, normStyle } from '../automix.js';
 import { SET_SHAPES, PRESETS } from '../smartmix.js';
+import { LANGUAGES, initI18n, resolveLanguage, currentLanguage, rememberLanguage, translateFrame, t } from '../i18n.js';
 
 /** Automix modes offered in the start dialog. */
 export const AUTOMIX_MODES = [
@@ -503,6 +504,7 @@ export class Dialogs {
       app.midi.mapperPick = false;
       mapperFrame = el('iframe', { class: 'mapper-frame', title: 'Controller Mapper', allow: 'midi', src: `controller-mapper.html${q.size ? `?${q}` : ''}` });
       mapperHost.replaceChildren(mapperFrame);
+      translateFrame(mapperFrame);
       app.midi.attachMapper(mapperFrame.contentWindow);
     };
     const shortcuts = el('div', { class: 'form shortcuts' }, el('table', {}, ...[
@@ -560,7 +562,20 @@ export class Dialogs {
       scaleNoteEl.textContent = eff < want ? `Limited to ${eff}% at this window size (the layout needs at least 1100 × 700 points); enlarge the window to use ${want}%.` : '';
     };
     scaleNote();
+    // interface language: switching to a translation applies at once; back to English needs a reload
+    const langNote = el('p', { class: 'hint lang-note' });
+    const langSel = sel(s.language || 'auto', LANGUAGES, async (v) => {
+      await set('language', v);
+      const want = resolveLanguage(v);
+      if (want === currentLanguage()) { rememberLanguage(v); langNote.replaceChildren(); return; }
+      if (want !== 'en' && currentLanguage() === 'en') { await initI18n(v); langNote.replaceChildren(); return; }
+      rememberLanguage(v);
+      langNote.replaceChildren(t('Reload OpenDJ to show the interface in the new language.'), ' ',
+        el('button', { class: 'btn sm', onclick: () => location.reload() }, t('Reload now')));
+    });
     const appearance = el('div', { class: 'form' },
+      field('Language', langSel, 'Auto uses the language of your browser or system.'),
+      langNote,
       field('Jog wheel style', jogStyle, 'Saved separately for each skin.'),
       themeGrid,
       el('div', { class: 'row' }, skinUpdateButton, skinUpdateStatus),

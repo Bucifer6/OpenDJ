@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS = {
   jogStyles: {},
   accentColor: '',
   uiScale: 100,
+  language: 'auto',           // interface language: 'auto' (browser) | 'en' | 'ro' (public/js/i18n.js)
   layoutMode: 'classic',      // 'classic' | 'performance' | 'waveform' (decks view; 4 decks is deckCount)
   libraryRows: 'compact',     // 'compact' | 'art' (larger artwork rows)
   masterDeviceId: 'default',

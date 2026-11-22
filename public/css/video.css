@@ -4,7 +4,7 @@
 .vid-host { position: fixed; left: 0; bottom: 0; width: 2px; height: 2px; overflow: hidden; opacity: 0; pointer-events: none; z-index: -1; }
 .vid-host video, .vid-host canvas { width: 2px; height: 2px; }
 
-.vid-panel { position: fixed; top: 52px; right: 10px; z-index: 90; width: 560px; min-width: 320px; max-width: calc(100vw - 20px); max-height: calc(100vh - 64px); display: flex; flex-direction: column; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 14px 40px var(--shadow); overflow: hidden; resize: horizontal; }
+.vid-panel { position: fixed; top: 52px; right: 10px; z-index: 90; width: 560px; min-width: 320px; max-width: calc(var(--zvw, 100vw) - 20px); max-height: calc(var(--zvh, 100vh) - 64px); display: flex; flex-direction: column; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 14px 40px var(--shadow); overflow: hidden; resize: horizontal; }
 .vid-panel[hidden] { display: none; }
 .vid-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: linear-gradient(var(--topbar-1), var(--topbar-2)); border-bottom: 1px solid var(--line); cursor: move; touch-action: none; }
 .vid-head b { letter-spacing: .08em; font-size: 11px; }
