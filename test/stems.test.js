@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  fftPlan, demucsSpec, demucsISpec, planChunks, chunkInput, StreamingOLA, separateChunked, transitionWeight,
+  fftPlan, demucsSpec, demucsISpec, planChunks, chunkInput, separateChunked, transitionWeight,
   interleaveInt16, floatToInt16, specFrames, BINS, STEMS, DEMUCS_SOURCES,
 } from '../public/js/stems/stem-dsp.js';
 import { createRunner, createStubSession, StubTensor } from '../public/js/stems/stems-model.js';

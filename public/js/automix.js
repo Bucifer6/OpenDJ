@@ -620,8 +620,6 @@ export class AutoMix extends Emitter {
     this.emit('state');
   }
 
-  mixOutPoint(deck) { return planMixOut(this.info(deck), this.opts); }
-
   /** Library copy of a track (analysed fields: energy, key, phrases), else the given object. */
   fresh(t) { return (t && this.app.library?.track?.(t.id)) || t; }
 

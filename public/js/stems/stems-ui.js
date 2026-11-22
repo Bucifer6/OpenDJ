@@ -165,9 +165,6 @@ export function stemsMenuItems(app, tracks) {
   return items;
 }
 
-/** "Prepare stems for playlist": queue every track of a playlist (ids in playlist order). */
-export function prepareStemsForTracks(app, ids) { return stemsMenuItems(app, ids.map((id) => app.library.track(id)))[0]?.action(); }
-
 /** Settings pane content (model status, download/delete, backend, auto-load). */
 export function stemsSettingsPane(app) {
   const stems = setupStems(app);
@@ -197,8 +194,8 @@ export function stemsSettingsPane(app) {
   return el('div', { class: 'stems-settings' }, info,
     el('label', { class: 'field' }, el('span', {}, 'Separate on'), where),
     el('label', { class: 'field' }, el('span', {}, 'Separation hardware'), sel),
-    el('label', { class: 'field check' }, auto, el('span', {}, 'Load prepared stems when a track is loaded')),
-    el('label', { class: 'field check' }, ahead, el('span', {}, 'Prepare stems ahead for Automix and loaded tracks (server engine)')));
+    el('label', { class: 'check' }, auto, el('span', {}, 'Load prepared stems when a track is loaded')),
+    el('label', { class: 'check' }, ahead, el('span', {}, 'Prepare stems ahead for Automix and loaded tracks (server engine)')));
 }
 
 export { stemsApi };

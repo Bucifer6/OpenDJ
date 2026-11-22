@@ -13,7 +13,6 @@
 .wave-row:hover .lyr-line button, .lyr-line button.active { opacity: 1; }
 .lyr-line button.active { background: color-mix(in srgb, var(--deck-color, var(--accent)) 40%, var(--panel-3)); border-color: var(--deck-color, var(--accent)); color: var(--text); }
 .four-decks .lyr-line { height: 15px; font-size: 10.5px; line-height: 15px; }
-.lyr-line.lyr-inline { position: static; height: auto; background: none; padding: 2px 0; }
 
 /* editor */
 .lyr-ed { display: flex; flex-direction: column; gap: 8px; }

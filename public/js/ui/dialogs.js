@@ -6,6 +6,7 @@ import { api } from '../api.js';
 import { THEMES, JOG_STYLE_OPTIONS, applyTheme, refreshSkinCatalog, selectedTheme } from './themes.js';
 import { controllersPanel } from './controllers-panel.js';
 import { remoteSettingsPane } from './remote-settings.js';
+import { stemsSettingsPane } from '../stems/stems-ui.js';
 import { platform, MOBILE_UNAVAILABLE, APP_VERSION } from '../platform.js';
 import { STYLES, normStyle } from '../automix.js';
 import { SET_SHAPES, PRESETS } from '../smartmix.js';
@@ -589,7 +590,7 @@ export class Dialogs {
     const about = this.aboutPane(chk);
     const tabs = platform.local
       ? { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], mobile: ['Mobile', this.mobileInfo()], about: ['About', about] }
-      : { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], mapper: ['Controller Mapper', mapperPane], dvs: ['DVS', dvsTab], remote: ['Remote control', remoteSettingsPane(app)], keys: ['Shortcuts', shortcuts], about: ['About', about] };
+      : { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], mapper: ['Controller Mapper', mapperPane], dvs: ['DVS', dvsTab], stems: ['AI stems', stemsSettingsPane(app)], remote: ['Remote control', remoteSettingsPane(app)], keys: ['Shortcuts', shortcuts], about: ['About', about] };
     if (!tabs[tab]) tab = 'audio';
     const tabBar = el('div', { class: 'tabs' });
     const pane = el('div', { class: 'tab-pane' });

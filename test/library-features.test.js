@@ -6,7 +6,7 @@ import path from 'node:path';
 import { evaluateSmart, toCamelot, normSmart } from '../server/smart.js';
 import { History, exportSession, SESSION_GAP_MS } from '../server/history.js';
 import { Library } from '../server/library.js';
-import { relocateTracks, findDuplicates, mergeDuplicates, buildBackup, restoreBackup, MissingChecker } from '../server/library-tools.js';
+import { relocateTracks, findDuplicates, mergeDuplicates, MissingChecker } from '../server/library-tools.js';
 import { start } from '../server/index.js';
 import { buildRekordboxXml, parseRekordboxXml } from '../server/rekordbox.js';
 

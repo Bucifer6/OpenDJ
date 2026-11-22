@@ -84,5 +84,3 @@ export function base64Utf8(s) {
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(bin);
 }
-
-export { hex as bytesToHex };

@@ -4,7 +4,7 @@ import { el } from '../util.js';
 import { icon } from './icons.js';
 import { describeKey } from '../midi/midi.js';
 import { PRESETS } from '../midi/presets.js';
-import { listMixxxMappings, matchMappings, downloadMixxxMapping, mappingTitle } from '../midi/mixxx-online.js';
+import { listMixxxMappings, matchMappings, downloadMixxxMapping } from '../midi/mixxx-online.js';
 import { wizardSteps, detectMidiControl, entryFor } from '../midi/wizard.js';
 import { ctlState, setDeckLayer } from '../midi/controller-extras.js';
 

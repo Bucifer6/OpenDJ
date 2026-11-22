@@ -3,13 +3,6 @@
 
 export const WAVE_RATE = 150; // waveform points per second
 
-export function downmix(left, right) {
-  if (!right || right === left) return left;
-  const m = new Float32Array(left.length);
-  for (let i = 0; i < m.length; i++) m[i] = (left[i] + right[i]) * 0.5;
-  return m;
-}
-
 const onePoleCoef = (fc, sr) => 1 - Math.exp(-2 * Math.PI * fc / sr);
 
 /** Coloured waveform data: per point peak of low / mid / high bands and overall peak, 0..255 */

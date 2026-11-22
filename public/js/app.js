@@ -456,8 +456,6 @@ class App {
     // same set length as the Automix dialog's default: a smart order over a whole big library would block the UI
     await this.startAutomix(tracks, { mode, shape: opts.shape, sliders: opts.sliders, limit: from === 'view' && tracks.length > 200 ? 40 : undefined });
   }
-  /** Older name (MCP / scripts): MIX NOW while automix runs, else the one-click start. */
-  automixNow() { return this.automix.enabled ? this.mixNow() : this.automixStart(); }
   queueAdd(tracks, { next = false } = {}) {
     next = next || this.shift; // Shift = play next
     if (!this.automix.enabled) { const rest = this.automix.queue.slice(this.automix.idx); this.automix.queue = next ? [...tracks, ...rest] : [...rest, ...tracks]; this.automix.idx = 0; }

@@ -78,8 +78,6 @@ const PATHS = {
 };
 
 const NS = 'http://www.w3.org/2000/svg';
-/** Icon names available to icon(). */
-export const ICONS = Object.keys(PATHS);
 
 /** <svg class="ico ico-NAME"> for a Lucide icon; `cls` adds classes, `label` makes it non-decorative. */
 export function icon(name, { cls = '', label } = {}) {

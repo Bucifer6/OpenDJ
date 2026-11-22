@@ -278,8 +278,6 @@ body:not(.four-decks) .deck-col > .deck:nth-child(2) { display: none; }
    selects was hard to ride, and the selects lost their labels). Flex wrap follows the mixer's width, not the
    window's, so wide windows with a narrow mixer are handled too. */
 .xfader-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 0 4px; }
-.xfader-options { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
-.xfader-options .sel { flex: 1 1 0; min-width: 64px; }
 .xfader-control { display: flex; align-items: center; gap: 8px; flex: 999 1 300px; min-width: 0; }
 .xfader-control .crossfader { flex: 1 1 auto; width: 100%; min-width: 0; }
 .xfader-control .fader-track { width: 100%; }
@@ -289,8 +287,6 @@ body:not(.four-decks) .deck-col > .deck:nth-child(2) { display: none; }
 .mixer .smart-xf { padding: 1px 5px; font-size: 9px; } /* Smart Fader toggle (mixer-ui.js) */
 @media (max-width: 560px) {
   .xfader-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
-  .xfader-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
-  .xfader-options .sel { min-width: 0; width: 100%; }
   .xfader-control { min-width: 0; width: 100%; gap: 10px; }
   .xfader-control .crossfader { min-width: 0; }
 }
