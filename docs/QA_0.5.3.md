@@ -64,6 +64,7 @@ The unit MCP suite additionally covers disabled-by-default behavior, tokens/sess
 9. **Tablet mixer:** channel strips can shrink within their available width; master controls remain visible. Short mixer layouts reserve enough height for meaningful fader travel.
 10. **Test portability:** Windows import fixtures use correct volume/file-URL encoding; mobile QA falls back when the optional FFmpeg binary is absent; updater fixtures use future versions instead of a version already older than the application.
 11. **Release checksum coverage:** Android publishing adds/replaces its APK checksum in the desktop manifest and waits for that manifest to exist.
+12. **Oversized requests:** early body-limit rejection preserves the response channel and discards arriving data without buffering, so clients reliably receive HTTP 413. The security suite repeats oversized requests to cover the connection-reset race.
 
 The adaptive planner also passed 100 deterministic randomized section-layout cases for finite, bounded, non-mutating plans. A local seven-minute vocal-map fixture benchmark measured 1.51 ms median / 3.61 ms p95 over 150 searches before the later QA fixes; this is a workload-specific measurement, not a scheduling guarantee.
 

@@ -117,6 +117,7 @@ test('cached planning is stable as playhead advances; grid edits, seeks, stems a
   engine.decks[1].stemsReady = true; am.nextTransition(); assert.notEqual(am.upcoming, sought);
   app.settings.automix.keepSync = false; am.nextTransition(); assert.ok(DROP_STYLES.has(am.upcoming.style));
   am.setOverride(1, 'cut'); am.nextTransition(); assert.equal(am.upcoming.style, 'cut'); assert.equal(am.upcoming.adaptive, undefined);
+  am.setOverride(1, 'auto'); am.nextTransition(); assert.ok(am.upcoming.adaptive, 'explicit Auto selection still searches adaptive windows');
 });
 
 test('beat confidence survives analysis, API edits and rescans; locked grids are trusted', () => {

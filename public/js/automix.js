@@ -715,7 +715,7 @@ export class AutoMix extends Emitter {
       const length = s.plan && this.opts.lengthMode === 'auto' ? { beats: s.plan.beats, bars: s.plan.bars, auto: true, why: s.plan.lengthWhy }
         : this.lengthFor(oi, innReady ? this.info(nd) : this.trackInfo(next), s.style, cur.track, next);
       this.upcoming = { key, ...s, length, plan: planTransition(oi, s.style, { ...this.opts, transitionBeats: length.beats }) };
-      if (s.plan && !s.override) {
+      if (s.plan && (!s.override || this.overrides.get(next) === 'auto')) {
         const adaptive = planAdaptiveTransition(oi, ii, {
           position: cur.position, entry: cur._autoMixEntry || 0, rate: cur.rate, keepSync: this.opts.keepSync,
           stemsOut: !!cur.stemsReady, stemsIn: !!nd?.stemsReady,

@@ -32,6 +32,7 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **Deck transport:** sequence acknowledgements prevent old audio-thread feedback from undoing a newer cue or jog-search position.
 - **Timecode vinyl:** switching modes preserves the acquired position when the timecode definition is unchanged.
 - **Release downloads:** the checksum manifest now includes the Android APK uploaded after the desktop builds.
+- **Server:** oversized requests reliably receive HTTP 413 instead of an intermittent connection reset; request-size limits remain enforced.
 - No new production dependencies or models. Research sources, performance considerations, licensing and known limitations are documented in `docs/ADAPTIVE_DJ.md`.
 
 ### New in 0.5.2

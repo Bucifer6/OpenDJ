@@ -93,7 +93,8 @@ const IMPORT_LIMIT = 50 * MiB; // rekordbox / Traktor / VirtualDJ XML, M3U sent 
 async function readBody(req, limit = DEFAULT_BODY_LIMIT) {
   if (Number(req.headers['content-length']) > limit) throw new HttpError(413, 'Body too large');
   const chunks = []; let n = 0;
-  for await (const c of req) { n += c.length; if (n > limit) throw new HttpError(413, 'Body too large'); chunks.push(c); }
+  // Preserve the socket on early exit so the error handler can deliver HTTP 413 before closing it.
+  for await (const c of req.iterator({ destroyOnReturn: false })) { n += c.length; if (n > limit) throw new HttpError(413, 'Body too large'); chunks.push(c); }
   const raw = Buffer.concat(chunks);
   if (!raw.length) return {};
   // JSON only with exactly `application/json` (not a CORS-safelisted type, so cross-site pages need a preflight).
@@ -110,6 +111,25 @@ function sendJson(res, status, obj) {
   const body = JSON.stringify(obj);
   res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
   res.end(body);
+}
+
+function sendBodyLimitError(req, res, obj) {
+  const body = JSON.stringify(obj);
+  // Deliver a complete response before closing a socket whose client may still be uploading.
+  // Closing immediately can replace the response with ECONNRESET on Windows.
+  res.writeHead(413, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Content-Length': Buffer.byteLength(body), Connection: 'close' });
+  res.write(body);
+  let finished = false;
+  const finish = () => {
+    if (finished) return; finished = true; clearTimeout(timer);
+    req.off('end', finish); req.off('error', finish); req.off('close', finish);
+    if (!res.destroyed && !res.writableEnded) res.end();
+  };
+  const timer = setTimeout(finish, 1000); timer.unref();
+  req.once('end', finish); req.once('error', finish); req.once('close', finish);
+  res.once('close', finish);
+  req.resume(); // discard without buffering, for at most one second
+  if (req.readableEnded) finish();
 }
 
 /** Parse a Range header against a size: { start, end } | 'invalid' | null (no/ignored range -> full body). */
@@ -934,7 +954,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     } catch (e) {
       if (!e.status) log.error?.('[opendj]', e);
       if (e.retryAfter) res.setHeader('Retry-After', String(e.retryAfter));
-      if (e.status === 413 && !res.headersSent) res.setHeader('Connection', 'close'); // don't read the rest of a huge body
+      if (e.status === 413 && !res.headersSent) return sendBodyLimitError(req, res, { error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) });
       if (!res.headersSent) sendJson(res, e.status || 500, { error: e.status ? e.message : 'Internal error', ...(e.code && typeof e.code === 'string' && e.status ? { code: e.code } : {}) });
       else res.end();
     }
