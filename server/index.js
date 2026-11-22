@@ -815,7 +815,14 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   // ---------------- lighting (DMX / Art-Net / sACN / WLED / Hue / OSC) ----------------
   const lighting = registerLightingRoutes({ route, library, emit });
   const link = registerLinkRoutes({ route, library, emit, log });
-  const stems = registerStemRoutes({ route, library, emit, restricted });
+  // what the native stems engine decodes: the local file, or the media server's stream for remote tracks
+  const stemsInput = async (t) => {
+    const l = await servableFile(t);
+    if (l) return { file: l.file };
+    if (t.sourceType !== 'remote') return null;
+    try { const r = remoteStream(library, t); return r?.url ? { url: r.url, headers: r.headers || {} } : null; } catch { return null; }
+  };
+  const stems = registerStemRoutes({ route, library, emit, restricted, input: stemsInput });
   registerLyricsRoutes({ route, library, emit, dataDir, canRead: readable, canWrite: readable });
   const recording = registerRecordingRoutes({ route, library, emit, pathAllowed, allowedRoots });
   const broadcast = registerBroadcastRoutes({ route, library, emit, pathAllowed: readable, log });

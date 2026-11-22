@@ -81,7 +81,11 @@
           ]
         }
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "files": [
+        "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**",
+        "!node_modules/onnxruntime-node/bin/napi-v6/linux/**"
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -117,7 +121,11 @@
       "extendInfo": {
         "NSMicrophoneUsageDescription": "OpenDJ uses audio inputs for the microphone channel and to list audio interfaces.",
         "NSAppleEventsUsageDescription": "OpenDJ opens folders in Finder."
-      }
+      },
+      "files": [
+        "!node_modules/onnxruntime-node/bin/napi-v6/win32/**",
+        "!node_modules/onnxruntime-node/bin/napi-v6/linux/**"
+      ]
     },
     "linux": {
       "target": [
@@ -154,7 +162,11 @@
           "Keywords": "dj;mix;music;audio;midi;"
         }
       },
-      "maintainer": "OpenDJ contributors <opendj@users.noreply.github.com>"
+      "maintainer": "OpenDJ contributors <opendj@users.noreply.github.com>",
+      "files": [
+        "!node_modules/onnxruntime-node/bin/napi-v6/win32/**",
+        "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**"
+      ]
     },
     "deb": {
       "depends": [
@@ -170,7 +182,8 @@
       ]
     },
     "asarUnpack": [
-      "node_modules/ffmpeg-static/**"
+      "node_modules/ffmpeg-static/**",
+      "node_modules/onnxruntime-node/**"
     ],
     "beforePack": "build/before-pack.cjs",
     "afterAllArtifactBuild": "build/after-all.cjs",
@@ -191,7 +204,8 @@
     "email": "opendj@users.noreply.github.com"
   },
   "optionalDependencies": {
-    "ffmpeg-static": "^5.3.0"
+    "ffmpeg-static": "^5.3.0",
+    "onnxruntime-node": "1.31.1"
   },
   "overrides": {
     "app-builder-lib": {

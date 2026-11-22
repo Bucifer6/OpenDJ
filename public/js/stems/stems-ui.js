@@ -4,7 +4,7 @@
 import { el } from '../util.js';
 import { icon } from '../ui/icons.js';
 import { button, knob } from '../ui/controls.js';
-import { StemsManager, stemsApi } from './stems.js';
+import { StemsManager, stemsApi, backendName } from './stems.js';
 
 const LABELS = [['VOC', 'Vocals'], ['DRM', 'Drums'], ['BASS', 'Bass'], ['MEL', 'Melody / other']];
 const MB = (b) => `${Math.round((b || 0) / 1048576)} MB`;
@@ -42,10 +42,24 @@ export function setupStems(app) {
     if (m.error) app.toast(`⚠ Stems model: ${m.error}`);
     render();
   });
-  stems.on('finished', (r) => app.toast(`Stems ready: ${r.title}${r.ms ? ` (${(r.ms / 1000).toFixed(0)} s, ${r.backend}${r.threads > 1 ? ` ×${r.threads}` : ''})` : ''}`));
+  stems.on('finished', (r) => app.toast(`Stems ready: ${r.title}${r.ms ? ` (${(r.ms / 1000).toFixed(0)} s, ${backendName(r.backend)}${r.threads > 1 ? ` ×${r.threads}` : ''})` : ''}`));
   stems.on('failed', (r) => app.toast(`⚠ Stems for "${r.title}" failed: ${r.message}`));
   stems.on('cancelled', () => app.toast('Stem preparation cancelled'));
   render();
+  stems.status().catch(() => {}); // which engine, and the server's queue (another device may be preparing already)
+
+  // Prepare ahead on the server: Automix's next two tracks, and any track loaded on a deck (first in line)
+  let aheadT = null;
+  app.automix?.on('state', () => {
+    clearTimeout(aheadT);
+    aheadT = setTimeout(() => {
+      const a = app.automix;
+      if (!a?.enabled) return;
+      const next = a.queue.slice(a.idx, a.idx + 2).map((t) => t?.id).filter(Boolean);
+      if (next.length) stems.prefetch(next);
+    }, 800);
+  });
+  for (const d of app.engine?.decks || []) d.on('load', () => { if (d.track?.id && !d.track.stems?.ready) stems.prefetch([d.track.id], { front: true }); });
   return stems;
 }
 
@@ -53,7 +67,7 @@ export function setupStems(app) {
 export async function consentDialog(app, m) {
   let host = ''; try { host = new URL(m.url).host; } catch { /* custom */ }
   const body = el('div', { class: 'stems-consent' },
-    el('p', {}, 'AI stems split a track into vocals, drums, bass and melody so you can mute or solo each part on the deck. The separation runs on this computer (in the browser engine, using the GPU when available); your music is not uploaded anywhere.'),
+    el('p', {}, 'AI stems split a track into vocals, drums, bass and melody so you can mute or solo each part on the deck. The separation runs on the computer running OpenDJ (its GPU when it has one), or in this browser when that computer cannot; your music is not uploaded anywhere else.'),
     el('p', {}, 'The first time, OpenDJ needs to download the separation model once:'),
     el('dl', {},
       el('dt', {}, 'Model'), el('dd', {}, m.name),
@@ -61,7 +75,7 @@ export async function consentDialog(app, m) {
       el('dt', {}, 'From'), el('dd', {}, host || m.url),
       el('dt', {}, 'Licence'), el('dd', {}, m.licence),
       m.custom && !m.sha256 ? [el('dt', {}, 'Check'), el('dd', {}, 'No SHA-256 configured for this custom model: its integrity cannot be verified.')] : null),
-    el('p', { class: 'muted' }, 'Preparing stems takes about as long as the track on a recent laptop with WebGPU, several times longer on CPU only. Stems are saved, so each track is prepared once.'));
+    el('p', { class: 'muted' }, 'Preparing stems takes from a few seconds per track with a graphics card to about as long as the track on CPU only. Automix prepares its next tracks ahead. Stems are saved, so each track is prepared once.'));
   return !!(await app.dialogs.modal('Download the AI stems model?', body, [{ label: 'Not now', value: false }, { label: `Download ${MB(m.downloadBytes || m.bytes)}`, primary: true, value: true }]));
 }
 
@@ -163,7 +177,10 @@ export function stemsSettingsPane(app) {
       const st = await stems.status(), m = st.model;
       info.replaceChildren(
         el('div', {}, `Model: ${m.name} — ${m.ready ? `downloaded (${MB(m.bytes)}${m.verified ? ', SHA-256 verified' : ''})` : m.downloading ? 'downloading…' : `not downloaded (${MB(m.downloadBytes || m.bytes)})`}`),
-        el('div', { class: 'muted' }, `Runtime: ${st.ort ? `ONNX Runtime Web ${st.ortVersion || ''}` : 'AI stems engine is missing from this app build — update or reinstall OpenDJ'} · stems saved as ${st.format.toUpperCase()} · ${globalThis.crossOriginIsolated ? 'multi-threaded' : 'single-threaded'} WASM, WebGPU ${'gpu' in navigator ? 'available' : 'not available'}`),
+        el('div', { class: 'muted' }, st.native?.installed
+          ? `Server engine: ONNX Runtime ${st.native.version}${st.native.backend ? ` · ${backendName(st.native.backend)}${st.native.threads > 1 ? ` ×${st.native.threads}` : ''}` : ' (GPU when available, else CPU)'}${st.native.last ? ` · last track ${Math.round(st.native.last.ms / 1000)} s for ${Math.round(st.native.last.seconds)} s of audio` : ''}`
+          : `Server engine: not available (${st.native?.reason || 'old server'}) — this browser separates instead`),
+        el('div', { class: 'muted' }, `Browser engine: ${st.ort ? `ONNX Runtime Web ${st.ortVersion || ''}` : 'missing from this app build — update or reinstall OpenDJ'} · ${globalThis.crossOriginIsolated ? 'multi-threaded' : 'single-threaded'} WASM, WebGPU ${'gpu' in navigator ? 'available' : 'not available'} · stems saved as ${st.format.toUpperCase()}`),
         el('div', { class: 'stems-settings-actions' },
           m.ready ? el('button', { class: 'btn sm', onclick: async () => { await fetch('/api/stems/model', { method: 'DELETE', credentials: 'same-origin' }); refresh(); } }, 'Delete model')
             : el('button', { class: 'btn sm', onclick: async () => { try { await stems.ensureModel(); } catch (e) { app.toast(`⚠ ${e.message}`); } refresh(); } }, 'Download model…')),
@@ -171,12 +188,17 @@ export function stemsSettingsPane(app) {
     } catch (e) { info.textContent = `⚠ ${e.message}`; }
   };
   refresh();
+  const where = el('select', { class: 'inp', onchange: () => { app.setSetting('stemsEngine', where.value); stems.status().then(refresh, () => {}); } },
+    ...[['auto', 'OpenDJ server when it can, else this browser'], ['browser', 'Always this browser']].map(([v, l]) => el('option', { value: v, selected: (app.settings.stemsEngine || 'auto') === v }, l)));
   const sel = el('select', { class: 'inp', onchange: () => app.setSetting('stemsBackend', sel.value) },
-    ...[['auto', 'Automatic (WebGPU, else CPU)'], ['wasm', 'CPU only (WASM)']].map(([v, l]) => el('option', { value: v, selected: (app.settings.stemsBackend || 'auto') === v }, l)));
+    ...[['auto', 'Automatic (GPU, else CPU)'], ['wasm', 'CPU only']].map(([v, l]) => el('option', { value: v, selected: (app.settings.stemsBackend || 'auto') === v }, l)));
   const auto = el('input', { type: 'checkbox', checked: app.settings.stemsAutoLoad !== false, onchange: () => app.setSetting('stemsAutoLoad', auto.checked) });
+  const ahead = el('input', { type: 'checkbox', checked: app.settings.stemsAutoPrepare !== false, onchange: () => app.setSetting('stemsAutoPrepare', ahead.checked) });
   return el('div', { class: 'stems-settings' }, info,
-    el('label', { class: 'field' }, el('span', {}, 'Separation engine'), sel),
-    el('label', { class: 'field check' }, auto, el('span', {}, 'Load prepared stems when a track is loaded')));
+    el('label', { class: 'field' }, el('span', {}, 'Separate on'), where),
+    el('label', { class: 'field' }, el('span', {}, 'Separation hardware'), sel),
+    el('label', { class: 'field check' }, auto, el('span', {}, 'Load prepared stems when a track is loaded')),
+    el('label', { class: 'field check' }, ahead, el('span', {}, 'Prepare stems ahead for Automix and loaded tracks (server engine)')));
 }
 
 export { stemsApi };

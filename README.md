@@ -57,9 +57,11 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 
 <img src="docs/images/stems.jpg" alt="Deck with AI stem controls: vocals, drums, bass and melody" width="100%">
 
-- Right-click a track → **Prepare AI stems**. Separation runs on your computer with HT-Demucs (ONNX Runtime; WebGPU when available) and is cached per track.
+- Right-click a track → **Prepare AI stems**. Separation runs with HT-Demucs and is cached per track.
+- **Where it runs:** on the computer running OpenDJ (desktop app, web server, Docker), natively with ONNX Runtime for Node in a low-priority background process: GPU via DirectML on Windows, CoreML on Apple Silicon, CUDA on Linux when installed, otherwise all CPU cores. Phones and browsers connected to it only ask for stems, so the page stays responsive. When the server cannot (mobile app, `OPENDJ_STEMS_NATIVE=0`, no FFmpeg), the browser separates instead (WebGPU or WASM).
+- **Ahead of time:** with the server engine, Automix's next two tracks and every track loaded on a deck are prepared automatically (Settings → AI stems, can be turned off).
 - Each deck gets **vocals / drums / bass / melody** mute and level, **acapella**, **instrumental** and **vocal echo**.
-- The model (~98 MB) is downloaded only after you agree; see [the licence note](#licence). Separation on the CPU is slow (roughly 2.5× the track length), so prepare tracks before the gig.
+- The model (~98 MB) is downloaded only after you agree; see [the licence note](#licence). On a graphics card a track takes seconds to a minute; on the CPU only, about as long as the track or longer, so prepare tracks before the gig.
 - Without prepared stems, the VOC / INST knobs use fast DSP vocal isolation (quick stems).
 
 ### Library & media servers

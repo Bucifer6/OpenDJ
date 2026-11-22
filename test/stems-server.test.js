@@ -27,7 +27,7 @@ async function harness(opts = {}) {
     const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)'; }) + '$');
     routes.push({ method, re, keys, handler, ...o });
   };
-  const stems = registerStemRoutes({ route, library, emit: (t, p) => events.push([t, p]), ortDir: opts.ortDir ?? null, fetch: opts.fetch, restricted: opts.restricted, lookup: opts.lookup });
+  const stems = registerStemRoutes({ route, library, emit: (t, p) => { events.push([t, p]); opts.onEvent?.(t, p); }, ortDir: opts.ortDir ?? null, fetch: opts.fetch, restricted: opts.restricted, lookup: opts.lookup, native: opts.native ?? false, input: opts.input });
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     try {
@@ -156,6 +156,68 @@ test('stems server: FLAC via FFmpeg is lossless', { skip: !hasFfmpeg && 'ffmpeg 
     const dec = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', f, '-f', 's16le', '-']);
     assert.ok(dec.stdout.equals(data.drums), 'decoded FLAC equals the uploaded PCM');
   } finally { h.close(); }
+});
+
+// ---------------- native engine (server-side queue + child process) ----------------
+test('stems server: native engine separates in a child process and saves the stems', { skip: !hasFfmpeg && 'ffmpeg not installed' }, async () => {
+  let done;
+  const finished = new Promise((r) => { done = r; });
+  let h;
+  h = await harness({
+    ffmpeg: true, native: { stub: true, idleMs: 50 },
+    input: async () => ({ file: path.join(h.dir, 'song.wav') }),
+    onEvent: (t, p) => { if (t === 'stems-done' || t === 'stems-failed') done([t, p]); },
+  });
+  try {
+    const frames = 44100 * 9; // two model chunks
+    const data = Buffer.alloc(frames * 4);
+    for (let i = 0; i < frames; i++) { const v = Math.round(Math.sin(i * 0.03) * 8000 + Math.sin(i * 0.4) * 4000); data.writeInt16LE(v, i * 4); data.writeInt16LE(v, i * 4 + 2); }
+    fs.writeFileSync(path.join(h.dir, 'song.wav'), Buffer.concat([wavHeader(data.length), data]));
+    const st = await h.json('GET', '/api/stems/status');
+    assert.equal(st.native.installed, true); assert.equal(st.native.available, true);
+    const q = await h.json('POST', '/api/stems/queue', { ids: ['trk1', 'nope', '../x'] });
+    assert.equal(q.status, 200, q.error); assert.equal(q.added, 1);
+    const [type, ev] = await finished;
+    assert.equal(type, 'stems-done', ev.message);
+    assert.equal(ev.backend, 'stub'); assert.equal(Math.round(ev.seconds), 9);
+    const info = await h.json('GET', '/api/stems/trk1');
+    assert.equal(info.ready, true); assert.equal(info.frames, frames); assert.equal(info.format, 'flac');
+    assert.equal(h.library.getTrack('trk1').stems.ready, true);
+    // the four stems add up to the original (the stub splits the spectrum)
+    const dec = (s) => spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', path.join(h.dir, 'stems', 'trk1', `${s}.flac`), '-f', 's16le', '-'], { maxBuffer: 64 * 2 ** 20 }).stdout;
+    const parts = ['vocals', 'drums', 'bass', 'other'].map(dec);
+    let maxErr = 0;
+    for (let i = 0; i < frames * 2; i += 97) { const sum = parts.reduce((a, p) => a + p.readInt16LE(i * 2), 0); maxErr = Math.max(maxErr, Math.abs(sum - data.readInt16LE(i * 2))); }
+    assert.ok(maxErr < 40, `stems sum to the mix (max error ${maxErr})`);
+    // already prepared: not queued again unless forced
+    assert.equal((await h.json('POST', '/api/stems/queue', { ids: ['trk1'] })).added, 0);
+    assert.ok(!fs.readdirSync(path.join(h.dir, 'stems')).some((n) => n.startsWith('.upload-')), 'no upload folder left');
+  } finally { h.close(); }
+});
+
+test('stems server: native engine cancel, and off by default without onnxruntime-node', { skip: !hasFfmpeg && 'ffmpeg not installed' }, async () => {
+  let failed;
+  const fail = new Promise((r) => { failed = r; });
+  let h;
+  h = await harness({ ffmpeg: true, native: { stub: true }, input: async () => ({ file: path.join(h.dir, 'long.wav') }), onEvent: (t, p) => { if (t === 'stems-failed' || t === 'stems-done') failed([t, p]); } });
+  try {
+    const frames = 44100 * 60;
+    fs.writeFileSync(path.join(h.dir, 'long.wav'), Buffer.concat([wavHeader(frames * 4), pcm(frames, 3)]));
+    await h.json('POST', '/api/stems/queue', { ids: ['trk1'] });
+    await new Promise((r) => setTimeout(r, 300));
+    await h.json('POST', '/api/stems/queue/cancel', { id: 'trk1' });
+    const [type, ev] = await fail;
+    assert.equal(type, 'stems-failed'); assert.equal(ev.cancelled, true);
+    assert.equal((await h.json('GET', '/api/stems/trk1')).ready, false);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.ok(!fs.readdirSync(path.join(h.dir, 'stems')).some((n) => n.startsWith('.upload-')), 'no upload folder left');
+  } finally { h.close(); }
+  const off = await harness({ ffmpeg: true });
+  try {
+    const st = await off.json('GET', '/api/stems/status');
+    assert.equal(st.native.available, false);
+    assert.equal((await off.json('POST', '/api/stems/queue', { ids: ['trk1'] })).status, 409);
+  } finally { off.close(); }
 });
 
 // ---------------- model download ----------------

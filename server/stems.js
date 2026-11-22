@@ -1,8 +1,11 @@
 // AI stems: model download/cache, ONNX Runtime Web files, and the per-track stem cache.
 // Registered from server/index.js with registerStemRoutes({ route, library, emit }).
 //
-// Separation itself runs in the browser (public/js/stems/stems-worker.js, onnxruntime-web, WASM or WebGPU);
-// the server only stores what the browser sends back and serves it to the decks:
+// Separation runs on the server when it can (server/stems-child.js, onnxruntime-node: native CPU threads, DirectML /
+// CoreML / CUDA on the GPU), in a below-normal-priority child process with its own queue, so every client (phone,
+// browser, desktop app) only asks for stems and gets them. Without onnxruntime-node or FFmpeg (mobile app, minimal
+// installs) the browser separates (public/js/stems/stems-worker.js, onnxruntime-web) and uploads the result.
+// Either way the stems end up in the same cache, served to the decks:
 //   <data>/stems/models/<sha256>.onnx          the downloaded model (verified, never committed to the repo)
 //   <data>/stems/<trackId>/{vocals,drums,bass,other}.flac (16-bit 44.1 kHz; .wav when FFmpeg has no FLAC encoder)
 //   <data>/stems/<trackId>/meta.json
@@ -10,7 +13,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
-import { spawn } from 'node:child_process';
+import os from 'node:os';
+import { spawn, fork } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -125,6 +130,20 @@ export function wavHeader(dataBytes, sampleRate = STEM_RATE, channels = 2) {
   return h;
 }
 
+/**
+ * onnxruntime-node, when installed (optional dependency) and built for this platform: { version } or { reason }.
+ * OPENDJ_STEMS_NATIVE=0 turns the native engine off.
+ */
+export function nativeRuntime(env = process.env) {
+  if (env.OPENDJ_STEMS_NATIVE === '0') return { reason: 'Server stems are turned off (OPENDJ_STEMS_NATIVE=0)' };
+  try {
+    const pkg = createRequire(import.meta.url).resolve('onnxruntime-node/package.json');
+    const bin = path.join(path.dirname(pkg), 'bin', 'napi-v6', process.platform, process.arch);
+    if (!fs.existsSync(bin)) return { reason: `onnxruntime-node has no build for ${process.platform}-${process.arch}` };
+    return { version: JSON.parse(fs.readFileSync(pkg, 'utf8')).version };
+  } catch { return { reason: 'onnxruntime-node is not installed on the server' }; }
+}
+
 /** onnxruntime-web's dist folder (OPENDJ_ORT_DIR overrides; null when the package is not installed). */
 export function findOrtDir(explicit = process.env.OPENDJ_ORT_DIR) {
   const ok = (d) => d && fs.existsSync(path.join(d, 'ort.webgpu.min.mjs'));
@@ -173,8 +192,12 @@ const run = (bin, args) => new Promise((resolve, reject) => {
  * @param {Function} [o.fetch]
  * @param {boolean} [o.restricted]  hosted mode: the model URL may not point at this server / link-local addresses
  * @param {Function} [o.lookup]     DNS lookup (tests)
+ * @param {Function} [o.input]      async (track) => { file } | { url, headers } | null: what FFmpeg decodes for the
+ *                                  native engine (null: this track can only be separated in the browser)
+ * @param {object|false} [o.native] native engine: false = off; { stub, child, idleMs } for tests. Default: on when
+ *                                  onnxruntime-node is installed (hosted servers: only with OPENDJ_STEMS_NATIVE=1)
  */
-export function registerStemRoutes({ route, library, emit = () => {}, dataDir = library.dataDir, ortDir, fetch: f = globalThis.fetch, restricted = false, lookup }) {
+export function registerStemRoutes({ route, library, emit = () => {}, dataDir = library.dataDir, ortDir, fetch: f = globalThis.fetch, restricted = false, lookup, input = null, native }) {
   const root = path.join(dataDir, 'stems');
   const modelsDir = path.join(root, 'models');
   fs.mkdirSync(modelsDir, { recursive: true });
@@ -268,6 +291,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
   }
 
   route('GET', '/api/stems/status', () => ({
+    native: engine.status(),
     model: modelStatus(), ort: !!ORT, ortVersion: ORT ? ortVersion(ORT) : null,
     ffmpeg: !!ffmpeg(), format: ffmpeg()?.encoders?.flac ? 'flac' : 'wav', stemNames: STEM_NAMES, sampleRate: STEM_RATE,
   }));
@@ -345,9 +369,8 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     try { await fh.write(body, 0, body.length, frame * 4); } finally { await fh.close(); }
     return { ok: true };
   }, { bodyLimit: 64 * 2 ** 20 });
-  route('POST', '/api/stems/:id/finish', async ({ params, query }) => {
-    const t = track(params.id);
-    const u = upload(t.id, query.get('token'));
+  /** Raw s16 stems in u.dir -> FLAC (or WAV) + meta.json, moved into the track's stem folder. */
+  async function finalize(t, u) {
     const ff = ffmpeg();
     const flac = !!ff?.encoders?.flac;
     for (const s of STEM_NAMES) {
@@ -370,11 +393,149 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     uploads.delete(t.id);
     const value = { model: u.model, ready: true, format: meta.format, at: meta.at };
     setTrackStems(t.id, value);
-    emit('stems', { id: t.id, ready: true });
+    emit('stems', { id: t.id, ready: true, stems: value });
+    return value;
+  }
+  route('POST', '/api/stems/:id/finish', async ({ params, query }) => {
+    const t = track(params.id);
+    const value = await finalize(t, upload(t.id, query.get('token')));
     return { ok: true, stems: value };
   });
+
+  // ---------------- native engine: the server's own separation queue ----------------
+  const engine = createEngine();
+  function createEngine() {
+    const rt = native === false ? { reason: 'Server stems are turned off' }
+      : native?.stub ? { version: 'stub' }
+        : restricted && process.env.OPENDJ_STEMS_NATIVE !== '1' ? { reason: 'Server stems are off on hosted servers (OPENDJ_STEMS_NATIVE=1 turns them on)' }
+          : nativeRuntime();
+    const idleMs = native?.idleMs ?? (Number(process.env.OPENDJ_STEMS_IDLE_MS) || 10 * 60e3); // model stays loaded between tracks
+    const childPath = native?.child || fileURLToPath(new URL('./stems-child.js', import.meta.url));
+    const queue = [];          // track ids
+    let cur = null;            // { id, title, phase, done, total, started, backend, cancelled }
+    let child = null, ready = null, backend = null, pending = null, idleT = null, pumping = false, last = null;
+
+    const installed = () => !!rt.version && !!ffmpeg();
+    const modelOk = () => { if (native?.stub) return true; try { return modelReady(modelSpec(settings())); } catch { return false; } };
+    const state = () => ({
+      current: cur && { id: cur.id, title: cur.title, phase: cur.phase, done: cur.done, total: cur.total, elapsed: Date.now() - cur.started, separating: cur.sepAt ? Date.now() - cur.sepAt : 0, backend: cur.backend || backend?.backend || null },
+      queue: [...queue],
+    });
+    const changed = () => emit('stems-queue', state());
+    const killChild = () => { const c = child; child = null; ready = null; backend = null; c?.kill(); };
+
+    function startChild() {
+      const spec = native?.stub ? null : modelSpec(settings());
+      const c = child = fork(childPath, [], { stdio: ['ignore', 'inherit', 'pipe', 'ipc'], serialization: 'advanced', windowsHide: true, execArgv: [] });
+      try { os.setPriority(c.pid, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* not allowed here: normal priority */ }
+      let err = '';
+      c.stderr.on('data', (d) => { err = (err + d).slice(-2000); process.stderr.write(d); });
+      const p = new Promise((resolve, reject) => {
+        c.on('message', (m) => {
+          if (m.type === 'ready') { if (child === c) backend = m; resolve(m); }
+          else if (m.type === 'progress') { if (cur?.id === m.id) { Object.assign(cur, { phase: m.phase, done: m.done, total: m.total }, m.backend ? { backend: m.backend } : {}); if (m.phase === 'separating') cur.sepAt ||= Date.now(); changed(); } }
+          else if (m.type === 'done') pending?.resolve(m);
+          else if (m.type === 'error') { if (m.id) pending?.reject(new Error(m.message)); else { reject(new Error(m.message)); if (child === c) killChild(); } }
+        });
+        c.on('exit', (code) => {
+          const tail = err.trim().split('\n').pop();
+          const e = new Error(`The stems engine stopped${code ? ` (exit ${code})` : ''}${tail ? `: ${tail}` : ''}`);
+          if (child === c) { child = null; ready = null; backend = null; }
+          reject(e); pending?.reject(e);
+        });
+      });
+      c.send({ type: 'init', model: spec ? modelFile(spec) : null, stub: !!native?.stub, backend: settings().stemsBackend === 'wasm' ? 'cpu' : 'auto', threads: Number(process.env.OPENDJ_STEMS_THREADS) || 0 });
+      ready = p; p.catch(() => {});
+      return p;
+    }
+
+    async function runOne(id) {
+      const t = library.getTrack(id);
+      if (!t) return;
+      cur = { id, title: t.title || 'Untitled', phase: 'starting', done: 0, total: 0, started: Date.now() };
+      changed();
+      const token = crypto.randomBytes(12).toString('hex');
+      const dir = path.join(root, `.upload-${id}-${token.slice(0, 8)}`);
+      const mine = () => uploads.get(id)?.token === token;
+      try {
+        const src = input ? await input(t) : null;
+        if (!src) throw bad('This track can only be separated in the browser');
+        await dropUpload(id);
+        await fs.promises.mkdir(dir, { recursive: true });
+        uploads.set(id, { token, dir, frames: 0, sampleRate: STEM_RATE, model: native?.stub ? 'stub-bands' : modelSpec(settings()).id, backend: '', at: Date.now() });
+        emit('stems', { id, preparing: true });
+        if (!ready) { cur.phase = 'loading model'; changed(); }
+        await (ready || startChild());
+        if (cur.cancelled) throw Object.assign(new Error('Cancelled'), { cancelled: true });
+        const r = await new Promise((resolve, reject) => {
+          pending = { resolve, reject };
+          child.send({ type: 'job', id, ffmpeg: ffmpeg().path, input: src, dir, overlap: Number(settings().stemsOverlap) || 0.25, maxFrames: STEM_RATE * 60 * maxMinutes });
+        });
+        pending = null;
+        if (!mine()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
+        cur.phase = 'saving'; changed();
+        const u = uploads.get(id);
+        Object.assign(u, { frames: r.frames, backend: `server ${r.backend}${r.threads > 1 ? ` x${r.threads}` : ''}` });
+        const value = await finalize(t, u);
+        last = { id, title: cur.title, ms: r.ms, seconds: r.frames / STEM_RATE, backend: r.backend, threads: r.threads, chunks: r.chunks };
+        emit('stems-done', { ...last, stems: value });
+      } catch (e) {
+        pending = null;
+        if (mine()) await dropUpload(id);
+        else await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+        if (cur?.cancelled || e.cancelled) emit('stems-failed', { id, title: cur?.title, cancelled: true });
+        else { console.warn('[stems]', id, e.message); emit('stems-failed', { id, title: cur?.title, message: e.message }); }
+      } finally { cur = null; changed(); }
+    }
+
+    async function pump() {
+      if (pumping) return;
+      pumping = true; clearTimeout(idleT);
+      try { while (queue.length) await runOne(queue.shift()); }
+      finally {
+        pumping = false;
+        // free the model's memory (and the GPU, for Ollama & co.) when nothing comes for a while
+        idleT = setTimeout(() => { if (!pumping) killChild(); }, idleMs); idleT.unref?.();
+      }
+    }
+
+    return {
+      status: () => ({
+        installed: installed(), available: installed() && modelOk(),
+        reason: rt.reason || (!ffmpeg() ? 'FFmpeg is needed for server stems' : !modelOk() ? 'The stems model is not downloaded yet' : null),
+        version: rt.version || null, backend: backend?.backend || null, threads: backend?.threads || 0, last, ...state(),
+      }),
+      state,
+      add(ids, { force = false, front = false } = {}) {
+        if (!installed()) throw bad(rt.reason || 'FFmpeg is needed for server stems', 409);
+        if (!modelOk()) throw bad('The stems model is not downloaded yet', 409);
+        let added = 0;
+        const list = [...new Set(ids.map(String))].filter((id) => ID_RE.test(id) && library.getTrack(id) && cur?.id !== id && (force || !readMeta(id)));
+        if (front) list.reverse();
+        for (const id of list) {
+          const i = queue.indexOf(id);
+          if (i >= 0) { if (front && i > 0) { queue.splice(i, 1); queue.unshift(id); } continue; }
+          if (front) queue.unshift(id); else queue.push(id);
+          added++;
+        }
+        changed();
+        pump();
+        return { added, ...state() };
+      },
+      cancel(id) {
+        const i = queue.indexOf(id);
+        if (i >= 0) { queue.splice(i, 1); changed(); }
+        if (cur && cur.id === id) { cur.cancelled = true; uploads.delete(id); killChild(); }
+      },
+      cancelAll() { queue.length = 0; if (cur) this.cancel(cur.id); changed(); },
+      close() { clearTimeout(idleT); queue.length = 0; killChild(); },
+    };
+  }
+  route('POST', '/api/stems/queue', ({ body }) => engine.add(Array.isArray(body?.ids) ? body.ids.slice(0, 5000) : [], { force: !!body?.force, front: !!body?.front }));
+  route('POST', '/api/stems/queue/cancel', ({ body }) => { if (body?.all) engine.cancelAll(); else engine.cancel(String(body?.id || '')); return engine.state(); });
   route('DELETE', '/api/stems/:id', async ({ params }) => {
     const id = checkId(params.id);
+    engine.cancel(id);
     await dropUpload(id);
     await fs.promises.rm(trackDir(id), { recursive: true, force: true });
     if (library.getTrack(id)?.stems) setTrackStems(id, null);
@@ -393,7 +554,8 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     dir: root,
     ortDir: ORT,
     /** Remove a track's stems (call when tracks are deleted from the library). */
-    evict: async (id) => { if (!ID_RE.test(id)) return; await dropUpload(id); await fs.promises.rm(trackDir(id), { recursive: true, force: true }); },
-    close() { clearInterval(sweep); download?.ctrl.abort(); },
+    engine,
+    evict: async (id) => { if (!ID_RE.test(id)) return; engine.cancel(id); await dropUpload(id); await fs.promises.rm(trackDir(id), { recursive: true, force: true }); },
+    close() { clearInterval(sweep); download?.ctrl.abort(); engine.close(); },
   };
 }
