@@ -143,7 +143,7 @@ const faderCheck = (key) => ev((base) => {
     if (base != null && travel < base) out.push(`channel ${s.dataset.ch * 1 + 1} fader travel ${travel} px < ${base} px before`);
     if (travel < 0.35 * s.offsetHeight) out.push(`channel ${s.dataset.ch * 1 + 1} fader travel ${travel} px < 35 % of a ${s.offsetHeight} px strip`);
   }
-  const rows = strips.map((s) => [...s.querySelectorAll(':scope > .knob-wrap .knob')].filter((k) => k.offsetParent).map((k) => k.getBoundingClientRect().top));
+  const rows = strips.map((s) => [...s.querySelectorAll(':scope > .kn-row > .knob-wrap .knob')].filter((k) => k.offsetParent).map((k) => k.getBoundingClientRect().top));
   for (let r = 0; rows.length && r < rows[0].length; r++) { const tops = rows.map((x) => x[r]); if (Math.max(...tops) - Math.min(...tops) > 2) out.push(`knob row ${r + 1} not aligned (${tops.map(Math.round).join('/')})`); }
   return out;
 }, FADER_BASE[key]);
