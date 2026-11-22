@@ -45,7 +45,7 @@ export const DEFAULT_SETTINGS = {
   sampler: null,              // { pads: [{ sound, volume, sync }] } built-in sound / volume / sync-to-beat per pad; replaced wholesale
   link: { enabled: false, quantum: 4, startStopSync: false },
   lyrics: { online: false, writeLrc: false },
-  stemsModelUrl: '', stemsModelSha256: '', stemsBackend: 'auto', stemsEngine: 'auto', stemsAutoPrepare: true, stemsAutoLoad: true, stemsOverlap: 0.25,
+  stemsModelUrl: '', stemsModelSha256: '', stemsBackend: 'auto', stemsEngine: 'auto', stemsAutoPrepare: true, stemsAutoLoad: true, stemsOverlap: 0.25, stemsBackground: false, stemsCacheGB: 40,
   highPrecisionAudio: false,  // decks keep 32-bit float audio (2x RAM) instead of 16-bit
   recording: null,
   broadcast: null,

@@ -68,8 +68,9 @@ export class StemsManager extends Emitter {
   serverState(s) {
     if (!s || this._pumping) return; // the browser engine is running here
     const c = s.current;
-    this.current = c ? { id: c.id, title: c.title, phase: c.phase, done: c.done, total: c.total, backend: c.backend, started: performance.now() - (c.separating || c.elapsed || 0), server: true } : null;
+    this.current = c ? { id: c.id, title: c.title, phase: c.phase, done: c.done, total: c.total, backend: c.backend, started: performance.now() - (c.separating || c.elapsed || 0), server: true, background: !!c.background } : null;
     this.queue = [...(s.queue || [])];
+    this.background = s.background || null; // { enabled, remaining, done, failed, cacheBytes, capBytes, full }
     this.emit('progress', this.current && { ...this.current }); this.emit('queue', this.state());
   }
   /** Server events: 'stems-queue', 'stems-done', 'stems-failed', 'stems' (wired in app.js). */

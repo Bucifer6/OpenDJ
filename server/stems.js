@@ -43,6 +43,15 @@ export const DEFAULT_MODEL = Object.freeze({
   homepage: 'https://github.com/facebookresearch/demucs',
 });
 
+/**
+ * Background preparation order: tracks played most, then rated highest, then played or added most recently (the
+ * ones a DJ is likely to load next get their stems first).
+ */
+export function bgOrder(a, b) {
+  return (b.playCount || 0) - (a.playCount || 0) || (b.rating || 0) - (a.rating || 0)
+    || (b.lastPlayed || 0) - (a.lastPlayed || 0) || (b.addedAt || 0) - (a.addedAt || 0);
+}
+
 const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 const ID_RE = /^[\w-]{1,64}$/;
 const isHex64 = (s) => /^[0-9a-f]{64}$/i.test(String(s || ''));
@@ -417,9 +426,33 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
 
     const installed = () => !!rt.version && !!ffmpeg();
     const modelOk = () => { if (native?.stub) return true; try { return modelReady(modelSpec(settings())); } catch { return false; } };
+
+    // Background preparation (settings.stemsBackground): when the queue is empty, the library's tracks without stems
+    // are separated one by one, the ones played most first, until the stem cache reaches settings.stemsCacheGB. Any
+    // track asked for (a deck load, Automix's next tracks, the menu) goes first and interrupts a background track.
+    const bg = { failed: new Set(), done: 0, cacheBytes: null };
+    const bgCap = () => Math.max(1, Number(settings().stemsCacheGB) || 40) * 2 ** 30;
+    const bgOn = () => settings().stemsBackground === true && installed() && modelOk();
+    const bgTodo = () => (library.allTracks?.() || []).filter((t) => !t.stems?.ready && !bg.failed.has(t.id) && t.id !== cur?.id && !queue.includes(t.id) && ID_RE.test(t.id));
+    const bgNext = () => bgTodo().sort(bgOrder)[0]?.id || null;
+    async function measureCache() {
+      let total = 0;
+      for (const d of await fs.promises.readdir(root, { withFileTypes: true }).catch(() => [])) {
+        if (!d.isDirectory() || d.name === 'models' || d.name.startsWith('.')) continue;
+        for (const f of await fs.promises.readdir(path.join(root, d.name)).catch(() => [])) total += (await fs.promises.stat(path.join(root, d.name, f)).catch(() => null))?.size || 0;
+      }
+      return (bg.cacheBytes = total);
+    }
+    const bgFull = () => bg.cacheBytes != null && bg.cacheBytes >= bgCap();
+    const bgState = () => {
+      const on = settings().stemsBackground === true;
+      return { enabled: on, remaining: on ? bgTodo().length : 0, done: bg.done, failed: bg.failed.size, cacheBytes: bg.cacheBytes, capBytes: bgCap(), full: bgFull() };
+    };
+
     const state = () => ({
-      current: cur && { id: cur.id, title: cur.title, phase: cur.phase, done: cur.done, total: cur.total, elapsed: Date.now() - cur.started, separating: cur.sepAt ? Date.now() - cur.sepAt : 0, backend: cur.backend || backend?.backend || null },
+      current: cur && { id: cur.id, title: cur.title, phase: cur.phase, done: cur.done, total: cur.total, elapsed: Date.now() - cur.started, separating: cur.sepAt ? Date.now() - cur.sepAt : 0, backend: cur.backend || backend?.backend || null, background: !!cur.background },
       queue: [...queue],
+      background: bgState(),
     });
     const changed = () => emit('stems-queue', state());
     const killChild = () => { const c = child; child = null; ready = null; backend = null; c?.kill(); };
@@ -449,10 +482,10 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
       return p;
     }
 
-    async function runOne(id) {
+    async function runOne(id, { background = false } = {}) {
       const t = library.getTrack(id);
       if (!t) return;
-      cur = { id, title: t.title || 'Untitled', phase: 'starting', done: 0, total: 0, started: Date.now() };
+      cur = { id, title: t.title || 'Untitled', phase: 'starting', done: 0, total: 0, started: Date.now(), background };
       changed();
       const token = crypto.randomBytes(12).toString('hex');
       const dir = path.join(root, `.upload-${id}-${token.slice(0, 8)}`);
@@ -478,12 +511,16 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
         Object.assign(u, { frames: r.frames, backend: `server ${r.backend}${r.threads > 1 ? ` x${r.threads}` : ''}` });
         const value = await finalize(t, u);
         last = { id, title: cur.title, ms: r.ms, seconds: r.frames / STEM_RATE, backend: r.backend, threads: r.threads, chunks: r.chunks };
-        emit('stems-done', { ...last, stems: value });
+        emit('stems-done', { ...last, background, stems: value });
+        if (background) bg.done++;
+        measureCache().catch(() => {});
       } catch (e) {
         pending = null;
         if (mine()) await dropUpload(id);
         else await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
-        if (cur?.cancelled || e.cancelled) emit('stems-failed', { id, title: cur?.title, cancelled: true });
+        if (cur?.preempted) { /* a background track made way for a track someone asked for: it is tried again later */ }
+        else if (background && !cur?.cancelled && !e.cancelled) { bg.failed.add(id); console.warn('[stems] background', id, e.message); }
+        else if (cur?.cancelled || e.cancelled) emit('stems-failed', { id, title: cur?.title, cancelled: true });
         else { console.warn('[stems]', id, e.message); emit('stems-failed', { id, title: cur?.title, message: e.message }); }
       } finally { cur = null; changed(); }
     }
@@ -491,8 +528,17 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     async function pump() {
       if (pumping) return;
       pumping = true; clearTimeout(idleT);
-      try { while (queue.length) await runOne(queue.shift()); }
-      finally {
+      try {
+        for (;;) {
+          if (queue.length) { await runOne(queue.shift()); continue; }
+          if (!bgOn()) break;
+          if (bg.cacheBytes == null) await measureCache();
+          if (bgFull()) break;
+          const id = bgNext();
+          if (!id) break;
+          await runOne(id, { background: true });
+        }
+      } finally {
         pumping = false;
         // free the model's memory (and the GPU, for Ollama & co.) when nothing comes for a while
         idleT = setTimeout(() => { if (!pumping) killChild(); }, idleMs); idleT.unref?.();
@@ -518,6 +564,8 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
           if (front) queue.unshift(id); else queue.push(id);
           added++;
         }
+        // a track someone asked for interrupts a background track (that one goes back to the background list)
+        if (added && cur?.background && !cur.cancelled) { cur.cancelled = cur.preempted = true; uploads.delete(cur.id); killChild(); }
         changed();
         pump();
         return { added, ...state() };
@@ -528,10 +576,16 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
         if (cur && cur.id === id) { cur.cancelled = true; uploads.delete(id); killChild(); }
       },
       cancelAll() { queue.length = 0; if (cur) this.cancel(cur.id); changed(); },
-      close() { clearTimeout(idleT); queue.length = 0; killChild(); },
+      /** Start background preparation when it is turned on (called on settings changes and every minute). */
+      kick() { if (!pumping && bgOn()) pump(); },
+      /** Forget background failures (e.g. after FFmpeg or a source came back) and recount the cache. */
+      retryBackground() { bg.failed.clear(); measureCache().then(() => this.kick(), () => {}); return state(); },
+      close() { clearTimeout(idleT); clearInterval(bgT); queue.length = 0; killChild(); },
     };
   }
+  const bgT = setInterval(() => engine.kick(), native?.bgPollMs ?? 60e3); bgT.unref?.();
   route('POST', '/api/stems/queue', ({ body }) => engine.add(Array.isArray(body?.ids) ? body.ids.slice(0, 5000) : [], { force: !!body?.force, front: !!body?.front }));
+  route('POST', '/api/stems/background', ({ body }) => (body?.retry ? engine.retryBackground() : (engine.kick(), engine.state())));
   route('POST', '/api/stems/queue/cancel', ({ body }) => { if (body?.all) engine.cancelAll(); else engine.cancel(String(body?.id || '')); return engine.state(); });
   route('DELETE', '/api/stems/:id', async ({ params }) => {
     const id = checkId(params.id);
@@ -539,6 +593,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     await dropUpload(id);
     await fs.promises.rm(trackDir(id), { recursive: true, force: true });
     if (library.getTrack(id)?.stems) setTrackStems(id, null);
+    engine.retryBackground?.();
     emit('stems', { id, ready: false });
     return { ok: true };
   });

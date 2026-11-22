@@ -26,7 +26,7 @@ export function setupStems(app) {
   let modelMsg = null;
   const render = () => {
     const c = stems.current;
-    panel.hidden = !c && !modelMsg;
+    panel.hidden = (!c || c.background) && !modelMsg; // background preparation stays quiet (Settings > AI stems shows it)
     if (modelMsg) { label.textContent = modelMsg.text; bar.style.width = `${modelMsg.pct}%`; queued.textContent = ''; return; }
     if (!c) return;
     const p = c.phase === 'separating' ? pct(c) : c.phase === 'loading model' && c.total ? pct(c) : null;
@@ -191,11 +191,27 @@ export function stemsSettingsPane(app) {
     ...[['auto', 'Automatic (GPU, else CPU)'], ['wasm', 'CPU only']].map(([v, l]) => el('option', { value: v, selected: (app.settings.stemsBackend || 'auto') === v }, l)));
   const auto = el('input', { type: 'checkbox', checked: app.settings.stemsAutoLoad !== false, onchange: () => app.setSetting('stemsAutoLoad', auto.checked) });
   const ahead = el('input', { type: 'checkbox', checked: app.settings.stemsAutoPrepare !== false, onchange: () => app.setSetting('stemsAutoPrepare', ahead.checked) });
+  const kick = () => fetch('/api/stems/background', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json()).then((s) => { stems.serverState(s); bgRender(); }).catch(() => {});
+  const bgBox = el('input', { type: 'checkbox', checked: app.settings.stemsBackground === true, onchange: async () => { await app.setSetting('stemsBackground', bgBox.checked); kick(); } });
+  const cap = el('input', { class: 'inp', type: 'number', min: 1, max: 4000, step: 1, value: app.settings.stemsCacheGB || 40, style: 'width:6em', onchange: async () => { await app.setSetting('stemsCacheGB', Number(cap.value) || 40); kick(); } });
+  const quality = el('select', { class: 'inp', onchange: () => app.setSetting('stemsOverlap', Number(quality.value)) },
+    ...[['0.25', 'Best (overlap 25 %)'], ['0.1', 'Faster (about 15 % quicker, overlap 10 %)']].map(([v, l]) => el('option', { value: v, selected: Math.abs((Number(app.settings.stemsOverlap) || 0.25) - Number(v)) < 0.01 }, l)));
+  const bgInfo = el('div', { class: 'muted' });
+  const bgRender = () => {
+    const b = stems.background;
+    bgInfo.textContent = !b ? '' : !b.enabled ? 'Off: stems are prepared only for loaded tracks, the next Automix tracks and the ones you pick.'
+      : `${b.remaining ? `${b.remaining} track(s) left` : 'Every track has stems'}${b.done ? ` · ${b.done} prepared this session` : ''}${b.failed ? ` · ${b.failed} skipped` : ''}${b.cacheBytes != null ? ` · cache ${MB(b.cacheBytes)} of ${MB(b.capBytes)}` : ''}${b.full ? ' (full: raise the limit or delete stems)' : ''}`;
+  };
+  stems.on('queue', bgRender); bgRender();
   return el('div', { class: 'stems-settings' }, info,
     el('label', { class: 'field' }, el('span', {}, 'Separate on'), where),
     el('label', { class: 'field' }, el('span', {}, 'Separation hardware'), sel),
+    el('label', { class: 'field' }, el('span', {}, 'Quality'), quality),
     el('label', { class: 'check' }, auto, el('span', {}, 'Load prepared stems when a track is loaded')),
-    el('label', { class: 'check' }, ahead, el('span', {}, 'Prepare stems ahead for Automix and loaded tracks (server engine)')));
+    el('label', { class: 'check' }, ahead, el('span', {}, 'Prepare stems ahead for Automix and loaded tracks (server engine)')),
+    el('label', { class: 'check' }, bgBox, el('span', {}, 'Prepare stems for the whole library in the background, most played first (server engine; saved, done once per track)')),
+    el('label', { class: 'field' }, el('span', {}, 'Stem cache limit (GB)'), cap),
+    bgInfo);
 }
 
 export { stemsApi };
