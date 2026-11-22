@@ -9,6 +9,7 @@ Date: 22 November 2026. Local environment: Windows, Node 24.19, Playwright Chrom
 - Full interface sweep: **573 checks passed**, covering layouts, themes, zoom, viewport sizes, DPI scaling, panels, dialogs, keyboard actions, control overlap/visibility and fader bounds/travel.
 - All **28 advertised MCP tools** exercised through authenticated HTTP, the event relay and the real browser app; the transport was not replaced by a fake page handler.
 - Dependency audit: zero reported vulnerabilities. Controller Mapper generation check passed. Mobile vendor bundle checked against a separate clean install of the exact lockfile and passed.
+- Browser QA uses the pinned Playwright development dependency; the README documents its one-time Chromium installation. It is not a production dependency or bundled model.
 
 | Suite | Coverage | Result |
 | --- | --- | --- |

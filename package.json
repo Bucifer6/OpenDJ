@@ -44,7 +44,8 @@
     "@capawesome/capacitor-file-picker": "^8.1.1",
     "electron": "^45.4.1",
     "electron-builder": "^26.18.0",
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "playwright": "1.65.1"
   },
   "build": {
     "appId": "org.opendj.app",

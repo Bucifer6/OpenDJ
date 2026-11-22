@@ -363,7 +363,9 @@ npm run dist       # installers for the OS you're on (Windows/macOS installers m
 Tests:
 
 ```bash
+npm ci              # install the exact runtime and test dependencies
 npm test            # unit tests: analysis, media-server clients against mock servers, rekordbox round trip, CDJ export, DVS, Link…
+npx playwright install chromium  # one-time browser download for end-to-end tests
 npm run test:e2e    # end-to-end checks in headless Chromium (smoke, performance, controllers, lighting, video, web app, DVS, Link/lyrics, recording, stems, analysis, sampler, automix)
 ```
 
