@@ -50,6 +50,8 @@ export const STEM_RATE = 44100;
  *     that still added up to the track
  */
 export const STEM_CHECK = 2;
+/** Version of the GPU check (2: every graph optimisation level is tried); older failure records are retried. */
+export const GPU_CHECK_VERSION = 2;
 export const uncheckedGpuStems = (meta) => !!meta && !(meta.checked >= STEM_CHECK) && /\b(dml|webgpu|coreml|cuda)\b/i.test(String(meta.backend || ''));
 
 /**
@@ -361,6 +363,13 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     // immutable per hash: the UI asks for /api/stems/model?sha=<sha256>
     return sendFile(req, res, modelFile(spec), 'application/octet-stream', 'private, max-age=31536000, immutable');
   });
+  // the native engine's CPU stems for its fixed test signal (stems-child.js): the browser engine checks WebGPU
+  // against it in one chunk instead of a slow single-threaded WASM run (404 until the native engine computed it)
+  route('GET', '/api/stems/model/cpu-ref', ({ req, res }) => {
+    const spec = modelSpec(settings());
+    if (!modelReady(spec)) throw bad('The stems model has not been downloaded yet', 404);
+    return sendFile(req, res, modelFile(spec) + '.cpu-ref.f32', 'application/octet-stream');
+  });
   route('DELETE', '/api/stems/model', async () => {
     const spec = modelSpec(settings());
     await fs.promises.rm(modelFile(spec), { force: true }); await fs.promises.rm(modelFile(spec) + '.json', { force: true });
@@ -481,12 +490,13 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     // <stems>/gpu-check.json across restarts until onnxruntime-node changes (a new version may fix it) or
     // POST /api/stems/gpu/retry clears it.
     const gpuFile = path.join(root, 'gpu-check.json');
-    let gpuFailed = (() => { try { const g = JSON.parse(fs.readFileSync(gpuFile, 'utf8')); return g.ort === rt.version && g.backend ? g : null; } catch { return null; } })();
+    // GPU_CHECK_VERSION: records from older checks (fewer things tried) are ignored, so the GPU gets another chance
+    let gpuFailed = (() => { try { const g = JSON.parse(fs.readFileSync(gpuFile, 'utf8')); return g.ort === rt.version && g.version === GPU_CHECK_VERSION && g.backend ? g : null; } catch { return null; } })();
     const setGpuFailed = (g) => {
       if (gpuFailed) return;
       gpuFailed = { backend: String(g.backend || 'gpu'), message: String(g.message || '').slice(0, 500), at: Date.now() };
       console.warn(`[stems] the graphics card (${gpuFailed.backend}) is not used for stems from now on: ${gpuFailed.message}`);
-      try { fs.writeFileSync(gpuFile, JSON.stringify({ ...gpuFailed, ort: rt.version })); } catch { /* read-only data dir: this session only */ }
+      try { fs.writeFileSync(gpuFile, JSON.stringify({ ...gpuFailed, ort: rt.version, version: GPU_CHECK_VERSION })); } catch { /* read-only data dir: this session only */ }
     };
     const crashRetried = new Set(); // tracks already redone on the CPU after a GPU crash (only once each)
 
@@ -668,6 +678,8 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
       retryGpu() {
         gpuFailed = null; crashRetried.clear();
         fs.rmSync(gpuFile, { force: true });
+        // the engine's own memo of which GPU optimisation level works (stems-child.js), so every level is tried again
+        try { for (const f of fs.readdirSync(modelsDir)) if (/\.gpu-[a-z]+\.json$/.test(f)) fs.rmSync(path.join(modelsDir, f), { force: true }); } catch { /* none */ }
         if (!cur) killChild(); // loaded again (GPU first) for the next track
         console.warn('[stems] the graphics card will be tried again for stems');
         return { gpuFailed };

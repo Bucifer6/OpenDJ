@@ -6,7 +6,7 @@ import { api } from '../api.js';
 import { THEMES, JOG_STYLE_OPTIONS, applyTheme, refreshSkinCatalog, selectedTheme } from './themes.js';
 import { controllersPanel } from './controllers-panel.js';
 import { remoteSettingsPane } from './remote-settings.js';
-import { stemsSettingsPane } from '../stems/stems-ui.js';
+import { stemsSettingsPane, perTrackMinutes } from '../stems/stems-ui.js';
 import { platform, MOBILE_UNAVAILABLE, APP_VERSION } from '../platform.js';
 import { STYLES, normStyle } from '../automix.js';
 import { SET_SHAPES, PRESETS } from '../smartmix.js';
@@ -366,6 +366,16 @@ export class Dialogs {
     modeSel.addEventListener('change', showSmart); showSmart();
     for (const c of [source, playlistSel, ...genreBoxes]) c.addEventListener('change', showSource);
     showSource();
+    // AI stems for the whole set, prepared ahead in play order (stem swap transitions and the deck stem controls
+    // need them; on a CPU each track takes minutes, so starting early matters)
+    const stemsOn = !platform.local && !!this.app.stems;
+    const prepStems = el('input', { type: 'checkbox', checked: !!o.prepareStems, 'data-am': 'prepare-stems' });
+    const stemsHint = el('span', { class: 'hint' });
+    if (stemsOn) this.app.stems.status().then((st) => {
+      const where = st?.native?.available ? (st.native.backend && !['cpu'].includes(st.native.backend) ? 'on the graphics card' : 'on the CPU') : 'in this browser';
+      stemsHint.textContent = ` Prepared ${where}, about ${perTrackMinutes(this.app.stems)} min per track, in play order; tracks that already have stems are skipped.`;
+    }).catch(() => {});
+    const stemsRow = stemsOn ? [el('label', { class: 'check' }, prepStems, ' Prepare AI stems for the whole set now', stemsHint)] : [];
     const body = el('div', { class: 'form' },
       summary,
       el('label', { class: 'field' }, el('span', {}, 'Mix'), source), playlistRow, genreRow,
@@ -377,7 +387,8 @@ export class Dialogs {
       el('label', { class: 'field' }, el('span', {}, 'Transition length'), bars),
       el('label', { class: 'check' }, smartStart, ' Start at the best analysed phrase'),
       el('label', { class: 'check' }, vary, ' Vary transition styles'),
-      el('label', { class: 'check' }, keySync, ' Fix key clashes with Key Sync'));
+      el('label', { class: 'check' }, keySync, ' Fix key clashes with Key Sync'),
+      ...stemsRow);
     const native = window.opendjNative;
     const savedModel = (() => { try { return localStorage.getItem('dj-model') || ''; } catch { return ''; } })();
     const model = el('input', { class: 'inp', placeholder: 'Installed Ollama model, e.g. llama3.2', value: savedModel, list: 'odj-ollama-models', 'data-am': 'model', maxlength: 180 });
@@ -427,8 +438,9 @@ export class Dialogs {
     const sm = smartBox.value();
     await this.app.setSetting('automix', { ...o, style: style.value, ...lengthPatch(bars.value, o), keySync: keySync.checked,
       varyStyles: vary.checked, shape: shape.value, preset: sm.preset, sliders: sm.sliders,
-      shuffle: modeSel.value === 'shuffle', smartStart: smartStart.checked, profile: profile.value, setLength: setLength.value });
-    return this.app.startAutomix(tracks, { mode: modeSel.value, shape: shape.value, sliders: sm.sliders, limit: Number(limit.value) || undefined, pool: tracks, ...lengthOptions(setLength.value) });
+      shuffle: modeSel.value === 'shuffle', smartStart: smartStart.checked, profile: profile.value, setLength: setLength.value, prepareStems: stemsOn ? prepStems.checked : !!o.prepareStems });
+    await this.app.startAutomix(tracks, { mode: modeSel.value, shape: shape.value, sliders: sm.sliders, limit: Number(limit.value) || undefined, pool: tracks, ...lengthOptions(setLength.value) });
+    if (stemsOn && prepStems.checked) this.app.prepareSetStems();
   }
 
   gridEditor(deck) {
