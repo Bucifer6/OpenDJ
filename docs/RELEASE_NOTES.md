@@ -24,6 +24,8 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
 ### Unreleased
+- **Automix starts with your decks.** Tracks you have loaded on deck 1 and/or deck 2 now play first when you press AUTOMIX: deck 1 starts (from your cue point if you set one), deck 2 plays next, then the rest of the mix. A deck that is already playing keeps playing.
+- **Choose what Automix plays and for how long.** The new ▾ menu next to AUTOMIX mixes the whole library (shuffled or smart, endless), this view for an hour or endlessly, one playlist, or the genres you pick. The Automix dialog has the same *Mix* (view, whole library, a playlist, genres) and *Set length* (whole list, 30 minutes, 1 to 3 hours, endless) choices, and the ▾ menu sets what the one-click AUTOMIX button plays. Endless sets keep adding tracks, playing the whole pool before any track comes back; a playlist in *Play in this order* loops in order.
 - **Fix AI stems that came out as noise on the graphics card.** The previous check only tested that the four stems add up to the track, but the GPU (DirectML) was returning noise spread across the stems that still added up exactly, so it passed. A GPU is now compared once with the CPU on real audio. If its stems differ, the track is redone on the CPU and the GPU is not used for stems again. Noisy GPU stems saved by 0.5.3–0.5.4 are deleted at start-up and prepared again. The browser engine checks WebGPU against WASM the same way.
 
 ### New in 0.5.4

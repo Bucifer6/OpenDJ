@@ -9,7 +9,7 @@
 // (autoTransitionLength).
 import { Emitter } from './util.js';
 import { toCamelot, camelotCompatible, analyzeStructure } from './audio/analysis-core.js';
-import { smartMix, liveNext, shuffle, camelotRelation, genreSimilarity } from './smartmix.js';
+import { smartMix, liveNext, shuffle, camelotRelation, genreSimilarity, explain } from './smartmix.js';
 import { t } from './i18n.js';
 import { planBestTransition, stemSwapLevels, learnChoice } from './mix-planner.js';
 import { planAdaptiveTransition } from './adaptive-dj.js';
@@ -396,6 +396,22 @@ export function tempoRampValue(from, k) {
 
 const structureCache = new WeakMap();
 
+/** Endless live sets: length of one energy-curve cycle (tracks). */
+const LIVE_ENDLESS_CYCLE = 30;
+/** Seconds left in the track playing on a deck (0 without one). */
+function remainingSeconds(deck) {
+  if (!deck?.track) return 0;
+  const d = Number(deck.duration || deck.track.duration) || 0;
+  return Math.max(0, d - (Number(deck.position) || 0));
+}
+/** The first tracks of a list that fill `seconds` (tracks of unknown length count 4 minutes); at least one. */
+export function trimToMinutes(list, seconds) {
+  const out = [];
+  let total = 0;
+  for (const t of list) { if (out.length && total >= seconds) break; out.push(t); total += Number(t.duration) || 240; }
+  return out;
+}
+
 export class AutoMix extends Emitter {
   constructor(app) {
     super();
@@ -418,38 +434,71 @@ export class AutoMix extends Emitter {
    * Start automix. opts.mode: 'order' (as given) | 'shuffle' | 'smart' (order by compatibility up front) |
    * 'live' (smart pick of each next track while playing). Older callers: { smart: true, order } = energy-curve order.
    * opts.shape / sliders / limit tune smart mix (defaults from settings.automix).
+   * opts.minutes: a timed set (e.g. 60), opts.endless: never runs out (opts.pool, default the tracks, is drawn from
+   * again as the set plays). Tracks already on decks 1 / 2 are used first (see below).
    */
-  async start(tracks, { smart = false, order, mode, shape, sliders, limit } = {}) {
+  async start(tracks, { smart = false, order, mode, shape, sliders, limit, minutes, endless = false, pool = null } = {}) {
     if (!tracks.length) throw new Error('Queue is empty');
-    let list = [...tracks];
-    this.reasons = new Map(); this.overrides = new Map(); this.live = null;
+    this.reasons = new Map(); this.overrides = new Map(); this.live = null; this.refill = null;
     mode = mode || (smart ? 'legacy-smart' : this.opts.shuffle ? 'shuffle' : 'order');
     shape = shape || this.opts.shape || 'warmup';
     sliders = sliders || this.opts.sliders;
-    const playingDeck = this.engine.decks.slice(0, 2).find((d) => d.playing);
-    const playingTrack = playingDeck?.track ? (this.app.library?.track?.(playingDeck.track.id) || playingDeck.track) : null;
+    const [a, b] = this.engine.decks;
+    // Start with what is already on decks 1 / 2: a playing deck keeps playing; otherwise a loaded deck (deck 1 first)
+    // starts the set, and a track loaded on the other deck plays next. Those tracks are taken out of the list.
+    const lib = this.app.library;
+    const libCopy = (t) => (t ? lib?.track?.(t.id) || t : null);
+    const ready = (d) => !!d.track && !d.loading;
+    const playingDeck = [a, b].find((d) => d.playing && ready(d)) || null;
+    const firstDeck = playingDeck || [a, b].find(ready) || null;
+    const nextDeck = firstDeck && ready(this.other(firstDeck)) && this.other(firstDeck).track.id !== firstDeck.track.id ? this.other(firstDeck) : null;
+    const firstTrack = libCopy(firstDeck?.track), pinnedNext = libCopy(nextDeck?.track);
+    const onDecks = new Set([firstTrack?.id, pinnedNext?.id].filter(Boolean));
+    let list = tracks.filter((t) => t && !onDecks.has(t.id));
+    if (!list.length && !pinnedNext && !firstTrack) throw new Error('Queue is empty');
+    const after = pinnedNext || firstTrack; // what the ordering continues from
     if (mode === 'shuffle') list = shuffle(list);
     else if (mode === 'legacy-smart') list = smartOrder(list, order || this.opts.order || 'harmonic');
-    else if (mode === 'smart') {
-      const r = smartMix(list, { shape, sliders, limit, start: playingTrack });
+    else if (mode === 'smart' && list.length) {
+      const r = smartMix(list, { shape, sliders, limit, start: after });
       list = r.tracks;
       r.steps.forEach((s) => this.reasons.set(s.track, s.reason));
     } else if (mode === 'live') {
-      const setLength = Math.min(list.length, Math.max(2, Number(limit) || Number(this.opts.liveSetLength) || list.length));
-      this.live = { ids: list.map((t) => t.id), shape, sliders, setLength };
-      const first = playingTrack ? liveNext(playingTrack, list, { shape, sliders, position: 0, setLength, transitionScore: (t) => this.transitionQuality(playingTrack, t, playingDeck) }) : null;
-      const r = first ? null : smartMix(list, { shape, sliders, limit: 1 });
-      const t0 = first?.track || r.tracks[0];
-      list = [t0];
-      this.reasons.set(t0, first?.reason || r.steps[0].reason);
+      const avg = list.reduce((n, t) => n + (Number(t.duration) || 240), 0) / (list.length || 1);
+      const timed = minutes > 0 ? Math.max(2, Math.ceil(minutes * 60 / avg)) : 0; // a timed live set: tracks that fill it
+      const setLength = endless ? LIVE_ENDLESS_CYCLE : Math.min(list.length + onDecks.size, Math.max(2, timed || Number(limit) || Number(this.opts.liveSetLength) || list.length + onDecks.size));
+      this.live = { ids: list.map((t) => t.id), shape, sliders, setLength, endless: !!endless };
+      if (pinnedNext || !list.length) list = [];
+      else {
+        const first = after ? liveNext(after, list, { shape, sliders, position: 0, setLength, transitionScore: (t) => this.transitionQuality(after, t, firstDeck) }) : null;
+        const r = first ? null : smartMix(list, { shape, sliders, limit: 1 });
+        const t0 = first?.track || r.tracks[0];
+        list = [t0];
+        this.reasons.set(t0, first?.reason || r.steps[0].reason);
+      }
+    }
+    if (pinnedNext) { list.unshift(pinnedNext); this.reasons.set(pinnedNext, [explain(firstTrack, pinnedNext), `already loaded on deck ${nextDeck.index + 1}`].filter(Boolean).join('; ')); }
+    if (minutes > 0 && !endless) list = trimToMinutes(list, minutes * 60 - remainingSeconds(firstDeck));
+    // endless (or a set length the list is too short for): more tracks are added from the pool as the set plays
+    if ((endless || minutes > 0) && mode !== 'live') {
+      const ids = (pool || tracks).map((t) => t?.id).filter(Boolean);
+      this.refill = { ids, endless: !!endless, seconds: endless ? Infinity : minutes * 60, mode, shape, sliders };
     }
     this.mode = mode;
-    this.queue = list; this.idx = 0; this.enabled = true; this.transition = null; this.forceTransitionRequested = false;
+    this.queue = firstTrack ? [firstTrack, ...list] : list; this.idx = firstTrack ? 1 : 0;
+    this.enabled = true; this.transition = null; this.forceTransitionRequested = false;
+    this.startedAt = Date.now();
     const runId = this._runId = (this._runId || 0) + 1;
-    const [a, b] = this.engine.decks;
     await this.engine.resume();
-    const playing = [a, b].find((d) => d.playing);
-    if (!playing) {
+    if (playingDeck) this.current = playingDeck;
+    else if (firstDeck) {
+      // a track the DJ loaded (and maybe cued): play it from where it is, or from the best phrase when at the start
+      this.prepare(firstDeck);
+      const smartMode = ['smart', 'live', 'legacy-smart'].includes(this.mode);
+      if (firstDeck.position < 0.5 && smartMode && this.opts.smartStart !== false) { const at = smartStartPoint(firstTrack); if (at > 0.5) firstDeck.seek(at); }
+      firstDeck._autoMixEntry = firstDeck.position; firstDeck.play();
+      this.current = firstDeck;
+    } else {
       // start with the first track that actually loads (missing files / server errors are skipped)
       let loaded = false;
       while (this.idx < this.queue.length && this.enabled) {
@@ -460,17 +509,61 @@ export class AutoMix extends Emitter {
       if (!this.enabled || runId !== this._runId) { this.emit('state'); return; }
       if (!loaded) { this.enabled = false; this.emit('state'); throw new Error('None of the tracks in the queue could be loaded'); }
       this.prepare(a);
-      const firstTrack = this.queue[Math.max(0, this.idx - 1)] || a.track;
+      const first = this.queue[Math.max(0, this.idx - 1)] || a.track;
       const smartMode = ['smart', 'live', 'legacy-smart'].includes(this.mode);
-      const startAt = smartMode && this.opts.smartStart !== false ? smartStartPoint(firstTrack) : 0;
+      const startAt = smartMode && this.opts.smartStart !== false ? smartStartPoint(first) : 0;
       if (startAt > 0.5) a.seek(startAt);
       a._autoMixEntry = startAt; a.play();
+      this.current = a;
     }
     if (!this.enabled || runId !== this._runId) return;
-    this.current = playing || a;
+    if (nextDeck) { const ch = this.engine.channels[nextDeck.index]; ch.set('xfAssign', 'THRU'); ch.set('volume', 0); }
     this.fillLive();
+    this.fillMore();
     this.preloadNext();
     this.emit('state');
+  }
+
+  /**
+   * Endless / timed sets: keep a few tracks queued from the pool (settings of the start: shuffle or smart order),
+   * preferring tracks not played in this set; when the whole pool has been played, it starts over (endless only).
+   * A timed set stops adding once the queued tracks fill its length.
+   */
+  fillMore() {
+    const r = this.refill;
+    if (!r || this.live) return; // live mode picks each next track itself (fillLive)
+    const lib = this.app.library;
+    const secs = (t) => Number(lib?.track?.(t.id)?.duration || t.duration) || 240;
+    if (this.queue.length - this.idx >= 2) return;
+    if (!r.endless && this.queue.reduce((n, t) => n + secs(t), 0) >= r.seconds) return;
+    if (r.mode === 'order') {
+      // in order: carry on after the last queued track, back to the top of the list at its end (endless)
+      const n = r.ids.length, from = r.ids.indexOf(this.queue.at(-1)?.id) + 1;
+      if (!n || (!r.endless && from >= n)) return;
+      let add = [];
+      for (let k = 0; k < Math.min(8, n); k++) { const id = r.ids[(from + k) % n]; if (!r.endless && from + k >= n) break; const t = lib?.track?.(id); if (t && !t.unreadable) add.push(t); }
+      if (!r.endless) { let planned = this.queue.reduce((x, t) => x + secs(t), 0); add = add.filter((t) => { const keep = planned < r.seconds; planned += secs(t); return keep; }); }
+      if (add.length) this.queue.push(...add);
+      return;
+    }
+    // not played in this set; endless: a track comes back once (nearly) every other track has played since
+    const window = r.endless ? Math.min(this.queue.length, Math.max(1, Math.ceil(r.ids.length * 0.75))) : this.queue.length;
+    const recent = new Set(this.queue.slice(this.queue.length - window).map((t) => t.id));
+    const pool = r.ids.filter((id) => !recent.has(id)).map((id) => lib?.track?.(id)).filter((t) => t && !t.unreadable);
+    if (!pool.length) return;
+    let add;
+    const last = this.queue.at(-1) || this.current?.track;
+    if (r.mode === 'smart' || r.mode === 'legacy-smart') {
+      const sm = smartMix(pool.length > 400 ? shuffle(pool).slice(0, 400) : pool, { shape: r.shape, sliders: r.sliders, limit: 8, start: last ? lib?.track?.(last.id) || last : null });
+      add = sm.tracks; sm.steps.forEach((s) => this.reasons.set(s.track, s.reason));
+    } else add = shuffle(pool).slice(0, 8);
+    if (!r.endless) {
+      let planned = this.queue.reduce((n, t) => n + secs(t), 0);
+      const keep = [];
+      for (const t of add) { if (planned >= r.seconds) break; keep.push(t); planned += secs(t); }
+      add = keep;
+    }
+    if (add.length) this.queue.push(...add);
   }
   stop() { this.enabled = false; this.forceTransitionRequested = false; if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
   /** Start the next transition immediately, waiting for its deck preload if necessary. */
@@ -557,10 +650,15 @@ export class AutoMix extends Emitter {
     const lib = this.app.library;
     const fresh = (t) => (t && lib?.track?.(t.id)) || t;
     const played = this.queue.slice(0, this.idx).map(fresh);
-    if (played.length >= this.live.setLength) return;
+    const endless = !!this.live.endless;
+    if (!endless && played.length >= this.live.setLength) return;
     const cur = fresh(this.current?.track) || played.at(-1) || null;
     const pool = this.live.ids.map((id) => lib?.track?.(id)).filter(Boolean);
-    const r = liveNext(cur, pool, { history: played, shape: this.live.shape, sliders: this.live.sliders, position: played.length, setLength: this.live.setLength, transitionScore: (t) => this.transitionQuality(cur, t, this.current) });
+    // endless: the energy curve repeats every LIVE_ENDLESS_CYCLE tracks, and a track can come back once every other
+    // track of the pool has played since
+    const history = endless ? played.slice(-Math.max(1, pool.length - 1)) : played;
+    const position = endless ? played.length % this.live.setLength : played.length;
+    const r = liveNext(cur, pool, { history, shape: this.live.shape, sliders: this.live.sliders, position, setLength: this.live.setLength, transitionScore: (t) => this.transitionQuality(cur, t, this.current) });
     if (!r) return;
     this.queue.push(r.track); this.reasons.set(r.track, r.reason);
   }
@@ -646,6 +744,7 @@ export class AutoMix extends Emitter {
 
   async preloadNext() {
     this.fillLive();
+    this.fillMore();
     const t = this.nextTrack(); if (!t) return;
     const deck = this.other(this.current);
     if (this._loading || deck.track?.id === t.id || deck.loading) return;
@@ -965,6 +1064,7 @@ export class AutoMix extends Emitter {
     this.current = inn;
     this.startTempoRamp(inn);
     this.fillLive();
+    this.fillMore();
     if (this.nextTrack()) setTimeout(() => this.preloadNext(), 500);
     else this.emit('ending');
     this.emit('state');
