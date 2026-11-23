@@ -21,6 +21,16 @@ function run(sig, opts) {
 }
 const between = (log, a, b) => log.filter((r) => r.t >= a && r.t < b);
 
+test('structured-cloned configuration preserves acquired absolute position; polarity changes reacquire it', () => {
+  const def = TIMECODES.serato_2a, sig = generateTimecode({ def, sampleRate: SR, seconds: 0.3, startCycle: 20000 });
+  const { d } = run(sig, { def, table: tableFor(def) });
+  assert.ok(d.lock);
+  const before = d.position;
+  d.configure({ def: structuredClone(def), rpm: 33 });
+  assert.equal(d.lock, true); assert.equal(d.position, before);
+  d.configure({ invertBits: !d.invertBits }); assert.equal(d.lock, false);
+});
+
 test('LFSR: reverse step inverts forward step; position table is unique over the record', () => {
   for (const id of ['serato_2a', 'serato_2b', 'serato_cd', 'traktor_a', 'traktor_b']) {
     const def = TIMECODES[id];

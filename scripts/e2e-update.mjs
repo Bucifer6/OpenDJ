@@ -39,9 +39,9 @@ function writeWav(file, seconds) {
 writeWav(path.join(music, 'Update Artist - Long Tone.wav'), 30);
 
 // ---------------------------------------------------------------- fake GitHub API
-// the test injects its own (hostile) "New in 0.5": drop the real one so there is exactly one
+// the test injects its own (hostile) "New in 99.0": drop the real one so there is exactly one
 const NOTES = fs.readFileSync(path.join(root, 'docs', 'RELEASE_NOTES.md'), 'utf8').replace(/### New in 0\.5\n[\s\S]*?(?=### New in 0\.4)/, '');
-const NEW_SECTION = `### New in 0.5
+const NEW_SECTION = `### New in 99.0
 **Update prompt**
 - OpenDJ tells you when a new version is out, with *what's new* and an **Update now** button.
 - Notes support \`inline code\` and [links](https://github.com/Bucifer6/OpenDJ).
@@ -140,12 +140,12 @@ try {
   console.log('\n=== newer version: prompt, notes, Later ===');
   const sharedData = fs.mkdtempSync(path.join(tmp, 'data-'));
   {
-    gh.version = '0.5.0';
+    gh.version = '99.0.0';
     const app = await newServer({ dataDir: sharedData });
     const { page, ctx } = await openApp(app);
     await modal(page).waitFor({ timeout: 8000 });
-    check(true, 'the prompt appears for a newer version (0.5.0)');
-    check((await page.textContent('.update-modal .modal-head h2')) === 'OpenDJ 0.5.0 is available', 'title: "OpenDJ 0.5.0 is available"');
+    check(true, 'the prompt appears for a newer version (99.0.0)');
+    check((await page.textContent('.update-modal .modal-head h2')) === 'OpenDJ 99.0.0 is available', 'title: "OpenDJ 99.0.0 is available"');
     check((await page.textContent('.upd-sub')) === `You have ${VERSION}`, `subtitle: "You have ${VERSION}"`);
     check(/Update prompt/.test(await page.textContent('.upd-summary')), 'short summary from the release notes');
     const btns = await page.locator('.update-modal .modal-foot .btn').allTextContents();
@@ -158,7 +158,7 @@ try {
     await page.locator('.upd-toggle').click();
     check(await page.getAttribute('.upd-toggle', 'aria-expanded') === 'true', 'toggle reports aria-expanded');
     const titles = await page.locator('.upd-section > h3').allTextContents();
-    check(JSON.stringify(titles) === JSON.stringify(['New in 0.5']), `"What’s new" shows only the newer sections (${titles.join(', ')})`);
+    check(JSON.stringify(titles) === JSON.stringify(['New in 99.0']), `"What’s new" shows only the newer sections (${titles.join(', ')})`);
     const notesText = await page.textContent('.upd-notes');
     check(!/Windows 10\/11|SHA256SUMS|New in 0\.4|Phone and tablet app/.test(notesText), 'no download table and no 0.4 notes in "What’s new"');
     check(notesText.includes('<script>window.__xss = 1</script>'), 'a <script> tag in the notes shows as plain text');
@@ -187,7 +187,7 @@ try {
     await page.keyboard.press('Escape');
     await modal(page).waitFor({ state: 'detached', timeout: 3000 });
     const sn = settingsOf(app).updateSnooze;
-    check(sn?.version === '0.5.0' && sn.until > Date.now() + 2.9 * 86400e3 && sn.until < Date.now() + 3.1 * 86400e3, 'Esc = Later: snoozed for 3 days');
+    check(sn?.version === '99.0.0' && sn.until > Date.now() + 2.9 * 86400e3 && sn.until < Date.now() + 3.1 * 86400e3, 'Esc = Later: snoozed for 3 days');
     check(await page.locator('.update-badge').isVisible(), 'the "Update" badge stays in the top bar');
     await page.screenshot({ path: path.join(shots, 'badge-desktop.png'), clip: { x: 900, y: 0, width: 540, height: 60 } });
     // Later button
@@ -196,7 +196,7 @@ try {
     check(true, 'the badge opens the prompt');
     await page.locator('.update-modal .upd-later').click();
     await modal(page).waitFor({ state: 'detached', timeout: 3000 });
-    check(settingsOf(app).updateSnooze?.version === '0.5.0', '"Later" snoozes 0.5.0');
+    check(settingsOf(app).updateSnooze?.version === '99.0.0', '"Later" snoozes 99.0.0');
     // reload: snoozed
     const before = gh.hits.length;
     await page.reload();
@@ -208,15 +208,15 @@ try {
     await ctx.close(); stopServer(app);
   }
   {
-    gh.version = '0.5.1';
+    gh.version = '99.0.1';
     const app = await newServer({ dataDir: sharedData });
-    check(settingsOf(app).updateSnooze?.version === '0.5.0', 'the snooze survived a restart');
+    check(settingsOf(app).updateSnooze?.version === '99.0.0', 'the snooze survived a restart');
     const { page, ctx } = await openApp(app);
     await modal(page).waitFor({ timeout: 8000 });
-    check(true, 'a newer version than the snoozed one (0.5.1) prompts again');
+    check(true, 'a newer version than the snoozed one (99.0.1) prompts again');
     await page.locator('.upd-skip').click();
     await modal(page).waitFor({ state: 'detached', timeout: 3000 });
-    check(settingsOf(app).updateSnooze?.version === '0.5.1' && settingsOf(app).updateSnooze.skip === true, '"Skip this version" remembers 0.5.1');
+    check(settingsOf(app).updateSnooze?.version === '99.0.1' && settingsOf(app).updateSnooze.skip === true, '"Skip this version" remembers 99.0.1');
     check(await page.locator('.update-badge').isHidden(), 'no badge for a skipped version');
     await ctx.close(); stopServer(app);
   }
@@ -224,7 +224,7 @@ try {
   // ================================================================ 3. never during a set
   console.log('\n=== deferred while a deck plays ===');
   {
-    gh.version = '0.5.0';
+    gh.version = '99.0.0';
     const app = await newServer();
     app.library.updateSettings({ allowedRoots: [music] });
     const r = await fetch(`${app.url}api/folders`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: music }) });
@@ -256,20 +256,20 @@ try {
   const MOCK = (kind) => `window.__calls = [];
     window.opendjNative = { update: {
       info: async () => { window.__calls.push('info'); return ${JSON.stringify({
-        nsis: { kind: 'nsis', arch: 'x64', action: 'install', asset: { name: 'OpenDJ-Setup-0.5.0-x64.exe', size: 94371840 } },
-        dmg: { kind: 'dmg', arch: 'arm64', action: 'download', asset: { name: 'OpenDJ-0.5.0-mac-arm64.dmg', size: 94371840 } },
-        deb: { kind: 'deb', arch: 'x64', action: 'open', asset: { name: 'OpenDJ-0.5.0-linux-amd64.deb', size: 94371840 } },
+        nsis: { kind: 'nsis', arch: 'x64', action: 'install', asset: { name: 'OpenDJ-Setup-99.0.0-x64.exe', size: 94371840 } },
+        dmg: { kind: 'dmg', arch: 'arm64', action: 'download', asset: { name: 'OpenDJ-99.0.0-mac-arm64.dmg', size: 94371840 } },
+        deb: { kind: 'deb', arch: 'x64', action: 'open', asset: { name: 'OpenDJ-99.0.0-linux-amd64.deb', size: 94371840 } },
       }[kind])}; },
       download: async () => { window.__calls.push('download');
         for (let i = 1; i <= 4; i++) { await new Promise((r) => setTimeout(r, 120)); window.__progress?.({ received: i * 23592960, total: 94371840 }); }
-        return ${JSON.stringify({ nsis: { ok: true, action: 'ready', name: 'OpenDJ-Setup-0.5.0-x64.exe' }, dmg: { ok: true, action: 'opened-dmg', name: 'OpenDJ-0.5.0-mac-arm64.dmg' },
-          deb: { ok: true, action: 'opened', name: 'OpenDJ-0.5.0-linux-amd64.deb', url: 'https://github.com/Bucifer6/OpenDJ/releases/download/v0.5.0/OpenDJ-0.5.0-linux-amd64.deb', hint: { text: 'When the download finishes, install it with:', command: 'sudo apt install ./OpenDJ-0.5.0-linux-amd64.deb' } } }[kind])}; },
+        return ${JSON.stringify({ nsis: { ok: true, action: 'ready', name: 'OpenDJ-Setup-99.0.0-x64.exe' }, dmg: { ok: true, action: 'opened-dmg', name: 'OpenDJ-99.0.0-mac-arm64.dmg' },
+          deb: { ok: true, action: 'opened', name: 'OpenDJ-99.0.0-linux-amd64.deb', url: 'https://github.com/Bucifer6/OpenDJ/releases/download/v99.0.0/OpenDJ-99.0.0-linux-amd64.deb', hint: { text: 'When the download finishes, install it with:', command: 'sudo apt install ./OpenDJ-99.0.0-linux-amd64.deb' } } }[kind])}; },
       install: async () => { window.__calls.push('install'); return { ok: true }; },
       cancel: async () => { window.__calls.push('cancel'); },
       onProgress: (cb) => { window.__progress = cb; return () => { window.__progress = null; }; },
     } };`;
   {
-    gh.version = '0.5.0';
+    gh.version = '99.0.0';
     const app = await newServer();
     const { page, ctx } = await openApp(app, { extraInit: MOCK('nsis') });
     await modal(page).waitFor({ timeout: 8000 });
@@ -285,7 +285,7 @@ try {
     await page.waitForFunction(() => window.__calls.includes('install'));
     check(JSON.stringify(await page.evaluate(() => window.__calls)) === JSON.stringify(['info', 'download', 'install']), 'Update now → IPC info, download, then install on "Restart to update"');
     await ctx.close();
-    for (const [kind, expect] of [['dmg', /drag OpenDJ to Applications/], ['deb', /sudo apt install \.\/OpenDJ-0\.5\.0-linux-amd64\.deb/]]) {
+    for (const [kind, expect] of [['dmg', /drag OpenDJ to Applications/], ['deb', /sudo apt install \.\/OpenDJ-99\.0\.0-linux-amd64\.deb/]]) {
       const { page: p, ctx: c } = await openApp(app, { extraInit: MOCK(kind) });
       await p.locator('.update-modal').waitFor({ timeout: 8000 });
       await p.waitForFunction(() => window.__calls.includes('info'));
@@ -301,7 +301,7 @@ try {
   // ================================================================ 5. hosted mode
   console.log('\n=== hosted mode ===');
   {
-    gh.version = '0.5.0';
+    gh.version = '99.0.0';
     const PASSWORD = 'e2e-update-password';
     const app = await newServer({ auth: true, password: PASSWORD, roots: [music] });
     const before = gh.hits.length;
@@ -325,7 +325,7 @@ try {
   // ================================================================ 6. automatic checks off + Check now
   console.log('\n=== automatic checks off, Check now ===');
   {
-    gh.version = '0.5.0';
+    gh.version = '99.0.0';
     const app = await newServer();
     app.library.updateSettings({ updateCheck: false });
     const before = gh.hits.length;
@@ -337,7 +337,7 @@ try {
     await page.locator('.upd-check-now').click();
     await modal(page).waitFor({ timeout: 5000 });
     check(gh.hits.length === before + 1, 'Settings → Check now opens the prompt when a newer version exists');
-    check(/0\.5\.0 is available/.test(await page.textContent('.upd-check-status')), 'and says so in Settings');
+    check(/99\.0\.0 is available/.test(await page.textContent('.upd-check-status')), 'and says so in Settings');
     await ctx.close(); stopServer(app);
   }
 
@@ -349,7 +349,7 @@ try {
     const reqs = [];
     await ctx.route('https://api.github.com/repos/Bucifer6/OpenDJ/releases/latest', (route) => {
       reqs.push(route.request().headers());
-      route.fulfill({ status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', ETag: '"m"' }, body: JSON.stringify(releaseJson('0.5.0')) });
+      route.fulfill({ status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', ETag: '"m"' }, body: JSON.stringify(releaseJson('99.0.0')) });
     });
     const before = gh.hits.length;
     const { page } = await openApp(app, { ctx, query: '?local=1' });
@@ -372,7 +372,7 @@ try {
     check(box.x >= 0 && box.x + box.width <= vp.width && box.y >= 0 && box.y + box.height <= vp.height, 'phone: the dialog fits the screen');
     await page.locator('.upd-now').click();
     await page.waitForFunction(() => window.__opened.length > 0);
-    check((await page.evaluate(() => window.__opened))[0] === 'https://github.com/Bucifer6/OpenDJ/releases/tag/v0.5.0', 'mobile browser: Update now opens the release page');
+    check((await page.evaluate(() => window.__opened))[0] === 'https://github.com/Bucifer6/OpenDJ/releases/tag/v99.0.0', 'mobile browser: Update now opens the release page');
     await ctx.close(); stopServer(app);
   }
 
@@ -399,7 +399,7 @@ async function electronCheck() {
     if (xvfb.exitCode != null) { console.log('skip - no display for Electron (Xvfb not available)'); return; }
     env.DISPLAY = ':97';
   }
-  gh.version = '0.5.0';
+  gh.version = '99.0.0';
   let eapp;
   try {
     eapp = await _electron.launch({ executablePath: electronPath, args: [root, '--no-sandbox'], env, timeout: 30000 });
@@ -408,14 +408,14 @@ async function electronCheck() {
     await eapp.evaluate(({ shell }) => { globalThis.__opened = []; shell.openExternal = async (u) => { globalThis.__opened.push(u); }; });
     check(await page.evaluate(() => typeof window.opendjNative?.update?.download === 'function'), 'electron: the preload exposes update info / download / install only');
     const info = await page.evaluate(() => window.opendjNative.update.info());
-    check(info?.version === '0.5.0' && info.kind === 'source', `electron (unpackaged): main process knows the release (${info?.version}, ${info?.kind})`);
+    check(info?.version === '99.0.0' && info.kind === 'source', `electron (unpackaged): main process knows the release (${info?.version}, ${info?.kind})`);
     await page.evaluate(() => window.opendj.updates.check());
     await page.locator('.update-modal').waitFor({ timeout: 8000 });
     check(true, 'electron: the prompt appears');
     await page.locator('.upd-now').click();
     await page.waitForFunction(() => document.querySelector('.upd-now')?.textContent === 'Done', null, { timeout: 8000 });
     const opened = await eapp.evaluate(() => globalThis.__opened);
-    check(opened.length === 1 && opened[0] === 'https://github.com/Bucifer6/OpenDJ/releases/tag/v0.5.0', 'electron: Update now → main process opens the release page (source checkout)');
+    check(opened.length === 1 && opened[0] === 'https://github.com/Bucifer6/OpenDJ/releases/tag/v99.0.0', 'electron: Update now → main process opens the release page (source checkout)');
     const refused = await page.evaluate(() => window.opendjNative.update.install());
     check(refused?.ok === false, 'electron: install is refused when nothing was downloaded and verified');
     await page.screenshot({ path: path.join(shots, 'prompt-electron-source.png') });

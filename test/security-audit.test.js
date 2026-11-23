@@ -138,7 +138,9 @@ test('#2 body limits: 16 KiB for the public login routes, 1 MiB by default, expl
   assert.equal((await raw(app.port, 'POST', '/api/auth/login', { 'Content-Type': 'application/json' }, pad(20 * 1024))).status, 413);
   assert.equal((await raw(app.port, 'POST', '/api/auth/setup', { 'Content-Type': 'application/json' }, pad(20 * 1024))).status, 413);
   // default 1 MiB
-  assert.equal((await c('PUT', '/api/lyrics/settings', { online: false, pad: 'A'.repeat(1.5 * 2 ** 20) })).status, 413);
+  for (let i = 0; i < 10; i++) {
+    assert.equal((await c('PUT', '/api/lyrics/settings', { online: false, pad: 'A'.repeat(1.5 * 2 ** 20) })).status, 413, `oversized request ${i + 1} receives a response, not a connection reset`);
+  }
   assert.equal((await c('PUT', '/api/lyrics/settings', { online: false, pad: 'A'.repeat(100 * 1024) })).status, 200);
   assert.equal((await c('POST', '/api/playlists', { name: 'x', pad: 'A'.repeat(1.5 * 2 ** 20) })).status, 200, 'playlists take long id lists');
   // explicit bigger limits keep working

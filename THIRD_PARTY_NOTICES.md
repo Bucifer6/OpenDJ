@@ -23,6 +23,8 @@ include the following third-party software.
 
 ## Other npm packages
 
+- [Playwright](https://github.com/microsoft/playwright) — Apache-2.0; development-only browser/desktop QA, not bundled in production installers.
+
 - [music-metadata](https://github.com/borewit/music-metadata) — MIT
 - [fast-xml-parser](https://github.com/NaturalIntelligence/fast-xml-parser) — MIT
 - [Electron](https://github.com/electron/electron) — MIT (includes Chromium, whose licences are listed in the app's

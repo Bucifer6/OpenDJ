@@ -58,7 +58,9 @@ export class TimecodeDecoder {
   }
 
   configure({ def, rpm, swap, invertPhase, invertBits, gain, gate }) {
-    if (def && def !== this.def) {
+    // Worklet messages structured-clone definitions; changing REL/ABS must not erase a valid bit window.
+    const sameDef = def && this.def && ['id', 'carrier', 'bits', 'taps', 'seed', 'length', 'leadIn', 'safe'].every((k) => def[k] === this.def[k]);
+    if (def && !sameDef) {
       this.def = def; this.w0 = TAU * def.carrier / this.sr;
       this.mask = def.bits ? (def.bits >= 32 ? 0xffffffff : (1 << def.bits) - 1) : 0;
       if (this.table && this.table.length !== (1 << def.bits)) this.table = null;
@@ -68,7 +70,7 @@ export class TimecodeDecoder {
     if ((swap != null && !!swap !== this.swap) || (invertPhase != null && !!invertPhase !== this.invertPhase)) this._trimN = 0; // wiring changed: re-learn the trim
     if (swap != null) this.swap = !!swap;
     if (invertPhase != null) this.invertPhase = !!invertPhase;
-    if (invertBits != null) this.invertBits = !!invertBits;
+    if (invertBits != null) { if (!!invertBits !== this.invertBits) this._resetBits?.(); this.invertBits = !!invertBits; }
     if (gain != null) this.gain = gain;
     if (gate != null) this.gate = gate;
   }

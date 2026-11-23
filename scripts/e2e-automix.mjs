@@ -104,6 +104,48 @@ try {
     window.__tap = sp;
   });
 
+  // Adaptive planning through the real decks/worklets: force a clear interior instrumental entry.
+  await page.evaluate(async () => {
+    const app = window.opendj, am = app.automix;
+    window.__adaptiveSaved = { automix: app.settings.automix, learning: app.settings.mixLearning };
+    app.settings.automix = { ...app.settings.automix, style: 'auto', lengthMode: 'auto', keepSync: true, varyStyles: false };
+    app.settings.mixLearning = { bias: { blend: 5, echo: -5, cut: -5, reverb: -5 } };
+    await am.start([...app.library.tracks.values()].slice(0, 2), { mode: 'order' });
+  });
+  await waitNextLoaded();
+  const adaptivePlan = await page.evaluate(async () => {
+    const am = window.opendj.automix;
+    window.__adaptiveOriginal = new Map();
+    for (const d of [am.current, am.other(am.current)]) {
+      window.__adaptiveOriginal.set(d.track.id, window.opendj.library.track(d.track.id));
+      d.bpm = 120; d.gridOffset = 0;
+      d.track = { ...d.track, bpm: 120, bpmConfidence: 1, key: '8A', mixIn: 0, mixOut: 64, downbeat: 0,
+        phrases: Array.from({ length: 4 }, (_, i) => ({ start: i * 16, end: (i + 1) * 16, type: i === 0 ? 'intro' : 'breakdown', energy: 0.6 })),
+        vocalMap: Array.from({ length: 75 }, (_, i) => d === am.current ? 1 : i >= 16 && i < 48 ? 0 : 1) };
+      window.opendj.library.tracks.set(d.track.id, d.track);
+      await fetch(`/api/tracks/${d.track.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d.track) });
+    }
+    am.current.seek(10); am.upcoming = null;
+    const nt = am.nextTransition(), p = am.upcoming.adaptive;
+    const off = am.on('transition', () => { window.__adaptiveHeard = { cue: am.transition.inStart ?? am.transition.inn.position, style: am.transition.style }; off(); });
+    am.current.seek(nt.begin - 0.2);
+    return { begin: nt.begin, cue: p?.inStart, style: nt.style, adaptive: !!p };
+  });
+  check(adaptivePlan.adaptive && adaptivePlan.cue >= 16 && adaptivePlan.begin < 64, `adaptive interior plan: ${JSON.stringify(adaptivePlan)}`);
+  await page.waitForFunction(() => !!window.__adaptiveHeard, null, { timeout: 15000 });
+  const heard = await page.evaluate(() => window.__adaptiveHeard);
+  check(heard.style === adaptivePlan.style && Math.abs(heard.cue - adaptivePlan.cue) < 0.25, 'real deck transport follows the selected adaptive cue');
+  await page.waitForFunction(() => !window.opendj.automix.transition, null, { timeout: 40000 });
+  await page.evaluate(async () => {
+    const app = window.opendj; app.automix.stop();
+    for (const d of app.engine.decks.slice(0, 2)) d.pause();
+    for (const [id, track] of window.__adaptiveOriginal) {
+      app.library.tracks.set(id, track);
+      await fetch(`/api/tracks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(track) });
+    }
+    app.settings.automix = window.__adaptiveSaved.automix; app.settings.mixLearning = window.__adaptiveSaved.learning;
+  });
+
   // ================= A) smart mix from the demo library =================
   await page.evaluate(() => window.opendj.setSetting('automix', { ...window.opendj.settings.automix, style: 'blend', transitionBeats: 16 }));
   const sm = await page.evaluate(async () => {

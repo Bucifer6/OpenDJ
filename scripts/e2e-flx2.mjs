@@ -133,7 +133,14 @@ try {
   await page.waitForTimeout(100);
   const pos0 = await ev(() => window.opendj.engine.decks[1].position);
   await midi([0xb1, 0x29, 0x50]);
-  check(await ev((p) => window.opendj.engine.decks[1].position > p + 0.5, pos0), 'SHIFT + jog (CC 0x29) searches forward');
+  const jogSearch = await ev(() => { const d = window.opendj.engine.decks[1]; return { position: d.position, raw: d._pos, rate: d._rate, loop: d.loop }; });
+  check(jogSearch.position > pos0 + 0.5, `SHIFT + jog (CC 0x29) searches forward (${pos0.toFixed(2)} → ${JSON.stringify(jogSearch)})`);
+  for (let i = 0; i < 10; i++) {
+    await ev(() => window.opendj.engine.decks[1].seek(5));
+    await midi([0xb1, 0x29, 0x50]);
+    await page.waitForTimeout(30);
+    check(await ev(() => window.opendj.engine.decks[1].position > 6.5), `jog search remains at the new position after worklet feedback (${i + 1}/10)`);
+  }
   await midi([0x91, 0x36, 0x7f]);
   check(await ev(() => window.opendj.engine.decks[1]._jogTouched), 'jog touch (note 0x36)');
   await midi([0x91, 0x36, 0x00]);

@@ -45,6 +45,16 @@ function speeds(p, secs, onBlock) {
 }
 const firstAt = (arr, pred) => arr.find(pred)?.t;
 
+test('worklet acknowledges the latest seek in its position reports', () => {
+  const { p, msg, sent } = deck(sine(SR * 10));
+  msg({ type: 'seek', frame: SR * 2, seq: 3 }); run(p, 512);
+  const old = sent.filter((m) => m.type === 'pos').at(-1);
+  assert.equal(old.seekSeq, 3);
+  msg({ type: 'seek', frame: SR * 5, seq: 4 }); run(p, 512);
+  assert.equal(sent.filter((m) => m.type === 'pos').at(-1).seekSeq, 4);
+  assert.equal(old.seekSeq, 3, 'already queued messages retain their older acknowledgement');
+});
+
 test('vinyl helpers: rpm scale, defaults, clamping', () => {
   assert.equal(secPerRev(33), 1.8);
   assert.ok(Math.abs(secPerRev(45) - 1.3333) < 1e-3 && Math.abs(secPerRev(78) - 0.7692) < 1e-3);

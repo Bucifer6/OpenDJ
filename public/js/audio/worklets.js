@@ -70,6 +70,7 @@ class DeckProcessor extends AudioWorkletProcessor {
     this.fin = 1;             // fade-in of the main play head after a jump / start
     this.grains = [{ p: 0, age: 0 }, { p: 0, age: GRAIN / 2 }];
     this.counter = 0;
+    this.seekSeq = 0;
     // AI stems: original + vocals/drums/bass (Int16), "other" = residual (see stems/stem-mix.js)
     this.stems = null;
     this.stemTarget = new Float32Array([1, 1, 1, 1]); this.stemCur = new Float32Array([1, 1, 1, 1]); this.stemCoef = stemCoefficients(this.stemCur);
@@ -116,6 +117,7 @@ class DeckProcessor extends AudioWorkletProcessor {
         break;
       }
       case 'seek': {
+        if (Number.isSafeInteger(m.seq)) this.seekSeq = m.seq;
         // m.at = audio-clock time the target was computed for; advance by the time that passed since then
         let f = m.frame;
         if (m.at != null && this.playing && !this.scratch) f += Math.max(0, currentTime - m.at) * sampleRate * this.rate * this.dir * this.step;
@@ -460,7 +462,7 @@ class DeckProcessor extends AudioWorkletProcessor {
     }
     if ((this.counter += frames) >= 512) {
       this.counter = 0;
-      this.port.postMessage({ type: 'pos', frame: this.pos, shadow: this.shadow, rate: this.curRate, playing: this.playing, time: currentTime + frames / sampleRate, alt: !!this.alt, tempo: this.rate });
+      this.port.postMessage({ type: 'pos', frame: this.pos, shadow: this.shadow, rate: this.curRate, playing: this.playing, time: currentTime + frames / sampleRate, alt: !!this.alt, tempo: this.rate, seekSeq: this.seekSeq });
     }
     return true;
   }

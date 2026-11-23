@@ -78,6 +78,8 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 
 ### Automix
 
+**Adaptive Auto DJ:** Auto style searches section boundaries throughout both tracks for compatible handovers, including interior entry points. Live mode also compares executable transition quality when choosing the next track. See [the adaptive DJ guide](docs/ADAPTIVE_DJ.md) for setup, research, architecture, licensing and limitations.
+
 <img src="docs/images/automix.png" alt="Automix dialog with smart ordering, energy curve and transition options" width="60%">
 
 - Non-stop mixing of any playlist or library view on decks 1 and 2. **One click on AUTOMIX** starts a smart mix of the queue (or, without one, of the playlist / library view shown) with your saved preferences; click it again to stop. **Shift-click or right-click AUTOMIX** (or **Automix view** above the track list, or a playlist's menu) opens the Automix dialog with order, mix profile, transition style and length. While automix runs, each deck's **MIX NOW** starts the next transition at once
@@ -361,7 +363,9 @@ npm run dist       # installers for the OS you're on (Windows/macOS installers m
 Tests:
 
 ```bash
+npm ci              # install the exact runtime and test dependencies
 npm test            # unit tests: analysis, media-server clients against mock servers, rekordbox round trip, CDJ export, DVS, Link…
+npx playwright install chromium  # one-time browser download for end-to-end tests
 npm run test:e2e    # end-to-end checks in headless Chromium (smoke, performance, controllers, lighting, video, web app, DVS, Link/lyrics, recording, stems, analysis, sampler, automix)
 ```
 

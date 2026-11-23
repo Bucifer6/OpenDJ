@@ -23,6 +23,18 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.5.3
+- **Adaptive Auto DJ:** Auto style compares section handovers throughout both tracks, including interior entry points, using tempo, harmony, local energy and vocal overlap. Live selection also compares how well candidate tracks can actually transition.
+- **Playback follows the plan:** selected cue points reach the real decks, late ticks catch up, and transition progress follows the audio clock. Uncertain beat grids avoid long synchronized overlaps; manually corrected grids are trusted.
+- **More reliable beat analysis:** a bounded whole-track consistency search corrects tempo estimates when sustained tones overpower drum onsets, including 48 kHz playback devices.
+- **Assistant tools:** transition planning reports adaptive cue positions; all 28 advertised tools have an authenticated real-app QA test using synthetic audio and a local broadcast fixture.
+- **QA fixes:** refreshed library analysis takes priority over stale deck metadata, selected-window vocal protection is recalculated, queue lengths follow the active plan, and the tablet mixer keeps its master controls within the available width.
+- **Deck transport:** sequence acknowledgements prevent old audio-thread feedback from undoing a newer cue or jog-search position.
+- **Timecode vinyl:** switching modes preserves the acquired position when the timecode definition is unchanged.
+- **Release downloads:** the checksum manifest now includes the Android APK uploaded after the desktop builds.
+- **Server:** oversized requests reliably receive HTTP 413 instead of an intermittent connection reset; request-size limits remain enforced.
+- No new production dependencies or models. Research sources, performance considerations, licensing and known limitations are documented in `docs/ADAPTIVE_DJ.md`.
+
 ### New in 0.5.2
 - **Smarter Automix transitions.** The *Auto* style now plans every transition: it tries each style at 4 to 32 bars and keeps the one that fits the two tracks best: tempo gap, key, energy, genre, the outro and intro phrases, and where the vocals are. Two voices no longer clash: the incoming vocals wait until the bass swap. The queue shows why each transition was chosen. It runs on any device, with no graphics card needed.
 - **Stem swap** transition style: with AI stems on both decks, the incoming drums come in first, then the bass, and the vocals last.

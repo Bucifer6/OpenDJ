@@ -111,6 +111,18 @@ export function detectBpm(mono, sr, { min = 70, max = 180 } = {}) {
     return m;
   };
   if (l23 >= minLag && sharpest(l23) > 1.25 * sharpest(best.lag)) coarseLag = l23;
+  // A sustained pad can produce a stronger ACF peak than the drums, especially at 48 kHz.
+  // If that hypothesis has weak whole-track consistency, search the bounded tempo range
+  // before local refinement. Confident estimates keep the fast path and existing disambiguation.
+  const sharpness = sharpest(coarseLag);
+  if (sharpness < 4) {
+    let alternative = { bpm: 60 * fps / coarseLag, score: sharpness };
+    for (let b = min; b <= max; b += 0.25) {
+      const score = foldScore(env, fps * 60 / b).score;
+      if (score > alternative.score) alternative = { bpm: b, score };
+    }
+    if (alternative.score > sharpness * 1.25) coarseLag = fps * 60 / alternative.bpm;
+  }
   // 2) refine with phase folding over the whole track (sub-hop precision)
   let coarse = 60 * fps / coarseLag;
   let top = { bpm: coarse, score: 0, phase: 0 };
@@ -497,6 +509,7 @@ export function analysisPatch(track, r, { duration, autoCues = true } = {}) {
     gridOffset: locked && track.gridOffset != null ? track.gridOffset : r.gridOffset,
     key: track.key || r.key, gain: r.gain, startTime: r.startTime, endTime: r.endTime,
     energy: r.energy, duration: duration ?? r.duration, analyzed: true, unreadable: false,
+    bpmConfidence: locked ? 1 : r.bpmConfidence,
   };
   for (const k of ['phrases', 'mixIn', 'mixOut', 'downbeat']) if (r[k] !== undefined) patch[k] = r[k];
   if (locked && track.downbeat != null) patch.downbeat = track.downbeat;
