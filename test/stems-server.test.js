@@ -10,7 +10,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { Library } from '../server/library.js';
-import { registerStemRoutes, DEFAULT_MODEL, modelSpec, extractTarEntry, wavHeader, bgOrder, STEM_CHECK, exitText, lastMeaningfulLine } from '../server/stems.js';
+import { registerStemRoutes, DEFAULT_MODEL, modelSpec, extractTarEntry, wavHeader, bgOrder, STEM_CHECK, exitText, lastMeaningfulLine, GPU_CHECK_VERSION } from '../server/stems.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-hide_banner', '-version']).status === 0;
 
@@ -278,7 +278,7 @@ test('stems server: a GPU that crashes the engine: the track is redone on the CP
     const st = await h.json('GET', '/api/stems/status');
     assert.match(st.native.gpuFailed?.message || '', /stopped \(signal SIGKILL\)/);
     const saved = JSON.parse(fs.readFileSync(path.join(h.dir, 'stems', 'gpu-check.json'), 'utf8'));
-    assert.equal(saved.backend, 'gpu'); assert.equal(saved.ort, 'stub');
+    assert.equal(saved.backend, 'gpu'); assert.equal(saved.ort, 'stub'); assert.equal(saved.version, GPU_CHECK_VERSION);
     // retry: the record is gone and the next load tries the GPU again
     assert.equal((await h.json('POST', '/api/stems/gpu/retry')).gpuFailed, null);
     assert.ok(!fs.existsSync(path.join(h.dir, 'stems', 'gpu-check.json')));
@@ -287,7 +287,7 @@ test('stems server: a GPU that crashes the engine: the track is redone on the CP
   let h2; let done2; const fin2 = new Promise((r) => { done2 = r; });
   h2 = await harness({
     ffmpeg: true, native: { stub: true, stubGpu: 'crash', idleMs: 20 },
-    setup: (dir) => { fs.mkdirSync(path.join(dir, 'stems'), { recursive: true }); fs.writeFileSync(path.join(dir, 'stems', 'gpu-check.json'), JSON.stringify({ backend: 'dml', message: 'crashed', ort: 'stub' })); },
+    setup: (dir) => { fs.mkdirSync(path.join(dir, 'stems'), { recursive: true }); fs.writeFileSync(path.join(dir, 'stems', 'gpu-check.json'), JSON.stringify({ backend: 'dml', message: 'crashed', ort: 'stub', version: GPU_CHECK_VERSION })); },
     input: async () => ({ file: path.join(h2.dir, 'song.wav') }),
     onEvent: (t, p) => { if (t === 'stems-done' || t === 'stems-failed') done2([t, p]); },
   });
@@ -299,6 +299,12 @@ test('stems server: a GPU that crashes the engine: the track is redone on the CP
     const [t2, ev2] = await fin2;
     assert.equal(t2, 'stems-done', ev2.message); assert.equal(ev2.backend, 'stub');
   } finally { h2.close(); }
+});
+
+test('stems server: a GPU failure recorded by an older check is retried', async () => {
+  const h = await harness({ native: { stub: true },
+    setup: (dir) => { fs.mkdirSync(path.join(dir, 'stems'), { recursive: true }); fs.writeFileSync(path.join(dir, 'stems', 'gpu-check.json'), JSON.stringify({ backend: 'dml', message: 'old check', ort: 'stub' })); } });
+  try { assert.equal((await h.json('GET', '/api/stems/status')).native.gpuFailed, null); } finally { h.close(); }
 });
 
 test('stems server: exit codes and error tails are readable (Windows NTSTATUS in hex, crash-reporter lines skipped)', () => {

@@ -31,10 +31,21 @@ export function setupStems(app) {
     if (!c) return;
     const p = c.phase === 'separating' ? pct(c) : c.phase === 'loading model' && c.total ? pct(c) : null;
     const eta = c.phase === 'separating' && c.done > 0 ? Math.round(((performance.now() - c.started) / c.done) * (c.total - c.done) / 1000) : null;
-    label.textContent = `Stems: ${c.title} — ${c.phase}${p != null ? ` ${p}%` : '…'}${eta != null ? ` (~${eta >= 90 ? `${Math.round(eta / 60)} min` : `${eta} s`} left)` : ''}`;
+    const on = c.backend ? ` · ${backendName(c.backend)}` : '';
+    label.textContent = `Stems: ${c.title} — ${c.phase}${p != null ? ` ${p}%` : '…'}${eta != null ? ` (~${eta >= 90 ? `${Math.round(eta / 60)} min` : `${eta} s`} left)` : ''}${on}`;
+    if (c.phase === 'separating' && !c.background) cpuNotice(c.backend);
     bar.style.width = `${p ?? 0}%`;
     bar.classList.toggle('indeterminate', p == null);
     queued.textContent = stems.queue.length ? `${stems.queue.length} more queued` : '';
+  };
+  // once a session: separation on the CPU takes minutes per track, so say so, and how to have stems ready in time
+  let cpuNoticed = false;
+  const cpuNotice = (backend) => {
+    if (cpuNoticed || !['cpu', 'wasm'].includes(backend)) return;
+    cpuNoticed = true;
+    const per = perTrackMinutes(stems);
+    const why = stems._status?.native?.gpuFailed ? ' (the graphics card could not be used for stems on this computer)' : '';
+    app.toast(`AI stems are being prepared on the CPU${why}: about ${per} min per track. To have them ready when you mix, prepare them ahead: playlist ⋯ → Prepare AI stems, or Automix → Prepare stems for this set.`, { duration: 12000 });
   };
   stems.on('progress', render); stems.on('queue', render);
   stems.on('model', (m) => {
@@ -61,6 +72,16 @@ export function setupStems(app) {
   });
   for (const d of app.engine?.decks || []) d.on('load', () => { if (d.track?.id && !d.track.stems?.ready) stems.prefetch([d.track.id], { front: true }); });
   return stems;
+}
+
+/**
+ * Minutes a 4-minute track takes to separate here, from the last finished run (ms per second of audio), else a
+ * typical CPU figure. Shown in notices and next to "Prepare stems".
+ */
+export function perTrackMinutes(stems, seconds = 240) {
+  const r = stems.lastRun || stems._status?.native?.last;
+  const ratio = r?.ms > 0 && r.seconds > 0 ? r.ms / 1000 / r.seconds : 0.5;
+  return Math.max(1, Math.round((ratio * seconds) / 60 * 2) / 2);
 }
 
 /** One-time consent before the model download (size, source, licence). Resolves true to download. */
@@ -142,6 +163,15 @@ export function buildStemControls(app, deck) {
     render();
   });
   deck.on('stems', render); deck.on('load', render); deck.on('loaded', render); deck.on('state', () => { for (const p of parts) p.render?.(); });
+  // once a session: separation on the CPU takes minutes per track, so say so, and how to have stems ready in time
+  let cpuNoticed = false;
+  const cpuNotice = (backend) => {
+    if (cpuNoticed || !['cpu', 'wasm'].includes(backend)) return;
+    cpuNoticed = true;
+    const per = perTrackMinutes(stems);
+    const why = stems._status?.native?.gpuFailed ? ' (the graphics card could not be used for stems on this computer)' : '';
+    app.toast(`AI stems are being prepared on the CPU${why}: about ${per} min per track. To have them ready when you mix, prepare them ahead: playlist ⋯ → Prepare AI stems, or Automix → Prepare stems for this set.`, { duration: 12000 });
+  };
   stems.on('progress', render); stems.on('queue', render); stems.on('track', render);
   render();
   root.render = render;
@@ -179,7 +209,12 @@ export function stemsSettingsPane(app) {
           : `Server engine: not available (${st.native?.reason || 'old server'}) — this browser separates instead`),
         st.native?.gpuFailed ? el('div', { class: 'stems-gpu-off', 'data-stems': 'gpu-off' },
           el('span', { class: 'muted' }, `Graphics card not used for stems (${backendName(st.native.gpuFailed.backend) || st.native.gpuFailed.backend}): ${st.native.gpuFailed.message} — separating on the CPU instead. `),
-          el('button', { class: 'btn sm', onclick: async () => { await fetch('/api/stems/gpu/retry', { method: 'POST', credentials: 'same-origin' }); app.toast('The graphics card will be tried again for the next track'); refresh(); } }, 'Try the graphics card again')) : null,
+          el('button', { class: 'btn sm', onclick: async () => {
+            await fetch('/api/stems/gpu/retry', { method: 'POST', credentials: 'same-origin' });
+            stems.webgpuVerdict(null); stems.gpuFailed = false; stems.gpuVerified = false; // this window's WebGPU too
+            app.toast('The graphics card will be tried again for the next track'); refresh();
+          } }, 'Try the graphics card again')) : null,
+        st.native?.gpuFailed && stems.browserGpu ? el('div', { class: 'muted', 'data-stems': 'webgpu' }, `Tracks you ask for are separated in this window on the graphics card (WebGPU${stems.webgpuVerdict() === 'ok' ? ', checked against the CPU' : ', checked against the CPU on first use'}); the server's CPU keeps preparing the background tracks.`) : null,
         el('div', { class: 'muted' }, `Browser engine: ${st.ort ? `ONNX Runtime Web ${st.ortVersion || ''}` : 'missing from this app build — update or reinstall OpenDJ'} · ${globalThis.crossOriginIsolated ? 'multi-threaded' : 'single-threaded'} WASM, WebGPU ${'gpu' in navigator ? 'available' : 'not available'} · stems saved as ${st.format.toUpperCase()}`),
         el('div', { class: 'stems-settings-actions' },
           m.ready ? el('button', { class: 'btn sm', onclick: async () => { await fetch('/api/stems/model', { method: 'DELETE', credentials: 'same-origin' }); refresh(); } }, 'Delete model')
@@ -189,7 +224,7 @@ export function stemsSettingsPane(app) {
   };
   refresh();
   const where = el('select', { class: 'inp', onchange: () => { app.setSetting('stemsEngine', where.value); stems.status().then(refresh, () => {}); } },
-    ...[['auto', 'OpenDJ server when it can, else this browser'], ['browser', 'Always this browser']].map(([v, l]) => el('option', { value: v, selected: (app.settings.stemsEngine || 'auto') === v }, l)));
+    ...[['auto', 'Automatic: the OpenDJ server, or this window\'s graphics card when the server cannot use one'], ['server', 'Always the OpenDJ server'], ['browser', 'Always this browser']].map(([v, l]) => el('option', { value: v, selected: (app.settings.stemsEngine || 'auto') === v }, l)));
   const sel = el('select', { class: 'inp', onchange: () => app.setSetting('stemsBackend', sel.value) },
     ...[['auto', 'Automatic (GPU, else CPU)'], ['wasm', 'CPU only']].map(([v, l]) => el('option', { value: v, selected: (app.settings.stemsBackend || 'auto') === v }, l)));
   const auto = el('input', { type: 'checkbox', checked: app.settings.stemsAutoLoad !== false, onchange: () => app.setSetting('stemsAutoLoad', auto.checked) });

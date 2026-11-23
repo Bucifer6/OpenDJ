@@ -23,6 +23,12 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### Unreleased
+- **Faster AI stems on graphics cards where DirectML gets it wrong.** OpenDJ now tries DirectML at simpler model optimisation levels too, and checks each against the CPU. If none is right (seen on an RTX 3070), the tracks you ask for are separated in the app window on the graphics card through WebGPU, which is checked against the CPU first. The server's CPU keeps preparing the background tracks. Anything that does not match the CPU is never used, so stems stay correct. *Settings → AI stems → Where* can force the server.
+- **Prepare stems ahead:** the Automix dialog can prepare AI stems for the whole set when it starts (in play order), and OpenDJ tells you once when stems run on the CPU, with the time per track and how to prepare playlists ahead.
+- **Beat sync by ear:** during transitions OpenDJ now listens to where both tracks' kicks actually land and keeps them together (to about a millisecond), instead of trusting the beat grids alone, which can be slightly off. Grids are still used when there are no clear kicks.
+- **Recommended Automix settings are the default for new installs:** Auto transition style and length, varied styles.
+
 ### New in 0.5.6
 - **Automix mixes like a DJ.** With the *Auto* transition style, each track now plays most of its length before the next one comes in: OpenDJ mixes out over the outro and brings the next track in on its intro (or early in it, to keep two vocals apart). Before, it could mix out after only half a minute, or start the next track deep inside it, so some songs played for only a few seconds.
 - **Tighter beat sync in transitions.** The incoming track now starts exactly on the beat even when the computer is busy (for example while AI stems are being prepared), without the turntable motor spin-up, and during the blend OpenDJ keeps both tracks in phase with small pitch nudges, the way a DJ rides the jog wheel.

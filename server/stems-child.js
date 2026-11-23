@@ -19,6 +19,9 @@ import { createRunner, createStubSession, StubTensor, backendTestInput } from '.
 const send = (m) => process.send?.(m);
 const order = STEMS.map((n) => DEMUCS_SOURCES.indexOf(n));
 const log = (msg) => process.stderr.write(`[stems] ${msg}\n`);
+/** ONNX Runtime graph optimisation levels tried on a GPU provider, most optimised first. */
+export const GPU_LEVELS = ['all', 'basic', 'disabled'];
+const ortVersion = () => { try { return createRequire(import.meta.url)('onnxruntime-node/package.json').version; } catch { return null; } };
 let runner = null, info = null, ort = null, gpuFailed = null, initMsg = null, session = null;
 
 /** Test stand-in for a GPU whose output layout is wrong: every stem gets slices of the others (sum unchanged). */
@@ -95,22 +98,47 @@ async function load(m, { cpuOnly = false } = {}) {
   };
   if (wantGpu) {
     for (const ep of gpuProviders(process.platform, ort.listSupportedBackends?.() || [])) {
-      // DirectML needs sequential execution without memory patterns
-      const epOpts = ep === 'dml' ? { ...opts, enableMemPattern: false, executionMode: 'sequential' } : opts;
-      let s = null;
-      try {
-        const input = backendTestInput();
-        const ref = await cpuReference(m, makeCpu, input); // before the GPU session exists
-        log(`loading the model on ${ep}`);
-        s = await ort.InferenceSession.create(m.model, { ...epOpts, executionProviders: [ep] });
-        const gpu = createRunner(s, ort.Tensor);
-        const verdict = await checkGpu(ep, gpu, null, m, { input, ref });
-        if (verdict.ok) { session = s; runner = gpu; info = { backend: ep, threads: 0, loadMs: Date.now() - t0 }; return; }
-      } catch (e) {
-        gpuFailed ||= { backend: ep, message: e.message };
-        log(`${ep} unavailable, using the CPU: ${e.message}`);
+      // ONNX Runtime's graph optimisations can fuse HT-Demucs' layers into kernels a GPU provider computes wrongly
+      // (DirectML returned noise with level 'all'), so each level is tried in turn and checked against the CPU; the
+      // one that works is remembered next to the model (<model>.gpu-<ep>.json) and tried first next time.
+      const memo = `${m.model}.gpu-${ep}.json`;
+      let remembered = null;
+      try { remembered = JSON.parse(fs.readFileSync(memo, 'utf8')); } catch { /* first time */ }
+      if (remembered?.ok === false && remembered.ort === ortVersion()) { gpuFailed ||= { backend: ep, message: remembered.message }; log(`${ep}: ${remembered.message} (checked before)`); continue; }
+      const levels = [...new Set([remembered?.ok ? remembered.level : null, ...GPU_LEVELS].filter(Boolean))];
+      const failures = [];
+      let input, ref;
+      try { input = backendTestInput(); ref = await cpuReference(m, makeCpu, input); } // before any GPU session exists
+      catch (e) { log(`CPU reference failed: ${e.message}`); break; }
+      for (const level of levels) {
+        // DirectML needs sequential execution without memory patterns
+        const epOpts = { ...opts, graphOptimizationLevel: level, ...(ep === 'dml' ? { enableMemPattern: false, executionMode: 'sequential' } : {}) };
+        let s = null;
+        try {
+          log(`loading the model on ${ep} (graph optimisation: ${level})`);
+          s = await ort.InferenceSession.create(m.model, { ...epOpts, executionProviders: [ep] });
+          const gpu = createRunner(s, ort.Tensor);
+          const verdict = await checkGpu(`${ep}/${level}`, gpu, null, m, { input, ref, record: false });
+          if (verdict.ok) {
+            gpuFailed = null;
+            try { fs.writeFileSync(memo, JSON.stringify({ ok: true, level, ort: ortVersion(), at: Date.now() })); } catch { /* read-only */ }
+            session = s; runner = gpu; info = { backend: ep, threads: 0, loadMs: Date.now() - t0, level };
+            return;
+          }
+          failures.push(`${level}: difference ${verdict.diff.toExponential(1)}`);
+        } catch (e) {
+          failures.push(`${level}: ${e.message}`);
+          log(`${ep} (${level}) unavailable: ${e.message}`);
+        }
+        try { await s?.release?.(); } catch { /* already gone */ }
+        if (failures.length && /unavailable|Failed to load|not supported/i.test(failures.at(-1))) break; // the provider itself is missing
       }
-      try { await s?.release?.(); } catch { /* already gone */ }
+      const missing = failures.length === 1 && /unavailable|Failed to load|not supported/i.test(failures[0]);
+      const message = missing ? `the ${ep} backend is not available here (${failures[0].replace(/^\w+: /, '')})`
+        : `the ${ep} backend did not match the CPU at any optimisation level (${failures.join('; ')})`;
+      gpuFailed ||= { backend: ep, message };
+      log(`${message}: using the CPU`);
+      try { fs.writeFileSync(memo, JSON.stringify({ ok: false, message, ort: ortVersion(), at: Date.now() })); } catch { /* read-only */ }
     }
   }
   const cpu = await makeCpu();
@@ -119,14 +147,14 @@ async function load(m, { cpuOnly = false } = {}) {
 }
 
 /** Compare a GPU runner with the CPU on the test signal; records gpuFailed when it does not match. */
-async function checkGpu(name, gpu, makeCpu, m, { input = backendTestInput(), ref = null } = {}) {
+async function checkGpu(name, gpu, makeCpu, m, { input = backendTestInput(), ref = null, record = true } = {}) {
   const t0 = Date.now();
   ref ||= await cpuReference(m, makeCpu, input);
   const out = await gpu.runChunk(input);
   const diff = stemsDifference(out, ref);
   if (diff <= MAX_BACKEND_DIFFERENCE) { log(`${name} output matches the CPU (difference ${diff.toExponential(1)}, ${Date.now() - t0} ms)`); return { ok: true, diff }; }
   const message = backendMismatchError(name, diff).message;
-  gpuFailed = { backend: name, message };
+  if (record) gpuFailed = { backend: name, message };
   log(`${message}: using the CPU`);
   return { ok: false, diff };
 }

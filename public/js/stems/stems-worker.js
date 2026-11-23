@@ -2,14 +2,14 @@
 // Finished audio is posted back block by block as Int16 (the page uploads it to the server), so neither the
 // UI thread nor the audio thread does any heavy work, and a long track never sits in memory as 4 float stems.
 //
-// in : { type: 'init', ortBase, modelUrl, threads, backend: 'auto'|'webgpu'|'wasm', stub, gpuVerified }
+// in : { type: 'init', ortBase, modelUrl, refUrl?, threads, backend: 'auto'|'webgpu'|'wasm', stub, gpuVerified, requireGpu? }
 //      { type: 'separate', id, left, right, length, overlap }
 // out: { type: 'model-progress', received, total } { type: 'ready', backend, threads, kind, loadMs }
 //      { type: 'progress', id, done, total } { type: 'block', id, frame, frames, stems: Int16Array[4] (STEMS order) }
 //      { type: 'backend', backend, threads, failed? } { type: 'verified', backend } (WebGPU matched WASM once)
 //      { type: 'done', id, ms, chunks } { type: 'error', id?, message }
-import { separateChunked, interleaveInt16, STEMS, DEMUCS_SOURCES } from './stem-dsp.js';
-import { createRunner, createStubSession, StubTensor, verifiedRunChunk } from './stems-model.js';
+import { separateChunked, interleaveInt16, STEMS, DEMUCS_SOURCES, stemsDifference, MAX_BACKEND_DIFFERENCE } from './stem-dsp.js';
+import { createRunner, createStubSession, StubTensor, verifiedRunChunk, backendTestInput } from './stems-model.js';
 
 let runner = null, info = null, toWasm = null, wasmReference = null, gpuRun = null;
 const order = STEMS.map((n) => DEMUCS_SOURCES.indexOf(n)); // model index for each OpenDJ stem
@@ -48,8 +48,28 @@ async function init(m) {
     if (gpuOk) {
       try { session = await ort.InferenceSession.create(bytes, { ...opts, executionProviders: ['webgpu'] }); backend = 'webgpu'; } catch (e) { console.warn('[stems] WebGPU unavailable, using WASM:', e.message); }
     }
+    // m.requireGpu: the page only came here for the graphics card (the server separates on its CPU otherwise), so
+    // without a WebGPU that matches the CPU, say so (NO_GPU) instead of separating slowly on one WASM thread
+    const noGpu = (message) => Object.assign(new Error(message), { code: 'NO_GPU' });
+    if (!session && m.requireGpu) throw noGpu('WebGPU is not available in this window');
     if (!session) session = await ort.InferenceSession.create(bytes, { ...opts, executionProviders: ['wasm'] });
     runner = createRunner(session, ort.Tensor);
+    // quick check against the server's CPU stems for the fixed test signal (one chunk), when the server has them
+    if (backend === 'webgpu' && !m.gpuVerified && m.refUrl) {
+      const ref = await fetch(m.refUrl, { credentials: 'same-origin' }).then((r) => (r.ok ? r.arrayBuffer() : null), () => null);
+      if (ref && ref.byteLength) {
+        const t1 = performance.now();
+        const diff = stemsDifference(await runner.runChunk(backendTestInput()), new Float32Array(ref));
+        if (diff <= MAX_BACKEND_DIFFERENCE) { m.gpuVerified = true; postMessage({ type: 'verified', backend, diff, ms: Math.round(performance.now() - t1) }); }
+        else {
+          await session.release?.().catch?.(() => {});
+          postMessage({ type: 'backend', backend: 'wasm', threads: 0, failed: true, diff });
+          if (m.requireGpu) throw noGpu(`WebGPU returned different stems from the CPU (difference ${Number.isFinite(diff) ? diff.toExponential(1) : 'NaN'})`);
+          session = await ort.InferenceSession.create(bytes, { ...opts, executionProviders: ['wasm'] });
+          runner = createRunner(session, ort.Tensor); backend = 'wasm';
+        }
+      }
+    }
     // WebGPU is checked once against WASM on real audio (verifiedRunChunk: noise that still adds up to the track
     // passes mixtureError), unless this page already checked it
     wasmReference = backend === 'wasm' || m.gpuVerified ? null : async () => {
@@ -106,6 +126,6 @@ self.onmessage = async (e) => {
     if (m.type === 'init') await init(m);
     else if (m.type === 'separate') await separate(m);
   } catch (err) {
-    postMessage({ type: 'error', id: m.id, message: err?.message || String(err) });
+    postMessage({ type: 'error', id: m.id, message: err?.message || String(err), code: err?.code });
   }
 };
