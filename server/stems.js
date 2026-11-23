@@ -43,11 +43,13 @@ export async function meanSquarePerSecond(file, rate = STEM_RATE) {
 export const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'];
 export const STEM_RATE = 44100;
 /**
- * Stems saved since separateChunked checks every chunk (the sources must add up to the track) carry
- * meta.checked = STEM_CHECK. GPU-made stems without it may be noise (DirectML returned full-scale garbage for
- * HT-Demucs), so they are dropped at start-up and prepared again.
+ * Stems saved with the current output checks carry meta.checked = STEM_CHECK. GPU-made stems from before them may be
+ * noise (DirectML returned full-scale garbage for HT-Demucs), so they are dropped at start-up and prepared again.
+ *  1: every chunk's sources must add up to the track (mixtureError)
+ *  2: a GPU's stems must also match the CPU's for the same audio (verifiedRunChunk): check 1 missed DirectML noise
+ *     that still added up to the track
  */
-export const STEM_CHECK = 1;
+export const STEM_CHECK = 2;
 export const uncheckedGpuStems = (meta) => !!meta && !(meta.checked >= STEM_CHECK) && /\b(dml|webgpu|coreml|cuda)\b/i.test(String(meta.backend || ''));
 
 /**
@@ -229,7 +231,7 @@ const run = (bin, args) => new Promise((resolve, reject) => {
  * @param {Function} [o.lookup]     DNS lookup (tests)
  * @param {Function} [o.input]      async (track) => { file } | { url, headers } | null: what FFmpeg decodes for the
  *                                  native engine (null: this track can only be separated in the browser)
- * @param {object|false} [o.native] native engine: false = off; { stub, child, idleMs } for tests. Default: on when
+ * @param {object|false} [o.native] native engine: false = off; { stub, stubGpu: 'ok'|'broken', child, idleMs } for tests. Default: on when
  *                                  onnxruntime-node is installed (hosted servers: only with OPENDJ_STEMS_NATIVE=1)
  */
 export function registerStemRoutes({ route, library, emit = () => {}, dataDir = library.dataDir, ortDir, fetch: f = globalThis.fetch, restricted = false, lookup, input = null, native }) {
@@ -458,6 +460,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     const queue = [];          // track ids
     let cur = null;            // { id, title, phase, done, total, started, backend, cancelled }
     let child = null, ready = null, backend = null, pending = null, idleT = null, pumping = false, last = null;
+    let gpuFailed = null; // { backend, message }: the GPU failed its check, later model loads use the CPU directly
 
     const installed = () => !!rt.version && !!ffmpeg();
     const modelOk = () => { if (native?.stub) return true; try { return modelReady(modelSpec(settings())); } catch { return false; } };
@@ -512,7 +515,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
           reject(e); pending?.reject(e);
         });
       });
-      c.send({ type: 'init', model: spec ? modelFile(spec) : null, stub: !!native?.stub, backend: settings().stemsBackend === 'wasm' ? 'cpu' : 'auto', threads: Number(process.env.OPENDJ_STEMS_THREADS) || 0 });
+      c.send({ type: 'init', model: spec ? modelFile(spec) : null, stub: !!native?.stub, stubGpu: native?.stubGpu || null, backend: settings().stemsBackend === 'wasm' || gpuFailed ? 'cpu' : 'auto', threads: Number(process.env.OPENDJ_STEMS_THREADS) || 0 });
       ready = p; p.catch(() => {});
       return p;
     }
@@ -540,6 +543,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
           child.send({ type: 'job', id, ffmpeg: ffmpeg().path, input: src, dir, overlap: Number(settings().stemsOverlap) || 0.25, maxFrames: STEM_RATE * 60 * maxMinutes });
         });
         pending = null;
+        if (r.gpuFailed && !gpuFailed) { gpuFailed = r.gpuFailed; console.warn(`[stems] ${r.gpuFailed.backend} is not used for stems: ${r.gpuFailed.message}`); }
         if (!mine()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
         cur.phase = 'saving'; changed();
         const u = uploads.get(id);
@@ -584,7 +588,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
       status: () => ({
         installed: installed(), available: installed() && modelOk(),
         reason: rt.reason || (!ffmpeg() ? 'FFmpeg is needed for server stems' : !modelOk() ? 'The stems model is not downloaded yet' : null),
-        version: rt.version || null, backend: backend?.backend || null, threads: backend?.threads || 0, last, ...state(),
+        version: rt.version || null, backend: backend?.backend || null, threads: backend?.threads || 0, gpuFailed, last, ...state(),
       }),
       state,
       add(ids, { force = false, front = false } = {}) {
@@ -619,7 +623,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     };
   }
   const bgT = setInterval(() => engine.kick(), native?.bgPollMs ?? 60e3); bgT.unref?.();
-  // stems made on a GPU before the output check may be noise: drop them so they are prepared again
+  // stems made on a GPU before the current output checks may be noise: drop them so they are prepared again
   const purged = (async () => {
     let n = 0;
     for (const t of library.allTracks?.() || []) {
@@ -627,7 +631,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
       await fs.promises.rm(trackDir(t.id), { recursive: true, force: true }).catch(() => {});
       setTrackStems(t.id, null); emit('stems', { id: t.id, ready: false }); n++;
     }
-    if (n) { console.warn(`[stems] ${n} track(s) had GPU stems made before the output check: preparing them again`); engine.retryBackground?.(); }
+    if (n) { console.warn(`[stems] ${n} track(s) had GPU stems made before the current output checks: preparing them again`); engine.retryBackground?.(); }
     return n;
   })().catch((e) => { console.warn('[stems] purge', e.message); return 0; });
   route('POST', '/api/stems/queue', ({ body }) => engine.add(Array.isArray(body?.ids) ? body.ids.slice(0, 5000) : [], { force: !!body?.force, front: !!body?.front }));
