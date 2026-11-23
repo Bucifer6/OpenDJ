@@ -2,23 +2,26 @@
 // §1.2, §4.3, §6). A family sets the technique preferences, blend lengths, effect budget and echo timing the planner
 // uses for a pair of tracks. Pure data + lookups: no audio, no DOM.
 
-/** Family table. prior: added to the planner's per-style prior; maxBars / bestBars: blend lengths (long overlaps like
- * a club DJ: house / techno / trance 32 bars, up to 64; open format stays quick, 4 to 8); fxBudget: largest
- * share of effect transitions (echo, reverb, spins, brakes, loops) in recent transitions; echoBeats: echo-out delay. */
+/** Family table. prior: added to the planner's per-style prior; maxBars / bestBars: blend lengths (real club mixes:
+ * median 16 bars, half of them 8-26, 90 % under 40, docs/automix-research/04-real-mixes.md §2.2; open format stays
+ * quick, 4 to 8); playMinutes: how long a DJ typically lets a track play, its blend included (§2.1; club families
+ * only: open format has no measured figure, and radio edits are often played nearly whole); fxBudget:
+ * largest share of effect transitions (echo, reverb, spins, brakes, loops) in recent transitions; echoBeats: echo-out
+ * delay. */
 export const FAMILIES = {
-  house: { label: 'house', maxBars: 64, bestBars: [32], fxBudget: 0.2, echoBeats: 0.75,
+  house: { label: 'house', maxBars: 32, bestBars: [16], playMinutes: 4, fxBudget: 0.2, echoBeats: 0.75,
     prior: { blend: 1, bassswap: 0.5, stemswap: 0.5, echo: -0.5, cut: -2, backspin: -3, brake: -3, loop: -0.5 } },
-  techno: { label: 'techno', maxBars: 64, bestBars: [32, 64], fxBudget: 0.15, echoBeats: 0.5,
+  techno: { label: 'techno', maxBars: 32, bestBars: [16, 32], playMinutes: 4, fxBudget: 0.15, echoBeats: 0.5,
     prior: { blend: 1.5, filter: 0.5, crossfade: -1, echo: -1, reverb: -0.5, cut: -3, backspin: -4, brake: -4 } },
-  trance: { label: 'trance / progressive', maxBars: 64, bestBars: [32], fxBudget: 0.25, echoBeats: 0.75,
+  trance: { label: 'trance / progressive', maxBars: 32, bestBars: [16, 32], playMinutes: 4.3, fxBudget: 0.25, echoBeats: 0.75,
     prior: { blend: 0.5, reverb: 1.5, filter: 0.5, cut: -2, backspin: -3, brake: -3 } },
-  bass: { label: 'drum & bass / dubstep', maxBars: 32, bestBars: [16], fxBudget: 0.3, echoBeats: 0.5,
+  bass: { label: 'drum & bass / dubstep', maxBars: 32, bestBars: [16], playMinutes: 3, fxBudget: 0.3, echoBeats: 0.5,
     prior: { bassswap: 1.5, cut: 1, blend: -0.5, echo: 0.5, backspin: 0, crossfade: -1.5 } },
   open: { label: 'open format', maxBars: 8, bestBars: [4, 8], fxBudget: 0.4, echoBeats: 1,
     prior: { cut: 3, echo: 1.5, bassswap: 1, backspin: 0.5, brake: 0, blend: -2, crossfade: -1, filter: -0.5 } },
-  disco: { label: 'disco / funk', maxBars: 32, bestBars: [16], fxBudget: 0.2, echoBeats: 1,
+  disco: { label: 'disco / funk', maxBars: 32, bestBars: [16], playMinutes: 4, fxBudget: 0.2, echoBeats: 1,
     prior: { crossfade: 1, filter: 0.5, cut: -1, backspin: -2, brake: -2 } },
-  lounge: { label: 'lounge / downtempo', maxBars: 32, bestBars: [32], fxBudget: 0.1, echoBeats: 1,
+  lounge: { label: 'lounge / downtempo', maxBars: 32, bestBars: [32], playMinutes: 4.5, fxBudget: 0.1, echoBeats: 1,
     prior: { crossfade: 2, filter: 1, reverb: 0.5, cut: -3, backspin: -5, brake: -5, loop: -2 } },
 };
 

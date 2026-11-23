@@ -172,6 +172,18 @@ The set's tempo drifts slowly, through small nudges per track. In one example mi
 
 ## 4. Proposed changes (in order)
 
+**Status (0.5.11):** items 1, 2, 3, 5 and 6 are implemented; tests in `test/automix-real-mixes.test.js`,
+`test/automix-tease.test.js` and the corpus targets at the end of `test/automix-corpus.test.js`. Differences from
+the proposal:
+- **Item 2:** the play-time targets are set for the club families only (house, techno, trance, drum & bass, disco,
+  lounge). Open format has no measured figure, and a 2.5–3.5-minute target there made the corpus's open-format set
+  land fewer transitions on the incoming main part. For a long track, the `MIN_PLAY` share is capped at 80 % of the
+  target, so a 9-minute club record hands over after about 4–5 minutes, not 6.
+- **Item 3:** the swap goes to the incoming main part when it starts 40–85 % into the blend, else to the phrase
+  line nearest 58 % (`SWAP_AT`).
+- **Item 4** (bass preview) is not implemented: it changes the sound of every blend and needs judging by ear first.
+- **Item 7** is still open.
+
 1. **Shorter club blends.**
    - `dj-styles.js`: set house and trance `bestBars` to `[16]` and techno to `[16, 32]`. Cap the usual length at
      32 bars, keeping 48–64 only for two long beatless or drums-only sections (an outro over an intro).

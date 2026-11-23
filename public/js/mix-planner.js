@@ -31,6 +31,8 @@ const MAX_BARS = { blend: 64, stemswap: 64, drumbridge: 16, vocalcarry: 16, acap
 /** Prior per style: how good the style is "in general", before the tracks are looked at. Novelty styles are rare. */
 const PRIOR = { blend: 4, stemswap: 5, drumbridge: 1, vocalcarry: 0.5, acapellain: 0.5, pingpong: -2, bassswap: 2.5, filter: 1.5, crossfade: 0, echo: 1, cut: -1, loop: -1.5, reverb: -1, backspin: -4, brake: -4.5 };
 export const BIAS_LIMIT = 5;
+/** Shown with a blend's length: what real DJs do (docs/automix-research/04-real-mixes.md §2.2). */
+export const REAL_BLENDS = '; most DJs: 8-26 bars';
 
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : null);
@@ -136,8 +138,9 @@ export function planBestTransition(out, inn, opts = {}) {
         if (d > Math.log(1.06) && !(style === 'bassswap' && bars <= 4)) continue;
         const p = [...base];
         if (fam) {
-          if (bars > fam.maxBars) p.push([-(bars - fam.maxBars) * 0.4, `long for ${fam.label}`]);
-          // the family's usual overlap (house: 32 bars); stronger for club music, which is blended rather than cut
+          // past the family's longest usual blend only over a long outro and a long intro (both at least that long)
+          if (bars > fam.maxBars && !(ob != null && ib != null && Math.min(ob, ib) >= bars)) p.push([-(bars - fam.maxBars) * 0.4, `long for ${fam.label}`]);
+          // the family's usual overlap (house: 16 bars); stronger for club music, which is blended rather than cut
           else if (fam.bestBars.includes(bars)) p.push([['house', 'techno', 'trance', 'lounge', 'disco'].includes(famId) ? 1.6 : 0.8, null]);
         }
         // tempo: the incoming track plays at the outgoing tempo for the whole overlap
@@ -151,8 +154,8 @@ export function planBestTransition(out, inn, opts = {}) {
         const club = ['house', 'techno', 'trance', 'lounge', 'disco'].includes(famId);
         const longBlend = club && key.value >= 0.8 && g != null && g >= 0.8 && d < 0.02;
         if (ob != null) p.push(bars > ob ? [-(bars - ob) * (longBlend ? 0.15 : 0.7), longBlend ? null : `longer than the ${ob}-bar outro`] : [1.5, null]);
-        // like a club DJ: compatible club records are layered for a long time (32 bars and more)
-        if (longBlend && bars >= 32 && famId !== 'disco') p.push([2, 'long blend']);
+        // like a club DJ: compatible club records are layered for a while (16 to 32 bars; longer is rare in real mixes)
+        if (longBlend && bars >= 16 && bars <= 32 && famId !== 'disco') p.push([1, 'long blend']);
         if (ib != null) {
           if (ib === 0) p.push([-(bars - 4) * 0.6, bars > 4 ? 'incoming track has no intro' : null]);
           else if (Math.abs(bars - ib) <= 1) p.push([3, `lands on the incoming track's main part (${ib}-bar intro)`]);
@@ -219,7 +222,7 @@ export function planBestTransition(out, inn, opts = {}) {
   return {
     style: best.style, bars: best.bars, beats: best.bars * 4, vocals: best.vocals || null, score: Math.round(best.score * 10) / 10,
     why: `planned: ${[...new Set(reasons)].slice(0, 3).join(', ') || 'best fit for these two tracks'}`, family: famId || null,
-    lengthWhy: `${best.bars} bars (planned)`, options,
+    lengthWhy: `${best.bars} bars (planned${BLEND_STYLES.has(best.style) ? REAL_BLENDS : ''})`, options,
   };
 }
 

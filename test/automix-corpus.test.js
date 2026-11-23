@@ -143,3 +143,23 @@ test('corpus target: tempo within 5 % on ≥ 95 % of picks in club sets (open fo
 test('corpus target: level within limits on ≥ 90 % of blends', () => {
   for (const [n, m] of all()) assert.ok(m.levelOk >= 0.9, `${n}: ${pct(m.levelOk)}`);
 });
+
+// ---- real DJ mixes (docs/automix-research/04-real-mixes.md §2.1-2.2) ----
+const quantile = (v, f) => { const s = [...v].sort((a, b) => a - b); return s[Math.floor(f * (s.length - 1))]; };
+
+test('corpus target: club blends like real mixes (median 16 bars, few longer than 32)', () => {
+  for (const n of ['house night', 'bass night', 'mixed A']) {
+    const bars = run(n).sim.steps.filter((s) => s.blend).map((s) => s.bars);
+    assert.ok(quantile(bars, 0.5) <= 16 && quantile(bars, 0.5) >= 4, `${n}: median ${quantile(bars, 0.5)} bars`);
+    assert.ok(bars.filter((b) => b > 32).length <= bars.length * 0.15, `${n}: ${bars.filter((b) => b > 32).length} of ${bars.length} blends over 32 bars`);
+  }
+});
+
+test('corpus target: a club track is on air about as long as DJs play one (house 3-5 min, drum & bass 2.5-4 min)', () => {
+  for (const [n, lo, hi] of [['house night', 3, 5], ['bass night', 2.5, 4]]) {
+    const s = run(n).sim.steps;
+    const onAir = s.slice(1).map((x, i) => (x.begin - s[i].inStart) / 60).filter(Number.isFinite);
+    const med = quantile(onAir, 0.5);
+    assert.ok(med >= lo && med <= hi, `${n}: median ${med.toFixed(1)} min on air`);
+  }
+});

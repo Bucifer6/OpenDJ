@@ -109,7 +109,7 @@ test('phrase swap point lands on a phrase boundary of the incoming track', () =>
   assert.ok(Math.abs(phraseSwapPoint(inn, 0.05, 8 * BAR) - (0.05 + 4 * BAR)) < 1e-6);
   // 2-bar transition: bar boundary
   assert.ok(Math.abs(phraseSwapPoint({ ...inn, phrases: [] }, 0.05, 2 * BAR) - (0.05 + BAR)) < 1e-6);
-  assert.equal(phraseSwapPoint({ bpm: 0 }, 10, 8), 14);
+  assert.ok(Math.abs(phraseSwapPoint({ bpm: 0 }, 10, 8) - 14.64) < 1e-9, 'no grid: 58 % in');
 });
 
 test('mixLevels: phrase style swaps the bass exactly once at the swap point', () => {

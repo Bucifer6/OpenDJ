@@ -16,10 +16,10 @@ test('P1.2: no blend style ever plays two basslines at once', () => {
   }
 });
 
-test('P1.4: blend follows the club recipe (incoming highs/mids eased in, outgoing highs make room, mids leave after the swap)', () => {
+test('P1.4: blend follows the club recipe (incoming mids eased in, highs held back until the swap, outgoing highs make room, mids leave after it)', () => {
   const at = (k, s = null) => mixLevels('blend', k, s);
   assert.equal(at(0).inVol, 0); assert.ok(Math.abs(at(0.25).inVol - 0.8) < 1e-9, 'fader up after a quarter');
-  assert.ok(at(0).inHigh < -0.2 && at(0.25).inHigh === 0, 'incoming highs from -6 dB to flat');
+  assert.ok(at(0).inHigh < -0.2 && at(0.45).inHigh < -0.2 && Math.abs(at(0.8, 0.5).inHigh) < 1e-12, 'incoming highs -6 dB until the swap, then flat (real-mixes.md §2.4)');
   assert.ok(at(0.2).outHigh === 0 && at(0.5).outHigh < -0.2, 'outgoing highs make room from the second quarter');
   const post = at(0.75, 0.5);
   assert.equal(post.outLow, -1); assert.equal(post.inLow, 0);

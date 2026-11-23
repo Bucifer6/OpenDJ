@@ -1,9 +1,9 @@
 // Bounded, deterministic section search. No decoding, network, models, or PCM on the playback thread.
-import { planBestTransition, vocalsBetween, STEM_STYLES } from './mix-planner.js';
+import { planBestTransition, vocalsBetween, STEM_STYLES, REAL_BLENDS } from './mix-planner.js';
 import { planTransition, incomingStart, DROP_STYLES, outroBars } from './automix.js';
 import { camelotRelation } from './smartmix.js';
 import { decodeVocalMap } from './shared/vocal-map.js';
-import { pairFamily } from './dj-styles.js';
+import { pairFamily, FAMILIES } from './dj-styles.js';
 import { checkTransition } from './transition-check.js';
 import { regionBeatSafety } from './audio/analysis-core.js';
 
@@ -91,7 +91,13 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
   // MIN_PLAY_SECONDS when the track has that much) before a transition may begin; minPlay lowers it (tests, MCP).
   const share = finite(opts.minPlay) ? clamp(opts.minPlay, 0, 1) : MIN_PLAY;
   const left = Math.max(0, end - entry);
-  const played = Math.min(left * 0.9, Math.max(left * share, share > 0 ? Math.min(MIN_PLAY_SECONDS, left * 0.8) : 0));
+  // a long track (a 9-minute club record) need not play 60 % of itself: real DJs hand over after about
+  // FAMILIES[family].playMinutes, so the share is capped at 80 % of that (never under MIN_PLAY_SECONDS)
+  const family = pairFamily(out, inn);
+  const rate0 = finite(opts.rate) && opts.rate > 0 ? opts.rate : 1;
+  const target = finite(FAMILIES[family]?.playMinutes) && opts.playTarget !== false ? FAMILIES[family].playMinutes * 60 * rate0 : null;
+  const byShare = target != null && !finite(opts.minPlay) ? Math.min(left * share, Math.max(MIN_PLAY_SECONDS, target * 0.8)) : left * share;
+  const played = Math.min(left * 0.9, Math.max(byShare, share > 0 ? Math.min(MIN_PLAY_SECONDS, left * 0.8) : 0));
   const minTime = Math.max(position + barOf(out) * 2, entry + Math.max(Math.min(32, left * 0.5), played));
   const earliest = anchor(out) + Math.ceil((minTime - anchor(out)) / barOf(out) - 1e-6) * barOf(out);
   const rate = finite(opts.rate) && opts.rate > 0 ? opts.rate : 1;
@@ -110,7 +116,6 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
     .filter((x) => x > earliest && x <= end + EPS).sort((a, b) => a - b);
   // double drops (P2.3, drum & bass / dubstep): an exit 16 bars into each outgoing drop, so the incoming drop can hit
   // together with it
-  const family = pairFamily(out, inn);
   // a double drop on the outgoing track's second drop is worth leaving a little earlier for (45 % played, not 60 %)
   const playedDD = Math.min(left * 0.9, Math.max(left * Math.min(share, 0.45), share > 0 ? Math.min(MIN_PLAY_SECONDS * 0.75, left * 0.8) : 0));
   const earliestDD = Math.min(earliest, anchor(out) + Math.ceil((Math.max(position + barOf(out) * 2, entry + Math.max(Math.min(32, left * 0.5), playedDD)) - anchor(out)) / barOf(out) - 1e-6) * barOf(out));
@@ -181,7 +186,7 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
       if (bars < 4 || ((opts.fixedBars || ddBars) && bars !== (opts.fixedBars || ddBars))) continue;
       const len = bars * barOf(out), start = exit - len;
       timing = { ...timing, begin: start, start, len, end: exit };
-      p = { ...p, bars, beats: bars * 4, lengthWhy: `${bars} bars (section fit)` };
+      p = { ...p, bars, beats: bars * 4, lengthWhy: `${bars} bars (section fit${REAL_BLENDS})` };
     }
     const finish = drop ? timing.drop : timing.start + timing.len;
     const inSpan = drop ? 0 : timing.len * ratio / rate;
@@ -233,7 +238,11 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
     if (check) phrasing -= check.penalty;
     if (safety === 'short' && p.bars > 8) phrasing -= (p.bars - 8) * 0.8; // the beat isn't steady enough for a long overlap
     if (looped) phrasing -= 1; // a natural outro is better than a loop
-    const score = p.score - vocalCost - clashCost - Math.abs(ei - eo) * 0.7 - unplayed * 6 - skipped * 8 + phrasing;
+    // how long the outgoing track has been on when the next one comes in: real DJs let a track play about
+    // FAMILIES[family].playMinutes (house / techno 4 min, drum & bass 3, open format 2.5; real-mixes.md §2.1). Well
+    // past that, staying longer stops being worth it and costs instead (MIN_PLAY stays the floor).
+    const over = target ? Math.max(0, (timing.begin - entry) / rate - target / rate0 * 1.2) / 60 : 0;
+    const score = p.score - vocalCost - clashCost - Math.abs(ei - eo) * 0.7 - unplayed * 6 * (over > 0 ? 0.3 : 1) - over * 1.5 - skipped * 8 + phrasing;
     evaluated++;
     if (doubleDrop) {
       // kept aside: a double drop is a peak-time move, not something to score against ordinary blends
