@@ -44,3 +44,12 @@ test('i18n: language setting', () => {
   assert.equal(resolveLanguage('ro'), 'ro');
   assert.equal(resolveLanguage('en'), 'en');
 });
+
+test('i18n-extract: tags are stripped completely before the prose test', async () => {
+  const { stripTags, looksLikeUi } = await import('../scripts/i18n-extract.mjs');
+  assert.equal(stripTags('Press <b>Play</b> now'), 'Press Play now');
+  assert.equal(stripTags('<<b>script>alert(1)<</b>/script>'), 'alert(1)', 'nested tags leave no tag behind');
+  assert.ok(!/[<>]/.test(stripTags('<<b>i>x <')));
+  assert.equal(looksLikeUi({ text: '<span class="x">1</span>', before: '', after: '' }), false, 'markup without prose');
+  assert.equal(looksLikeUi({ text: 'Drop your <b>Tracks here</b>', before: '', after: '' }), true);
+});

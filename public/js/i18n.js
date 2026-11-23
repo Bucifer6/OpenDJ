@@ -168,10 +168,11 @@ function skipped(elm) {
 }
 
 function doText(node) {
-  const v = node.data;
+  // nodeValue of a Text node: plain text, never parsed as HTML
+  const v = node.nodeValue;
   if (written.get(node) === v) return;
   const r = translateText(v);
-  if (r != null && r !== v && !skipped(node.parentNode)) { written.set(node, r); node.data = r; }
+  if (r != null && r !== v && !skipped(node.parentNode)) { written.set(node, r); node.nodeValue = r; }
 }
 
 function doAttrs(elm) {
