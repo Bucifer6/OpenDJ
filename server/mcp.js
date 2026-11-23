@@ -147,7 +147,8 @@ export function trackDetails(t) {
   return {
     ...publicTrack(t), rating: Number(t.rating) || 0, play_count: Number(t.playCount) || 0,
     downbeat: r(t.downbeat ?? t.gridOffset), mix_in: r(t.mixIn), mix_out: r(t.mixOut), start: r(t.startTime), end: r(t.endTime),
-    sections: (Array.isArray(t.phrases) ? t.phrases : []).slice(0, 200).map((p, i) => ({ index: i, type: String(p.type || '').slice(0, 20), start: r(p.start), end: r(p.end), bars: Number(p.bars) || null })),
+    key_confidence: r(t.keyConfidence), lufs: r(t.lufs), main_lufs: r(t.mainLufs), phrase_anchor: r(t.phraseAnchor), phrase_confidence: r(t.phraseConfidence),
+    sections: (Array.isArray(t.phrases) ? t.phrases : []).slice(0, 200).map((p, i) => ({ index: i, type: String(p.type || '').slice(0, 20), start: r(p.start), end: r(p.end), bars: Number(p.bars) || null, lufs: r(p.lufs) })),
     hot_cues: (Array.isArray(t.cues) ? t.cues : []).filter((c) => c.type === 'hot' && c.index >= 0).slice(0, 16).map((c) => ({ cue: c.index + 1, position: r(c.position), name: String(c.name || '').slice(0, 40) })),
     stems: t.stems?.ready ? { ready: true, model: String(t.stems.model || '').slice(0, 40) } : { ready: false },
     vocal_sections: t.stems?.vocals ? vocalSections(t.stems.vocals) : null,

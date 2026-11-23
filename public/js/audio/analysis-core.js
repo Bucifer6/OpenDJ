@@ -1,5 +1,8 @@
-// Track analysis: 3-band waveform, BPM + beatgrid, musical key (Camelot), loudness and silence trimming.
+// Track analysis: 3-band waveform, BPM + beatgrid, musical key (Camelot) + confidence, BS.1770 loudness (integrated,
+// main section, per phrase) and track trim, silence trimming, phrases on an 8-bar phrase grid.
 // Pure functions: used by the Web Worker in the app and by Node unit tests.
+
+import { LOUDNESS_TARGET, loudnessProfile, integratedLoudness, sectionLoudness, loudestWindow } from './loudness.js';
 
 export const WAVE_RATE = 150; // waveform points per second
 
@@ -189,7 +192,7 @@ export function detectKey(mono, sr) {
   const fs = sr / dec;
   const N = 8192;
   const frames = Math.floor(mono.length / dec / N);
-  if (frames < 2) return { key: null, camelot: null };
+  if (frames < 2) return { key: null, camelot: null, keyConfidence: 0 };
   const maxFrames = 160;
   const stride = Math.max(1, Math.floor(frames / maxFrames));
   const chroma = new Float64Array(12);
@@ -216,14 +219,32 @@ export function detectKey(mono, sr) {
     const tot = frameChroma.reduce((x, y) => x + y) + 1e-9;
     for (let i = 0; i < 12; i++) chroma[i] += frameChroma[i] / tot;
   }
-  let best = { r: -2, key: null, camelot: null };
+  const cands = [];
   for (let tonic = 0; tonic < 12; tonic++) {
     const rot = (p) => p.map((_, i) => p[(i - tonic + 12) % 12]);
-    const rMaj = corr([...chroma], rot(MAJOR)), rMin = corr([...chroma], rot(MINOR));
-    if (rMaj > best.r) best = { r: rMaj, key: NOTE_NAMES[tonic], camelot: CAMELOT_MAJOR[tonic] };
-    if (rMin > best.r) best = { r: rMin, key: NOTE_NAMES[tonic] + 'm', camelot: CAMELOT_MINOR[tonic] };
+    cands.push({ r: corr([...chroma], rot(MAJOR)), key: NOTE_NAMES[tonic], camelot: CAMELOT_MAJOR[tonic] });
+    cands.push({ r: corr([...chroma], rot(MINOR)), key: NOTE_NAMES[tonic] + 'm', camelot: CAMELOT_MINOR[tonic] });
   }
-  return { key: best.key, camelot: best.camelot, confidence: best.r };
+  let best = { r: -2, key: null, camelot: null };
+  for (const c of cands) if (c.r > best.r) best = c;
+  return { key: best.key, camelot: best.camelot, confidence: best.r, keyConfidence: keyConfidenceOf(cands, best) };
+}
+
+/**
+ * Key confidence 0..1 from the 24 Krumhansl correlations: how well the best key fits (correlation r, 0..1) times
+ * how clearly it beats the runner-up. The relative major / minor (same Camelot number) is not a rival: it shares the
+ * scale and mixes the same way, so the margin is taken to the best key with a different Camelot number.
+ * conf = clamp((r − 0.4) / 0.5) · (0.35 + 0.65 · min(1, margin / 0.15)); clear tonal material ≈ 0.8..1, noise /
+ * atonal / single-note material ≈ 0.1..0.4.
+ */
+function keyConfidenceOf(cands, best) {
+  if (!best.camelot || !(best.r > 0)) return 0;
+  const num = parseInt(best.camelot, 10);
+  let second = -1;
+  for (const c of cands) if (parseInt(c.camelot, 10) !== num && c.r > second) second = c.r;
+  const margin = Math.max(0, best.r - second);
+  const conf = Math.min(1, Math.max(0, (best.r - 0.4) / 0.5)) * (0.35 + 0.65 * Math.min(1, margin / 0.15));
+  return Math.round(Math.max(0, Math.min(1, conf)) * 100) / 100;
 }
 
 /** Camelot code for tag-style keys ("Am", "A minor", "8A", "F#m", "Gbmaj") */
@@ -252,19 +273,62 @@ export function camelotCompatible(a, b) {
   return d === 0;
 }
 
-export function loudness(mono, sr) {
-  // RMS over 400 ms blocks, gated (ignore quiet blocks), roughly LUFS-like
-  const blk = Math.floor(sr * 0.4); const vals = [];
-  for (let i = 0; i + blk <= mono.length; i += blk) {
-    let s = 0; for (let j = i; j < i + blk; j++) s += mono[j] * mono[j];
-    vals.push(s / blk);
+// ---------------- loudness (BS.1770, see loudness.js) ----------------
+export { LOUDNESS_TARGET };
+export const GAIN_MIN = -12, GAIN_MAX = 6; // dB: track trim range
+const MAIN_TYPES = new Set(['drop', 'verse', 'chorus']); // "main" sections: what the track sounds like most of the time
+const r1 = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
+
+/** Track trim (dB) that brings the main-section loudness to LOUDNESS_TARGET, clamped to [GAIN_MIN, GAIN_MAX]; 0 when unknown. */
+export function gainForLoudness(mainLufs) {
+  if (!Number.isFinite(mainLufs)) return 0;
+  return Math.round(Math.max(GAIN_MIN, Math.min(GAIN_MAX, LOUDNESS_TARGET - mainLufs)) * 10) / 10;
+}
+
+/**
+ * Loudness of a track from its loudness profile (one K-weighted pass, loudness.js) and its phrases.
+ * - lufs: gated integrated loudness of the whole track;
+ * - phraseLufs[i]: gated loudness of the 400 ms blocks inside phrases[i] (null for silence);
+ * - mainLufs: the loudest main section — consecutive drop / verse / chorus phrases of one type spanning ≥ 8 bars —
+ *   else the loudest 30 s window, else the integrated loudness.
+ * All LUFS rounded to 0.1 (null when silent).
+ */
+export function trackLoudness(prof, sampleRate, phrases = [], bpm = 0) {
+  const lufs = integratedLoudness(prof);
+  const phraseLufs = sectionLoudness(prof, sampleRate, phrases).map((v) => r1(v));
+  const bar = bpm ? 240 / bpm : 0;
+  const barsOf = (p) => (Number.isFinite(p.bars) ? p.bars : bar ? Math.round((p.end - p.start) / bar) : 0);
+  const mains = [];
+  for (let i = 0; i < phrases.length; i++) {
+    const p = phrases[i];
+    if (!MAIN_TYPES.has(p.type)) continue;
+    const last = mains.at(-1);
+    if (last && last.i1 === i - 1 && phrases[last.i0].type === p.type) { last.i1 = i; last.end = p.end; last.bars += barsOf(p); }
+    else mains.push({ i0: i, i1: i, start: p.start, end: p.end, bars: barsOf(p) });
   }
-  const gated = vals.filter((v) => 10 * Math.log10(v + 1e-12) > -50);
-  if (!gated.length) return { rmsDb: -60, gainDb: 0 };
-  const mean = gated.reduce((a, b) => a + b) / gated.length;
-  const rmsDb = 10 * Math.log10(mean);
-  const gainDb = Math.max(-12, Math.min(12, -12 - rmsDb)); // target ≈ -12 dB RMS
-  return { rmsDb, gainDb };
+  let main = -Infinity;
+  const big = mains.filter((m) => m.bars >= 8);
+  if (big.length) for (const v of sectionLoudness(prof, sampleRate, big)) if (v != null && v > main) main = v;
+  if (!Number.isFinite(main)) main = loudestWindow(prof, sampleRate, 30)?.lufs ?? -Infinity;
+  if (!Number.isFinite(main)) main = lufs;
+  return { lufs: r1(lufs), mainLufs: r1(main), phraseLufs };
+}
+
+/**
+ * Per-phrase loudness for phrases recomputed from the waveform (grid edit, no audio at hand): each new phrase gets the
+ * energy-weighted mean of the old phrases' lufs it overlaps (old analyses without lufs: phrases unchanged).
+ */
+export function carryPhraseLufs(oldPhrases, newPhrases) {
+  const old = (oldPhrases || []).filter((p) => Number.isFinite(p?.lufs) && p.end > p.start);
+  if (!old.length || !Array.isArray(newPhrases)) return newPhrases;
+  return newPhrases.map((p) => {
+    let e = 0, w = 0;
+    for (const o of old) {
+      const ov = Math.min(p.end, o.end) - Math.max(p.start, o.start);
+      if (ov > 0) { e += ov * 10 ** (o.lufs / 10); w += ov; }
+    }
+    return w > 0 ? { ...p, lufs: Math.round(10 * Math.log10(e / w) * 10) / 10 } : { ...p };
+  });
 }
 
 export function trimPoints(mono, sr) {
@@ -314,14 +378,18 @@ function segDist(P, a0, a1, b0, b1) {
 
 /**
  * Bar / phrase structure.
- * @returns {{ phrases: {start:number,end:number,type:string,energy:number,bars:number}[], downbeat: number }}
+ * @returns {{ phrases: {start:number,end:number,type:string,energy:number,bars:number}[], downbeat: number,
+ *   phraseAnchor: number|null, phraseConfidence: number }}
  * phrase.energy is the section's relative energy 0..1 (1 = loudest section of the track).
+ * phraseAnchor (s) is the first downbeat (≥ downbeat) that starts an 8-bar phrase: downbeat + o bars, where the
+ * offset o ∈ 0..7 wins a vote of bar novelty summed at o + 8k (o > 0 = pickup bars before the first phrase).
+ * phraseConfidence 0..1 says how clearly that offset beats the others (0 = no 8-bar phrasing found).
  */
 export function detectPhrases(mono, sr, bpm, gridOffset = 0, waveform = null, opts = {}) {
   if (!waveform && mono) waveform = computeWaveform(mono, sr);
   const duration = opts.duration ?? (mono && sr ? mono.length / sr : waveform ? waveform.peak.length / waveform.rate : 0);
   const startTime = Math.max(0, opts.startTime ?? 0), endTime = Math.min(duration, opts.endTime ?? duration);
-  if (!bpm || !waveform || !(endTime > startTime)) return { phrases: [], downbeat: startTime };
+  if (!bpm || !waveform || !(endTime > startTime)) return { phrases: [], downbeat: startTime, phraseAnchor: null, phraseConfidence: 0 };
   const beat = 60 / bpm, bar = beat * 4;
   // beat lattice covering the whole track
   const t0 = gridOffset - Math.floor(gridOffset / beat) * beat;
@@ -347,7 +415,7 @@ export function detectPhrases(mono, sr, bpm, gridOffset = 0, waveform = null, op
   // ---- 2) per-bar features ----
   const K = Math.floor((lastBeat - db) / 4);
   if (K < 4) {
-    return { phrases: [{ start: r3(Math.min(downbeat, startTime)), end: r3(endTime), type: 'verse', energy: 1, bars: Math.max(0, K) }], downbeat: r3(downbeat) };
+    return { phrases: [{ start: r3(Math.min(downbeat, startTime)), end: r3(endTime), type: 'verse', energy: 1, bars: Math.max(0, K) }], downbeat: r3(downbeat), phraseAnchor: r3(downbeat), phraseConfidence: 0 };
   }
   const F = [new Float32Array(K), new Float32Array(K), new Float32Array(K)];
   for (let j = 0; j < 3; j++) {
@@ -371,7 +439,16 @@ export function detectPhrases(mono, sr, bpm, gridOffset = 0, waveform = null, op
     nov[k] = v; if (v > maxNov) maxNov = v;
   }
   const thr = Math.max(0.06, 0.2 * maxNov);
-  const prior = (k) => (k % 16 === 0 ? 1.3 : k % 8 === 0 ? 1.2 : k % 4 === 0 ? 1.05 : 1);
+
+  // ---- 3b) phrase grid (8-bar): offset vote over bar novelty, above its median (the background level) ----
+  const { offset: po, confidence: phraseConfidence } = phraseOffsetVote(nov, K);
+  const gridOn = phraseConfidence >= 0.3; // below: no trustworthy 8-bar grid, behave as before (grid from bar 0)
+  const go = gridOn ? po : 0;
+  const rel = (k) => k - go;
+  const prior = (k) => { const r = rel(k); return r % 32 === 0 ? 1.35 : r % 16 === 0 ? 1.3 : r % 8 === 0 ? 1.2 : r % 4 === 0 ? 1.05 : 1; };
+  // sharp (±2 bar) contrast: decides whether a boundary one bar off the grid is really off-grid (pickup / fill bar)
+  const sharp = (k) => (k <= 0 || k >= K ? 0 : segDist(PF, Math.max(0, k - 2), k, k, Math.min(K, k + 2)));
+  const snapRatio = phraseConfidence >= 0.6 ? 0.6 : 0.8;
   const cands = [];
   for (let k = 2; k <= K - 2; k++) {
     if (nov[k] < thr) continue;
@@ -382,8 +459,14 @@ export function detectPhrases(mono, sr, bpm, gridOffset = 0, waveform = null, op
   cands.sort((a, b) => b.s - a.s);
   const bounds = [];
   for (const c of cands) {
-    if (c.k < 4 || K - c.k < 4) continue;
-    if (bounds.every((k) => Math.abs(k - c.k) >= 8)) bounds.push(c.k);
+    let k = c.k;
+    if (gridOn && rel(k) % 8 !== 0) {
+      // within ±1 bar of a phrase line: snap to it unless the off-grid evidence is clearly stronger
+      const g = go + Math.round(rel(k) / 8) * 8;
+      if (Math.abs(g - k) <= 1 && g > 0 && g < K && sharp(g) >= snapRatio * sharp(k)) k = g;
+    }
+    if (k < 4 || K - k < 4) continue;
+    if (bounds.every((b) => Math.abs(b - k) >= 8)) bounds.push(k);
   }
   bounds.sort((a, b) => a - b);
   const edges = [0, ...bounds, K];
@@ -420,7 +503,14 @@ export function detectPhrases(mono, sr, bpm, gridOffset = 0, waveform = null, op
   const phrases = [];
   for (const s of secs) {
     let a = s.a;
-    if (s.b - a > 32) while (s.b - a >= 24) { phrases.push({ a, b: a + 16, s }); a += 16; }
+    if (s.b - a > 32) {
+      for (;;) {
+        // 16 bars on, on a phrase line of the grid (a section that starts off-grid gets back onto it)
+        const cut = gridOn ? go + Math.round((a + 16 - go) / 8) * 8 : a + 16;
+        if (s.b - a < 24 || cut - a < 8 || s.b - cut < 8) break;
+        phrases.push({ a, b: cut, s }); a = cut;
+      }
+    }
     phrases.push({ a, b: s.b, s });
   }
   const out = phrases.map(({ a, b, s }, i) => ({
@@ -428,13 +518,46 @@ export function detectPhrases(mono, sr, bpm, gridOffset = 0, waveform = null, op
     end: r3(i === phrases.length - 1 ? Math.max(downbeat + b * bar, endTime) : downbeat + b * bar),
     type: s.type, energy: Math.round(s.eRel * 100) / 100, bars: b - a,
   }));
-  return { phrases: out, downbeat: r3(downbeat) };
+  return { phrases: out, downbeat: r3(downbeat), phraseAnchor: r3(downbeat + po * bar), phraseConfidence };
+}
+
+/**
+ * Phrase-offset vote (P1.1): score each bar offset o ∈ 0..7 by Σ novelty[o + 8k] over the novelty peaks (local maxima
+ * within ±2 bars, measured above the median so a busy track's background doesn't vote), pick the best (ties: the
+ * smaller offset).
+ * confidence = (best − mean) / (⅞ · best) — 1 when all novelty falls on one 8-bar grid, 0 when spread evenly —
+ * scaled by 0.5 + 0.5 · min(1, 2 · (best − runner-up) / best), so a 4-bar ambiguity (o and o + 4 equal) halves it.
+ */
+export function phraseOffsetVote(nov, K = nov.length - 1) {
+  const vals = [];
+  for (let k = 1; k < K; k++) vals.push(nov[k]);
+  if (vals.length < 8) return { offset: 0, confidence: 0, votes: new Array(8).fill(0) };
+  vals.sort((a, b) => a - b);
+  const base = vals[vals.length >> 1];
+  const votes = new Array(8).fill(0);
+  for (let k = 1; k < K; k++) {
+    // only peaks vote (the novelty kernels smear a boundary over ±7 bars, which would vote for every offset)
+    let peak = true;
+    for (let j = Math.max(1, k - 2); j <= Math.min(K - 1, k + 2); j++) if (j !== k && nov[j] > nov[k]) { peak = false; break; }
+    if (peak) votes[k % 8] += Math.max(0, nov[k] - base);
+  }
+  let o = 0;
+  for (let i = 1; i < 8; i++) if (votes[i] > votes[o] * 1.02 + 1e-9) o = i;
+  const best = votes[o];
+  if (!(best > 1e-9)) return { offset: 0, confidence: 0, votes };
+  const mean = votes.reduce((x, y) => x + y, 0) / 8;
+  let second = 0; for (let i = 0; i < 8; i++) if (i !== o && votes[i] > second) second = votes[i];
+  const c = ((best - mean) / (0.875 * best)) * (0.5 + 0.5 * Math.min(1, (2 * (best - second)) / best));
+  return { offset: o, confidence: Math.round(Math.max(0, Math.min(1, c)) * 100) / 100, votes };
 }
 
 function r3(x) { return Math.round(x * 1000) / 1000; }
 
-/** Where to start the next track (mixIn) and where to start mixing out of this one (mixOut), in seconds. */
-export function mixPoints(phrases, downbeat, bpm, { startTime = 0, endTime } = {}) {
+/**
+ * Where to start the next track (mixIn) and where to start mixing out of this one (mixOut), in seconds.
+ * phraseAnchor (optional): a downbeat that starts an 8-bar phrase; the fallback mixOut lands on that phrase grid.
+ */
+export function mixPoints(phrases, downbeat, bpm, { startTime = 0, endTime, phraseAnchor } = {}) {
   const end = endTime ?? (phrases.length ? phrases.at(-1).end : startTime);
   if (!bpm || !phrases.length) return { mixIn: r3(startTime), mixOut: r3(Math.max(startTime, end - 30)) };
   const bar = 240 / bpm;
@@ -449,7 +572,8 @@ export function mixPoints(phrases, downbeat, bpm, { startTime = 0, endTime } = {
   if (last.type === 'outro' && oi > 0 && outroBars >= 8 && outroBars <= 64) mixOut = phrases[oi].start;
   else { // last 32 (short tracks: 16) bars, on an 8-bar phrase boundary
     const L = K >= 64 ? 32 : K >= 24 ? 16 : Math.max(1, Math.floor(K / 2));
-    const k = Math.max(0, L >= 8 ? Math.floor((K - L) / 8) * 8 : K - L);
+    const a0 = phraseAnchor != null ? ((Math.round((phraseAnchor - downbeat) / bar) % 8) + 8) % 8 : 0; // pickup bars
+    const k = Math.max(0, L >= 8 ? (K - L - a0 >= 0 ? a0 + Math.floor((K - L - a0) / 8) * 8 : Math.floor((K - L) / 8) * 8) : K - L);
     mixOut = downbeat + k * bar;
   }
   if (mixOut <= mixIn) mixOut = Math.max(mixIn, end - Math.min(30, (end - mixIn) / 2));
@@ -501,6 +625,13 @@ export function autoCuesFor(phrases, { mixIn, mixOut, downbeat } = {}) {
  * deck load and background analysis so both store exactly the same thing. User / imported data wins:
  * a locked BPM or imported grid (bpmLocked / gridLocked) keeps its BPM and grid, an existing key is kept,
  * existing cues are kept (auto cues are only added to tracks without any cues).
+ *
+ * keyConfidence: the detector's 0..1 confidence when the detected key is stored. When the track's own key is kept
+ * (typed by the user, read from tags or imported, i.e. stored without a keyConfidence) it is 1 — a key the user or
+ * their other software chose is trusted. A stored key that came from an earlier analysis (it has a keyConfidence) gets
+ * the fresh confidence if the detector still agrees, else keeps its old one. Analyses from before this field: absent.
+ * gain = LOUDNESS_TARGET − mainLufs (dB, clamped) for new analyses; lufs / mainLufs / phrases[i].lufs in LUFS.
+ * phraseAnchor / phraseConfidence: the 8-bar phrase grid; with a locked grid the anchor is moved onto its beats.
  */
 export function analysisPatch(track, r, { duration, autoCues = true } = {}) {
   const locked = !!(track.bpm && (track.bpmLocked || track.gridLocked));
@@ -511,8 +642,17 @@ export function analysisPatch(track, r, { duration, autoCues = true } = {}) {
     energy: r.energy, duration: duration ?? r.duration, analyzed: true, unreadable: false,
     bpmConfidence: locked ? 1 : r.bpmConfidence,
   };
-  for (const k of ['phrases', 'mixIn', 'mixOut', 'downbeat']) if (r[k] !== undefined) patch[k] = r[k];
+  for (const k of ['phrases', 'mixIn', 'mixOut', 'downbeat', 'lufs', 'mainLufs', 'phraseAnchor', 'phraseConfidence']) if (r[k] !== undefined) patch[k] = r[k];
   if (locked && track.downbeat != null) patch.downbeat = track.downbeat;
+  if (locked && Number.isFinite(patch.phraseAnchor) && track.bpm > 0 && Number.isFinite(patch.gridOffset)) {
+    const beat = 60 / track.bpm;
+    patch.phraseAnchor = r3(patch.gridOffset + Math.round((patch.phraseAnchor - patch.gridOffset) / beat) * beat);
+  }
+  if (r.keyConfidence !== undefined) {
+    if (!track.key) patch.keyConfidence = r.keyConfidence;
+    else if (track.keyConfidence == null) patch.keyConfidence = 1;
+    else patch.keyConfidence = toCamelot(track.key) === (r.camelot ?? toCamelot(r.key)) ? r.keyConfidence : track.keyConfidence;
+  }
   if (!(track.cues || []).length && Array.isArray(r.autoCues) && r.autoCues.length && autoCues !== false) patch.cues = r.autoCues;
   return patch;
 }
@@ -521,24 +661,30 @@ export function analysisPatch(track, r, { duration, autoCues = true } = {}) {
 export function analyzeStructure(waveform, bpm, gridOffset, { startTime = 0, endTime, duration } = {}) {
   duration = duration ?? (waveform ? waveform.peak.length / waveform.rate : 0);
   endTime = endTime ?? duration;
-  const { phrases, downbeat } = detectPhrases(null, 0, bpm, gridOffset, waveform, { startTime, endTime, duration });
-  const { mixIn, mixOut } = mixPoints(phrases, downbeat, bpm, { startTime, endTime });
+  const { phrases, downbeat, phraseAnchor, phraseConfidence } = detectPhrases(null, 0, bpm, gridOffset, waveform, { startTime, endTime, duration });
+  const { mixIn, mixOut } = mixPoints(phrases, downbeat, bpm, { startTime, endTime, phraseAnchor: phraseConfidence >= 0.3 ? phraseAnchor : undefined });
   const autoCues = autoCuesFor(phrases, { mixIn, mixOut, downbeat: bpm ? downbeat : undefined });
-  return { phrases, downbeat, mixIn, mixOut, autoCues };
+  return { phrases, downbeat, phraseAnchor, phraseConfidence, mixIn, mixOut, autoCues };
 }
 
 export function analyzeTrack(mono, sr) {
   const waveform = computeWaveform(mono, sr);
   const beat = detectBpm(mono, sr);
   const key = detectKey(mono, sr);
-  const loud = loudness(mono, sr);
   const trim = trimPoints(mono, sr);
   let energy = 0;
   for (let i = 0; i < waveform.peak.length; i++) energy += waveform.low[i] + waveform.mid[i];
   energy = Math.round(Math.min(10, Math.max(1, energy / waveform.peak.length / 25)));
   const duration = mono.length / sr;
   const structure = analyzeStructure(waveform, beat.bpm, beat.offset, { ...trim, duration });
-  return { waveform, bpm: beat.bpm, gridOffset: beat.offset, bpmConfidence: beat.confidence, key: key.key, camelot: key.camelot, gain: loud.gainDb, ...trim, energy, duration, ...structure };
+  // loudness: one K-weighted pass over the mono mix (measured as dual mono = as played on both speakers)
+  const loud = trackLoudness(loudnessProfile(mono, sr), sr, structure.phrases, beat.bpm);
+  structure.phrases = structure.phrases.map((p, i) => ({ ...p, lufs: loud.phraseLufs[i] }));
+  return {
+    waveform, bpm: beat.bpm, gridOffset: beat.offset, bpmConfidence: beat.confidence, key: key.key, camelot: key.camelot,
+    keyConfidence: key.keyConfidence, lufs: loud.lufs, mainLufs: loud.mainLufs, gain: gainForLoudness(loud.mainLufs),
+    ...trim, energy, duration, ...structure,
+  };
 }
 
 // ---------- waveform (de)serialisation for the server cache ----------
