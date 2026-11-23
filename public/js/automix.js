@@ -1379,7 +1379,7 @@ export class AutoMix extends Emitter {
       out.setMaster(); inn.syncOn = true; inn.matchTempo();
       // ride the master tempo over to the incoming track's own tempo during the blend, so it is never stretched
       // after it (P1.6); the synced incoming deck follows
-      const to = this.opts.tempoMorph === false || immediate ? null : morphTarget(out, inn);
+      const to = this.opts.tempoMorph !== true || immediate ? null : morphTarget(out, inn); // opt-in: it would fight the by-ear phase keeper (beat-phase.js)
       if (to != null) morph = { from: out.tempo || 0, to };
     }
     else { inn.syncOn = false; if (Math.abs(inn.tempo || 0) > 0.01) inn.setTempo(0); } // its own tempo: nothing to ramp back afterwards

@@ -522,7 +522,7 @@ export class Dialogs {
       el('h4', {}, 'Party mode'),
       el('label', { class: 'check' }, chk(am.watchdog !== false, (v) => amSet({ watchdog: v })), ' Safety net: if the music stops or goes silent, restore the level or start the next track'),
       el('label', { class: 'check' }, chk(am.levelMatch !== false, (v) => amSet({ levelMatch: v })), ' Level matching: every track at the same loudness (from its loudest main section)'),
-      el('label', { class: 'check' }, chk(am.tempoMorph !== false, (v) => amSet({ tempoMorph: v })), ' Ride the tempo across blends (up to 4 %), so no track stays stretched'),
+      el('label', { class: 'check' }, chk(am.tempoMorph === true, (v) => amSet({ tempoMorph: v })), ' Ride the tempo across blends (up to 4 %) instead of easing it back afterwards (experimental: the phase keeper relies on steady tempos during a blend)'),
       el('label', { class: 'check' }, chk(am.doubleDrops !== false, (v) => amSet({ doubleDrops: v })), ' Double drops in drum & bass / dubstep sets'),
       field('Tricks inside tracks', sel(am.tricks || 'subtle', [['off', 'Off'], ['subtle', 'Subtle (bass teases, filter builds)'], ['party', 'Party (also loop rolls, pause drops, rewinds, horns)']], (v) => amSet({ tricks: v })), 'Tricks land on the downbeat of a drop or phrase, never over vocals, spaced out and only when the energy calls for it.'),
       field('End the set at', (() => { const i = el('input', { class: 'inp', type: 'time', value: am.endAt || '' }); i.addEventListener('change', () => amSet({ endAt: i.value })); return i; })(), 'Optional clock time: the energy winds down towards it, nothing new is queued in the last minutes, and the last track fades out in a reverb wash. Empty: no end time.'),

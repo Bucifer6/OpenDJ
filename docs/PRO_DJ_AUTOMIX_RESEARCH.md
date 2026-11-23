@@ -33,7 +33,7 @@ marked [verify] in the raw files should be checked against the paper before bein
 | P1.3 landing | **Done**. | `adaptive-dj.js` |
 | P1.4 club EQ curves | **Done**. | `mixLevels` |
 | P1.5 vocal rules | Vocal maps / hold-in, plus the checker's measured vocal-overlap penalty (> 2 s). | |
-| P1.6 tempo | **Done**: morph across blends ≤ 4 %, ride-back ≤ 1 BPM / 16 bars, blends capped at 6 % stretch, set tempo journey (≈ 3 BPM per hour through warm-up and build, held at the peak; not for open format). | `morphTarget`, `restoreBars`, `targetBpm` |
+| P1.6 tempo | **Done**: morph across blends ≤ 4 % (opt-in since 0.5.7's by-ear phase keeper assumes steady tempos during a blend), ride-back ≤ 1 BPM / 16 bars, blends capped at 6 % stretch, set tempo journey (≈ 3 BPM per hour through warm-up and build, held at the peak; not for open format). | `morphTarget`, `restoreBars`, `targetBpm` |
 | P2.1 genre families | **Done**. | `dj-styles.js` |
 | P2.2 loop-extend | **Done**: a short ending loops its last clean 8-bar phrase (no vocals, steady beat) so a full blend fits. | `adaptive-dj.js`, `beginTransition` |
 | P2.3 double drop | **Done** (bass family, peak energy, both channels −3 dB, may leave after 45 % of the track). | |
