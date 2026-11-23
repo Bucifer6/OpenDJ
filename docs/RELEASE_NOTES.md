@@ -23,6 +23,13 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.5.6
+- **AI stems no longer fail when the graphics card crashes.** If the stems engine crashes on the graphics card (seen on Windows as "The stems engine stopped (exit …)"), the track is now separated again on the CPU instead of failing, and the graphics card is not used for stems from then on. After a driver update, *Settings → AI stems → Try the graphics card again* turns it back on.
+- **The graphics-card check is lighter and runs once.** OpenDJ now compares the graphics card with the CPU once, when the stems model loads, using a short built-in test sound. The CPU result is saved, so the CPU and graphics-card copies of the model are never in memory at the same time.
+- **Logs for troubleshooting.** OpenDJ now keeps a log of what it did: server messages, the AI stems engine, and errors from the app window, with times. *Settings → About → Logs* has **Download log** and, in the desktop app, **Open logs folder**. Attach the log when you report a problem. Passwords and media-server tokens are removed from it. The file is kept small (5 MB, 3 older copies).
+- **Clearer errors:** Windows crash codes are shown in hex (for example `0xC0000005`), and Electron's crash-reporter messages no longer hide the real cause.
+- **Security:** fixed four code-scanning findings in the translation code (none could be exploited in practice).
+
 ### New in 0.5.5
 - **Automix starts with your decks.** Tracks you have loaded on deck 1 and/or deck 2 now play first when you press AUTOMIX: deck 1 starts (from your cue point if you set one), deck 2 plays next, then the rest of the mix. A deck that is already playing keeps playing.
 - **Choose what Automix plays and for how long.** The new ▾ menu next to AUTOMIX mixes the whole library (shuffled or smart, endless), this view for an hour or endlessly, one playlist, or the genres you pick. The Automix dialog has the same *Mix* (view, whole library, a playlist, genres) and *Set length* (whole list, 30 minutes, 1 to 3 hours, endless) choices, and the ▾ menu sets what the one-click AUTOMIX button plays. Endless sets keep adding tracks, playing the whole pool before any track comes back; a playlist in *Play in this order* loops in order.
