@@ -8,6 +8,7 @@
 // cached. Pad order and names stay compatible with older settings / MIDI maps (pads 1-8 = Air Horn, Siren, Laser,
 // Kick, Clap, Rewind, Riser, Impact).
 import { SAMPLE_CATALOG, SAMPLE_SOURCE } from './sample-catalog.js';
+import { integratedLoudness } from './loudness.js';
 
 const TARGET_LUFS = -14;
 const CEILING = 10 ** (-1 / 20); // -1 dBFS
@@ -318,49 +319,9 @@ export const DEFAULT_PADS = ['airhorn', 'siren', 'laser', 'kick', 'clap', 'rewin
 
 // ------------------------------------------------------------------ mastering / measurement
 
-/** BS.1770 K-weighting biquads for any sample rate (pre-filter shelf + RLB high-pass). */
-function kWeightCoefs(fs) {
-  const shelf = (() => { // high shelf, +4 dB around 1.68 kHz
-    const f0 = 1681.974450955533, G = 3.999843853973347, Q = 0.7071752369554196;
-    const K = Math.tan(Math.PI * f0 / fs), Vh = 10 ** (G / 20), Vb = Vh ** 0.4996667741545416;
-    const a0 = 1 + K / Q + K * K;
-    return { b: [(Vh + Vb * K / Q + K * K) / a0, 2 * (K * K - Vh) / a0, (Vh - Vb * K / Q + K * K) / a0], a: [2 * (K * K - 1) / a0, (1 - K / Q + K * K) / a0] };
-  })();
-  const hp = (() => { // RLB high-pass, ~38 Hz
-    const f0 = 38.13547087602444, Q = 0.5003270373238773, K = Math.tan(Math.PI * f0 / fs);
-    const a0 = 1 + K / Q + K * K;
-    return { b: [1, -2, 1], a: [2 * (K * K - 1) / a0, (1 - K / Q + K * K) / a0] };
-  })();
-  return [shelf, hp];
-}
-function filt(x, { b, a }) {
-  const y = new Float32Array(x.length); let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
-  for (let i = 0; i < x.length; i++) { const v = b[0] * x[i] + b[1] * x1 + b[2] * x2 - a[0] * y1 - a[1] * y2; x2 = x1; x1 = x[i]; y2 = y1; y1 = v; y[i] = v; }
-  return y;
-}
-
-/**
- * Integrated loudness (LUFS, BS.1770-4: K-weighting, 400 ms blocks with 75 % overlap, -70 LUFS absolute and
- * -10 LU relative gates). Sounds shorter than one block are measured as a single block.
- * @param {Float32Array[]} channels  @param {number} sampleRate
- */
-export function integratedLoudness(channels, sampleRate) {
-  const [s1, s2] = kWeightCoefs(sampleRate);
-  const w = channels.map((c) => filt(filt(c, s1), s2));
-  const n = w[0].length, blk = Math.min(n, Math.round(0.4 * sampleRate)), hop = Math.max(1, Math.round(blk / 4));
-  const zs = [];
-  for (let st = 0; st + blk <= n; st += hop) {
-    let z = 0;
-    for (const c of w) { let s = 0; for (let i = st; i < st + blk; i++) s += c[i] * c[i]; z += s / blk; }
-    zs.push(z);
-  }
-  const L = (z) => -0.691 + 10 * Math.log10(z || 1e-12);
-  let gated = zs.filter((z) => L(z) > -70);
-  if (!gated.length) return -Infinity;
-  const rel = L(gated.reduce((a, b) => a + b, 0) / gated.length) - 10;
-  gated = gated.filter((z) => L(z) > rel);
-  return L(gated.reduce((a, b) => a + b, 0) / gated.length);
-}
+// Integrated loudness (LUFS, BS.1770-4) lives in loudness.js; re-exported here under its old name. Sounds are passed
+// as an array of channels (measured as given, BS.1770 channel sum); shorter than one 400 ms block = one block.
+export { integratedLoudness };
 
 export function peakOf(channels) { let p = 0; for (const c of channels) for (let i = 0; i < c.length; i++) { const a = Math.abs(c[i]); if (a > p) p = a; } return p; }
 

@@ -18,15 +18,18 @@
 import { tempoDistance, planMixOut, incomingStart, outroBars, introBars, DROP_STYLES, autoTransitionLength, LOG_BPM_JUMP } from './automix.js';
 import { camelotRelation, genreSimilarity } from './smartmix.js';
 import { decodeVocalMap } from './shared/vocal-map.js';
+import { FAMILIES, EFFECT_STYLES, pairFamily, effectsOverBudget } from './dj-styles.js';
 
 /** Styles the planner chooses from. 'stemswap' needs AI stems on both decks. */
-export const PLANNER_STYLES = ['blend', 'bassswap', 'crossfade', 'filter', 'stemswap', 'echo', 'cut', 'backspin', 'brake', 'loop', 'reverb'];
-const BLEND_STYLES = new Set(['blend', 'bassswap', 'crossfade', 'filter', 'stemswap']);
+export const PLANNER_STYLES = ['blend', 'bassswap', 'crossfade', 'filter', 'stemswap', 'drumbridge', 'vocalcarry', 'acapellain', 'pingpong', 'echo', 'cut', 'backspin', 'brake', 'loop', 'reverb'];
+/** Stem transitions (P2.5): need AI stems on both decks. */
+export const STEM_STYLES = new Set(['stemswap', 'drumbridge', 'vocalcarry', 'acapellain']);
+const BLEND_STYLES = new Set(['blend', 'bassswap', 'crossfade', 'filter', 'stemswap', 'drumbridge', 'vocalcarry', 'acapellain', 'pingpong']);
 const LENGTHS = [4, 8, 16, 32];
 /** Longest overlap each blend style is used for (bars). */
-const MAX_BARS = { blend: 32, stemswap: 32, filter: 16, crossfade: 16, bassswap: 8 };
+const MAX_BARS = { blend: 32, stemswap: 32, drumbridge: 16, vocalcarry: 16, acapellain: 16, pingpong: 8, filter: 16, crossfade: 16, bassswap: 8 };
 /** Prior per style: how good the style is "in general", before the tracks are looked at. Novelty styles are rare. */
-const PRIOR = { blend: 4, stemswap: 5, bassswap: 2.5, filter: 1.5, crossfade: 0, echo: 1, cut: -1, loop: -1.5, reverb: -1, backspin: -4, brake: -4.5 };
+const PRIOR = { blend: 4, stemswap: 5, drumbridge: 1, vocalcarry: 0.5, acapellain: 0.5, pingpong: -2, bassswap: 2.5, filter: 1.5, crossfade: 0, echo: 1, cut: -1, loop: -1.5, reverb: -1, backspin: -4, brake: -4.5 };
 export const BIAS_LIMIT = 5;
 
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
@@ -98,6 +101,8 @@ export function planBestTransition(out, inn, opts = {}) {
   const stemsBoth = !!(opts.stemsOut && opts.stemsIn);
   const allowed = new Set(opts.styles || PLANNER_STYLES);
   const inStart = incomingStart(inn || {});
+  // genre family of the pair (P2.1): technique preferences, blend lengths and the effect budget
+  const famId = opts.family !== undefined ? opts.family : pairFamily(out, inn), fam = FAMILIES[famId] || null;
   const outBar = ba ? 240 / ba : 2, inBar = bb ? 240 / bb : 2;
   const cands = [];
 
@@ -108,19 +113,32 @@ export function planBestTransition(out, inn, opts = {}) {
 
   for (const style of PLANNER_STYLES) {
     if (!allowed.has(style)) continue;
-    if (style === 'stemswap' && !stemsBoth) continue;
+    if (STEM_STYLES.has(style) && !stemsBoth) continue;
+    if (style === 'pingpong' && famId !== 'open') continue; // a chop between records: open format only
     const blend = BLEND_STYLES.has(style);
     if (blend && (!grid || bigJump)) continue; // never beat-match far off a track's tempo, nor without beat grids
     if (!grid && !['echo', 'cut', 'reverb'].includes(style)) continue; // spins, brakes and loops need a beat grid
     const base = [[PRIOR[style] ?? 0, null], [bias[style] || 0, bias[style] > 0.5 ? 'you often pick it' : bias[style] < -0.5 ? 'you often change it' : null]];
-    if (opts.prevStyle && opts.prevStyle === style) base.push([opts.vary ? -5 : -1.5, 'same as the last transition']);
+    // variety: an effect never twice running; with "vary styles" other styles rotate too, except the core EQ blends
+    // of club music (house, techno, trance, drum & bass DJs blend transition after transition)
+    const clubCore = ['house', 'techno', 'trance', 'bass'].includes(famId) && ['blend', 'bassswap', 'stemswap'].includes(style);
+    if (opts.prevStyle && opts.prevStyle === style) base.push([EFFECT_STYLES.has(style) ? -5 : opts.vary && !clubCore ? -6.5 : -1.5, 'same as the last transition']);
     if (opts.recent?.includes(style)) base.push([-0.8, null]);
+    if (fam?.prior[style]) base.push([fam.prior[style], fam.prior[style] >= 1 ? `${fam.label}: ${style === 'cut' ? 'cut on the 1' : style === 'blend' ? 'long EQ blend' : style}` : null]);
+    // effects are seasoning: past the family's budget they are held back (P2.6)
+    if (EFFECT_STYLES.has(style) && effectsOverBudget(opts.recent, fam?.fxBudget ?? 0.3)) base.push([-2.5, null]);
 
     if (blend) {
       const lengths = opts.fixedBars ? [opts.fixedBars] : [...new Set([...LENGTHS, ...(opts.candidateBars || [])])]
         .filter((b) => Number.isInteger(b) && b >= 4 && b <= (MAX_BARS[style] || 16));
       for (const bars of lengths) {
+        // key lock artefacts show beyond about 6 %: further than that only a quick 4-bar bass swap beat-matches
+        if (d > Math.log(1.06) && !(style === 'bassswap' && bars <= 4)) continue;
         const p = [...base];
+        if (fam) {
+          if (bars > fam.maxBars) p.push([-(bars - fam.maxBars) * 0.4, `long for ${fam.label}`]);
+          else if (fam.bestBars.includes(bars)) p.push([0.8, null]);
+        }
         // tempo: the incoming track plays at the outgoing tempo for the whole overlap
         if (d > 0.005) p.push([-d * 100 * (0.5 + bars / 16), d > 0.03 ? `${Math.round((Math.exp(d) - 1) * 100)} % tempo gap` : null]);
         // key
@@ -145,12 +163,20 @@ export function planBestTransition(out, inn, opts = {}) {
         const vo = vocalsBetween(out, w.start, w.start + len), vi = vocalsBetween(inn, inStart, inStart + len * (inBar / outBar));
         const overlap = Math.min(vo.v, vi.v), conf = vo.known && vi.known ? 1 : vo.known || vi.known ? 0.75 : 0.5;
         let vocals = null, keep = 1;
-        if (style === 'stemswap') keep = 0.1;
+        if (STEM_STYLES.has(style)) keep = 0.1;
+        if (style === 'pingpong') keep = 0; // the records alternate: never both heard
         else if (overlap > 0.2 && style !== 'crossfade') { vocals = 'hold-in'; keep = opts.stemsIn ? 0.3 : 0.6; }
         const vPen = overlap * bars * 1.6 * conf * keep;
         if (vPen > 0.2) p.push([-vPen, keep < 1 || overlap < 0.3 ? null : `vocals would overlap${vo.known && vi.known ? '' : ' (estimated)'}`]);
         if (vocals) p.push([0, `incoming vocals held back until the swap${opts.stemsIn ? ' (AI stems)' : ''}`]);
         if (style === 'stemswap') p.push([overlap > 0.2 ? 2.5 : 1, 'stem swap: drums, then bass, vocals last']);
+        // drum bridge: only drums overlap, so keys and genres never clash (and a tempo gap is hidden)
+        if (style === 'drumbridge') p.push([(clash ? 4 : 0) + (g === 0 ? 2 : 0) + (d > 0.03 ? 1.5 : 0), clash || g === 0 ? 'drum bridge: only the drums overlap' : null]);
+        // acapella carry: the outgoing vocal rides over the incoming instrumental (keys must match)
+        if (style === 'vocalcarry') p.push(key.value >= 0.8 && vo.v > 0.4 && vi.v < 0.3 ? [3, 'acapella carry: the outgoing vocal over the new beat'] : [-6, null]);
+        // acapella in: the incoming vocal comes in over the outgoing instrumental before its drop
+        if (style === 'acapellain') p.push(key.value >= 0.8 && vi.v > 0.4 && vo.v < 0.3 ? [3, 'acapella in: the new vocal over the outgoing beat'] : [-6, null]);
+        if (style === 'pingpong') p.push(bars === 8 ? [clash ? 3 : 1, 'ping-pong: the two records trade bars'] : [-4, null]);
         add(style, bars, p, { vocals });
       }
     } else {
@@ -181,7 +207,7 @@ export function planBestTransition(out, inn, opts = {}) {
   for (const c of cands) { if (seen.has(c.style)) continue; seen.add(c.style); options.push({ style: c.style, bars: c.bars, score: Math.round(c.score * 10) / 10 }); if (options.length >= 4) break; }
   return {
     style: best.style, bars: best.bars, beats: best.bars * 4, vocals: best.vocals || null, score: Math.round(best.score * 10) / 10,
-    why: `planned: ${[...new Set(reasons)].slice(0, 3).join(', ') || 'best fit for these two tracks'}`,
+    why: `planned: ${[...new Set(reasons)].slice(0, 3).join(', ') || 'best fit for these two tracks'}`, family: famId || null,
     lengthWhy: `${best.bars} bars (planned)`, options,
   };
 }
@@ -191,6 +217,27 @@ export function planBestTransition(out, inn, opts = {}) {
  * The incoming drums come in first under the outgoing track, then its music, the bass swaps at the middle, the
  * outgoing vocals leave, and the incoming vocals enter only after them.
  */
+export function stemLevels(style, k) {
+  k = clamp01(k);
+  const e = (a, b) => { const x = clamp01((k - a) / (b - a)); return x * x * (3 - 2 * x); };
+  if (style === 'drumbridge') {
+    // outgoing strips to its drums, the incoming drums join, then the outgoing drums leave; a few bars of drums only
+    // (the bridge), then the incoming bass, music and vocals: [vocals, drums, bass, other]
+    return { inn: [e(0.86, 0.98), e(0.4, 0.55), e(0.74, 0.78), e(0.78, 0.92)], out: [1 - e(0, 0.2), 1 - e(0.6, 0.74), 1 - e(0.3, 0.36), 1 - e(0.05, 0.3)], inVol: 0.8, outVol: 0.8 * (1 - e(0.9, 1)) };
+  }
+  if (style === 'vocalcarry') {
+    // the incoming instrumental takes over under the outgoing vocal (bass swap at the middle); the incoming vocal only
+    // after the outgoing one has finished
+    const swap = e(0.48, 0.52);
+    return { inn: [e(0.88, 0.98), e(0, 0.25), swap, e(0.3, 0.55)], out: [1 - e(0.8, 0.88), 1 - e(0.4, 0.55), 1 - swap, 1 - e(0.3, 0.5)], inVol: 0.8, outVol: 0.8 * (1 - e(0.9, 1)) };
+  }
+  if (style === 'acapellain') {
+    // the outgoing vocal leaves first; the incoming vocal alone over the outgoing beat; at 3/4 the incoming band drops in
+    const swap = e(0.74, 0.77);
+    return { inn: [e(0.25, 0.4), e(0.72, 0.76), swap, e(0.72, 0.78)], out: [1 - e(0, 0.22), 1 - e(0.74, 0.8), 1 - swap, 1 - e(0.74, 0.85)], inVol: 0.8, outVol: 0.8 * (1 - e(0.85, 1)) };
+  }
+  return stemSwapLevels(k);
+}
 export function stemSwapLevels(k) {
   k = clamp01(k);
   const e = (a, b) => { const x = clamp01((k - a) / (b - a)); return x * x * (3 - 2 * x); };

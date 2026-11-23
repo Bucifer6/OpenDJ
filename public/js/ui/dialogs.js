@@ -518,7 +518,17 @@ export class Dialogs {
       el('label', { class: 'check' }, chk(am.keySync, (v) => amSet({ keySync: v })), ' Fix key clashes with Key Sync'),
       el('label', { class: 'check' }, chk(am.restoreTempo !== false, (v) => amSet({ restoreTempo: v })), ' Ease each track back to its original tempo after the transition'),
       field('Loading a track on the deck automix is playing', sel(am.onAirLoad || 'ask', [['ask', 'Ask'], ['queue', 'Play it next'], ['stop', 'Stop automix and load it']], (v) => amSet({ onAirLoad: v })), 'Loading on the other deck always makes the track the next one; during a transition it is queued next.'),
-      field('Smart mix set shape', sel(am.shape || 'warmup', SET_SHAPES, (v) => amSet({ shape: v }))),
+      field('Smart mix set shape', sel(am.shape || 'warmup', SET_SHAPES, (v) => amSet({ shape: v })), 'Party follows the clock: background energy early in the evening, a peak around midnight to 2 am, deeper after 4 am, with a dip before the main peak.'),
+      el('h4', {}, 'Party mode'),
+      el('label', { class: 'check' }, chk(am.watchdog !== false, (v) => amSet({ watchdog: v })), ' Safety net: if the music stops or goes silent, restore the level or start the next track'),
+      el('label', { class: 'check' }, chk(am.levelMatch !== false, (v) => amSet({ levelMatch: v })), ' Level matching: every track at the same loudness (from its loudest main section)'),
+      el('label', { class: 'check' }, chk(am.tempoMorph === true, (v) => amSet({ tempoMorph: v })), ' Ride the tempo across blends (up to 4 %) instead of easing it back afterwards (experimental: the phase keeper relies on steady tempos during a blend)'),
+      el('label', { class: 'check' }, chk(am.doubleDrops !== false, (v) => amSet({ doubleDrops: v })), ' Double drops in drum & bass / dubstep sets'),
+      field('Tricks inside tracks', sel(am.tricks || 'subtle', [['off', 'Off'], ['subtle', 'Subtle (bass teases, filter builds)'], ['party', 'Party (also loop rolls, pause drops, rewinds, horns)']], (v) => amSet({ tricks: v })), 'Tricks land on the downbeat of a drop or phrase, never over vocals, spaced out and only when the energy calls for it.'),
+      field('End the set at', (() => { const i = el('input', { class: 'inp', type: 'time', value: am.endAt || '' }); i.addEventListener('change', () => amSet({ endAt: i.value })); return i; })(), 'Optional clock time: the energy winds down towards it, nothing new is queued in the last minutes, and the last track fades out in a reverb wash. Empty: no end time.'),
+      el('label', { class: 'check' }, chk(!!am.cleanOnly, (v) => amSet({ cleanOnly: v })), ' Clean versions only (skip tracks tagged or titled "Explicit" / "Dirty")'),
+      el('label', { class: 'check' }, chk(am.finale !== false, (v) => amSet({ finale: v })), ' Fade the last track out in a reverb wash when the set ends'),
+      el('div', { class: 'field' }, el('button', { class: 'btn sm', type: 'button', onclick: () => { amSet({ banned: [] }); app.toast?.('Automix may play every track again'); } }, 'Allow "never play" tracks again'), el('small', { class: 'hint' }, `${(am.banned || []).length} track(s) set to never play.`)),
       amSmart.el,
     );
     const dlIn = el('input', { class: 'inp', value: s.downloadDir });
