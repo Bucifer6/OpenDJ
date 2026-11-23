@@ -1,5 +1,5 @@
 // Bounded, deterministic section search. No decoding, network, models, or PCM on the playback thread.
-import { planBestTransition, vocalsBetween } from './mix-planner.js';
+import { planBestTransition, vocalsBetween, STEM_STYLES } from './mix-planner.js';
 import { planTransition, incomingStart, DROP_STYLES, outroBars } from './automix.js';
 import { camelotRelation } from './smartmix.js';
 import { decodeVocalMap } from './shared/vocal-map.js';
@@ -201,7 +201,7 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
     const eo = localEnergy(out, timing.begin, finish), ei = localEnergy(inn, cue, cue + Math.max(2, inSpan));
     const harmonic = camelotRelation(out.key, inn.key);
     // Compare actual windows. Holding quick-stem vocals is not treated as perfect source separation.
-    const vocalCost = drop ? vo.v * 2 : Math.min(vo.v, vi.v) * (p.style === 'stemswap' ? 2 : 12);
+    const vocalCost = drop ? vo.v * 2 : Math.min(vo.v, vi.v) * (STEM_STYLES.has(p.style) ? 2 : p.style === 'pingpong' ? 0 : 12);
     const clashCost = !drop && harmonic.kind === 'clash' ? Math.min(8, inSpan / 4) : 0;
     // music left unplayed in the outgoing track, and the incoming intro skipped, both cost: a DJ mixes out late and
     // in early, and only moves off those points to avoid two voices or a bad key / energy match
@@ -241,7 +241,7 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
       continue;
     }
     if (!best || score > best.score) best = { ...p, score, timing, exit, inStart: cue,
-      vocals: !drop && !['stemswap', 'crossfade'].includes(p.style) && Math.min(vo.v, vi.v) > 0.2 ? 'hold-in' : null,
+      vocals: !drop && !STEM_STYLES.has(p.style) && !['crossfade', 'pingpong'].includes(p.style) && Math.min(vo.v, vi.v) > 0.2 ? 'hold-in' : null,
       confidence: lowConfidence ? 'low' : vo.known && vi.known ? 'measured-vocals' : 'estimated',
       landed, landing: landed ? landing : null, doubleDrop: false, swapIn: null, check, beatSafety: safety, loopOut: looped ? loopOut : null,
       why: `${p.why}${landed ? '; the incoming main part lands on the phrase' : ''}${looped ? '; the outgoing last phrase loops to make room' : ''}${safety === 'short' ? '; beat not steady here: short overlap' : ''}; section search: ${timing.begin.toFixed(1)}s → ${cue.toFixed(1)}s${lowConfidence ? '; uncertain grid: no beat-matched overlap' : ''}` };

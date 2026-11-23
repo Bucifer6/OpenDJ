@@ -255,3 +255,48 @@ test('P2.2 / P0.4: loop-extend for a short ending, and beat safety per region', 
   const steady = planAdaptiveTransition({ ...drift, phrases: [sec('intro', 0, 16), sec('verse', 16, 96), sec('outro', 96, 128)] }, inn, { position: 60 * bar, entry: 0, minPlay: 0 });
   assert.equal(steady.beatSafety, 'long');
 });
+
+test('P2.5 / P5: stem recipes and ping-pong keep one bassline and one vocal', async () => {
+  const { stemLevels, planBestTransition } = await import('../public/js/mix-planner.js');
+  const { mixLevels, twoBasslines } = await import('../public/js/automix.js');
+  for (const style of ['stemswap', 'drumbridge', 'vocalcarry', 'acapellain']) {
+    for (let k = 0; k <= 1.0001; k += 0.01) {
+      const L = stemLevels(style, k);
+      assert.ok(!(L.inn[2] > 0.1 && L.out[2] > 0.1 && Math.min(L.inn[2], L.out[2]) > 0.5), `${style} k=${k.toFixed(2)}: two basslines`);
+      assert.ok(!(L.inn[0] > 0.3 && L.out[0] > 0.3), `${style} k=${k.toFixed(2)}: two vocals`);
+    }
+    assert.deepEqual(stemLevels(style, 1).inn, [1, 1, 1, 1]);
+  }
+  // drum bridge: a moment of drums only
+  const mid = stemLevels('drumbridge', 0.66);
+  assert.ok(mid.out[0] === 0 && mid.out[2] === 0 && mid.out[3] === 0 && mid.inn[0] === 0 && mid.inn[2] === 0, 'drums only');
+  // acapella carry: outgoing vocal over the incoming instrumental
+  const vc = stemLevels('vocalcarry', 0.7);
+  assert.ok(vc.out[0] === 1 && vc.out[1] < 0.01 && vc.inn[1] === 1 && vc.inn[0] === 0);
+  for (let k = 0; k <= 1; k += 0.01) assert.ok(!twoBasslines(mixLevels('pingpong', k)));
+  // the planner picks a drum bridge for a key clash when both decks have stems
+  const bpm = 124, bar = 240 / bpm;
+  const t = (key) => ({ bpm, key, energy: 6, genre: 'House', duration: 112 * bar, endTime: 112 * bar, mixIn: 0, mixOut: 96 * bar, downbeat: 0, gridOffset: 0,
+    phrases: [{ start: 0, end: 16 * bar, type: 'intro' }, { start: 16 * bar, end: 96 * bar, type: 'drop' }, { start: 96 * bar, end: 112 * bar, type: 'outro' }] });
+  const p = planBestTransition(t('8A'), t('3B'), { stemsOut: true, stemsIn: true });
+  assert.ok(['drumbridge', 'stemswap', 'filter'].includes(p.style), `${p.style}: ${p.why}`);
+  assert.ok(p.options.some((o) => o.style === 'drumbridge'));
+});
+
+test('P5: scratch fill only with a scratch sound loaded; light cues follow tricks', async () => {
+  const { planTricks } = await import('../public/js/automix-tricks.js');
+  const bpm = 96, bar = 240 / bpm;
+  const sec = (type, a, b) => ({ type, start: a * bar, end: b * bar });
+  const hip = { genre: 'Hip-Hop', bpm, energy: 7, bpmConfidence: 0.9, phrases: [sec('intro', 0, 8), sec('verse', 8, 24), sec('chorus', 24, 32), sec('verse', 32, 48), sec('chorus', 48, 56)] };
+  const ctx = { from: 4 * bar, to: 60 * bar, mode: 'party', phase: 'peak', familiar: true, nowMs: 0, positionToMs: (s) => s * 1000 };
+  const without = planTricks(hip, ctx).map((e) => e.id), withS = planTricks(hip, { ...ctx, hasScratch: true }).map((e) => e.id);
+  assert.ok(!without.includes('scratchFill'));
+  assert.ok(withS.length >= 1);
+  const { AutoMix } = await import('../public/js/automix.js');
+  const calls = [];
+  const app = { engine: { on() {}, decks: [], channels: [], ctx: { currentTime: 0 } }, settings: { automix: {} }, lighting: { enabled: true, setLive: async (p) => { calls.push(p); } } };
+  const am = new AutoMix(app);
+  am.lightCue('blackout', 0, 0.2);
+  await new Promise((r) => setTimeout(r, 400));
+  assert.deepEqual(calls, [{ blackout: true }, { blackout: false }]);
+});

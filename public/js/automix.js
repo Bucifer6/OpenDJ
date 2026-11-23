@@ -14,7 +14,7 @@ import { smartMix, liveNext, shuffle, camelotRelation, genreSimilarity, explain,
 import { planTricks, rollSize } from './automix-tricks.js';
 import { decodeVocalMap } from './shared/vocal-map.js';
 import { t } from './i18n.js';
-import { planBestTransition, stemSwapLevels, learnChoice } from './mix-planner.js';
+import { planBestTransition, stemLevels, learnChoice, STEM_STYLES } from './mix-planner.js';
 import { planAdaptiveTransition } from './adaptive-dj.js';
 import { Watchdog, quietAt } from './automix-watchdog.js';
 import { echoBeatsFor, styleFamily } from './dj-styles.js';
@@ -302,6 +302,11 @@ export function mixLevels(style, k, kSwap = null) {
       outVol: 0.8 * (k < 0.75 ? 1 : 1 - ease((k - 0.75) / 0.25)), inHigh: k < 0.25 ? -0.5 + k * 2 : 0,
     };
   }
+  if (style === 'pingpong') {
+    // the records trade bars (8 segments), the last two belong to the incoming one: only one is ever heard
+    const seg = Math.min(7, Math.floor(clamp01(k) * 8)), inOn = seg % 2 === 1 || seg >= 6;
+    return { inVol: inOn ? 0.8 : 0, outVol: inOn ? 0 : 0.8, inLow: inOn ? 0 : -1, outLow: inOn ? -1 : 0 };
+  }
   // one bassline at a time (P1.2): beat-matched kicks add up in phase (+6 dB), which no fader curve hides, so the
   // filter and crossfade styles also hand the low band over in one move, at the swap point (default: the middle)
   const swapped = kSwap != null ? k >= kSwap : k >= 0.55;
@@ -347,6 +352,10 @@ export const STYLES = [
   ['blend', 'Smooth blend (EQ, bass swap on the phrase)'],
   ['bassswap', 'Bass swap (quick)'],
   ['stemswap', 'Stem swap (drums, bass, then vocals; needs AI stems)'],
+  ['drumbridge', 'Drum bridge (only the drums overlap; needs AI stems)'],
+  ['vocalcarry', 'Acapella carry (outgoing vocal over the new beat; needs AI stems)'],
+  ['acapellain', 'Acapella in (new vocal over the outgoing beat; needs AI stems)'],
+  ['pingpong', 'Ping-pong (the records trade bars, then cut)'],
   ['crossfade', 'Crossfade'],
   ['filter', 'Filter sweep'],
   ['echo', 'Echo out, drop in'],
@@ -365,7 +374,7 @@ export const DROP_STYLES = new Set(['echo', 'cut', 'backspin', 'brake', 'loop', 
 /** Drop styles: beats of effect before the drop, beats of tail after it. */
 const DROP_TIMING = { echo: [8, 8], reverb: [8, 8], cut: [0, 0], backspin: [2, 0], brake: [4, 0], loop: [16, 0] };
 /** "Vary styles": alternatives that suit the same situation. */
-const VARIANTS = { blend: ['blend', 'bassswap', 'filter'], stemswap: ['stemswap', 'blend', 'bassswap'], bassswap: ['bassswap', 'blend', 'filter'], crossfade: ['crossfade', 'blend'], filter: ['filter', 'blend', 'reverb'], echo: ['echo', 'reverb', 'loop'], cut: ['cut', 'backspin', 'loop'], backspin: ['backspin', 'brake', 'cut'], brake: ['brake', 'backspin', 'echo'], loop: ['loop', 'echo', 'cut'], reverb: ['reverb', 'echo', 'filter'] };
+const VARIANTS = { blend: ['blend', 'bassswap', 'filter'], stemswap: ['stemswap', 'blend', 'bassswap'], drumbridge: ['drumbridge', 'stemswap', 'blend'], vocalcarry: ['vocalcarry', 'stemswap', 'blend'], acapellain: ['acapellain', 'stemswap', 'blend'], pingpong: ['pingpong', 'cut', 'bassswap'], bassswap: ['bassswap', 'blend', 'filter'], crossfade: ['crossfade', 'blend'], filter: ['filter', 'blend', 'reverb'], echo: ['echo', 'reverb', 'loop'], cut: ['cut', 'backspin', 'loop'], backspin: ['backspin', 'brake', 'cut'], brake: ['brake', 'backspin', 'echo'], loop: ['loop', 'echo', 'cut'], reverb: ['reverb', 'echo', 'filter'] };
 const hashIdx = (s, n) => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return Math.abs(h) % n; };
 
 /**
@@ -1234,7 +1243,8 @@ export class AutoMix extends Emitter {
     t.vocalMap = t.vocalMap || decodeVocalMap(t.stems?.vocals);
     const bar = 240 / (deck.bpm || 120), rate = deck.rate || 1, now = Date.now(), pos = deck.position || 0;
     const to = (nt ? nt.begin : (deck.duration || 0) - 32 * bar) - 8 * bar;
-    const events = planTricks(t, { from: pos + 2 * bar, to, mode, phase: this.setPhase(), familiar: isFamiliar(this.fresh(deck.track), this.famInfo || familiarityInfo(this.queue)),
+    const hasScratch = (this.engine.sampler?.slots || []).some((x) => x?.buffer && /scratch/i.test(`${x.sound || ''} ${x.name || ''}`));
+    const events = planTricks(t, { from: pos + 2 * bar, to, mode, phase: this.setPhase(), hasScratch, familiar: isFamiliar(this.fresh(deck.track), this.famInfo || familiarityInfo(this.queue)),
       history: this.trickHistory || [], nowMs: now, positionToMs: (sec) => now + (sec - pos) / rate * 1000 });
     this.trickPlan = { key, deck, events };
   }
@@ -1258,9 +1268,14 @@ export class AutoMix extends Emitter {
     ev.done = true;
     (this.trickHistory ||= []).push({ id: ev.id, atMs: Date.now() });
     if (ev.id === 'bassTease' || ev.id === 'grooveLift') ch.scheduleEq?.({ eqLow: -1 }, atStart);
-    else if (ev.id === 'pauseDrop') { ch.scheduleEq?.({ eqLow: -1, eqMid: -1, eqHigh: -1 }, atStart); this._trickSilence = true; }
+    else if (ev.id === 'pauseDrop') { ch.scheduleEq?.({ eqLow: -1, eqMid: -1, eqHigh: -1 }, atStart); this._trickSilence = true; this.lightCue('blackout', atStart, atRes - atStart); this.lightCue('strobe', atRes, 4 * beatSec); }
     else if (ev.id === 'echoFreeze') { ch.set('fxType', 'echo'); ch.set('fxBeats', 0.5); ch.set('fxParam', 0.85); ch.set('fxMix', 0.5); ch.set('fxOn', true); }
-    else if (ev.id === 'horn') {
+    else if (ev.id === 'scratchFill') {
+      const sm = this.engine.sampler, i = sm?.slots?.findIndex((x) => x?.buffer && /scratch/i.test(`${x.sound || ''} ${x.name || ''}`));
+      if (i >= 0) sm.trigger(i, { when: atStart, velocity: 0.7 });
+      this.trick = null; this.emit('trick', ev); return;
+    } else if (ev.id === 'horn') {
+      this.lightCue('strobe', atRes, 4 * beatSec);
       const sm = this.engine.sampler, i = sm?.slots?.findIndex((s) => s?.sound === 'airhorn' && s.buffer);
       if (i >= 0) sm.trigger(i, { when: atRes, velocity: 0.55 });
       this.trick = null; this.emit('trick', ev); return;
@@ -1281,12 +1296,25 @@ export class AutoMix extends Emitter {
     if (ev.id === 'rewind') {
       if (!tr.restarted && ctxT >= tr.spinEnd + 0.05) {
         tr.restarted = true; d.seek(ev.restart ?? Math.max(0, ev.at - 16 * 4 * tr.beatSec)); d.play({ at: ctxT + 0.03, instant: true });
+        this.lightCue('strobe', ctxT + 0.03, 4 * tr.beatSec);
         this._trickSilence = false; this.trickPlan = null; this.upcoming = null; this.trick = null;
       }
       return;
     }
     if (tr.atRes - ctxT <= 0.15) this.endTrick(false);
   }
+  /**
+   * Light cue for a trick (P5): 'blackout' or 'strobe' on the lighting show from audio time `at` for `seconds`, when
+   * lighting is enabled. The show's own phrase-driven looks carry on around it.
+   */
+  lightCue(kind, at, seconds) {
+    const lt = this.app.lighting;
+    if (!lt?.enabled || typeof lt.setLive !== 'function' || this.opts.lightCues === false) return;
+    const now = this.engine.ctx?.currentTime ?? 0, ms = (x) => Math.max(0, (x - now) * 1000);
+    setTimeout(() => lt.setLive({ [kind]: true }).catch?.(() => {}), ms(at));
+    setTimeout(() => lt.setLive({ [kind]: false }).catch?.(() => {}), ms(at + Math.max(0.2, seconds)));
+  }
+
   /** Resolve the trick on its downbeat (scheduled), or undo it at once (abort). */
   endTrick(abort) {
     const tr = this.trick; if (!tr) return;
@@ -1325,7 +1353,7 @@ export class AutoMix extends Emitter {
     let { style, why, plan: planned } = this.styleFor(this.idx, this.app.library?.track?.(out.track.id) || out.track) || { style: 'blend' };
     if (upcoming?.adaptive) { style = upcoming.style; why = upcoming.why; planned = upcoming.adaptive; }
     let vocals = planned?.vocals || null;
-    if (style === 'stemswap' && !(out.stemsReady && inn.stemsReady)) { style = 'blend'; vocals = 'hold-in'; why = `${why ? why + '; ' : ''}AI stems not loaded on both decks: smooth blend`; }
+    if (STEM_STYLES.has(style) && !(out.stemsReady && inn.stemsReady)) { style = 'blend'; vocals = 'hold-in'; why = `${why ? why + '; ' : ''}AI stems not loaded on both decks: smooth blend`; }
     if (!out.playing) style = 'cut'; // the outgoing track already ended: just start the next one
     if (DROP_STYLES.has(style) && (!out.bpm || !inn.bpm) && style !== 'echo' && style !== 'cut') style = 'echo';
     // a big tempo gap (> 8 %, half / double time allowed) is never beat-matched: a blend would play the incoming track
@@ -1393,7 +1421,7 @@ export class AutoMix extends Emitter {
       const lenIn = upcoming?.adaptive ? len * (inn.rate || 1) / (out.rate || 1) : inn.bpm && out.bpm ? (len / out.beatLen) * inn.beatLen : len;
       Object.assign(tr, { dur: durWall * 1000, inStart, swapAt: upcoming?.adaptive?.swapIn ?? (SWAP_STYLES.has(style) ? phraseSwapPoint(ii, inStart, lenIn) : null), kSwap: null });
       if (tr.vocals === 'hold-in') chI.set('vocal', 0);
-      if (style === 'stemswap') this.applyStemSwap(tr, 0);
+      if (STEM_STYLES.has(style)) this.applyStemSwap(tr, 0);
     }
     this.transition = tr; this._skipNext = false;
     this._lastStyle = style;
@@ -1433,7 +1461,8 @@ export class AutoMix extends Emitter {
       } else if (ahead <= 0 || k >= 0.9) tr.kSwap = k;
     }
     if (tr.morph && tr.out.isMaster !== false) { const v = tr.morph.from + (tr.morph.to - tr.morph.from) * ease(clamp01(k / 0.9)); if (Math.abs(v - (tr.out.tempo || 0)) > 0.01) tr.out.setTempo(v); }
-    if (tr.style === 'stemswap') { this.applyStemSwap(tr, k); if (k >= 1) this.finishTransition(); return; }
+    if (STEM_STYLES.has(tr.style)) { this.applyStemSwap(tr, k); if (k >= 1) this.finishTransition(); return; }
+    if (tr.style === 'pingpong') return this.stepPingPong(tr, k, chO, chI);
     this.keepPhase(tr, k);
     const L = mixLevels(tr.style, k, tr.kSwap);
     if (tr.doubleDrop) { const f = doubleDropTrim(k, tr.kSwap); if (L.inVol != null) L.inVol *= f; if (L.outVol != null) L.outVol *= f; }
@@ -1469,9 +1498,29 @@ export class AutoMix extends Emitter {
     if (bend !== (inn.bend || 0)) { inn.setBend(bend); tr.phaseBend = true; }
   }
 
-  /** Stem swap: per-stem levels on both decks (AI stems), see stemSwapLevels in mix-planner.js. */
+  /**
+   * Ping-pong (P5): the two beat-matched records trade the floor bar by bar (both faders up, the deck that is off has
+   * its EQ killed, switched on the audio clock exactly on each bar line), then the incoming one stays.
+   */
+  stepPingPong(tr, k, chO, chI) {
+    const ctxT = this.engine.ctx?.currentTime, d = tr.out;
+    if (!Number.isFinite(ctxT) || !d.bpm) { if (k >= 1) this.finishTransition(); return; }
+    if (!tr.pp) { tr.pp = { n: Math.max(2, Math.round((tr.dur / 1000) / (4 * 60 / (d.effectiveBpm || d.bpm)))), next: 0 }; chI.set('volume', 0.8); chO.set('volume', 0.8); chI.scheduleEq?.({ eqLow: -1, eqMid: -1, eqHigh: -1 }, ctxT); }
+    const bar = 4 * 60 / (d.effectiveBpm || d.bpm), pp = tr.pp;
+    while (pp.next < pp.n) {
+      const at = tr.t0 / 1000 + pp.next * bar; // bar lines from the transition start (audio clock)
+      if (at - ctxT > 0.15) break;
+      const inOn = pp.next % 2 === 1 || pp.next >= pp.n - 2; // the last two bars: the incoming record
+      const full = { eqLow: 0, eqMid: 0, eqHigh: 0 }, kill = { eqLow: -1, eqMid: -1, eqHigh: -1 };
+      chI.scheduleEq?.(inOn ? full : kill, at); chO.scheduleEq?.(inOn ? kill : full, at);
+      pp.next++;
+    }
+    if (k >= 1) { chO.set('volume', 0); this.finishTransition(); }
+  }
+
+  /** Stem transitions: per-stem levels on both decks (AI stems), see stemLevels in mix-planner.js. */
   applyStemSwap(tr, k) {
-    const L = stemSwapLevels(k);
+    const L = stemLevels(tr.style, k);
     const chO = this.engine.channels[tr.out.index], chI = this.engine.channels[tr.inn.index];
     chI.set('volume', L.inVol); chO.set('volume', L.outVol);
     const put = (deck, lv) => lv.forEach((v, i) => { const was = deck.stemLevels?.[i] ?? 1; if (was !== v && (Math.abs(was - v) > 0.004 || v === 0 || v === 1)) deck.setStemLevel?.(i, v); });
@@ -1537,8 +1586,8 @@ export class AutoMix extends Emitter {
     // settings once it has died away (unless the FX unit has been switched on again meanwhile)
     if (tr.tailPost && !aborted) setTimeout(() => { if (!chO.state.fxOn) restoreFx(); }, 8000);
     else restoreFx();
-    for (const ch of [chO, chI]) { ch.set('eqLow', 0); ch.set('eqMid', 0); ch.set('eqHigh', 0); ch.set('filter', 0); if (tr.vocals || tr.style === 'stemswap') ch.set('vocal', 1); }
-    if (tr.style === 'stemswap') for (const d of [out, inn]) for (let i = 0; i < 4; i++) if (d.stemLevels?.[i] !== 1) d.setStemLevel?.(i, 1);
+    for (const ch of [chO, chI]) { ch.set('eqLow', 0); ch.set('eqMid', 0); ch.set('eqHigh', 0); ch.set('filter', 0); if (tr.vocals || STEM_STYLES.has(tr.style)) ch.set('vocal', 1); }
+    if (STEM_STYLES.has(tr.style)) for (const d of [out, inn]) for (let i = 0; i < 4; i++) if (d.stemLevels?.[i] !== 1) d.setStemLevel?.(i, 1);
     if (aborted) {
       // stopping mid-transition: finish the move to the incoming deck so the mixer isn't left half-mixed
       chI.set('volume', 0.8); chO.set('volume', 0.8);

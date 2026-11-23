@@ -22,7 +22,7 @@ export const FAMILIES = {
 };
 
 /** Effect transitions (counted against the family's effect budget). */
-export const EFFECT_STYLES = new Set(['echo', 'reverb', 'backspin', 'brake', 'loop']);
+export const EFFECT_STYLES = new Set(['echo', 'reverb', 'backspin', 'brake', 'loop', 'pingpong']);
 
 const WORDS = [
   ['bass', /\b(drum ?(and|&|n) ?bass|dnb|d&b|jungle|liquid|neuro(funk)?|dubstep|riddim|brostep|bass ?music|halftime|footwork|juke|breakbeat|breaks|uk ?garage|garage|grime)\b/],

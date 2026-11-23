@@ -21,6 +21,7 @@ export const TRICKS = {
   loopRoll: { label: 'loop-roll build', slot: 'preDrop', bars: 2, families: ['house', 'bass', 'open', 'trance'], weight: 1.1, modes: ['party'], minEnergy: 6 },
   pauseDrop: { label: 'pause drop', slot: 'preDrop', bars: 0.25, families: ['open', 'bass', 'house', 'trance'], weight: 1.3, modes: ['party'], familiar: true, minEnergy: 6 },
   echoFreeze: { label: 'echo freeze', slot: 'hookEnd', bars: 1, families: ['open'], weight: 0.9, modes: ['party'], familiar: true, vocal: true },
+  scratchFill: { label: 'scratch fill', slot: 'preDrop', bars: 0.5, families: ['open'], weight: 0.9, modes: ['party'], needs: 'scratch' },
   horn: { label: 'air horn on the drop', slot: 'dropStart', bars: 0, families: ['open'], weight: 0.8, modes: ['party'], minEnergy: 7 },
   rewind: { label: 'rewind', slot: 'afterDrop', bars: 0.5, families: ['bass', 'open'], weight: 1.4, modes: ['party'], familiar: true, minEnergy: 7, peak: true, cooldownMin: 60 },
 };
@@ -86,6 +87,7 @@ export function planTricks(t, ctx = {}) {
       if (!family && !['bassTease', 'filterBuild', 'grooveLift'].includes(id)) continue;
       if (tr.minEnergy && energy < tr.minEnergy) continue;
       if (tr.familiar && !ctx.familiar) continue;
+      if (tr.needs === 'scratch' && !ctx.hasScratch) continue; // a scratch sound must be on a sampler pad
       if (tr.peak && phase !== 'peak') continue;
       const start = s.at - tr.bars * bar;
       if (start < (ctx.from ?? 0)) continue;
