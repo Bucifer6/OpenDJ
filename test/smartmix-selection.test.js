@@ -130,8 +130,8 @@ test('artist gap: hard 8 tracks, soft to 15', () => {
   const histWith = (gap) => [...Array.from({ length: 20 - gap }, (_, i) => T(`f${i}`)), T('same', { artist: 'Repeat' }), ...Array.from({ length: gap - 1 }, (_, i) => T(`g${i}`))];
   const v = (gap) => { const h = histWith(gap); return scoreTransition(h.at(-1), T('x', { artist: 'Repeat' }), { history: h }).parts; };
   assert.equal(v(1).artistGap, 1);
-  assert.equal(v(1).variety, -4);
-  assert.equal(v(8).variety, -2);
+  assert.equal(v(1).variety, -10);
+  assert.equal(v(8).variety, -8);
   assert.ok(v(9).variety > -1 && v(9).variety < 0);
   assert.ok(v(15).variety < 0 && v(15).variety > v(9).variety);
   assert.equal(v(16).variety, 0);

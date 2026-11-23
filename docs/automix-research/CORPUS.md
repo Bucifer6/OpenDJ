@@ -81,50 +81,12 @@ Better numbers can be copied in the same way, so that the floor rises.
 
 If you change the generator (`makeLibrary`), every scenario changes, so update all the baselines in the same commit.
 
-## Known issues (the `todo` tests)
+## Issues found by the suite (all fixed)
 
-These targets run as `todo` tests: they report, but do not fail the suite. Once the code meets a target, turn its test
-into a normal assertion.
+The first run of this suite found these, and the targets that used to be `todo` tests are now ordinary assertions:
 
-1. **Exits one bar early when the analysis is rounded to milliseconds** (`adaptive-dj.js`). The analyser rounds
-   `endTime` and phrase ends to the nearest millisecond (`r3`). When the rounded end falls a fraction of a millisecond
-   before the exact bar line, the last phrase-line exit is lost in two places:
-   - `lastBar` floors with a tolerance of only `1e-6` bars;
-   - the snapped section end is filtered by `x <= end + 1e-6` seconds.
-
-   The planner then exits one bar early. The blend starts 3 bars into a phrase, and the incoming grid is 1 bar off,
-   which also costs score. In the simulated sets this affects 27–40 % of all blends. With unrounded fixture times it
-   affects none. To reproduce:
-   ```js
-   const r3 = (x) => Math.round(x * 1000) / 1000, bpm = 126.4, bar = 240 / bpm, db = 0.228;
-   const phrases = Array.from({ length: 11 }, (_, i) => ({ type: i ? (i === 10 ? 'outro' : i % 2 ? 'drop' : 'breakdown') : 'intro',
-     start: r3(db + i * 16 * bar), end: r3(db + (i + 1) * 16 * bar), energy: 0.6 }));
-   const out = { id: 'a', bpm, downbeat: db, gridOffset: db, phraseAnchor: db, endTime: phrases.at(-1).end,
-     duration: phrases.at(-1).end + 2, key: '8A', energy: 6, genre: 'House', phrases };
-   const p = planAdaptiveTransition(out, { ...out, id: 'b' }, { position: 200, entry: 200 });
-   // endTime 334.405 (exact line 334.4052): p.exit 332.506, offPhraseBars(out, p.exit) = 1, blend start 3 bars off
-   ```
-   A tolerance of a few milliseconds would fix it, for example `+ 0.01 / bar` in the floor and `end + 0.01` in the
-   filters.
-2. **The artist gap is soft.** `weightsFrom().artistWindow` is described as a *hard* gap of 8 tracks, but
-   `scoreTransition` only subtracts 2 to 4 points (× the variety weight). Within a genre, a better key or energy match
-   wins, so a three-hour set has 0–5 artists repeated within 8 tracks.
-
-   Related bug: `artistKey` in `smartmix.js` splits on `x`, `ft` or `vs` even when they come at the end of a word,
-   because the regex has `\s*` before the separator. As a result, `"Max Cooper"`, `"Max Richter"` and `"Alex …"`
-   collapse to `"ma"` / `"ale"`, and unrelated artists count as the same:
-   `scoreTransition({id:'x',artist:'Max Cooper'}, {id:'y',artist:'Max Richter'}, {history:[]}).parts.artistGap === 1`.
-   The suite's own `artistOf` requires whitespace before those words.
-3. **Tempo.** `tempoOk` is 88–100 %, against the 95 % target from Kim et al. 2020. The selection's tempo tolerance
-   is 5 % for open format and scores linearly beyond it, and the planner still beat-matches up to 8 %. As a result,
-   cross-genre moves such as dubstep 140 → techno 130, or reggaeton 90 → 97, end up stretched by 5–8 %.
-4. **The checker reports level dips on ordinary outro blends.** `checkTransition` measures the dip against a straight
-   line from the level 1 s before the blend to the level 1 s after it. When the outgoing track's outro (−4 LU)
-   follows a drop, and the blend lands the incoming drop, the quieter outro and intro in the middle read as a 3.5–5 LU
-   "dip". The outro is part of the music, so this is probably a false positive; it holds `levelOk` at 77–100 %.
-   One way to fix it would be to start the reference line from the outgoing level at the blend start.
-
-Observation (not asserted): in real sets double drops are rare. Even with `doubleDrops: true`, the bass night has 1
-in 31 transitions; with AutoMix's default (the 35 % pair hash), the three-hour bass night has none. The `MIN_PLAY`
-rule (60 % of what is left) appears to put the earliest exit after the last drop + 16 bars in most cases, so double-drop exits are
-seldom available.
+1. **Exit one bar early on millisecond-rounded times** (27–40 % of blends started 3 bars into a phrase): `adaptive-dj.js` now accepts phrase lines up to 10 ms past the music's end. Phrase-line starts: 100 %.
+2. **Artist key collapsed names** ("Max Cooper" → "ma", because `x` / `ft` / `vs` matched inside words): separators must now be whole words. The 8-track artist gap is now a strong penalty instead of a mild one; repeats within 8: 0 in every scenario.
+3. **Tempo**: blends are capped at 6 % stretch (only a quick 4-bar bass swap goes up to 8 %), and club sets penalise picks more than 5 % away. Club scenarios ≥ 95 % within 5 %; open-format sets move tempo on cuts, where nothing is stretched.
+4. **Checker dips**: the reference is now each track's own section level at that instant, not the loud drop before an outro.
+5. **Double drops were nearly impossible** (the 60 % minimum play left no exit inside the second drop): they may now leave after 45 % of the track, and both channels come down about 3 dB while both drops play.

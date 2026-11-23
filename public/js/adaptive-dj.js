@@ -103,14 +103,19 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
   const styles = noOverlap ? (opts.styles || ['echo', 'cut', 'reverb']).filter((s) => ['echo', 'cut', 'reverb'].includes(s)) : opts.styles;
   if (styles && !styles.length) return null;
   // Include the original endpoints as fallbacks; cap both axes independently of library/track size.
-  const lastBar = anchor(out) + Math.floor((end - anchor(out)) / barOf(out) + 1e-6) * barOf(out);
+  // (times are stored to the millisecond: a phrase line a fraction of a millisecond past `end` still counts)
+  const EPS = 0.01;
+  const lastBar = anchor(out) + Math.floor((end + EPS - anchor(out)) / barOf(out)) * barOf(out);
   const exits = [...new Set([lastBar, ...outSections.map((p) => snapPhrase(out, p.end))])]
-    .filter((x) => x > earliest && x <= end + 1e-6).sort((a, b) => a - b);
+    .filter((x) => x > earliest && x <= end + EPS).sort((a, b) => a - b);
   // double drops (P2.3, drum & bass / dubstep): an exit 16 bars into each outgoing drop, so the incoming drop can hit
   // together with it
   const family = pairFamily(out, inn);
+  // a double drop on the outgoing track's second drop is worth leaving a little earlier for (45 % played, not 60 %)
+  const playedDD = Math.min(left * 0.9, Math.max(left * Math.min(share, 0.45), share > 0 ? Math.min(MIN_PLAY_SECONDS * 0.75, left * 0.8) : 0));
+  const earliestDD = Math.min(earliest, anchor(out) + Math.ceil((Math.max(position + barOf(out) * 2, entry + Math.max(Math.min(32, left * 0.5), playedDD)) - anchor(out)) / barOf(out) - 1e-6) * barOf(out));
   const ddExits = family === 'bass' ? outSections.filter((p) => p.type === 'drop').map((p) => snapPhrase(out, p.start + 16 * barOf(out)))
-    .filter((x) => x > earliest && x <= end + 1e-6 && !exits.includes(x)) : [];
+    .filter((x) => x > earliestDD && x <= end + EPS && !exits.includes(x)) : [];
   // loop-extend (P2.2): when the outgoing track ends without a usable outro (radio edits, fade-outs), loop its last
   // clean 8-bar phrase so a full blend still fits; exits 8 and 16 bars past that phrase line
   let loopOut = null;
@@ -178,7 +183,7 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
     }
     const finish = drop ? timing.drop : timing.start + timing.len;
     const inSpan = drop ? 0 : timing.len * ratio / rate;
-    if (timing.begin < earliest - 1e-6 || finish > (looped ? exit : end) + 1e-6 || cue + inSpan > inEnd - 2) continue;
+    if (timing.begin < (dd ? earliestDD : earliest) - 1e-6 || finish > (looped ? exit : end) + EPS || cue + inSpan > inEnd - 2) continue;
     if (looped && (drop || timing.begin > loopOut.end - 1e-6)) continue; // the loop must be playing before the music runs out
     // is beat-matching safe here (P0.4)? per-region beat confidence of both overlap windows
     let safety = 'long';
@@ -221,7 +226,8 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
       if (hit && !measuredClash && harmonic.value >= 0.8 && Math.abs(Math.log(ratio)) <= Math.log(1.02) && Math.min(eo, ei) >= 6 && !opts.recent?.includes('doubledrop')) doubleDrop = true;
     }
     // objective check of the simulated blend (P4.1): loudness bump / dip, two basslines, vocals on vocals, stretch
-    const check = drop ? null : checkTransition(out, inn, { style: p.style, begin: timing.begin, len: timing.len, inStart: cue, ratio: ratio / rate, rate });
+    const check = drop ? null : checkTransition(out, inn, { style: p.style, begin: timing.begin, len: timing.len, inStart: cue, ratio: ratio / rate, rate, doubleDrop,
+      kSwap: doubleDrop && inSpan > 0 ? (landing - cue) / inSpan : undefined });
     if (check) phrasing -= check.penalty;
     if (safety === 'short' && p.bars > 8) phrasing -= (p.bars - 8) * 0.8; // the beat isn't steady enough for a long overlap
     if (looped) phrasing -= 1; // a natural outro is better than a loop

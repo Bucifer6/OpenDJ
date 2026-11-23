@@ -126,6 +126,8 @@ export function planBestTransition(out, inn, opts = {}) {
       const lengths = opts.fixedBars ? [opts.fixedBars] : [...new Set([...LENGTHS, ...(opts.candidateBars || [])])]
         .filter((b) => Number.isInteger(b) && b >= 4 && b <= (MAX_BARS[style] || 16));
       for (const bars of lengths) {
+        // key lock artefacts show beyond about 6 %: further than that only a quick 4-bar bass swap beat-matches
+        if (d > Math.log(1.06) && !(style === 'bassswap' && bars <= 4)) continue;
         const p = [...base];
         if (fam) {
           if (bars > fam.maxBars) p.push([-(bars - fam.maxBars) * 0.4, `long for ${fam.label}`]);

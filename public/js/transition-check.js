@@ -2,7 +2,7 @@
 // automation (mixLevels) and the two tracks' analysis, and reports what a listener would notice: a loudness bump or
 // dip, two basslines at once, vocals on vocals, too much time-stretch, an off-phrase start. Pure and cheap (about a
 // hundred samples per plan), so the planner can check every candidate and the preview can show the result.
-import { mixLevels, twoBasslines, SWAP_STYLES } from './automix.js';
+import { mixLevels, twoBasslines, SWAP_STYLES, doubleDropTrim } from './automix.js';
 import { faderGain, isoKnobGain } from './audio/curves.js';
 
 /** Starting thresholds (research §4 of 03-systems-mir.md). */
@@ -43,13 +43,13 @@ export function checkTransition(out, inn, plan, limits = CHECK_LIMITS) {
   const kSwap = finite(plan.kSwap) ? plan.kSwap : SWAP_STYLES.has(plan.style) || plan.style === 'blend' ? 0.5 : null;
   const beat = out?.bpm ? 60 / out.bpm : 0.5;
   const steps = Math.max(32, Math.min(256, Math.round(len / beat)));
-  const pre = levelAt(out, plan.begin - 1), post = levelAt(inn, plan.inStart + len * ratio + 1);
   let lowBeats = 0, vocalSec = 0;
   for (let i = 0; i <= steps; i++) {
     const k = i / steps, to = plan.begin + k * len, ti = plan.inStart + k * len * ratio;
     const L = mixLevels(plan.style, k, kSwap != null && k >= kSwap ? kSwap : null);
     const vol = (v, d) => faderGain(v ?? d, 'log');
-    const go = vol(L.outVol, 0.8) / faderGain(0.8, 'log'), gi = vol(L.inVol, 0) / faderGain(0.8, 'log');
+    const dd = plan.doubleDrop ? doubleDropTrim(k, kSwap) : 1;
+    const go = vol((L.outVol ?? 0.8) * dd, 0.8) / faderGain(0.8, 'log'), gi = vol((L.inVol ?? 0) * dd, 0) / faderGain(0.8, 'log');
     const eq = (v) => isoKnobGain(v ?? 0);
     const ao = Math.pow(10, levelAt(out, to) / 20) * go, ai = Math.pow(10, levelAt(inn, ti) / 20) * gi;
     // the low band of beat-matched tracks adds up in phase (amplitudes); mids and highs add as powers
@@ -57,9 +57,11 @@ export function checkTransition(out, inn, plan, limits = CHECK_LIMITS) {
     const mid = (Math.pow(ao * eq(L.outMid), 2) + Math.pow(ai * eq(L.inMid), 2)) * BAND_SHARE[1];
     const high = (Math.pow(ao * eq(L.outHigh), 2) + Math.pow(ai * eq(L.inHigh), 2)) * BAND_SHARE[2];
     const heard = toDb(low + mid + high);
-    const expect = pre + (post - pre) * k; // a straight line from the outgoing level to the incoming one
-    metrics.bumpLu = Math.max(metrics.bumpLu, heard - expect);
-    metrics.dipLu = Math.max(metrics.dipLu, expect - heard);
+    // what each track would sound like alone right now (its own section loudness, level-matched): the mix should
+    // never be much louder than the louder of the two (bump), nor fall well below the line from one to the other (dip)
+    const lo = levelAt(out, to), li = levelAt(inn, ti);
+    metrics.bumpLu = Math.max(metrics.bumpLu, heard - Math.max(lo, li));
+    metrics.dipLu = Math.max(metrics.dipLu, lo + (li - lo) * k - heard);
     if (twoBasslines(L) && go > 0.1 && gi > 0.1) lowBeats += len / steps / beat;
     const vo = vocalAt(out, to), vi = vocalAt(inn, ti);
     if (vo != null && vi != null && vo > 0.5 && vi > 0.5 && go > 0.3 && gi > 0.3 && (L.inMid ?? 0) > -0.5) vocalSec += len / steps;

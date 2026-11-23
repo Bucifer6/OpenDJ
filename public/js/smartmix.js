@@ -192,7 +192,8 @@ const OPEN_RE = /hip.?hop|\bpop\b|reggaeton|latin|afro.?beats?|r\s*&\s*b|\brnb\b
 /** Open-format track (hip-hop, pop, reggaeton, latin, afrobeats, r&b, dancehall): looser tempo tolerance. */
 export const isOpenFormat = (t) => !!t && OPEN_RE.test(`${t.genre || ''} ${(t.tags || []).join(' ')}`);
 
-const artistKey = (t) => String(t?.artist || '').toLowerCase().split(/\s*(?:,|&|feat\.?|ft\.?|vs\.?|x)\s+/)[0].trim();
+// main artist: before ", " / " & " / " feat. " / " ft " / " vs " / " x " (whole words: "Max Cooper" stays "max cooper")
+const artistKey = (t) => String(t?.artist || '').toLowerCase().split(/\s*[,&]\s*|\s+(?:feat\.?|ft\.?|featuring|vs\.?|x|with)\s+/)[0].trim();
 
 const GENERIC_TITLES = new Set(['intro', 'outro', 'untitled', 'track', 'interlude', 'skit', 'unknown']);
 const memoTitle = new Map();
@@ -424,7 +425,8 @@ export function scoreTransition(cur, cand, ctx = {}) {
     const tol = isOpenFormat(cur) || isOpenFormat(cand) ? 0.05 : 0.03;
     let s = pct <= 0.015 ? 1 : pct <= tol ? 1 - 0.5 * (pct - 0.015) / (tol - 0.015) : Math.max(0, 0.5 * (1 - (pct - tol) / tol));
     if (Math.abs(Math.log(bb / ba)) > 0.35) s *= 0.85; // half / double time: a feel change
-    parts.bpm = 2 * s - 1 - (d > Math.log(1.08) ? 1 + (d - Math.log(1.08)) * 15 : 0);
+    parts.bpm = 2 * s - 1 - (d > Math.log(1.08) ? 1 + (d - Math.log(1.08)) * 15 : 0)
+      - (tol < 0.05 && d > Math.log(1.05) ? 0.6 : 0); // club sets: real DJs keep 86 % of tracks within 5 % (Kim et al.)
   } else parts.bpm = 0;
   // tempo journey (P1.6): with ctx.targetBpm (the set's planned tempo now), tracks that move the set toward it win a
   // little; half / double time counts as the same tempo
@@ -463,7 +465,8 @@ export function scoreTransition(cur, cand, ctx = {}) {
   const at = ak ? st.artists.lastIndexOf(ak) : -1;
   parts.artistGap = at >= 0 ? st.artists.length - at : null;
   const gap = parts.artistGap;
-  if (gap != null && gap <= hard) v -= 2 + 2 * (hard - gap) / Math.max(1, hard - 1);
+  // the hard gap: an artist back within 8 tracks only wins when every other pick is clearly worse
+  if (gap != null && gap <= hard) v -= 8 + 2 * (hard - gap) / Math.max(1, hard - 1);
   else if (gap != null && gap <= soft) v -= 0.8 * (soft + 1 - gap) / (soft + 1 - hard);
   const sk = songKey(cand);
   const played = ctx.playedIds?.has(cand.id) || st.ids.has(cand.id);

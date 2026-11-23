@@ -316,6 +316,16 @@ export function mixLevels(style, k, kSwap = null) {
   return { inVol: 0.8 * sq(Math.sin(k * Math.PI / 2)), outVol: 0.8 * sq(Math.cos(k * Math.PI / 2)), ...low };
 }
 
+/**
+ * Double drops (P2.3): both tracks play their drop together, so both channels come down about 3 dB after the swap
+ * (fader position factor, gain = vol²), easing back as the outgoing track leaves. 1 outside a double drop's overlap.
+ */
+export function doubleDropTrim(k, kSwap) {
+  if (kSwap == null || k < kSwap) return 1;
+  const p = clamp01((k - kSwap) / Math.max(1e-3, 1 - kSwap));
+  return 0.841 + 0.159 * ease(clamp01((p - 0.5) / 0.5));
+}
+
 /** Styles whose bass hands over at a phrase line during the overlap (see phraseSwapPoint). */
 export const SWAP_STYLES = new Set(['blend', 'filter', 'crossfade']);
 
@@ -1350,7 +1360,7 @@ export class AutoMix extends Emitter {
       if (keysClash(outKey, inn.camelot || inn.track?.key)) { try { inn.keySyncTo(out); } catch (e) { console.warn('keySyncTo failed', e); } }
     }
     const fx = { ...chO.state }; // FX / EQ settings to restore on the outgoing channel afterwards
-    const tr = { skipped: !!this._skipNext, morph, out, inn, style, why, vocals: DROP_STYLES.has(style) ? null : vocals, length: immediate || !out.playing ? null : length, t0: this.now(), fxSaved: { fxType: fx.fxType, fxMix: fx.fxMix, fxParam: fx.fxParam, fxBeats: fx.fxBeats, fxOn: fx.fxOn } };
+    const tr = { doubleDrop: !!upcoming?.adaptive?.doubleDrop, skipped: !!this._skipNext, morph, out, inn, style, why, vocals: DROP_STYLES.has(style) ? null : vocals, length: immediate || !out.playing ? null : length, t0: this.now(), fxSaved: { fxType: fx.fxType, fxMix: fx.fxMix, fxParam: fx.fxParam, fxBeats: fx.fxBeats, fxOn: fx.fxOn } };
     if (DROP_STYLES.has(style)) {
       // the incoming track waits at its first downbeat and drops in on the outgoing track's bar line
       inn.seek(cue); inn._autoMixEntry = cue;
@@ -1426,6 +1436,7 @@ export class AutoMix extends Emitter {
     if (tr.style === 'stemswap') { this.applyStemSwap(tr, k); if (k >= 1) this.finishTransition(); return; }
     this.keepPhase(tr, k);
     const L = mixLevels(tr.style, k, tr.kSwap);
+    if (tr.doubleDrop) { const f = doubleDropTrim(k, tr.kSwap); if (L.inVol != null) L.inVol *= f; if (L.outVol != null) L.outVol *= f; }
     if (tr.vocals === 'hold-in') {
       // incoming vocals wait for the swap (blend: the bass swap; other styles: 60 %), then trade places with the outgoing ones
       const at = tr.kSwap ?? (tr.style === 'blend' ? null : 0.6);
