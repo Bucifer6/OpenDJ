@@ -415,7 +415,9 @@ export function detectPhrases(mono, sr, bpm, gridOffset = 0, waveform = null, op
   // ---- 2) per-bar features ----
   const K = Math.floor((lastBeat - db) / 4);
   if (K < 4) {
-    return { phrases: [{ start: r3(Math.min(downbeat, startTime)), end: r3(endTime), type: 'verse', energy: 1, bars: Math.max(0, K) }], downbeat: r3(downbeat), phraseAnchor: r3(downbeat), phraseConfidence: 0 };
+    const p = { start: r3(Math.min(downbeat, startTime)), end: r3(endTime), type: 'verse', energy: 1, bars: Math.max(0, K) };
+    Object.assign(p, sectionBeatConfidence(waveform, bpm, gridOffset, p.start, p.end));
+    return { phrases: [p], downbeat: r3(downbeat), phraseAnchor: r3(downbeat), phraseConfidence: 0 };
   }
   const F = [new Float32Array(K), new Float32Array(K), new Float32Array(K)];
   for (let j = 0; j < 3; j++) {
@@ -518,7 +520,121 @@ export function detectPhrases(mono, sr, bpm, gridOffset = 0, waveform = null, op
     end: r3(i === phrases.length - 1 ? Math.max(downbeat + b * bar, endTime) : downbeat + b * bar),
     type: s.type, energy: Math.round(s.eRel * 100) / 100, bars: b - a,
   }));
+  for (const p of out) Object.assign(p, sectionBeatConfidence(waveform, bpm, gridOffset, p.start, p.end));
   return { phrases: out, downbeat: r3(downbeat), phraseAnchor: r3(downbeat + po * bar), phraseConfidence };
+}
+
+// ---------- per-section beat confidence (P0.4: is a long beat-matched overlap safe here?) ----------
+const ONSET_MIN = 6;        // u8 waveform units / frame: smallest rise that counts as an onset (a steady pad stays below)
+const ONSET_RATIO = 1.4;   // an onset at least multiplies the band level by this
+const ONSET_COVER = 0.75;  // fraction of grid beats with an onset that counts as a full pulse
+const ONSET_WIN = 0.3;      // beats: onset search window around each grid beat (excludes off-beat 8ths at ±0.5)
+
+/**
+ * Onset flux of a u8 band over frames [i0, i1): how far the next two frames' mean rises above the highest of the three
+ * frames before, counted only when it is ≥ ONSET_RATIO × that level. Frame-to-frame wobble of a sustained sound (a
+ * pad's per-frame peak moves by ±20 %) gives 0; a kick or hat attack gives most of its height.
+ */
+function bandFlux(a, i0, i1) {
+  const n = a.length, f = new Float32Array(Math.max(0, i1 - i0));
+  for (let i = i0; i < i1; i++) {
+    if (i < 1) continue;
+    const prev = Math.max(a[i - 1], i >= 2 ? a[i - 2] : 0, i >= 3 ? a[i - 3] : 0);
+    const cur = (a[i] + (i + 1 < n ? a[i + 1] : a[i])) / 2, d = cur - prev;
+    f[i - i0] = d > 0 && (cur + 4) >= ONSET_RATIO * (prev + 4) ? d : 0;
+  }
+  return f;
+}
+
+/** Pearson correlation of the [1 2 1]-smoothed flux with itself `lag` frames later (max over lag ± 2 frames). */
+function pulseOf(flux, lagF) {
+  const n = flux.length;
+  const x = new Float32Array(n);
+  for (let i = 0; i < n; i++) x[i] = ((flux[i - 1] || 0) + 2 * flux[i] + (flux[i + 1] || 0)) / 4;
+  let best = 0;
+  for (let L = Math.floor(lagF) - 2; L <= Math.ceil(lagF) + 2; L++) {
+    const m = n - L;
+    if (L < 1 || m < 2 * L) continue; // need at least two periods
+    let sa = 0, sb = 0;
+    for (let i = 0; i < m; i++) { sa += x[i]; sb += x[i + L]; }
+    const ma = sa / m, mb = sb / m;
+    let ab = 0, aa = 0, bb = 0;
+    for (let i = 0; i < m; i++) { const u = x[i] - ma, v = x[i + L] - mb; ab += u * v; aa += u * u; bb += v * v; }
+    if (aa > 1e-9 && bb > 1e-9) best = Math.max(best, ab / Math.sqrt(aa * bb));
+  }
+  return best;
+}
+
+/** Signed offsets (s) of the strongest onset within ±ONSET_WIN beats of each grid beat in [i0, i1). */
+function gridOffsets(flux, i0, rate, beat, gridOffset, t0, t1) {
+  const peaks = [];
+  const kb0 = Math.ceil((t0 - gridOffset) / beat), kb1 = Math.floor((t1 - gridOffset) / beat);
+  for (let k = kb0; k <= kb1; k++) {
+    const g = gridOffset + k * beat;
+    const a = Math.max(1, Math.ceil((g - ONSET_WIN * beat) * rate) - i0), b = Math.min(flux.length - 1, Math.floor((g + ONSET_WIN * beat) * rate) - i0);
+    let bi = -1, bv = 0;
+    for (let i = a; i <= b; i++) if (flux[i] > bv && flux[i] >= flux[i - 1] && flux[i] >= flux[i + 1]) { bv = flux[i]; bi = i; }
+    if (bi >= 0) peaks.push({ v: bv, dt: (i0 + bi + 0.5) / rate - g });
+  }
+  if (!peaks.length) return { offsets: [], beats: Math.max(0, kb1 - kb0 + 1) };
+  const vs = peaks.map((p) => p.v).sort((x, y) => x - y);
+  const thr = Math.max(ONSET_MIN, 0.3 * vs[Math.floor(0.9 * (vs.length - 1))]);
+  return { offsets: peaks.filter((p) => p.v >= thr).map((p) => p.dt), beats: Math.max(0, kb1 - kb0 + 1) };
+}
+
+function median(a) { const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+
+/**
+ * Beat confidence of the section [start, end) from the 3-band waveform and the track grid (cheap: no PCM, ~1 ms for a
+ * 16-bar phrase), for the low band and the high band; each value is the better band's.
+ * pulse 0..1 = periodicity × coverage, where periodicity is the Pearson autocorrelation of the band's onset flux at the
+ *   beat period (±2 frames) and coverage = min(1, (beats with an onset within ±0.3 beat) / (0.75 × beats)). 0 = beatless
+ *   pad / free time, ≥ 0.8 = a steady four-on-the-floor (or steady 8th hats).
+ * gridErr ms: median |offset| between the strongest onset within ±0.3 beat of each grid beat and that beat, low band
+ *   first, high band when the low band has onsets on fewer than ¼ of the beats; null when neither has (beatless).
+ *   Off-beat 8ths (bass, hats) sit at ±0.5 beat, outside the window. Onset time = centre of the waveform frame where
+ *   the rise starts, so ~2–7 ms remain on a perfect grid (frame quantisation + the detector's grid offset).
+ */
+export function sectionBeatConfidence(waveform, bpm, gridOffset, start, end) {
+  if (!waveform || !(bpm > 0) || !(end > start)) return { pulse: null, gridErr: null };
+  const { rate } = waveform, n = waveform.low.length, beat = 60 / bpm;
+  const i0 = Math.max(0, Math.floor(start * rate)), i1 = Math.min(n, Math.ceil(end * rate));
+  if (i1 - i0 < 4) return { pulse: 0, gridErr: null };
+  const t0 = i0 / rate, t1 = i1 / rate;
+  let pulse = 0, gridErr = null;
+  for (const band of [waveform.low, waveform.high]) {
+    const f = bandFlux(band, i0, i1);
+    const { offsets, beats } = gridOffsets(f, i0, rate, beat, gridOffset || 0, t0, t1);
+    const cover = beats > 0 ? Math.min(1, offsets.length / (ONSET_COVER * beats)) : 0;
+    if (cover > 0) pulse = Math.max(pulse, cover * pulseOf(f, beat * rate));
+    if (gridErr == null && offsets.length >= Math.max(4, 0.25 * beats)) gridErr = Math.round(median(offsets.map(Math.abs)) * 10000) / 10;
+  }
+  return { pulse: Math.round(Math.max(0, Math.min(1, pulse)) * 100) / 100, gridErr };
+}
+
+/**
+ * Beat safety of the region [a, b] (s) of a track, from its phrases' pulse / gridErr (for the automix planner).
+ * pulse: overlap-duration-weighted mean over the phrases that carry it.
+ * gridErr: the worst (max) gridErr of those phrases overlapping the region by ≥ 1 bar (any overlap when the region is
+ *   shorter), because one drifting phrase is enough to flam a long blend; null when none has one (beatless region).
+ * known: false when the track has no grid or less than half of [a, b] is covered by phrases with a pulse
+ *   (analyses from before this field): fall back to the global bpmConfidence gate then.
+ */
+export function regionBeatSafety(track, a, b) {
+  const none = { pulse: null, gridErr: null, known: false };
+  const phrases = Array.isArray(track?.phrases) ? track.phrases : [];
+  if (!(track?.bpm > 0) || !phrases.length) return none;
+  if (!(b > a)) b = a + 1e-3;
+  const bar = 240 / track.bpm, minOv = Math.min(bar, (b - a) * 0.999);
+  let w = 0, ps = 0, err = null;
+  for (const p of phrases) {
+    const ov = Math.min(b, p.end) - Math.max(a, p.start);
+    if (!(ov > 0) || !Number.isFinite(p.pulse)) continue;
+    w += ov; ps += ov * p.pulse;
+    if (Number.isFinite(p.gridErr) && ov >= minOv) err = Math.max(err ?? 0, p.gridErr);
+  }
+  if (!(w >= 0.5 * (b - a))) return none;
+  return { pulse: Math.round((ps / w) * 100) / 100, gridErr: err, known: true };
 }
 
 /**
