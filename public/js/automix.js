@@ -1376,6 +1376,9 @@ export class AutoMix extends Emitter {
       const durWall = Math.max(2, len / (out.rate || 1));
       const inStart = cue + (upcoming?.adaptive ? Math.max(0, pos - plan.start) * (inn.rate || 1) / (out.rate || 1) : inn.bpm && out.bpm ? offBeats * inn.beatLen : 0);
       inn.seek(inStart); inn._autoMixEntry = inStart;
+      // loop-extend (P2.2): the outgoing track's last clean phrase loops so the blend fits; released when it ends
+      const lo = upcoming?.adaptive?.loopOut;
+      if (lo && out.bpm && typeof out.setLoop === 'function') out.setLoop(lo.start, lo.end, true);
       inn.play({ at: posAt, instant: true }); // on the beat even if the message reaches the audio thread late
       const lenIn = upcoming?.adaptive ? len * (inn.rate || 1) / (out.rate || 1) : inn.bpm && out.bpm ? (len / out.beatLen) * inn.beatLen : len;
       Object.assign(tr, { dur: durWall * 1000, inStart, swapAt: upcoming?.adaptive?.swapIn ?? (SWAP_STYLES.has(style) ? phraseSwapPoint(ii, inStart, lenIn) : null), kSwap: null });

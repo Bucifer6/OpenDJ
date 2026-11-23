@@ -233,3 +233,25 @@ test('P1.6: set tempo journey: selection leans toward the planned tempo', async 
   assert.ok(s(down, 119) > s(up, 119), 'falling toward 119');
   assert.equal(scoreTransition(cur, up, {}).parts.tempoArc, 0);
 });
+
+test('P2.2 / P0.4: loop-extend for a short ending, and beat safety per region', async () => {
+  const { planAdaptiveTransition } = await import('../public/js/adaptive-dj.js');
+  const bpm = 124, bar = 240 / bpm;
+  const sec = (type, a, b, extra = {}) => ({ type, start: a * bar, end: b * bar, energy: 0.7, pulse: 0.9, gridErr: 4, ...extra });
+  // radio edit: no outro, the music ends right after its last chorus
+  const out = { id: 'a', bpm, key: '8A', energy: 7, duration: 66 * bar, endTime: 66 * bar, downbeat: 0, gridOffset: 0, bpmConfidence: 0.9,
+    phrases: [sec('intro', 0, 8), sec('verse', 8, 40), sec('chorus', 40, 64)], vocalMap: Array.from({ length: Math.ceil(66 * bar) }, (_, i) => (i < 56 * bar ? 1 : 0)) };
+  const inn = { id: 'b', bpm, key: '8A', energy: 7, duration: 96 * bar, downbeat: 0, gridOffset: 0, bpmConfidence: 0.9, mixIn: 0,
+    phrases: [sec('intro', 0, 16), sec('drop', 16, 64), sec('outro', 64, 96)] };
+  const p = planAdaptiveTransition(out, inn, { position: 52 * bar, entry: 0, minPlay: 0, fixedBars: 16, styles: ['blend', 'bassswap', 'filter', 'crossfade'] });
+  assert.ok(p?.loopOut, `loop-extended (${p?.why})`);
+  assert.ok(Math.abs(p.loopOut.end - p.loopOut.start - 8 * bar) < 1e-6 && p.loopOut.end <= 66 * bar);
+  assert.ok(p.timing.begin < p.loopOut.end, 'the loop is engaged before the music runs out');
+  // a drifting live-drummed outro: no long beat-matched overlap
+  const drift = { ...out, id: 'c', duration: 128 * bar, endTime: 128 * bar, vocalMap: undefined,
+    phrases: [sec('intro', 0, 16), sec('verse', 16, 96), sec('outro', 96, 128, { gridErr: 40, pulse: 0.5 })] };
+  const q = planAdaptiveTransition(drift, inn, { position: 60 * bar, entry: 0, minPlay: 0 });
+  assert.ok(!q || ['echo', 'cut', 'reverb', 'backspin', 'brake', 'loop'].includes(q.style) || q.timing.begin < 96 * bar, `no overlap on the drifting outro (${q?.style} ${q?.timing?.begin / bar})`);
+  const steady = planAdaptiveTransition({ ...drift, phrases: [sec('intro', 0, 16), sec('verse', 16, 96), sec('outro', 96, 128)] }, inn, { position: 60 * bar, entry: 0, minPlay: 0 });
+  assert.equal(steady.beatSafety, 'long');
+});

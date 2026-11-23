@@ -1,10 +1,11 @@
 // Bounded, deterministic section search. No decoding, network, models, or PCM on the playback thread.
 import { planBestTransition, vocalsBetween } from './mix-planner.js';
-import { planTransition, incomingStart, DROP_STYLES } from './automix.js';
+import { planTransition, incomingStart, DROP_STYLES, outroBars } from './automix.js';
 import { camelotRelation } from './smartmix.js';
 import { decodeVocalMap } from './shared/vocal-map.js';
 import { pairFamily } from './dj-styles.js';
 import { checkTransition } from './transition-check.js';
+import { regionBeatSafety } from './audio/analysis-core.js';
 
 const finite = (x) => typeof x === 'number' && Number.isFinite(x);
 /** Share of a track (from where it came in) that plays before the next transition may begin. */
@@ -110,7 +111,19 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
   const family = pairFamily(out, inn);
   const ddExits = family === 'bass' ? outSections.filter((p) => p.type === 'drop').map((p) => snapPhrase(out, p.start + 16 * barOf(out)))
     .filter((x) => x > earliest && x <= end + 1e-6 && !exits.includes(x)) : [];
-  const boundedExits = [...spread(exits), ...ddExits.slice(0, 2)];
+  // loop-extend (P2.2): when the outgoing track ends without a usable outro (radio edits, fade-outs), loop its last
+  // clean 8-bar phrase so a full blend still fits; exits 8 and 16 bars past that phrase line
+  let loopOut = null;
+  const loopExits = [];
+  if (!noOverlap && opts.loopExtend !== false && (outroBars(out) ?? 0) < 16) {
+    const ph = barOf(out) * PHRASE_BARS, L = phraseAnchor(out) + Math.floor((end - 2 * barOf(out) - phraseAnchor(out)) / ph + 1e-6) * ph;
+    const a = L - ph, voc = vocalsBetween(out, a, L), safe = regionBeatSafety(out, a, L);
+    if (a > earliest && voc.v < 0.25 && localEnergy(out, a, L) >= 4 && (!safe.known || (safe.pulse >= 0.6 && safe.gridErr != null && safe.gridErr <= 15))) {
+      loopOut = { start: a, end: L };
+      loopExits.push(L + 8 * barOf(out), L + 16 * barOf(out));
+    }
+  }
+  const boundedExits = [...spread(exits), ...ddExits.slice(0, 2), ...loopExits];
   // The incoming track comes in on its intro / mix-in point, or a section start in its first quarter (MAX_CUE), so
   // most of it is still to come; never a section deep inside it.
   const home = incomingStart(inn);
@@ -140,9 +153,11 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
     const section = outSections.find((p) => p.end >= exit - 0.01 && p.start < exit);
     // a double-drop exit sits inside a drop: its window may start in the section before it (the incoming intro
     // plays under the outgoing breakdown / build)
-    const dd = ddExits.includes(exit);
-    const o = { ...out, duration: exit, endTime: exit, mixOut: Math.max(earliest, dd ? exit - 48 * barOf(out) : section ? snap(out, section.start) : earliest),
-      phrases: outSections.filter((p) => p.start < exit).map((p) => ({ ...p, end: Math.min(exit, p.end) })) };
+    const dd = ddExits.includes(exit), looped = loopExits.includes(exit);
+    const o = { ...out, duration: exit, endTime: exit, mixOut: Math.max(earliest, dd ? exit - 48 * barOf(out) : looped ? loopOut.start : section ? snap(out, section.start) : earliest),
+      phrases: looped
+        ? [...outSections.filter((p) => p.start < loopOut.end).map((p) => ({ ...p, end: Math.min(loopOut.end, p.end) })), { type: 'outro', start: loopOut.end, end: exit, energy: localEnergy(out, loopOut.start, loopOut.end) / 10 }]
+        : outSections.filter((p) => p.start < exit).map((p) => ({ ...p, end: Math.min(exit, p.end) })) };
     const n = { ...inn, mixIn: cue, phrases: inSections.filter((p) => p.end > cue) };
     const landing = landingAfter(inn, cue);
     const landBars = landing == null ? null : Math.round((landing - cue) / barOf(inn));
@@ -163,7 +178,20 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
     }
     const finish = drop ? timing.drop : timing.start + timing.len;
     const inSpan = drop ? 0 : timing.len * ratio / rate;
-    if (timing.begin < earliest - 1e-6 || finish > end + 1e-6 || cue + inSpan > inEnd - 2) continue;
+    if (timing.begin < earliest - 1e-6 || finish > (looped ? exit : end) + 1e-6 || cue + inSpan > inEnd - 2) continue;
+    if (looped && (drop || timing.begin > loopOut.end - 1e-6)) continue; // the loop must be playing before the music runs out
+    // is beat-matching safe here (P0.4)? per-region beat confidence of both overlap windows
+    let safety = 'long';
+    if (!drop) {
+      const so = regionBeatSafety(out, timing.begin, Math.min(finish, loopOut && looped ? loopOut.end : finish)), si = regionBeatSafety(inn, cue, cue + inSpan);
+      const grade = (r, bpm) => (!r.known ? 'long' : r.pulse < 0.3 || r.gridErr == null || r.gridErr > 25 ? 'none' : r.pulse < 0.6 || r.gridErr > (bpm < 100 ? 15 : 12) ? 'short' : 'long');
+      const go = grade(so, out.bpm), gi = grade(si, inn.bpm);
+      const rank = { none: 0, short: 1, long: 2 };
+      safety = rank[go] <= rank[gi] ? go : gi;
+      // a beatless incoming intro under a steady outro is a relaxed fade, no beats to clash
+      if (gi === 'none' && go !== 'none' && si.known && si.pulse < 0.3 && ['crossfade', 'filter'].includes(p.style)) safety = 'short';
+      if (safety === 'none') continue;
+    }
     const vo = vocalsBetween(out, timing.begin, finish), vi = vocalsBetween(inn, cue, cue + Math.max(2, inSpan));
     const eo = localEnergy(out, timing.begin, finish), ei = localEnergy(inn, cue, cue + Math.max(2, inSpan));
     const harmonic = camelotRelation(out.key, inn.key);
@@ -172,7 +200,7 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
     const clashCost = !drop && harmonic.kind === 'clash' ? Math.min(8, inSpan / 4) : 0;
     // music left unplayed in the outgoing track, and the incoming intro skipped, both cost: a DJ mixes out late and
     // in early, and only moves off those points to avoid two voices or a bad key / energy match
-    const unplayed = (end - exit) / Math.max(1, left), skipped = Math.max(0, cue - home) / Math.max(1, inEnd);
+    const unplayed = Math.max(0, end - exit) / Math.max(1, left), skipped = Math.max(0, cue - home) / Math.max(1, inEnd);
     // phrasing (P1.1 / P1.3): a blend starts on an outgoing phrase line, and the incoming main part should land on the
     // outgoing exit (the end of the overlap) rather than somewhere inside it
     let phrasing = 0, landed = false;
@@ -195,6 +223,8 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
     // objective check of the simulated blend (P4.1): loudness bump / dip, two basslines, vocals on vocals, stretch
     const check = drop ? null : checkTransition(out, inn, { style: p.style, begin: timing.begin, len: timing.len, inStart: cue, ratio: ratio / rate, rate });
     if (check) phrasing -= check.penalty;
+    if (safety === 'short' && p.bars > 8) phrasing -= (p.bars - 8) * 0.8; // the beat isn't steady enough for a long overlap
+    if (looped) phrasing -= 1; // a natural outro is better than a loop
     const score = p.score - vocalCost - clashCost - Math.abs(ei - eo) * 0.7 - unplayed * 6 - skipped * 8 + phrasing;
     evaluated++;
     if (doubleDrop) {
@@ -207,8 +237,8 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
     if (!best || score > best.score) best = { ...p, score, timing, exit, inStart: cue,
       vocals: !drop && !['stemswap', 'crossfade'].includes(p.style) && Math.min(vo.v, vi.v) > 0.2 ? 'hold-in' : null,
       confidence: lowConfidence ? 'low' : vo.known && vi.known ? 'measured-vocals' : 'estimated',
-      landed, landing: landed ? landing : null, doubleDrop: false, swapIn: null, check,
-      why: `${p.why}${landed ? '; the incoming main part lands on the phrase' : ''}; section search: ${timing.begin.toFixed(1)}s → ${cue.toFixed(1)}s${lowConfidence ? '; uncertain grid: no beat-matched overlap' : ''}` };
+      landed, landing: landed ? landing : null, doubleDrop: false, swapIn: null, check, beatSafety: safety, loopOut: looped ? loopOut : null,
+      why: `${p.why}${landed ? '; the incoming main part lands on the phrase' : ''}${looped ? '; the outgoing last phrase loops to make room' : ''}${safety === 'short' ? '; beat not steady here: short overlap' : ''}; section search: ${timing.begin.toFixed(1)}s → ${cue.toFixed(1)}s${lowConfidence ? '; uncertain grid: no beat-matched overlap' : ''}` };
   }
   // drum & bass DJs double-drop on roughly a quarter to a third of their transitions (never twice running, checked
   // above): a stable hash of the pair picks which eligible pairs get it
