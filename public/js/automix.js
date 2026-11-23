@@ -13,6 +13,7 @@ import { smartMix, liveNext, shuffle, camelotRelation, genreSimilarity, explain 
 import { t } from './i18n.js';
 import { planBestTransition, stemSwapLevels, learnChoice } from './mix-planner.js';
 import { planAdaptiveTransition } from './adaptive-dj.js';
+import { Watchdog, quietAt } from './automix-watchdog.js';
 
 export const LOG_BPM_JUMP = Math.log(1.08); // > 8 % tempo change (after half/double matching) is a "big jump"
 
@@ -262,6 +263,8 @@ export function phraseSwapPoint(t, inStart, lenIn) {
 const ease = (x) => x * x * (3 - 2 * x);
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const sq = (v) => (v <= 1e-12 ? 0 : Math.sqrt(v));
+/** Isolator knob positions for a few cuts (knob -1..0 = -26 dB..0, see curves.js isoKnobGain). */
+const EQ_M6 = -6 / 26, EQ_M20 = -20 / 26;
 
 /**
  * Mixer settings at transition progress k (0..1) for the blend styles. kSwap: progress at which the blend's bass swap
@@ -272,11 +275,22 @@ const sq = (v) => (v <= 1e-12 ? 0 : Math.sqrt(v));
 export function mixLevels(style, k, kSwap = null) {
   style = STYLE_ALIASES[style] || style;
   if (style === 'blend' || style === 'phrase') {
-    // long EQ blend: the incoming track comes in without bass and with soft mids / highs, the bass swaps on a phrase
-    // boundary, then the outgoing track's highs and mids leave before its fader does
-    if (kSwap == null) return { inVol: 0.8 * ease(clamp01(k * 3)), outVol: 0.8, inLow: -1, outLow: 0, inHigh: k < 0.3 ? -0.5 + (k / 0.3) * 0.5 : 0, inMid: k < 0.5 ? -0.4 + (k / 0.5) * 0.4 : 0 };
+    // long EQ blend, the club recipe (docs/PRO_DJ_AUTOMIX_RESEARCH.md P1.4): the incoming fader comes up over the first
+    // quarter with its bass killed and its mids / highs a little down; the outgoing highs make room for the incoming
+    // hats; the bass swaps on a phrase line (kSwap) in one move; then the outgoing mids / highs leave before its fader
+    if (kSwap == null) {
+      return {
+        inVol: 0.8 * ease(clamp01(k / 0.25)), outVol: 0.8, inLow: -1, outLow: 0, outMid: 0,
+        inHigh: EQ_M6 * (1 - clamp01((k - 0.125) / 0.125)), inMid: EQ_M6 + (EQ_M6 / -2) * clamp01(k / 0.5),
+        outHigh: EQ_M6 * ease(clamp01((k - 0.25) / 0.25)),
+      };
+    }
     const p = clamp01((k - kSwap) / Math.max(1e-3, 1 - kSwap));
-    return { inVol: 0.8, outVol: 0.8 * (1 - ease(p)), inLow: 0, outLow: -1, inHigh: 0, inMid: 0, outHigh: -0.7 * ease(clamp01(p * 1.5)), outMid: -0.4 * ease(p) };
+    return {
+      inVol: 0.8, outVol: 0.8 * (1 - ease(clamp01((p - 0.5) / 0.5))), inLow: 0, outLow: -1, inHigh: 0,
+      inMid: (EQ_M6 / 2) * (1 - ease(clamp01(p / 0.5))), outMid: EQ_M6 * ease(clamp01(p / 0.5)),
+      outHigh: EQ_M6 + EQ_M6 * ease(clamp01(p / 0.75)),
+    };
   }
   if (style === 'eqswap' || style === 'bassswap') {
     return {
@@ -284,14 +298,31 @@ export function mixLevels(style, k, kSwap = null) {
       outVol: 0.8 * (k < 0.75 ? 1 : 1 - ease((k - 0.75) / 0.25)), inHigh: k < 0.25 ? -0.5 + k * 2 : 0,
     };
   }
+  // one bassline at a time (P1.2): beat-matched kicks add up in phase (+6 dB), which no fader curve hides, so the
+  // filter and crossfade styles also hand the low band over in one move, at the swap point (default: the middle)
+  const swapped = kSwap != null ? k >= kSwap : k >= 0.55;
+  const low = { inLow: swapped ? 0 : -1, outLow: swapped ? -1 : 0 };
   if (style === 'filter') {
     // outgoing: high-pass sweep up; incoming: opens from a low-pass; constant-power fader crossfade in the middle
     const x = clamp01((k - 0.25) / 0.6);
-    return { inVol: 0.8 * sq(Math.sin(x * Math.PI / 2)), outVol: 0.8 * sq(Math.cos(x * Math.PI / 2)), outFilter: Math.min(0.85, k * 1.1), inFilter: -0.8 * (1 - ease(clamp01(k / 0.75))) };
+    return { inVol: 0.8 * sq(Math.sin(x * Math.PI / 2)), outVol: 0.8 * sq(Math.cos(x * Math.PI / 2)), outFilter: Math.min(0.85, k * 1.1), inFilter: -0.8 * (1 - ease(clamp01(k / 0.75))), ...low };
   }
-  if (style === 'echo') return { inVol: 0.8 * ease(k), echo: k > 0.7, outVol: 0.8 * (k < 0.75 ? 1 : 1 - ease((k - 0.75) / 0.25)) };
+  if (style === 'echo') return { inVol: 0.8 * ease(k), echo: k > 0.7, outVol: 0.8 * (k < 0.75 ? 1 : 1 - ease((k - 0.75) / 0.25)), ...low };
   // constant-power crossfade
-  return { inVol: 0.8 * sq(Math.sin(k * Math.PI / 2)), outVol: 0.8 * sq(Math.cos(k * Math.PI / 2)) };
+  return { inVol: 0.8 * sq(Math.sin(k * Math.PI / 2)), outVol: 0.8 * sq(Math.cos(k * Math.PI / 2)), ...low };
+}
+
+/** Styles whose bass hands over at a phrase line during the overlap (see phraseSwapPoint). */
+export const SWAP_STYLES = new Set(['blend', 'filter', 'crossfade']);
+
+/**
+ * Low-band owner check for mixer settings L (mixLevels output): true when both decks would play their low band at
+ * the same time (EQ above -20 dB on both audible decks). The executor never sends such a state.
+ */
+export function twoBasslines(L) {
+  const audible = (v) => v == null || v > 0.05;
+  const lowOn = (v) => v == null || v > EQ_M20;
+  return audible(L.inVol) && audible(L.outVol) && lowOn(L.inLow) && lowOn(L.outLow);
 }
 
 // ------------------------------------------------------------------ mixing styles
@@ -386,8 +417,34 @@ export function planTransition(t, style, opts = {}, { pos = 0, immediate = false
   return { style, begin: Math.max(0, drop - pre), start: Math.max(0, drop - pre), drop, pre: preB, post: postB, preSec: pre, postSec: post, immediate };
 }
 
-/** Bars over which the incoming track eases back to its original tempo after a transition. */
+/** Fewest bars over which the incoming track eases back to its original tempo after a transition. */
 export const TEMPO_RESTORE_BARS = 8;
+/** Most bars for the ease-back (about 2 minutes at 128 BPM). */
+export const TEMPO_RESTORE_MAX_BARS = 64;
+/**
+ * Bars for easing a deck back from `fromPct` % to its own tempo: like a DJ riding the pitch, at most about 1 BPM per
+ * 16 bars, so the change is never heard (P1.6); between TEMPO_RESTORE_BARS and TEMPO_RESTORE_MAX_BARS.
+ */
+export function restoreBars(fromPct, bpm) {
+  const dBpm = Math.abs(Number(fromPct) || 0) / 100 * (Number(bpm) || 120);
+  return Math.max(TEMPO_RESTORE_BARS, Math.min(TEMPO_RESTORE_MAX_BARS, Math.ceil(dBpm * 16 / 4) * 4));
+}
+/** Largest tempo gap a blend morphs across (the master tempo glides from the outgoing to the incoming tempo). */
+export const MORPH_MAX = Math.log(1.04);
+/**
+ * Tempo morph for a blend (P1.6): the outgoing (master) deck's tempo % that makes it run at the incoming track's own
+ * tempo (half / double time aware), or null when the gap is too small to matter or too big to morph.
+ * out / inn: { bpm, tempo (%), effectiveBpm }.
+ */
+export function morphTarget(out, inn) {
+  const ob = Number(out?.bpm), ib = Number(inn?.bpm);
+  if (!(ob > 0 && ib > 0)) return null;
+  const eff = Number(out.effectiveBpm) || ob * (1 + (Number(out.tempo) || 0) / 100);
+  const target = [ib, ib * 2, ib / 2].reduce((a, b) => (Math.abs(Math.log(b / eff)) < Math.abs(Math.log(a / eff)) ? b : a));
+  const gap = Math.abs(Math.log(target / eff));
+  if (gap < 0.002 || gap > MORPH_MAX) return null;
+  return (target / ob - 1) * 100;
+}
 /** Tempo (%) during the ease-back: smooth (ease-in-out) from `from` to 0 as k goes 0 → 1. */
 export function tempoRampValue(from, k) {
   k = Math.min(1, Math.max(0, k));
@@ -583,7 +640,7 @@ export class AutoMix extends Emitter {
     }
     if (add.length) this.queue.push(...add);
   }
-  stop() { this.enabled = false; this.forceTransitionRequested = false; if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
+  stop() { this.enabled = false; this.forceTransitionRequested = false; this.watchdog?.reset(); if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
   /** Start the next transition immediately, waiting for its deck preload if necessary. */
   skip() {
     if (!this.enabled || this.transition || !this.current || !this.nextTrack()) return false;
@@ -758,6 +815,9 @@ export class AutoMix extends Emitter {
     const ch = this.engine.channels[deck.index];
     ch.set('xfAssign', 'THRU'); ch.set('eqLow', 0); ch.set('eqMid', 0); ch.set('eqHigh', 0); ch.set('filter', 0); ch.set('volume', 0.8); ch.set('vocal', 1);
     deck.setKeyLock(true);
+    // level matching (P0.3): every track at the same loudness, from its analysed gain (main-section loudness when
+    // analysed with it), whatever the global auto-gain setting; set before the track is heard, never while on air
+    if (this.opts.levelMatch !== false && typeof ch.setAutoGain === 'function' && !deck.playing) ch.setAutoGain(Number(this.fresh(deck.track)?.gain ?? deck.track?.gain) || 0);
   }
 
   async preloadNext() {
@@ -852,6 +912,7 @@ export class AutoMix extends Emitter {
     if (!this.enabled) return;
     const cur = this.current;
     if (!cur) return;
+    if (this.opts.watchdog !== false && this.watch()) return;
     if (this.transition) return this.stepTransition();
     if (this.tempoRamp) this.stepTempoRamp();
     const next = this.nextTrack();
@@ -878,6 +939,49 @@ export class AutoMix extends Emitter {
   }
 
   /**
+   * Party safety (P0.1): watch the master output and the on-air deck; silence, a stalled or a stopped deck that lasts
+   * longer than any planned effect is rescued: the fader and EQ are restored, a stuck transition is completed, or the
+   * next track is cut in on the beat. Returns true when it acted this tick.
+   */
+  watch() {
+    const ctx = this.engine.ctx, t = ctx?.currentTime;
+    if (!Number.isFinite(t) || typeof this.engine.masterLevels !== 'function') return false;
+    if (ctx.state === 'suspended') { this.engine.resume?.(); return false; }
+    const wd = this.watchdog ||= new Watchdog();
+    const tr = this.transition, cur = this.current;
+    const deck = tr ? (tr.drop && tr.phase === 'pre' ? tr.out : tr.inn) : cur;
+    const masterOn = (this.engine.masterGain?.gain?.value ?? 1) > 0.02;
+    const expectSilence = !!(tr?.drop && tr.phase === 'pre') || !!this._trickSilence || quietAt(deck?.waveform, deck?.position, 2.5)
+      || !!deck?.loading || !!deck?.scratching;
+    const [l, r] = this.engine.masterLevels() || [0, 0];
+    const trouble = wd.update({ t, level: Math.max(l || 0, r || 0), position: deck?.position, playing: !!deck?.playing,
+      expectSilence, active: masterOn && !!deck?.track });
+    // a transition that runs far past its planned length is finished as well
+    const overdue = tr && !tr.drop && tr.dur && this.now() - tr.t0 > tr.dur + 4000;
+    if (!trouble && !overdue) return false;
+    this.rescue(overdue ? 'overdue' : trouble.kind);
+    wd.cooldown(t, 4);
+    return true;
+  }
+
+  rescue(kind) {
+    this.rescues = (this.rescues || 0) + 1;
+    console.warn(`[automix] rescue: ${kind}`);
+    this.emit('rescue', { kind });
+    if (this.transition) { this.finishTransition(true); this.app.toast?.(t('Automix: finished a stuck transition')); return; }
+    const cur = this.current, ch = this.engine.channels[cur.index];
+    // the fader or EQ of the on-air deck was left down (a controller, a stale automation): bring it back first
+    if (kind === 'silent' && cur.playing && ch?.state && (ch.state.volume < 0.05 || ch.state.eqLow <= -0.99 && ch.state.eqMid <= -0.99)) {
+      this.prepare(cur); this.app.toast?.(t('Automix: restored the on-air deck level')); return;
+    }
+    const next = this.nextTrack(), inn = this.other(cur);
+    if (next && inn.track?.id === next.id && !inn.loading) { this.beginTransition(true); this.app.toast?.(t('Automix: the music stopped, started the next track')); return; }
+    if (kind === 'stopped' && cur.track && cur.position < (cur.duration || 0) - 2) { cur.play(); return; }
+    // nothing ready yet: load the next track and cut to it as soon as it is there
+    if (next) { this.forceTransitionRequested = true; this.preloadNext(); }
+  }
+
+  /**
    * After a transition the incoming track keeps the outgoing track's tempo; without this every track would
    * inherit the previous one's speed and the drift adds up. Ease it back to 0 % over a few bars (setting
    * automix.restoreTempo, default on). Moving the tempo fader / sync by hand cancels it.
@@ -886,7 +990,7 @@ export class AutoMix extends Emitter {
     this.tempoRamp = null;
     if (this.opts.restoreTempo === false || !deck || Math.abs(deck.tempo) < 0.01 || deck.syncOn) return;
     const bpm = deck.effectiveBpm || 120;
-    this.tempoRamp = { deck, from: deck.tempo, last: deck.tempo, t0: this.now(), dur: (TEMPO_RESTORE_BARS * 4 * 60 / bpm) * 1000 };
+    this.tempoRamp = { deck, from: deck.tempo, last: deck.tempo, t0: this.now(), dur: (restoreBars(deck.tempo, bpm) * 4 * 60 / bpm) * 1000 };
   }
   stepTempoRamp() {
     const r = this.tempoRamp, d = r.deck;
@@ -931,7 +1035,14 @@ export class AutoMix extends Emitter {
     this.prepare(inn);
     const chI = this.engine.channels[inn.index], chO = this.engine.channels[out.index];
     chI.set('volume', 0);
-    if (this.opts.keepSync && out.bpm && inn.bpm && !bigJump && !DROP_STYLES.has(style)) { out.setMaster(); inn.syncOn = true; inn.matchTempo(); }
+    let morph = null;
+    if (this.opts.keepSync && out.bpm && inn.bpm && !bigJump && !DROP_STYLES.has(style)) {
+      out.setMaster(); inn.syncOn = true; inn.matchTempo();
+      // ride the master tempo over to the incoming track's own tempo during the blend, so it is never stretched
+      // after it (P1.6); the synced incoming deck follows
+      const to = this.opts.tempoMorph === false || immediate ? null : morphTarget(out, inn);
+      if (to != null) morph = { from: out.tempo || 0, to };
+    }
     else { inn.syncOn = false; if (Math.abs(inn.tempo || 0) > 0.01) inn.setTempo(0); } // its own tempo: nothing to ramp back afterwards
     // key clash → shift the incoming track's key to a compatible one (if the deck supports it)
     if (this.opts.keySync && typeof inn.keySyncTo === 'function') {
@@ -939,7 +1050,7 @@ export class AutoMix extends Emitter {
       if (keysClash(outKey, inn.camelot || inn.track?.key)) { try { inn.keySyncTo(out); } catch (e) { console.warn('keySyncTo failed', e); } }
     }
     const fx = { ...chO.state }; // FX / EQ settings to restore on the outgoing channel afterwards
-    const tr = { out, inn, style, why, vocals: DROP_STYLES.has(style) ? null : vocals, length: immediate || !out.playing ? null : length, t0: this.now(), fxSaved: { fxType: fx.fxType, fxMix: fx.fxMix, fxParam: fx.fxParam, fxBeats: fx.fxBeats, fxOn: fx.fxOn } };
+    const tr = { morph, out, inn, style, why, vocals: DROP_STYLES.has(style) ? null : vocals, length: immediate || !out.playing ? null : length, t0: this.now(), fxSaved: { fxType: fx.fxType, fxMix: fx.fxMix, fxParam: fx.fxParam, fxBeats: fx.fxBeats, fxOn: fx.fxOn } };
     if (DROP_STYLES.has(style)) {
       // the incoming track waits at its first downbeat and drops in on the outgoing track's bar line
       inn.seek(cue); inn._autoMixEntry = cue;
@@ -963,7 +1074,7 @@ export class AutoMix extends Emitter {
       inn.seek(inStart); inn._autoMixEntry = inStart;
       inn.play({ at: posAt, instant: true }); // on the beat even if the message reaches the audio thread late
       const lenIn = upcoming?.adaptive ? len * (inn.rate || 1) / (out.rate || 1) : inn.bpm && out.bpm ? (len / out.beatLen) * inn.beatLen : len;
-      Object.assign(tr, { dur: durWall * 1000, inStart, swapAt: style === 'blend' ? phraseSwapPoint(ii, inStart, lenIn) : null, kSwap: null });
+      Object.assign(tr, { dur: durWall * 1000, inStart, swapAt: SWAP_STYLES.has(style) ? phraseSwapPoint(ii, inStart, lenIn) : null, kSwap: null });
       if (tr.vocals === 'hold-in') chI.set('vocal', 0);
       if (style === 'stemswap') this.applyStemSwap(tr, 0);
     }
@@ -991,7 +1102,8 @@ export class AutoMix extends Emitter {
     const chO = this.engine.channels[tr.out.index], chI = this.engine.channels[tr.inn.index];
     if (tr.drop) return this.stepDrop(tr, chO, chI);
     const k = Math.min(1, (this.now() - tr.t0) / tr.dur);
-    if (tr.style === 'blend' && tr.kSwap == null && (tr.inn.position >= tr.swapAt - 0.005 || k >= 0.9)) tr.kSwap = k;
+    if (tr.swapAt != null && tr.kSwap == null && (tr.inn.position >= tr.swapAt - 0.005 || k >= 0.9)) tr.kSwap = k;
+    if (tr.morph && tr.out.isMaster !== false) { const v = tr.morph.from + (tr.morph.to - tr.morph.from) * ease(clamp01(k / 0.9)); if (Math.abs(v - (tr.out.tempo || 0)) > 0.01) tr.out.setTempo(v); }
     if (tr.style === 'stemswap') { this.applyStemSwap(tr, k); if (k >= 1) this.finishTransition(); return; }
     this.keepPhase(tr, k);
     const L = mixLevels(tr.style, k, tr.kSwap);

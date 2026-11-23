@@ -193,7 +193,10 @@ test('N3: after a transition the incoming deck eases back to its original tempo 
   try {
     am.startTempoRamp(deck);
     const dur = am.tempoRamp.dur;
-    assert.ok(Math.abs(dur - TEMPO_RESTORE_BARS * 4 * 60 / 128 * 1000) < 1);
+    // 3.2 % at 128 BPM is about 4 BPM: ridden back at 1 BPM per 16 bars (P1.6)
+    const { restoreBars } = await import('../public/js/automix.js');
+    assert.equal(restoreBars(3.2, 128), 64); assert.equal(restoreBars(0.3, 128), TEMPO_RESTORE_BARS); assert.equal(restoreBars(1, 125), 20);
+    assert.ok(Math.abs(dur - restoreBars(3.2, 128) * 4 * 60 / 128 * 1000) < 1);
     now += dur / 2; am.stepTempoRamp();
     assert.ok(Math.abs(deck.tempo - 1.6) < 1e-9, `half way ${deck.tempo}`);
     now += dur; am.stepTempoRamp();
