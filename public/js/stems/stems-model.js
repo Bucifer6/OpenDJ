@@ -5,7 +5,7 @@
 //      outputs spectrogram masks/estimates [1,S,4,2048,T] + time branch [1,S,2,N]  -> ispec(spec) + time
 //  - "waveform" exports with the STFT inside the graph (StemSplit demucs-onnx style): mix [1,2,N] -> [1,S,2,N]
 // A deterministic stub session (frequency bands) stands in for the model in tests.
-import { demucsSpec, demucsISpec, specFrames, BINS, NFFT, MODEL_RATE, DEMUCS_SOURCES } from './stem-dsp.js';
+import { demucsSpec, demucsISpec, specFrames, BINS, NFFT, MODEL_RATE, DEMUCS_SOURCES, stemsDifference, MAX_BACKEND_DIFFERENCE, meanSquare, backendMismatchError } from './stem-dsp.js';
 
 export const SEGMENT = Math.floor(7.8 * MODEL_RATE); // 343980: fixed by the exported graphs
 
@@ -51,6 +51,33 @@ export function createRunner(session, Tensor, { sources = DEMUCS_SOURCES } = {})
       return out;
     },
   };
+}
+
+/**
+ * runChunk for a GPU backend that is checked against the CPU once: the first chunk with real audio in it is also run
+ * on `reference()` (a CPU runner, created only for this and released after), and if the GPU's stems differ from the
+ * CPU's (stemsDifference > MAX_BACKEND_DIFFERENCE) backendMismatchError is thrown, so the caller redoes the track on
+ * the CPU. Until then every chunk is compared; after the check passes, chunks go straight to the GPU.
+ * @param {(mix: Float32Array) => Promise<Float32Array>} runChunk the GPU runner
+ * @param {() => Promise<{ runChunk: Function, release?: Function }>} reference
+ * @param {{ backend?: string, onVerified?: (diff: number) => void, minMeanSquare?: number }} [o]
+ */
+export function verifiedRunChunk(runChunk, reference, { backend = 'GPU', onVerified, minMeanSquare = 1e-5 } = {}) {
+  let verified = false;
+  const run = async (mix) => {
+    const out = await runChunk(mix);
+    if (verified || meanSquare(mix) < minMeanSquare) return out; // silence says nothing about the backend
+    const ref = await reference();
+    let expected;
+    try { expected = await ref.runChunk(mix); } finally { await ref.release?.(); }
+    const diff = stemsDifference(out, expected);
+    if (!(diff <= MAX_BACKEND_DIFFERENCE)) throw backendMismatchError(backend, diff);
+    verified = true;
+    onVerified?.(diff);
+    return out;
+  };
+  run.isVerified = () => verified;
+  return run;
 }
 
 /** Minimal tensor class for the stub (same shape as ort.Tensor). */

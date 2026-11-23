@@ -216,6 +216,48 @@ test('stems server: native engine separates in a child process and saves the ste
   } finally { h.close(); }
 });
 
+test('stems server: a GPU whose stems do not match the CPU is not used; the track is redone on the CPU and later loads skip the GPU', { skip: !hasFfmpeg && 'ffmpeg not installed' }, async () => {
+  for (const kind of ['broken', 'ok']) {
+    let done;
+    let finished = new Promise((r) => { done = r; });
+    let h;
+    h = await harness({
+      ffmpeg: true, native: { stub: true, stubGpu: kind, idleMs: 20 },
+      input: async () => ({ file: path.join(h.dir, 'song.wav') }),
+      onEvent: (t, p) => { if (t === 'stems-done' || t === 'stems-failed') done([t, p]); },
+    });
+    try {
+      const frames = 44100 * 9;
+      const data = Buffer.alloc(frames * 4);
+      for (let i = 0; i < frames; i++) { const v = Math.round(Math.sin(i * 0.03) * 8000 + Math.sin(i * 0.4) * 4000); data.writeInt16LE(v, i * 4); data.writeInt16LE(v, i * 4 + 2); }
+      fs.writeFileSync(path.join(h.dir, 'song.wav'), Buffer.concat([wavHeader(data.length), data]));
+      assert.equal((await h.json('POST', '/api/stems/queue', { ids: ['trk1'] })).added, 1);
+      const [type, ev] = await finished;
+      assert.equal(type, 'stems-done', ev.message);
+      const st = await h.json('GET', '/api/stems/status');
+      if (kind === 'broken') {
+        assert.equal(ev.backend, 'stub', 'redone on the CPU');
+        assert.equal(st.native.gpuFailed?.backend, 'stub-gpu');
+        assert.match(st.native.gpuFailed.message, /different stems from the CPU/);
+        // the stems saved are the CPU's: the 1 kHz-ish tone (0.4 rad/sample = 2.8 kHz) is in "vocals", not spread around
+        const dec = (s) => spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', path.join(h.dir, 'stems', 'trk1', `${s}.flac`), '-f', 's16le', '-'], { maxBuffer: 64 * 2 ** 20 }).stdout;
+        const rms = (b) => { let e = 0, n = 0; for (let i = 44100; i < frames - 44100; i += 7) { const v = b.readInt16LE(i * 4); e += v * v; n++; } return Math.sqrt(e / n); };
+        assert.ok(rms(dec('drums')) < 100, `drums stem is quiet (${rms(dec('drums'))})`);
+        // a later model load (after the idle timeout) asks for the CPU directly
+        await new Promise((r) => setTimeout(r, 100));
+        finished = new Promise((r) => { done = r; });
+        assert.equal((await h.json('POST', '/api/stems/queue', { ids: ['trk1'], force: true })).added, 1);
+        const [t2, ev2] = await finished;
+        assert.equal(t2, 'stems-done', ev2.message); assert.equal(ev2.backend, 'stub');
+      } else {
+        assert.equal(ev.backend, 'stub-gpu', 'a matching GPU is kept');
+        assert.equal(st.native.gpuFailed, null);
+      }
+      assert.equal((await h.json('GET', '/api/stems/trk1')).checked, STEM_CHECK);
+    } finally { h.close(); }
+  }
+});
+
 test('stems server: native engine cancel, and off by default without onnxruntime-node', { skip: !hasFfmpeg && 'ffmpeg not installed' }, async () => {
   let failed;
   const fail = new Promise((r) => { failed = r; });

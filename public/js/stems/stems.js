@@ -220,7 +220,8 @@ export class StemsManager extends Emitter {
       ortBase: new URL('/api/stems/ort/', location.href).href,
       modelUrl: new URL(`/api/stems/model?sha=${st?.model?.sha256 || ''}`, location.href).href,
       threads: Math.max(1, Math.min(4, hc - 2)),
-      backend: this.settings.stemsBackend || 'auto',
+      backend: this.gpuFailed ? 'wasm' : this.settings.stemsBackend || 'auto',
+      gpuVerified: !!this.gpuVerified,
     });
     this.workerReady.catch(() => this.disposeWorker());
     return this.workerReady;
@@ -260,7 +261,10 @@ export class StemsManager extends Emitter {
               if (uploadError || this._cancel) return;
               for (let s = 0; s < STEMS.length; s++) await stemsApi.part(t.id, token, STEMS[s], m.frame, m.stems[s]);
             }).catch((err) => { uploadError = err; reject(err); });
-          } else if (m.type === 'backend') this.backend = { ...this.backend, backend: m.backend, threads: m.threads }; // WebGPU output failed the check: WASM now
+          } else if (m.type === 'backend') { // WebGPU output failed a check: WASM now, and for the rest of this page's life
+            this.backend = { ...this.backend, backend: m.backend, threads: m.threads };
+            if (m.failed) this.gpuFailed = true;
+          } else if (m.type === 'verified') this.gpuVerified = true;
           else if (m.type === 'done') resolve(m);
           else if (m.type === 'error') reject(new Error(m.message));
         };

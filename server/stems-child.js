@@ -4,21 +4,33 @@
 // CUDA on Linux when its libraries are installed). A separate process at below-normal priority, so neither the
 // server's event loop nor the audio in the browser waits for it, and a cancel simply kills it.
 //
-// in  (IPC): { type: 'init', model, backend: 'auto'|'gpu'|'cpu', threads, stub }
+// in  (IPC): { type: 'init', model, backend: 'auto'|'gpu'|'cpu', threads, stub, stubGpu?: 'ok'|'broken' (tests) }
 //            { type: 'job', id, ffmpeg, input: { file } | { url, headers }, dir, overlap, maxFrames }
 // out (IPC): { type: 'ready', backend, threads, loadMs } { type: 'progress', id, phase, done, total }
-//            { type: 'done', id, frames, ms, chunks, backend } { type: 'error', id?, message }
+//            { type: 'done', id, frames, ms, chunks, backend, gpuFailed? } { type: 'error', id?, message }
 // A job writes <dir>/{vocals,drums,bass,other}.raw: interleaved stereo s16le, 44.1 kHz, the whole track.
 import fs from 'node:fs';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { separateChunked, interleaveInt16, STEMS, DEMUCS_SOURCES, MODEL_RATE } from '../public/js/stems/stem-dsp.js';
-import { createRunner, createStubSession, StubTensor } from '../public/js/stems/stems-model.js';
+import { createRunner, createStubSession, StubTensor, verifiedRunChunk } from '../public/js/stems/stems-model.js';
 
 const send = (m) => process.send?.(m);
 const order = STEMS.map((n) => DEMUCS_SOURCES.indexOf(n));
 let runner = null, info = null, ort = null, gpuFailed = false, initMsg = null;
+// A GPU backend is only trusted once its stems match the CPU's for one chunk of real audio (verifiedRunChunk):
+// DirectML has been seen returning noise in every stem that still adds up to the track, so mixtureError passes it.
+let gpuRun = null, cpuReference = null;
+
+/** Test stand-in for a GPU whose output layout is wrong: every stem gets slices of the others (sum unchanged). */
+function scrambleSources(out, sources, channels, segment) {
+  const r = new Float32Array(out.length);
+  for (let c = 0; c < channels; c++) for (let t = 0; t < segment; t++) for (let s = 0; s < sources; s++) {
+    r[(((s + (t >> 6)) % sources) * channels + c) * segment + t] = out[(s * channels + c) * segment + t];
+  }
+  return r;
+}
 
 /** GPU execution providers worth trying on this platform, in order. */
 export function gpuProviders(platform = process.platform, supported = []) {
@@ -31,9 +43,18 @@ export function gpuProviders(platform = process.platform, supported = []) {
 
 async function load(m, { cpuOnly = false } = {}) {
   const t0 = Date.now();
+  gpuRun = null; cpuReference = null;
   if (m.stub) {
     runner = createRunner(createStubSession(), StubTensor);
     info = { backend: 'stub', threads: 1 };
+    // tests: a fake GPU in front of the stub ('ok' returns the stub's stems, 'broken' scrambles them)
+    if (m.stubGpu && !cpuOnly && m.backend !== 'cpu') {
+      const cpu = runner, S = cpu.sources.length;
+      const fake = m.stubGpu === 'broken' ? async (x) => scrambleSources(await cpu.runChunk(x), S, 2, cpu.segment) : cpu.runChunk;
+      runner = { ...cpu, runChunk: fake };
+      info = { backend: 'stub-gpu', threads: 0 };
+      cpuReference = async () => ({ runChunk: cpu.runChunk });
+    }
     return;
   }
   ort ||= createRequire(import.meta.url)('onnxruntime-node');
@@ -49,6 +70,23 @@ async function load(m, { cpuOnly = false } = {}) {
   if (!session) session = await ort.InferenceSession.create(m.model, { ...opts, executionProviders: ['cpu'] });
   runner = createRunner(session, ort.Tensor);
   info = { backend, threads: backend === 'cpu' ? threads : 0, loadMs: Date.now() - t0 };
+  if (backend !== 'cpu') {
+    // the CPU session for the one-time check: loaded only when the first chunk with audio arrives, released after
+    cpuReference = async () => {
+      const cpu = await ort.InferenceSession.create(m.model, { ...opts, executionProviders: ['cpu'] });
+      return { runChunk: createRunner(cpu, ort.Tensor).runChunk, release: () => cpu.release?.() };
+    };
+  }
+}
+
+/** runChunk for this job: a GPU that has not passed the CPU comparison yet is checked on its first audible chunk. */
+function jobRunChunk() {
+  if (!cpuReference) return runner.runChunk;
+  gpuRun ||= verifiedRunChunk(runner.runChunk, cpuReference, {
+    backend: info.backend,
+    onVerified: (diff) => process.stderr.write(`[stems] ${info.backend} output matches the CPU (difference ${diff.toExponential(1)})\n`),
+  });
+  return gpuRun.isVerified() ? runner.runChunk : gpuRun;
 }
 
 /** Decode any input FFmpeg reads to planar float 44.1 kHz stereo. */
@@ -93,7 +131,7 @@ async function job(m) {
   let lastSent = 0;
   const run = async () => separateChunked({
     channels: [audio.left, audio.right], length: audio.length, segment: runner.segment, overlap: m.overlap ?? 0.25, sources: runner.sources.length,
-    runChunk: runner.runChunk,
+    runChunk: jobRunChunk(),
     onProgress: (done, total) => {
       const now = Date.now();
       if (done === 0 || done === total || now - lastSent > 500) { lastSent = now; send({ type: 'progress', id: m.id, phase: 'separating', done, total, backend: info.backend }); }
@@ -109,13 +147,13 @@ async function job(m) {
       // a GPU provider that loads but fails on the first chunk (driver, memory): redo the track on the CPU
       if (info.backend === 'cpu' || info.backend === 'stub' || gpuFailed) throw e;
       process.stderr.write(`[stems] ${info.backend} failed (${e.message}), using the CPU\n`);
-      gpuFailed = true;
+      gpuFailed = { backend: info.backend, message: e.message };
       await load(initMsg, { cpuOnly: true });
       for (const fd of fds) fs.ftruncateSync(fd, 0);
       pos.fill(0);
       r = await run();
     }
-    send({ type: 'done', id: m.id, frames: audio.length, ms: Date.now() - t0, chunks: r.chunks, backend: info.backend, threads: info.threads });
+    send({ type: 'done', id: m.id, frames: audio.length, ms: Date.now() - t0, chunks: r.chunks, backend: info.backend, threads: info.threads, ...(gpuFailed ? { gpuFailed } : {}) });
   } finally { for (const fd of fds) fs.closeSync(fd); }
 }
 
