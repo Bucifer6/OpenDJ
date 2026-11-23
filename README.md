@@ -12,7 +12,7 @@ Mix manually or let adaptive Auto DJ choose tracks and plan musical handovers. D
 [![Build](https://github.com/Bucifer6/OpenDJ/actions/workflows/build.yml/badge.svg)](https://github.com/Bucifer6/OpenDJ/actions/workflows/build.yml)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Web%2FDocker-informational)
 
-[**Download**](https://github.com/Bucifer6/OpenDJ/releases/latest) · [Features](#features) · [Quick start](#quick-start) · [Comparison](docs/GAP_ANALYSIS.md) · [Contributing](CONTRIBUTING.md)
+[**Download**](https://github.com/Bucifer6/OpenDJ/releases/latest) · [Quick start](#quick-start) · [Auto DJ](#automix) · [Features](#features) · [QA](docs/QA_0.5.4.md) · [Contributing](CONTRIBUTING.md)
 
 <img src="docs/images/hero.jpg" alt="OpenDJ mid-set: two decks in sync with scrolling 3-band waveforms, phrase markers, hot cues, mixer and library" width="100%">
 
@@ -27,6 +27,16 @@ Mix manually or let adaptive Auto DJ choose tracks and plan musical handovers. D
 - **Runs everywhere.** Desktop app for Windows, macOS and Linux, or a self-hosted web app (Docker / NAS) you open in Chrome or Edge.
 - **Automatic mixing that follows the music.** Select tracks live using tempo, harmony and energy, then find suitable entry and exit sections throughout the tracks.
 - **Plays nicely with your other tools.** Imports rekordbox, Traktor, Serato and VirtualDJ libraries; exports rekordbox XML, M3U and CDJ-ready USB sticks.
+
+Choose how you want to mix:
+
+| Mode | What you control | What OpenDJ handles |
+| --- | --- | --- |
+| Manual | Track choice, cue points, decks, EQ, effects and crossfader | Playback, analysis, optional sync and key lock |
+| Prepared set | Playlist order and any transition overrides | Preloading, musical handovers and tempo recovery |
+| Adaptive Auto DJ | Music pool, energy shape and musical priorities | Live next-track selection, entry/exit planning, transition style and length |
+
+Start with [Quick start](#quick-start), or go straight to the [Auto DJ setup](#automix). You can take over during an automatic set.
 
 <p align="center"><img src="docs/images/demo.gif" alt="Animated demo: waveforms scrolling while the crossfader and EQs mix from deck 1 to deck 2" width="90%"></p>
 
@@ -373,9 +383,9 @@ Tests:
 
 ```bash
 npm ci              # install the exact runtime and test dependencies
-npm test            # unit tests: analysis, media-server clients against mock servers, rekordbox round trip, CDJ export, DVS, Link…
+npm test            # unit/API/security/DSP tests plus syntax checks for every browser JS module
 npx playwright install chromium  # one-time browser download for end-to-end tests
-npm run test:e2e    # end-to-end checks in headless Chromium (smoke, performance, controllers, lighting, video, web app, DVS, Link/lyrics, recording, stems, analysis, sampler, automix)
+npm run test:e2e    # all 22 browser/desktop suites, including every advertised MCP tool
 ```
 
 The smoke test covers scan → load → analyse → play → sync → FX → record → automix; `scripts/e2e-automix.mjs` checks every mixing style on the master output (dropouts, level, clipping, clicks), smart mix, loading tracks while automix runs and media-server playlists; `scripts/e2e-sampler.mjs [outDir]` renders the sampler bank, measures loudness / spectrum and writes WAVs plus spectrogram PNGs; `node scripts/e2e-performance.mjs` measures pitch for key shift and key lock and checks key sync, quantized cues, saved loops, slicer, instant doubles, stems, Color FX, mic/talkover and the sequencer. `scripts/e2e-update.mjs [shotsDir]` runs the update prompt against a fake GitHub API (`OPENDJ_UPDATE_URL`, tests only, loopback URLs only): newer / same / older versions, *What's new*, Later / Skip, deferral during playback, desktop (mocked IPC and real Electron), hosted and phone modes.

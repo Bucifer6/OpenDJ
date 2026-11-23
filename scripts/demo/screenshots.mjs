@@ -135,6 +135,7 @@ async function heroState() {
   await loadDeck(1, T('Copper Skyline'));
   await ev(() => {
     const a = window.opendj, E = a.engine, [d1, d2] = E.decks;
+    E.decks.forEach((d) => d.showPanel?.('cues'));
     d1.setMaster?.();
     d1.seek(d1.beatLen * 4 * 46); // inside the first drop
     d2.seek(d2.beatLen * 4 * 8);
@@ -205,6 +206,7 @@ const shots = {
     await page.waitForFunction(() => window.opendj.engine.decks[0].stemsReady, null, { timeout: 60000 });
     await ev(() => {
       const a = window.opendj, E = a.engine, d = E.decks[0];
+      d.showPanel('stems');
       d.seek(d.beatLen * 4 * 72); d.play(); d.sync?.();
       d.setStemMute(1, true); // drums out
       d.setStemLevel(2, 0.6);
