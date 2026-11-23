@@ -23,6 +23,11 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.5.11
+- **Automix blends like real DJ mixes.** Measured over about 20,000 transitions in real mixes, the typical blend is 16 bars (half are 8–26), and a track plays about 4 minutes before the next comes in (see `docs/automix-research/04-real-mixes.md`). House, techno and trance now prefer 16-bar blends and go to 32 at most; only a long outro over a long intro runs longer. A long club track now hands over after about 4–5 minutes instead of playing for 6 or more.
+- **The bass changes hands as the next groove arrives**, on the incoming track's drop or main part when it starts inside the blend, else a little past the middle. The incoming hi-hats stay down until then and come in with its bass.
+- **Teases of the next record redone** (still off unless you turn them on): 4 bars instead of 8, one transition in five at most and never two in a row, 8–16 bars before the mix, never over the current track's vocals. With AI stems it's the next track's vocal hook or drums; without stems its intro beat with the bass cut. The thin, filtered slice of the whole track is gone.
+
 ### New in 0.5.10
 - **Automix no longer adds effects of its own.** Tricks inside tracks (bass teases, filter builds, loop rolls, horns…), teases of the next track and transitions built from AI stems (stem swap, drum bridge, acapella) are now off, also on existing installs (once). Isolated AI stems can carry audible artefacts. Each can be turned back on in *Settings → Automix*. Normal blends and echo-outs are unchanged.
 - **AI stems are never prepared twice at once.** The app window no longer takes a track the server is already preparing (the two runs could cancel each other and waste minutes of work).
@@ -93,11 +98,3 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **Remote control (MCP) for AI assistants:** many new tools, so an assistant you connect can pick tracks by genre, BPM, key and energy, read a track's sections and vocals, plan transitions, mix (EQ, filter, FX, tempo, key, loops), build mashups with AI stems, and speak over the mix like an MC. OpenDJ itself contains no AI: it only offers the tools, with the same token, scopes and audit log as before.
 - **4 decks:** the MASTER section is no longer hidden under decks 2 and 4.
 - **Mixer:** the MC button is gone, giving MIC / TALK more room; the SMART row is no longer cut off. FX assign buttons show the right state.
-
-### New in 0.5.1
-- **AI stems prepared by OpenDJ itself, ahead of time.** The desktop app and the web server (Docker included) now separate stems natively in a background process, on the graphics card when there is one (DirectML on Windows, CoreML on Apple Silicon, CUDA on Linux) or on all CPU cores. Phones and browsers connected to it just ask, so the page no longer freezes while stems are prepared. Automix's next two tracks and every track you load on a deck are prepared automatically (Settings → AI stems). The browser engine remains as the fallback.
-- **Romanian interface.** Settings → Appearance → Language: Auto, English or Română. The whole app is translated, including the login page, video output and Controller Mapper.
-- **Automatic transition length** in Automix: *Auto (from the tracks)* picks 4 to 32 bars per transition from the outro and intro phrases, and the queue shows why.
-- **Automix queue editing:** compact rows, Shuffle for the remaining tracks, drag & drop or Alt+Up/Down to reorder, and *Play next in automix* in the library menu.
-- **Mixer:** two knob rows per channel and a taller MASTER meter with its buttons at the bottom.
-- Dialogs and settings fit the window at every interface size; the settings tabs wrap instead of hiding the last ones.

@@ -133,7 +133,10 @@ export function planMixOut(t, { transitionBeats = 32, skipSilence = true } = {})
 /** Bounds of the automatic transition length (bars). */
 export const AUTO_LENGTH_MIN_BARS = 4, AUTO_LENGTH_MAX_BARS = 64, AUTO_LENGTH_DROP_MAX_BARS = 32;
 /** Auto length per style: [usual bars without structure info, most bars it is stretched to]. */
-const AUTO_LENGTH_STYLE = { blend: [16, 64], stemswap: [16, 64], filter: [16, 16], crossfade: [8, 16], bassswap: [4, 4] }; // bass swap: planTransition keeps it to 16 beats
+// most real blends are 8-26 bars, median 16 (docs/automix-research/04-real-mixes.md §2.2): 32 at most, except a long
+// outro over a long intro (both LONG_BLEND_BARS or more), which may run to 64
+const AUTO_LENGTH_STYLE = { blend: [16, 32], stemswap: [16, 32], filter: [16, 16], crossfade: [8, 16], bassswap: [4, 4] }; // bass swap: planTransition keeps it to 16 beats
+const LONG_BLEND_BARS = 48;
 /** Round down to a phrase: multiples of 8 bars from 8 bars up, else 4 bars. */
 const phraseBars = (b) => (b >= 8 ? Math.floor(b / 8 + 1e-6) * 8 : AUTO_LENGTH_MIN_BARS);
 
@@ -175,6 +178,7 @@ export function autoTransitionLength(out, inn, style, { keySync = false } = {}) 
   const ob = outroBars(out), ib = drop ? null : introBars(inn);
   const reasons = [];
   let bars, cap = drop ? AUTO_LENGTH_DROP_MAX_BARS : most; // an effect build-up stays at most 32 bars
+  if (!drop && ['blend', 'stemswap'].includes(style) && ob != null && ib != null && Math.min(ob, ib) >= LONG_BLEND_BARS) cap = 64; // a long outro over a long intro
   if (ob == null && ib == null) { bars = usual; reasons.push(t(drop ? 'no outro analysis' : 'no phrase analysis: usual length for the style')); }
   else {
     const known = [ob, ib].filter((x) => x != null);
@@ -244,13 +248,19 @@ export function barOffsetBeats(t, pos, start = null) {
 }
 
 /**
- * Bass-swap point for the 'phrase' style, in incoming-track seconds: a phrase boundary of the incoming track inside
- * the transition window [inStart, inStart + lenIn] (closest to its middle); falls back to 8-, 4- or 1-bar boundaries
- * counted from the mix-in point.
+ * Bass-swap point for the 'phrase' style, in incoming-track seconds, inside the transition window
+ * [inStart, inStart + lenIn] (between 20 % and 85 % of it):
+ * - the start of the incoming track's main part (drop / verse / chorus / buildup) when it falls in the middle of the
+ *   window (40-85 %): the bass changes hands as the new groove arrives;
+ * - else the incoming phrase boundary closest to 58 % of the window (real DJs swap a little past the middle,
+ *   docs/automix-research/04-real-mixes.md §2.4);
+ * - else 8-, 4-, 2- or 1-bar boundaries counted from the mix-in point.
  */
 export function phraseSwapPoint(t, inStart, lenIn) {
-  const lo = inStart + 0.2 * lenIn, hi = inStart + 0.85 * lenIn, mid = inStart + 0.5 * lenIn;
-  const pick = (cands) => cands.filter((x) => x >= lo && x <= hi).sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid))[0];
+  const lo = inStart + 0.2 * lenIn, hi = inStart + 0.85 * lenIn, mid = inStart + SWAP_AT * lenIn;
+  const pick = (cands, from = lo) => cands.filter((x) => x >= from - 1e-6 && x <= hi + 1e-6).sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid))[0];
+  const main = pick((t.phrases || []).filter((p) => SWAP_MAIN.has(p.type)).map((p) => p.start), inStart + 0.4 * lenIn);
+  if (main != null) return main;
   const fromPhrases = pick((t.phrases || []).map((p) => p.start));
   if (fromPhrases != null) return fromPhrases;
   if (t.bpm) {
@@ -264,6 +274,9 @@ export function phraseSwapPoint(t, inStart, lenIn) {
   }
   return mid;
 }
+/** Where in a blend the bass swap goes when no main part arrives: a little past the middle. */
+export const SWAP_AT = 0.58;
+const SWAP_MAIN = new Set(['drop', 'verse', 'chorus', 'buildup']);
 
 const ease = (x) => x * x * (3 - 2 * x);
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
@@ -285,14 +298,15 @@ export function mixLevels(style, k, kSwap = null) {
     // hats; the bass swaps on a phrase line (kSwap) in one move; then the outgoing mids / highs leave before its fader
     if (kSwap == null) {
       return {
+        // incoming highs stay 6 dB down until the swap: its hats arrive with its bass, as a DJ opens them
         inVol: 0.8 * ease(clamp01(k / 0.25)), outVol: 0.8, inLow: -1, outLow: 0, outMid: 0,
-        inHigh: EQ_M6 * (1 - clamp01((k - 0.125) / 0.125)), inMid: EQ_M6 + (EQ_M6 / -2) * clamp01(k / 0.5),
+        inHigh: EQ_M6, inMid: EQ_M6 + (EQ_M6 / -2) * clamp01(k / 0.5),
         outHigh: EQ_M6 * ease(clamp01((k - 0.25) / 0.25)),
       };
     }
     const p = clamp01((k - kSwap) / Math.max(1e-3, 1 - kSwap));
     return {
-      inVol: 0.8, outVol: 0.8 * (1 - ease(clamp01((p - 0.5) / 0.5))), inLow: 0, outLow: -1, inHigh: 0,
+      inVol: 0.8, outVol: 0.8 * (1 - ease(clamp01((p - 0.5) / 0.5))), inLow: 0, outLow: -1, inHigh: EQ_M6 * (1 - ease(clamp01(p / 0.15))),
       inMid: (EQ_M6 / 2) * (1 - ease(clamp01(p / 0.5))), outMid: EQ_M6 * ease(clamp01(p / 0.5)),
       outHigh: EQ_M6 + EQ_M6 * ease(clamp01(p / 0.75)),
     };
@@ -1348,7 +1362,7 @@ export class AutoMix extends Emitter {
       const nt = this.nextTransition(); if (!nt) return;
       const oi = this.info(cur), ii = this.info(inn);
       const plan = planTease({ ...oi, id: cur.track.id, vocalMap: oi.vocalMap || decodeVocalMap(oi.stems?.vocals) }, { ...ii, id: next.id, vocalMap: ii.vocalMap || decodeVocalMap(ii.stems?.vocals) },
-        { from: cur.position + 4 * (240 / cur.bpm), to: nt.begin, mode: this.opts.tricks || 'off', stemsIn: !!inn.stemsReady, keyClash: keysClash(cur.playingCamelot || cur.track?.key, inn.camelot || inn.track?.key) });
+        { from: cur.position + 4 * (240 / cur.bpm), to: nt.begin, mode: this.opts.tricks || 'off', stemsIn: !!inn.stemsReady, prevTeased: this._teasedInto === cur.track.id, keyClash: keysClash(cur.playingCamelot || cur.track?.key, inn.camelot || inn.track?.key) });
       this.tease = { key: pairKey, plan, on: false, done: !plan };
     }
     const t = this.tease;
@@ -1366,12 +1380,14 @@ export class AutoMix extends Emitter {
     const offBeats = barOffsetBeats(oi, pos, t.plan.start);
     inn.syncOn = true; inn.matchTempo?.();
     t.saved = { stems: inn.stemLevels ? [...inn.stemLevels] : null };
-    if (t.plan.kind !== 'filtered' && inn.stemsReady) [0, 1, 2, 3].forEach((i) => inn.setStemLevel?.(i, t.plan.kind === 'vocal' ? (i === 0 ? 1 : 0) : (i === 1 ? 1 : 0)));
+    if (t.plan.kind !== 'beat' && inn.stemsReady) [0, 1, 2, 3].forEach((i) => inn.setStemLevel?.(i, t.plan.kind === 'vocal' ? (i === 0 ? 1 : 0) : (i === 1 ? 1 : 0)));
     ch.set('xfAssign', 'THRU'); ch.set('volume', 0);
-    if (t.plan.kind === 'filtered') { ch.set('eqLow', -1); ch.set('eqMid', -0.6); ch.set('filter', 0.45); }
+    if (t.plan.kind === 'beat') ch.set('eqLow', -1); // its beat with the bass cut: one bassline at a time
     inn.seek(t.plan.cue + offBeats * inn.beatLen);
     inn.play({ at: posAt, instant: true });
-    Object.assign(t, { on: true, inn, cur, ch, peak: t.plan.kind === 'filtered' ? 0.55 : t.plan.kind === 'vocal' ? 0.6 : 0.5, phase: {} });
+    // at least 6 dB under the on-air deck (its fader sits at 0.8; channel gain is the fader squared)
+    Object.assign(t, { on: true, inn, cur, ch, peak: t.plan.kind === 'vocal' ? 0.55 : t.plan.kind === 'drums' ? 0.5 : 0.45, phase: {} });
+    this._teasedInto = inn.track?.id ?? null;
     this.emit('trick', { id: 'tease', label: 'tease of the next record', why: t.plan.why });
     this.emit('state');
   }
@@ -1379,7 +1395,7 @@ export class AutoMix extends Emitter {
     const t = this.tease, { cur, inn, ch } = t;
     if (cur !== this.current || !cur.playing || !inn.playing || this.transition) return this.endTease(true);
     const bar = 240 / cur.bpm, k = (cur.position - t.plan.start) / t.plan.len;
-    const env = k < 0.25 ? k / 0.25 : k < 0.75 ? 1 : (1 - k) / 0.25; // 2 bars in, 4 held, 2 out (of 8)
+    const env = k < 0.25 ? k / 0.25 : k < 0.75 ? 1 : (1 - k) / 0.25; // 1 bar in, 2 held, 1 out (of 4)
     ch.set('volume', t.peak * ease(clamp01(env)));
     t.phase.out = cur; t.phase.inn = inn; this.keepPhase(t.phase, 0.5);
     if (cur.position >= t.plan.end - 0.02 * bar) this.endTease(false);
