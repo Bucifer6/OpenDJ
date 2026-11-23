@@ -207,3 +207,29 @@ test('P1.1: phrase grids line up even when the incoming track has a pickup intro
   assert.equal(gridMisalign(out, 65 * bar, inn, 0), 0, 'starting the incoming a bar later lines them up');
   assert.equal(gridMisalign(out, 64 * bar, { ...inn, phraseAnchor: 0 }, 0), 0);
 });
+
+test('P3.4: end time, wind-down and clean-only filter', async () => {
+  const { AutoMix } = await import('../public/js/automix.js');
+  const app = { engine: { on() {}, decks: [{ index: 0 }, { index: 1 }], channels: [] }, settings: { automix: { endAt: '02:00', cleanOnly: true } }, toast() {} };
+  const am = new AutoMix(app);
+  am.startedAt = new Date(2026, 10, 21, 22, 0, 0).getTime();
+  const end = am.endAtMs();
+  assert.equal(new Date(end).getDate(), 22, 'next day'); assert.equal(new Date(end).getHours(), 2);
+  assert.equal(am.windingDown(new Date(2026, 10, 22, 0, 30).getTime()), false);
+  assert.equal(am.windingDown(new Date(2026, 10, 22, 1, 57).getTime()), true);
+  assert.ok(Math.abs(am.partyCtx().setMinutes - 240) < 1e-6);
+  assert.equal(am.allowed({ id: 1, title: 'Song (Explicit)' }), false);
+  assert.equal(am.allowed({ id: 2, title: 'Song (Clean)' }), true);
+  app.settings.automix = { endAt: 'nonsense' };
+  assert.equal(am.endAtMs(), null); assert.equal(am.windingDown(), false);
+});
+
+test('P1.6: set tempo journey: selection leans toward the planned tempo', async () => {
+  const { scoreTransition } = await import('../public/js/smartmix.js');
+  const cur = { id: 'c', bpm: 122, key: '8A', energy: 6, genre: 'House' };
+  const up = { id: 'u', bpm: 123.5, key: '8A', energy: 6, genre: 'House' }, down = { id: 'd', bpm: 120.5, key: '8A', energy: 6, genre: 'House' };
+  const s = (c, targetBpm) => scoreTransition(cur, c, { targetBpm }).score;
+  assert.ok(s(up, 125) > s(down, 125), 'rising toward 125');
+  assert.ok(s(down, 119) > s(up, 119), 'falling toward 119');
+  assert.equal(scoreTransition(cur, up, {}).parts.tempoArc, 0);
+});

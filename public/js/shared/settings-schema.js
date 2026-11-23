@@ -62,7 +62,8 @@ const SCHEMA = {
     // party mode (docs/PRO_DJ_AUTOMIX_RESEARCH.md): safety net, level matching, tempo morph, double drops, tricks,
     // and the no-skill party controls
     watchdog: bool(), levelMatch: bool(), tempoMorph: bool(), doubleDrops: bool(), tricks: oneOf('off', 'subtle', 'party'),
-    energyBias: num(-2, 2), vibeLock: bool(),
+    energyBias: num(-2, 2), vibeLock: bool(), cleanOnly: bool(), finale: bool(),
+    endAt: (v) => (v === '' || v == null ? '' : typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v) ? v : undefined),
     banned: (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' || Number.isFinite(x)).slice(0, 5000).map(String) : undefined),
     preset: oneOf('balanced', 'harmonic', 'energy', 'variety', 'custom'), liveSetLength: num(2, 1000),
     setLength: oneOf('all', '30', '60', '120', '180', 'endless'),

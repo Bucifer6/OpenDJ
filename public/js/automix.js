@@ -8,6 +8,7 @@
 // settings.automix.lengthMode 'auto' is chosen per transition from the outro / intro phrases, BPM gap, energy and key
 // (autoTransitionLength).
 import { Emitter } from './util.js';
+import { api } from './api.js';
 import { toCamelot, camelotCompatible, analyzeStructure } from './audio/analysis-core.js';
 import { smartMix, liveNext, shuffle, camelotRelation, genreSimilarity, explain, skipFeedback, playFeedback, emptyFeedback, arcPhase, familiarityInfo, isFamiliar } from './smartmix.js';
 import { planTricks, rollSize } from './automix-tricks.js';
@@ -16,7 +17,7 @@ import { t } from './i18n.js';
 import { planBestTransition, stemSwapLevels, learnChoice } from './mix-planner.js';
 import { planAdaptiveTransition } from './adaptive-dj.js';
 import { Watchdog, quietAt } from './automix-watchdog.js';
-import { echoBeatsFor } from './dj-styles.js';
+import { echoBeatsFor, styleFamily } from './dj-styles.js';
 
 export const LOG_BPM_JUMP = Math.log(1.08); // > 8 % tempo change (after half/double matching) is a "big jump"
 
@@ -533,7 +534,7 @@ export class AutoMix extends Emitter {
    */
   async start(tracks, { smart = false, order, mode, shape, sliders, limit, minutes, endless = false, pool = null } = {}) {
     if (!tracks.length) throw new Error('Queue is empty');
-    this.reasons = new Map(); this.overrides = new Map(); this.live = null; this.refill = null; this.feedback = emptyFeedback(); this.livePlan = null; this.trickHistory = []; this.famInfo = familiarityInfo(tracks);
+    this.reasons = new Map(); this.overrides = new Map(); this.live = null; this.refill = null; this.feedback = emptyFeedback(); this.livePlan = null; this.trickHistory = []; this.famInfo = familiarityInfo(tracks); this._peakHours = undefined;
     mode = mode || (smart ? 'legacy-smart' : this.opts.shuffle ? 'shuffle' : 'order');
     shape = shape || this.opts.shape || 'warmup';
     sliders = sliders || this.opts.sliders;
@@ -627,7 +628,7 @@ export class AutoMix extends Emitter {
    */
   fillMore() {
     const r = this.refill;
-    if (!r || this.live) return; // live mode picks each next track itself (fillLive)
+    if (!r || this.live || this.windingDown()) return; // live mode picks each next track itself (fillLive)
     const lib = this.app.library;
     const secs = (t) => Number(lib?.track?.(t.id)?.duration || t.duration) || 240;
     if (this.queue.length - this.idx >= 2) return;
@@ -661,7 +662,7 @@ export class AutoMix extends Emitter {
     }
     if (add.length) this.queue.push(...add);
   }
-  stop() { this.endTrick(true); this.trickPlan = null; this.enabled = false; this.forceTransitionRequested = false; this.watchdog?.reset(); if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
+  stop() { this.endTrick(true); this.trickPlan = null; this._finale = null; if (this.engine.prefetched) this.engine.prefetched.clear(); this.enabled = false; this.forceTransitionRequested = false; this.watchdog?.reset(); if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
   /** Start the next transition immediately, waiting for its deck preload if necessary. */
   skip({ feedback = true } = {}) {
     if (!this.enabled || this.transition || !this.current || !this.nextTrack()) return false;
@@ -748,10 +749,51 @@ export class AutoMix extends Emitter {
     return {
       energyBias: Number(o.energyBias) || 0, vibeLock: !!o.vibeLock, banned: new Set((o.banned || []).map(String)),
       feedback: this.feedback || undefined, now: Date.now(), elapsedMin: this.startedAt ? (Date.now() - this.startedAt) / 60000 : 0, ...extra,
+      targetBpm: this.targetBpm() ?? undefined,
+      ...(this.endAtMs() != null ? { setMinutes: (this.endAtMs() - (this.startedAt || Date.now())) / 60000, endless: false } : {}),
     };
   }
-  /** May this track be played (not banned)? */
-  allowed(t) { return !!t && !(this.opts?.banned || []).map(String).includes(String(t.id)); }
+  /**
+   * Wind-down (P3.4): settings.automix.endAt "HH:MM" (local clock) ends the set there: the energy arc closes towards
+   * it, no new tracks are added in its last minutes, and the last track fades out in a reverb wash.
+   * @returns {number|null} the end time in ms
+   */
+  endAtMs(now = Date.now()) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(this.opts?.endAt || ''));
+    if (!m) return null;
+    const start = this.startedAt || now, d = new Date(start);
+    d.setHours(+m[1], +m[2], 0, 0);
+    if (d.getTime() <= start + 60e3) d.setDate(d.getDate() + 1); // "02:00" after a 22:00 start is tomorrow
+    return d.getTime();
+  }
+  /** True once the set has reached its end time (less the track still to play): nothing more is queued. */
+  windingDown(now = Date.now()) {
+    const end = this.endAtMs(now);
+    if (end == null) return false;
+    const left = this.current?.track ? Math.max(0, (this.current.duration || 0) - (this.current.position || 0)) * 1000 : 0;
+    return now + Math.min(left, 6 * 60e3) + 3 * 60e3 >= end; // (the track that would come next needs a few minutes)
+  }
+  /**
+   * The set's planned tempo now (P1.6): from the tempo the set started at, rising about 3 BPM per hour through the
+   * warm-up and build and holding at the peak, as warm-up DJs do (capped at +8 %). null for open-format sets, which
+   * move between tempo worlds by design, and before anything has played.
+   */
+  targetBpm(now = Date.now()) {
+    const first = this.fresh(this.queue[0] || this.current?.track), b0 = Number(first?.bpm);
+    if (!(b0 > 0) || !this.startedAt || styleFamily(first) === 'open') return null;
+    const phase = this.setPhase();
+    const hours = Math.max(0, (now - this.startedAt) / 3600e3);
+    const rise = phase === 'peak' || phase === 'close' || phase === 'valley' ? Math.min(hours, this._peakHours ??= hours) : hours;
+    return b0 * Math.min(1.08, 1 + (3 * rise) / b0);
+  }
+  /** May this track be played (not banned, and clean when only clean versions are wanted)? */
+  allowed(t) {
+    if (!t || (this.opts?.banned || []).map(String).includes(String(t.id))) return false;
+    // clean only: the library has no parental-advisory flag, so explicit versions are recognised by their tags /
+    // title ("Explicit", "Dirty"); "Clean" / "Radio Edit" versions are fine
+    if (this.opts?.cleanOnly && /\b(explicit|dirty)\b/i.test([t.title, t.genre, t.comment, ...(Array.isArray(t.tags) ? t.tags : [])].filter(Boolean).join(' '))) return false;
+    return true;
+  }
   /**
    * Party pools (P0.2): when enough analysed tracks are available, only those are picked, so every transition can be
    * planned on beats and phrases; unanalysed ones come back only when nothing else is left.
@@ -770,7 +812,7 @@ export class AutoMix extends Emitter {
 
   /** Live smart mode: when nothing is queued after the current track, pick the best next one from the pool. */
   fillLive() {
-    if (!this.live || this.idx < this.queue.length) return;
+    if (!this.live || this.idx < this.queue.length || this.windingDown()) return;
     const lib = this.app.library;
     const fresh = (t) => (t && lib?.track?.(t.id)) || t;
     const played = this.queue.slice(0, this.idx).map(fresh);
@@ -938,8 +980,41 @@ export class AutoMix extends Emitter {
     if (!this.enabled) return; // stopped while loading: leave the deck's fader to the DJ
     const ch = this.engine.channels[deck.index];
     ch.set('xfAssign', 'THRU'); ch.set('volume', 0);
+    this.prefetchAhead();
     this.upcoming = null;
     this.emit('state');
+  }
+
+  /**
+   * Party safety (P0.1): fetch the track after next while this one plays, so its bytes are in memory when its deck
+   * loads (the deck uses them instead of the network), and a file that can't be read is found out a track early:
+   * it is retried once, then taken out of the queue.
+   */
+  async prefetchAhead() {
+    const t = this.queue[this.idx + 1];
+    if (!t || this.engine.lowEnd || typeof fetch !== 'function') return;
+    const cache = this.engine.prefetched ||= new Map();
+    if (cache.has(t.id) || this._prefetching === t.id) return;
+    const limit = 120 * 1024 * 1024; // never hold more than one very large file ahead
+    this._prefetching = t.id;
+    for (let attempt = 0; attempt < 2 && this.enabled; attempt++) {
+      try {
+        const res = await fetch(api.streamUrl(t.id));
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const len = Number(res.headers.get('content-length')) || 0;
+        if (len > limit) { res.body?.cancel?.(); break; }
+        const ab = await res.arrayBuffer();
+        if (!ab.byteLength) throw new Error('empty file');
+        for (const id of [...cache.keys()]) if (id !== this.nextTrack()?.id) cache.delete(id); // keep at most the next two
+        if (this.queue.slice(this.idx, this.idx + 3).some((x) => x.id === t.id)) cache.set(t.id, ab);
+        break;
+      } catch (e) {
+        if (attempt === 0) { await new Promise((r) => setTimeout(r, 5000)); continue; }
+        const at = this.queue.indexOf(t);
+        if (at > this.idx && this.enabled) { this.queue.splice(at, 1); this.app.toast?.(`Automix: skipping "${t.title}" (${e.message})`); this.emit('state'); }
+      }
+    }
+    if (this._prefetching === t.id) this._prefetching = null;
   }
 
   /** Library copy of a track (analysed fields: energy, key, phrases), else the given object. */
@@ -987,11 +1062,17 @@ export class AutoMix extends Emitter {
     const nudge = this.nudges?.get(next) || null;
     const key = JSON.stringify([cur.track.id, next.id, this.opts, this.overrides.get(next), nudge, signature(oi), signature(ii), cur.rate, cur.stemsReady, nd?.stemsReady, this.app.settings.mixLearning]);
     if (this.upcoming && (cur.position < (this.upcoming.observed || 0) - (cur.beatLen || 0.5) * 4 || cur.position > (this.upcoming.plan.drop ?? this.upcoming.plan.end ?? Infinity))) this.upcoming = null;
+    // rehearse, then commit (P6.4): two bars before it begins the plan is locked; analysis or stem updates arriving
+    // now re-plan only the transition after this one (a DJ's own override or nudge still applies)
+    const u0 = this.upcoming, bar0 = 4 * (cur.beatLen || 0.5);
+    const locked = u0 && u0.nextId === next.id && u0.userKey === JSON.stringify([this.overrides.get(next), nudge])
+      && cur.position >= u0.plan.begin - 2 * bar0 && cur.position < u0.plan.begin + bar0;
+    if (locked) u0.key = key;
     if (!this.upcoming || this.upcoming.key !== key) {
       const s = this.styleFor(this.idx, this.app.library?.track?.(cur.track.id) || cur.track);
       const length = s.plan && this.opts.lengthMode === 'auto' ? { beats: s.plan.beats, bars: s.plan.bars, auto: true, why: s.plan.lengthWhy }
         : this.lengthFor(oi, innReady ? this.info(nd) : this.trackInfo(next), s.style, cur.track, next);
-      this.upcoming = { key, ...s, length, plan: planTransition(oi, s.style, { ...this.opts, transitionBeats: length.beats }) };
+      this.upcoming = { key, nextId: next.id, userKey: JSON.stringify([this.overrides.get(next), nudge]), ...s, length, plan: planTransition(oi, s.style, { ...this.opts, transitionBeats: length.beats }) };
       if (s.plan && (!s.override || this.overrides.get(next) === 'auto')) {
         const adaptive = planAdaptiveTransition(oi, ii, {
           position: cur.position, entry: cur._autoMixEntry || 0, rate: cur.rate, keepSync: this.opts.keepSync,
@@ -1033,6 +1114,7 @@ export class AutoMix extends Emitter {
       if (next) this.beginTransition(true); else this.stop();
       return;
     }
+    if (!next && cur.playing && cur.track) { this.stepFinale(cur); return; }
     if (!cur.track || !cur.playing || !next) return;
     const nxt = this.other(cur);
     if (nxt.track?.id !== next.id) { if (!this._loading && !nxt.loading) this.preloadNext(); return; }
@@ -1102,6 +1184,28 @@ export class AutoMix extends Emitter {
     r.last = tempoRampValue(r.from, k);
     d.setTempo(k >= 1 ? 0 : r.last);
     if (k >= 1) this.tempoRamp = null;
+  }
+
+  /**
+   * The end of the set (no next track): the last track fades out over its final 8 bars in a reverb wash, like a DJ
+   * closing the night, then automix stops. settings.automix.finale false: it just plays to its end.
+   */
+  stepFinale(cur) {
+    // an endless set that just ran short: top the queue up instead of ending
+    if ((this.live?.endless || this.refill?.endless) && !this.windingDown()) { this.fillLive(); this.fillMore(); if (this.nextTrack()) this.preloadNext(); return; }
+    if (this.opts.finale === false || !cur.bpm) return;
+    const bars8 = 8 * 4 * 60 / (cur.effectiveBpm || cur.bpm), end = Math.min(cur.duration || 0, Number(this.fresh(cur.track)?.endTime) || cur.duration || 0);
+    const ch = this.engine.channels[cur.index], now = this.now();
+    if (!this._finale) {
+      if (end - cur.position > bars8 / (cur.rate || 1) || end - cur.position < 2) return;
+      this.endTrick(true);
+      this._finale = { t0: now, dur: Math.max(2000, (end - cur.position) / (cur.rate || 1) * 1000) };
+      ch.set('fxType', 'reverb'); ch.set('fxParam', 0.85); ch.set('fxMix', 0.15); ch.set('fxOn', true);
+      this.emit('finale');
+    }
+    const k = clamp01((now - this._finale.t0) / this._finale.dur);
+    ch.set('fxMix', 0.15 + 0.6 * k); ch.set('eqLow', -0.6 * ease(k)); ch.set('volume', 0.8 * Math.sqrt(1 - ease(k)));
+    if (k >= 1) { cur.pause(); ch.set('fxOn', false); ch.set('eqLow', 0); this._finale = null; this.app.toast?.(t('Automix: the set is over')); this.stop(); }
   }
 
   // ---------- tricks (P5, automix-tricks.js) ----------

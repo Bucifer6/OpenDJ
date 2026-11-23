@@ -426,6 +426,14 @@ export function scoreTransition(cur, cand, ctx = {}) {
     if (Math.abs(Math.log(bb / ba)) > 0.35) s *= 0.85; // half / double time: a feel change
     parts.bpm = 2 * s - 1 - (d > Math.log(1.08) ? 1 + (d - Math.log(1.08)) * 15 : 0);
   } else parts.bpm = 0;
+  // tempo journey (P1.6): with ctx.targetBpm (the set's planned tempo now), tracks that move the set toward it win a
+  // little; half / double time counts as the same tempo
+  parts.tempoArc = 0;
+  const tb = num(ctx.targetBpm);
+  if (tb && bb && ba) {
+    const toTarget = (x) => tempoDistance(x, tb);
+    parts.tempoArc = Math.max(-1, Math.min(1, (toTarget(ba) - toTarget(bb)) / 0.02)) * 0.5 - Math.min(1, toTarget(bb) / 0.06) * 0.5;
+  }
 
   // energy: Gaussian around the target (σ 1), −0.3 per level beyond a ±1 step (+2 allowed when the arc lifts)
   if (eb == null) parts.energy = 0;
@@ -504,7 +512,7 @@ export function scoreTransition(cur, cand, ctx = {}) {
   }
 
   let score = W.harmonic * parts.harmonic + W.bpm * parts.bpm + W.energy * parts.energy + W.genre * parts.genre + W.variety * parts.variety + W.phrase * parts.phrase
-    + (W.familiarity ?? 1) * parts.familiarity + (W.vocal ?? 1) * parts.vocal + (W.feedback ?? 1) * parts.feedback + (ctx.vibeLock ? W.vibe ?? 3 : 0) * parts.vibe;
+    + (W.tempoArc ?? 1) * parts.tempoArc + (W.familiarity ?? 1) * parts.familiarity + (W.vocal ?? 1) * parts.vocal + (W.feedback ?? 1) * parts.feedback + (ctx.vibeLock ? W.vibe ?? 3 : 0) * parts.vibe;
   if (ctx.banned && asSetCached(ctx.banned).has(cand.id)) { parts.banned = true; score -= 1e6; }
   return { score, parts, target };
 }

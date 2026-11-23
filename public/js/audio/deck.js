@@ -143,9 +143,15 @@ export class Deck extends Emitter {
       const phase = (name, pct = null) => { this.loadPhase = { name, pct }; this.emit('load-progress', this.loadPhase); };
       phase('Loading', 0);
       if ((Number(track.duration) || 0) > LONG_TRACK_SEC) this.engine.emit('warning', `"${track.title || 'This track'}" is ${Math.round(track.duration / 60)} minutes long: loading takes a while and needs a lot of memory`);
-      const res = await fetch(api.streamUrl(track.id));
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
-      const ab = await readWithProgress(res, (p) => { if (!stale()) phase('Loading', p); });
+      // bytes fetched ahead by automix (a NAS or media server that hiccups mid-party doesn't stop the next track)
+      const pre = this.engine.prefetched?.get(track.id);
+      if (pre) this.engine.prefetched.delete(track.id);
+      let ab = pre || null;
+      if (!ab) {
+        const res = await fetch(api.streamUrl(track.id));
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+        ab = await readWithProgress(res, (p) => { if (!stale()) phase('Loading', p); });
+      }
       if (stale()) return false; // another load superseded this one
       phase('Decoding');
       const buf = await this.ctx.decodeAudioData(ab);
