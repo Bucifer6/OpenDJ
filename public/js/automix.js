@@ -794,6 +794,54 @@ export class AutoMix extends Emitter {
     return p ? { score: Math.max(-4, Math.min(4, p.score / 4)), reason: p.why } : { score: -2, reason: 'limited section analysis' };
   }
 
+  /**
+   * Preview nudges for the next transition (P6.2): 'earlier' / 'later' move it a phrase, 'shorter' / 'longer' change
+   * its length (8 / 16 / 32 bars), 'reset' clears them. Returns the new nudge (or null).
+   */
+  nudge(kind) {
+    const next = this.nextTrack(); if (!next) return null;
+    this.nudges ||= new WeakMap();
+    const n = { ...(this.nudges.get(next) || { shift: 0, bars: null }) };
+    const bars = n.bars || this.upcoming?.length?.bars || 16, LEN = [4, 8, 16, 32];
+    if (kind === 'earlier') n.shift -= 1; else if (kind === 'later') n.shift += 1;
+    else if (kind === 'shorter') n.bars = LEN.filter((b) => b < bars).at(-1) || 4;
+    else if (kind === 'longer') n.bars = LEN.find((b) => b > bars) || 32;
+    if (kind === 'reset' || (!n.shift && !n.bars)) { this.nudges.delete(next); this.upcoming = null; this.emit('state'); return null; }
+    this.nudges.set(next, n); this.upcoming = null; this.emit('state');
+    return n;
+  }
+
+  /**
+   * The next transition as one plan object (P6.1): what the executor will play, for the preview timeline, the
+   * headphone render and the checker. null when nothing is planned.
+   */
+  previewPlan() {
+    const nt = this.nextTransition(), u = this.upcoming;
+    if (!nt || !u) return null;
+    const cur = this.current, nd = this.other(cur), next = this.nextTrack();
+    const innReady = nd?.track?.id === next.id && !nd.loading;
+    const ii = innReady ? this.info(nd) : this.trackInfo(next);
+    const style = u.style, drop = DROP_STYLES.has(style), plan = u.plan;
+    const outRate = cur.rate || 1, outBpm = cur.effectiveBpm || cur.bpm || 0, inBpm = Number(ii.bpm) || 0;
+    const raw = outBpm && inBpm ? outBpm / inBpm : 1;
+    const innRate = [raw, raw * 2, raw / 2].reduce((a, b) => (Math.abs(Math.log(b)) < Math.abs(Math.log(a)) ? b : a));
+    const inStart = u.adaptive?.inStart ?? incomingStart(ii);
+    const len = drop ? 0 : plan.len, lenIn = len * innRate / outRate;
+    const swapAt = drop ? null : u.adaptive?.swapIn ?? (SWAP_STYLES.has(style) ? phraseSwapPoint(ii, inStart, lenIn) : null);
+    const kSwap = swapAt != null && lenIn > 0 ? clamp01((swapAt - inStart) / lenIn) : style === 'bassswap' ? 0.5 : null;
+    const lanes = drop ? null : Array.from({ length: 65 }, (_, i) => { const k = i / 64; return { k, ...mixLevels(style, k, kSwap != null && k >= kSwap ? kSwap : null) }; });
+    return {
+      style, why: u.why, length: u.length, begin: plan.begin, len, drop: drop ? plan.drop : null, end: drop ? plan.drop : plan.start + len,
+      inStart, kSwap, lanes, outRate, innRate: drop ? 1 : innRate, beatLen: outBpm ? 60 / (cur.bpm || outBpm) : 0.5,
+      check: u.adaptive?.check || null, landing: u.adaptive?.landing ?? null, doubleDrop: !!u.adaptive?.doubleDrop,
+      position: cur.position, beginsIn: nt.beginsIn, outTrack: cur.track, inTrack: next, nudge: this.nudges?.get(next) || null,
+      echoBeats: echoBeatsFor(this.fresh(cur.track), this.fresh(next)),
+      gains: { out: Number(this.fresh(cur.track)?.gain) || 0, inn: Number(this.fresh(next)?.gain) || 0 },
+      tricks: (this.trickPlan?.deck === cur ? this.trickPlan.events : []).filter((e) => !e.done).map((e) => ({ id: e.id, label: e.label, at: e.at, start: e.start, why: e.why })),
+      upcoming: [next, ...(this.livePlan || []).filter((t) => t.id !== next.id), ...this.queue.slice(this.idx + 1)].slice(0, 8),
+    };
+  }
+
   /** Style (and why) for the transition into queue entry i. */
   styleFor(i, prevTrack) {
     const t = this.queue[i]; if (!t) return null;
@@ -936,7 +984,8 @@ export class AutoMix extends Emitter {
     const nd = this.other(cur), innReady = nd?.track?.id === next.id && !nd.loading;
     const oi = this.info(cur), ii = innReady ? this.info(nd) : this.trackInfo(next);
     const signature = (t) => ['bpm', 'bpmConfidence', 'gridOffset', 'downbeat', 'duration', 'startTime', 'endTime', 'mixIn', 'mixOut', 'phrases', 'key', 'energy', 'genre', 'vocalMap', 'stems'].map((k) => t[k]);
-    const key = JSON.stringify([cur.track.id, next.id, this.opts, this.overrides.get(next), signature(oi), signature(ii), cur.rate, cur.stemsReady, nd?.stemsReady, this.app.settings.mixLearning]);
+    const nudge = this.nudges?.get(next) || null;
+    const key = JSON.stringify([cur.track.id, next.id, this.opts, this.overrides.get(next), nudge, signature(oi), signature(ii), cur.rate, cur.stemsReady, nd?.stemsReady, this.app.settings.mixLearning]);
     if (this.upcoming && (cur.position < (this.upcoming.observed || 0) - (cur.beatLen || 0.5) * 4 || cur.position > (this.upcoming.plan.drop ?? this.upcoming.plan.end ?? Infinity))) this.upcoming = null;
     if (!this.upcoming || this.upcoming.key !== key) {
       const s = this.styleFor(this.idx, this.app.library?.track?.(cur.track.id) || cur.track);
@@ -947,7 +996,8 @@ export class AutoMix extends Emitter {
         const adaptive = planAdaptiveTransition(oi, ii, {
           position: cur.position, entry: cur._autoMixEntry || 0, rate: cur.rate, keepSync: this.opts.keepSync,
           stemsOut: !!cur.stemsReady, stemsIn: !!nd?.stemsReady,
-          fixedBars: this.opts.lengthMode === 'auto' ? null : length.bars,
+          fixedBars: nudge?.bars || (this.opts.lengthMode === 'auto' ? null : length.bars), exitShift: nudge?.shift || 0,
+          doubleDrops: this.opts.doubleDrops === false ? false : undefined,
           prevStyle: this._lastStyle, vary: !!this.opts.varyStyles, recent: this._recent, learning: this.app.settings.mixLearning,
         });
         if (adaptive) Object.assign(this.upcoming, { style: adaptive.style, why: adaptive.why, plan: adaptive.timing, adaptive,

@@ -197,3 +197,13 @@ test('P5: trick planner picks musical slots, respects mode, arc, vocals, grid an
   assert.ok(r.every((e) => e.id !== 'rewind' || e.restart != null));
   assert.equal(rollSize(0, 8), 1); assert.equal(rollSize(5, 8), 0.5); assert.equal(rollSize(7, 8), 0.125);
 });
+
+test('P1.1: phrase grids line up even when the incoming track has a pickup intro', async () => {
+  const { gridMisalign } = await import('../public/js/adaptive-dj.js');
+  const bpm = 120, bar = 2;
+  const out = { bpm, downbeat: 0, gridOffset: 0, phraseAnchor: 0 };
+  const inn = { bpm, downbeat: 0, gridOffset: 0, phraseAnchor: 7 * bar }; // 7-bar pickup before its first phrase
+  assert.equal(gridMisalign(out, 64 * bar, inn, 0), 1, 'starting both on bar 0 leaves the grids a bar apart');
+  assert.equal(gridMisalign(out, 65 * bar, inn, 0), 0, 'starting the incoming a bar later lines them up');
+  assert.equal(gridMisalign(out, 64 * bar, { ...inn, phraseAnchor: 0 }, 0), 0);
+});

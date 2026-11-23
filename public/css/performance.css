@@ -509,3 +509,22 @@ html.odj-local .panel-tab[data-panel="stems"] { display: none; }
 :root.h1250 body:not(.four-decks) .deck-body { grid-template-columns: minmax(190px, 0.9fr) minmax(0, 1.6fr) 62px; }
 :root.h1250 .jog { max-width: 300px; }
 :root.h1250 .btn.big { height: 60px; max-width: 72px; }
+
+/* automix preview: next transition timeline, checker verdict, nudges, party controls */
+.am-preview { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; padding: 6px; border: 1px solid var(--line, rgba(127,127,127,.25)); border-radius: 6px; }
+.am-tl { width: 100%; height: auto; display: block; }
+.am-tl-grid { stroke: rgba(127,127,127,.18); stroke-width: .5; }
+.am-tl-grid.strong { stroke: rgba(127,127,127,.4); }
+.am-tl-out { fill: rgba(62,166,255,.16); }
+.am-tl-in { fill: rgba(255,140,60,.16); }
+.am-tl-vol { fill: none; stroke-width: 1.5; }
+.am-tl-vol.out { stroke: #3ea6ff; }
+.am-tl-vol.in { stroke: #ff8c3c; }
+.am-tl-bass.out { fill: #3ea6ff; opacity: .7; }
+.am-tl-bass.in { fill: #ff8c3c; opacity: .7; }
+.am-tl-swap line { stroke: #ff3b4d; stroke-width: 1.5; }
+.am-tl-land line { stroke: #2ed47a; stroke-width: 1.5; stroke-dasharray: 3 2; }
+.am-tl-trick { fill: #ffb020; }
+.am-tl-head { stroke: var(--text, #fff); stroke-width: 1; }
+.am-nudges, .am-party { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.am-check, .am-plan, .am-tricks { font-size: var(--fs-sm); overflow-wrap: anywhere; }
