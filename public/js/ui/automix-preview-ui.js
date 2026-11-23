@@ -4,6 +4,7 @@
 import { el, fmtTime } from '../util.js';
 import { STYLE_LABEL } from '../automix.js';
 import { renderTransition, playPreview } from '../automix-preview.js';
+import { exportSet, exportFileName } from '../automix-export.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const svg = (tag, attrs = {}) => { const n = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; };
@@ -59,11 +60,33 @@ export function buildPreviewBox(app) {
     } catch (e) { app.toast?.(`Preview failed: ${e.message}`); previewBtn.textContent = 'Preview ♪'; }
     finally { previewBtn.disabled = false; }
   });
+  // "Render this set" (P6.5): the planned upcoming set to a WAV file, offline
+  const exportStatus = el('span', { class: 'hint am-export-status', 'aria-live': 'polite' });
+  const lowEnd = !!app.engine.lowEnd;
+  const exportBtn = el('button', { class: 'btn xs', disabled: lowEnd || undefined,
+    title: lowEnd ? 'Not on this device: rendering a set needs a few hundred MB of memory (two decoded tracks plus the file)'
+      : 'Render the planned upcoming set (up to 6 tracks / 30 min) offline to a WAV file, to check it before the party' }, 'Export set (WAV)');
+  let exporting = null;
+  exportBtn.addEventListener('click', async () => {
+    if (exporting) { exporting.abort(); return; }
+    const ac = exporting = new AbortController();
+    exportBtn.textContent = 'Cancel'; exportStatus.textContent = 'Planning…';
+    try {
+      const blob = await exportSet(app, { signal: ac.signal, onProgress: (p) => { exportStatus.textContent = `Rendering ${p.track} / ${p.tracks}… ${Math.round(p.done * 100)}%`; } });
+      const url = URL.createObjectURL(blob), link = el('a', { href: url, download: exportFileName() });
+      document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      exportStatus.textContent = `Set exported (${(blob.size / 1048576).toFixed(0)} MB)`;
+    } catch (e) {
+      exportStatus.textContent = '';
+      if (e?.name === 'AbortError') app.toast?.('Set export cancelled'); else app.toast?.(`Set export failed: ${e.message}`);
+    } finally { exporting = null; exportBtn.textContent = 'Export set (WAV)'; }
+  });
   const nudge = (kind, label, title) => el('button', { class: 'btn xs', title, onclick: () => { a.nudge(kind); lastKey = ''; } }, label);
   const nudges = el('div', { class: 'am-nudges' },
     nudge('earlier', '◀ phrase', 'Start the transition a phrase earlier'), nudge('later', 'phrase ▶', 'Start the transition a phrase later'),
     nudge('shorter', 'shorter', 'Shorter transition (fewer bars)'), nudge('longer', 'longer', 'Longer transition (more bars)'),
-    nudge('reset', 'reset', 'Back to the planned transition'), previewBtn);
+    nudge('reset', 'reset', 'Back to the planned transition'), previewBtn, exportBtn, exportStatus);
   // party controls (settings.automix: energyBias, vibeLock, banned, tricks)
   const amSet = (patch) => app.setSetting('automix', { ...app.settings.automix, ...patch });
   const energyLbl = el('span', { class: 'hint' });
