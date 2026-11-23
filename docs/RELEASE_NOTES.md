@@ -23,7 +23,12 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
-### New in 0.5.3
+### New in 0.5.4
+- Fix a browser startup syntax error in the stem backend fallback handler. CI now parses every browser JavaScript module and worker, including files not imported by unit tests.
+- Refresh the README, feature screenshots and demo animation from the working application using the fictional demo library.
+- Includes the adaptive DJ improvements below and the stem-output validation fix. The 0.5.3 release candidate was stopped before publication after combined-branch QA detected the startup error.
+
+### Adaptive DJ improvements (0.5.3 candidate)
 - **Adaptive Auto DJ:** Auto style compares section handovers throughout both tracks, including interior entry points, using tempo, harmony, local energy and vocal overlap. Live selection also compares how well candidate tracks can actually transition.
 - **Playback follows the plan:** selected cue points reach the real decks, late ticks catch up, and transition progress follows the audio clock. Uncertain beat grids avoid long synchronized overlaps; manually corrected grids are trusted.
 - **More reliable beat analysis:** a bounded whole-track consistency search corrects tempo estimates when sustained tones overpower drum onsets, including 48 kHz playback devices.

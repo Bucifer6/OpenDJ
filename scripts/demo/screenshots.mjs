@@ -44,7 +44,8 @@ fs.writeFileSync(tcWav, encodeWav(tc.L, tc.R, 44100));
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${tcWav}`] });
 const context = await browser.newContext({ viewport: VIEW, deviceScaleFactor: DSF, permissions: ['microphone'] });
 const page = await context.newPage();
-page.on('pageerror', (e) => console.error('[page error]', String(e)));
+const failures = [];
+page.on('pageerror', (e) => { failures.push(String(e)); console.error('[page error]', String(e)); });
 page.on('console', (m) => { if (m.type() === 'error' && !/favicon|404/.test(m.text())) console.error('[console]', m.text()); });
 const sleep = (ms) => page.waitForTimeout(ms);
 const ev = (fn, arg) => page.evaluate(fn, arg);
@@ -306,7 +307,12 @@ const shots = {
     await heroState();
     await ev(() => { window.opendj.engine.decks.forEach((d) => d.pause()); });
     await view('playlist', 'Friday — Warehouse');
-    await ev(() => { window.opendj.dialogs.automixQueue(window.opendj.library.rows); }); // resolves when the dialog closes: don't wait for it
+    await ev(() => {
+      const a = window.opendj;
+      a.dialogs.automixQueue(a.library.rows, { mode: 'live', title: 'Friday — Warehouse' });
+    }); // resolves when the dialog closes: don't wait for it
+    await page.locator('[data-am="style"]').selectOption('auto');
+    await page.locator('[data-am="bars"]').selectOption('auto');
     await sleep(800);
     await save('automix', { locator: page.locator('.overlay .modal').last() });
   },
@@ -380,11 +386,16 @@ const shots = {
 for (const name of wanted) {
   if (!shots[name]) { log(`(no shot "${name}")`); continue; }
   log(`--- ${name}`);
-  try { await Promise.race([shots[name](), new Promise((_, rej) => setTimeout(() => rej(new Error('timed out after 5 min')), 300000))]); } catch (e) { console.error(`shot ${name} failed:`, e); }
+  let timer;
+  try {
+    await Promise.race([shots[name](), new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('timed out after 5 min')), 300000); })]);
+  } catch (e) { failures.push(`${name}: ${e.message}`); console.error(`shot ${name} failed:`, e); }
+  finally { clearTimeout(timer); }
   await closeOverlays();
 }
 log('sizes:', sizes.map(([f, k]) => `${f} ${k} KB`).join(', '));
 await browser.close();
 app.shutdown?.();
 app.server.close();
-process.exit(0);
+if (failures.length) console.error('Screenshot failures:', failures);
+process.exit(failures.length ? 1 : 0);

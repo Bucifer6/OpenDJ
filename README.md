@@ -5,7 +5,7 @@
 # OpenDJ
 
 **Free, open-source DJ software for your own music.**
-Decks, mixer, AI stems, automix, controllers, video and lights, with a library that pulls from your folders, USB sticks, NAS and media servers.
+Mix manually or let adaptive Auto DJ choose tracks and plan musical handovers. Decks, mixer, AI stems, controllers, video and lights, with music from your folders, USB sticks, NAS and media servers.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/Bucifer6/OpenDJ?include_prereleases&sort=semver)](https://github.com/Bucifer6/OpenDJ/releases/latest)
@@ -25,6 +25,7 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 - **Free and open source.** MIT licensed. No subscription, no account, no feature locked behind a paywall.
 - **Your music, wherever it lives.** Local folders, USB sticks and NAS shares, plus your own **Plex, Jellyfin, Emby, Subsonic/Navidrome and MediaMax** servers. Stream from them or download tracks for offline gigs.
 - **Runs everywhere.** Desktop app for Windows, macOS and Linux, or a self-hosted web app (Docker / NAS) you open in Chrome or Edge.
+- **Automatic mixing that follows the music.** Select tracks live using tempo, harmony and energy, then find suitable entry and exit sections throughout the tracks.
 - **Plays nicely with your other tools.** Imports rekordbox, Traktor, Serato and VirtualDJ libraries; exports rekordbox XML, M3U and CDJ-ready USB sticks.
 
 <p align="center"><img src="docs/images/demo.gif" alt="Animated demo: waveforms scrolling while the crossfader and EQs mix from deck 1 to deck 2" width="90%"></p>
@@ -78,7 +79,15 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 
 ### Automix
 
-**Adaptive Auto DJ:** Auto style searches section boundaries throughout both tracks for compatible handovers, including interior entry points. Live mode also compares executable transition quality when choosing the next track. See [the adaptive DJ guide](docs/ADAPTIVE_DJ.md) for setup, research, architecture, licensing and limitations.
+**Adaptive Auto DJ** chooses a next track and a playable handover from the music's beat grid, phrases, harmony, local energy and estimated vocal activity. It searches section boundaries throughout both tracks, including interior entry points, then drives the deck transport, EQ, filters and effects during playback.
+
+To use it:
+
+1. Add your music and let analysis finish. Check or lock the beat grid on tracks with difficult rhythms.
+2. Shift-click or right-click **AUTOMIX** to open its options. Select **Smart mix live (pick each next track while playing)**, **Auto** style and **Auto (from the tracks)** length for adaptive selection and timing.
+3. Start the mix. The queue explains each planned transition; use **MIX NOW**, reorder the queue or override a transition whenever you want to take control.
+
+Plans adapt to the available analysis and prepared stems. Missing or uncertain information uses conservative fallbacks; stem swaps require stems loaded on both decks. The planner is a local heuristic and needs no cloud service or language model. See [the adaptive DJ guide](docs/ADAPTIVE_DJ.md) for research, architecture, licensing and performance limits, and the [QA record](docs/QA_0.5.4.md) for verified coverage and remaining hardware/model checks.
 
 <img src="docs/images/automix.png" alt="Automix dialog with smart ordering, energy curve and transition options" width="60%">
 
