@@ -137,6 +137,24 @@ try {
   await page.waitForFunction(() => !window.opendj.automix.transition, null, { timeout: 60000 });
   const clean = await page.evaluate(() => { const a = window.opendj, ch = a.engine.channels[a.automix.current.index].state; return { eq: [ch.eqLow, ch.eqMid, ch.eqHigh, ch.filter], vol: ch.volume, fb: a.automix.feedback?.resetSuggested }; });
   check(clean.eq.every((v) => v === 0) && clean.vol > 0.7, `after the transition the on-air channel is clean (${JSON.stringify(clean)})`);
+  // ---------- render this set (P6.5): the planned upcoming set exported offline to a WAV file ----------
+  const exported = await page.evaluate(async () => {
+    const { exportSet } = await import('/js/automix-export.js');
+    let timeline = null, calls = 0;
+    const t0 = performance.now();
+    const blob = await exportSet(window.opendj, { maxTracks: 2, maxMinutes: 3, onProgress: (p) => { timeline = p.timeline; calls++; } });
+    const h = new DataView(await blob.slice(0, 44).arrayBuffer());
+    const tag = (o) => String.fromCharCode(h.getUint8(o), h.getUint8(o + 1), h.getUint8(o + 2), h.getUint8(o + 3));
+    const sr = h.getUint32(24, true), bytes = h.getUint32(40, true);
+    // loudness of the middle of the file: music, not silence
+    const mid = new Int16Array(await blob.slice(44 + Math.floor(bytes / 8) * 4, 44 + Math.floor(bytes / 8) * 4 + sr * 4).arrayBuffer());
+    let pk = 0; for (const v of mid) pk = Math.max(pk, Math.abs(v));
+    return { riff: tag(0), wave: tag(8), data: tag(36), type: blob.type, size: blob.size, sr, channels: h.getUint16(22, true), bits: h.getUint16(34, true),
+      seconds: bytes / (sr * 4), planned: timeline?.seconds, kinds: timeline?.segments.map((s) => s.kind).join(','), calls, peak: pk / 32767, ms: Math.round(performance.now() - t0) };
+  });
+  check(exported.riff === 'RIFF' && exported.wave === 'WAVE' && exported.data === 'data' && exported.type === 'audio/wav' && exported.channels === 2 && exported.bits === 16
+    && exported.size > 1048576 && exported.size === 44 + exported.seconds * exported.sr * 4 && exported.seconds > 10 && exported.seconds <= 180 && Math.abs(exported.seconds - exported.planned) < 0.01
+    && exported.peak > 0.01, `set exported to WAV (${(exported.size / 1048576).toFixed(1)} MB, ${exported.seconds.toFixed(1)} s: ${exported.kinds}; peak ${exported.peak.toFixed(2)}; ${exported.ms} ms)`);
   check(!errors.length, `no console errors ${errors.join(' | ')}`);
   console.log('\nE2E PRO AUTOMIX PASSED');
 } catch (e) {
