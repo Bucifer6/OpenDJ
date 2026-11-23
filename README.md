@@ -128,6 +128,10 @@ Plans adapt to the available analysis and prepared stems. Missing or uncertain i
 
 ### Video & lighting
 
+**Five audio-reactive visualisers:** the cover spectrum ring plus **Spectrum Skyline**, **Neon Waveform**, **Particle Orbit** and **Prism Tunnel**. Open **VIDEO → Mix** and choose a style beside each deck. Select **Visualizer only** to use it even for a video track. Choices survive a restart, and the same picture reaches the preview and projector output.
+
+<img src="docs/images/visualizers.jpg" alt="Four audio-reactive visualisers: spectrum skyline, neon waveform, particle orbit and prism tunnel" width="100%">
+
 <table>
 <tr>
 <td width="50%"><img src="docs/images/video.jpg" alt="Video mixer with the audio-reactive visualizer and overlays"></td>

@@ -137,6 +137,70 @@ try {
   check(await page.evaluate(() => window.opendj.video.mixer.layers[0].video.muted), 'video element is muted (audio comes from the deck)');
   check(await page.evaluate(() => window.opendj.video.mixer.layers[1].kind) === 'visual', 'audio-only deck 2 gets the visualizer');
 
+  // Exercise the actual per-deck selectors; render controlled audio snapshots
+  // so each scene must be distinct, reactive and cheap enough for live output.
+  const styles = await page.evaluate(async () => (await import('/js/video/video-core.js')).VISUAL_STYLES);
+  const signatures = [];
+  for (const { id, name } of styles) {
+    await page.locator('[data-visual-deck="1"]').selectOption(id);
+    const result = await page.evaluate(() => {
+      const m = window.opendj.video.mixer, v = m.layers[1].visual;
+      v.ensureAnalyser(); const a = v.analyser, freq = a.getByteFrequencyData, wave = a.getByteTimeDomainData, cover = v.cover;
+      let level = 0;
+      a.getByteFrequencyData = data => data.fill(level);
+      a.getByteTimeDomainData = data => { for (let k = 0; k < data.length; k++) data[k] = 128 + Math.round(Math.sin(k / 12) * level * 0.4); };
+      v.cover = null;
+      const deck = { playing: false, bpm: 120, beatPhase: () => 0 };
+      const signature = () => {
+        const bytes = v.g.getImageData(0, 0, v.width, v.height).data;
+        let hash = 2166136261, lit = 0;
+        for (let k = 0; k < bytes.length; k += 4) { hash = Math.imul(hash ^ bytes[k] ^ (bytes[k + 1] << 8) ^ (bytes[k + 2] << 16), 16777619); if (bytes[k] + bytes[k + 1] + bytes[k + 2] > 100) lit++; }
+        return { hash, lit };
+      };
+      try {
+        v.energy = 0; v.smooth.fill(0); v.draw(deck, 1000); const quiet = signature();
+        level = 200; const times = [];
+        for (let k = 0; k < 120; k++) { const start = performance.now(); v.draw(deck, 1000); times.push(performance.now() - start); }
+        const loud = signature(); times.sort((a, b) => a - b);
+        const stored = JSON.parse(localStorage.getItem('opendj.video'));
+        return { quiet, loud, p95: times[Math.floor(times.length * 0.95)], style: v.style, saved: stored.visualStyles[1], independent: m.layers[0].visualStyle === 'ring', sameAnalyser: a === v.analyser };
+      } finally { a.getByteFrequencyData = freq; a.getByteTimeDomainData = wave; v.cover = cover; }
+    });
+    check(result.style === id && result.saved === id && result.independent && result.sameAnalyser, `${name}: selector, saved choice, independent deck and reused analyser`);
+    check(result.loud.lit > 100 && result.loud.hash !== result.quiet.hash, `${name}: visible scene responds to audio`);
+    check(result.p95 < 16.7, `${name}: draw p95 ${result.p95.toFixed(2)} ms at 640×360 (<16.7 ms local budget)`);
+    signatures.push(result.loud.hash);
+  }
+  check(new Set(signatures).size === styles.length, 'all five visualizers produce distinct scenes');
+  await page.evaluate(() => window.opendj.setDeckCount(4, false));
+  await page.waitForFunction(() => document.querySelectorAll('[data-visual-deck]').length === 4);
+  await page.locator('[data-visual-deck="2"]').selectOption('scope');
+  await page.locator('[data-visual-deck="3"]').selectOption('orbit');
+  check(await page.evaluate(() => { const m = window.opendj.video.mixer; return m.layers[2].visualStyle === 'scope' && m.layers[3].visualStyle === 'orbit' && m.layers[1].visualStyle === 'tunnel'; }), 'four-deck mode exposes independent visualizer controls');
+  await page.evaluate(() => window.opendj.setDeckCount(2, false));
+  await page.waitForFunction(() => document.querySelectorAll('[data-visual-deck]').length === 2);
+  const lazy = await page.evaluate(() => {
+    const m = window.opendj.video.mixer;
+    m.setMode(0, 'off'); m.setVisualStyle(0, 'bars'); m.setMode(0, 'visual');
+    const ok = m.layers[0].kind === 'visual' && m.layers[0].visual.style === 'bars';
+    m.setMode(0, 'auto'); m.setVisualStyle(0, 'ring'); return ok;
+  });
+  check(lazy, 'a style selected while off survives lazy visualizer creation and video/visual mode switching');
+  await page.waitForFunction(() => window.opendj.video.mixer.layers[0].video?.readyState >= 2);
+  const fit = await page.evaluate(() => {
+    const panel = document.querySelector('.vid-panel'); panel.style.width = '320px';
+    const bounds = panel.getBoundingClientRect();
+    const fits = [...panel.querySelectorAll('.vid-deckrow select')].every(s => { const r = s.getBoundingClientRect(); return r.width > 100 && r.left >= bounds.left && r.right <= bounds.right; });
+    panel.style.width = ''; return fits;
+  });
+  check(fit, 'source and visualizer selectors fit a narrow 320px video panel');
+  await page.evaluate(() => {
+    const m = window.opendj.video.mixer;
+    m.setVisualStyle(1, 'unknown-style');
+  });
+  check(await page.evaluate(() => window.opendj.video.mixer.layers[1].visual.style === 'ring'), 'unknown visualizer safely falls back to the cover ring');
+  await page.locator('[data-visual-deck="1"]').selectOption('tunnel');
+
   // play: video follows the deck clock
   await page.evaluate(() => { const E = window.opendj.engine; E.setCrossfader(-1); E.channels[0].set('volume', 1); E.decks[0].play(); });
   await page.waitForTimeout(1500);
@@ -210,6 +274,19 @@ try {
     return s / (d.length / 4) / 3;
   });
   check(lum > 20, `pop-out output shows a non-black frame (mean luma ${lum.toFixed(1)})`);
+  for (const { id, name } of styles) {
+    await page.locator('[data-visual-deck="1"]').selectOption(id);
+    await page.evaluate(() => { window.opendj.engine.setCrossfader(1); window.opendj.engine.decks[1].play(); });
+    await popup.waitForTimeout(250);
+    const lit = await popup.evaluate(() => {
+      const v = document.getElementById('out'), c = document.createElement('canvas'); c.width = 160; c.height = 90;
+      const g = c.getContext('2d'); g.drawImage(v, 0, 0, 160, 90); const pixels = g.getImageData(0, 0, 160, 90).data;
+      let n = 0; for (let k = 0; k < pixels.length; k += 4) if (pixels[k] + pixels[k + 1] + pixels[k + 2] > 60) n++;
+      return n;
+    });
+    check(lit > 30, `${name}: reaches the real pop-out video output with audio playing`);
+  }
+  await page.evaluate(() => window.opendj.engine.setCrossfader(-1));
   await popup.setViewportSize({ width: 960, height: 540 }).catch(() => {});
   await popup.screenshot({ path: path.join(outDir, 'video-output.png') });
   console.log('screenshot:', path.join(outDir, 'video-output.png'));
@@ -242,6 +319,11 @@ try {
   check(lum2 < 30, `output goes dark with faders down (mean luma ${lum2.toFixed(1)}; lower third may still be fading)`);
 
   await page.screenshot({ path: path.join(outDir, 'video-app.png') });
+  await page.reload();
+  await page.waitForFunction(() => window.opendj?.ready);
+  await page.evaluate(async () => { (await import('/js/video/video-ui.js')).setupVideo(window.opendj).openPanel(); });
+  check(await page.locator('[data-visual-deck="1"]').inputValue() === 'tunnel', 'per-deck visualizer choice survives a full application reload');
+  check(await page.evaluate(() => { const s = window.opendj.video.mixer.config.visualStyles; return s[2] === 'scope' && s[3] === 'orbit'; }), 'hidden deck 3/4 choices survive reload in two-deck mode');
   const real = errors.filter((e) => !/favicon|404 \(Not Found\)|youtube|ytimg/i.test(e));
   check(real.length === 0, `no console errors${real.length ? ': ' + real.join(' | ') : ''}`);
   console.log('\nE2E VIDEO PASSED');

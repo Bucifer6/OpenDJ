@@ -1,6 +1,6 @@
 // One video layer per deck: a muted <video> that follows deck.position / deck.rate, or an audio-reactive
 // visualizer for tracks without a picture. Audio always comes from the deck's own audio engine.
-import { isVideoCandidate, syncDecision } from './video-core.js';
+import { isVideoCandidate, syncDecision, visualStyle } from './video-core.js';
 import { Visualizer } from './visualizer.js';
 
 export const videoUrl = (id) => `/api/tracks/${encodeURIComponent(id)}/video`;
@@ -11,6 +11,7 @@ export class VideoDeckLayer {
   constructor(app, deck, host) {
     this.app = app; this.deck = deck; this.index = deck.index; this.host = host;
     this.mode = 'auto'; // auto | visual | off
+    this.visualStyle = 'ring';
     this.kind = 'none'; // none | video | visual
     this.video = null; this.visual = null; this.track = null;
     this.seekLatency = 0.05; this._seekAt = 0; this.lastDecision = null; this.drift = 0;
@@ -21,6 +22,7 @@ export class VideoDeckLayer {
   }
 
   setMode(m) { this.mode = m; this.setTrack(this.deck.track, true); }
+  setVisualStyle(id) { this.visualStyle = visualStyle(id); this.visual?.setStyle(this.visualStyle); }
 
   setTrack(track, force = false) {
     if (!force && track === this.track) return;
@@ -34,6 +36,7 @@ export class VideoDeckLayer {
   useVisual() {
     this.kind = 'visual';
     if (!this.visual) this.visual = new Visualizer(this.app, this.index);
+    this.visual.setStyle(this.visualStyle);
     this.visual.setTrack(this.track);
   }
 

@@ -3,7 +3,7 @@
 //
 //   node scripts/demo/screenshots.mjs [shot ...] [--lib=<dir>] [--out=<dir>] [--no-gif]
 //
-// Shots: hero four-decks library stems video lighting controllers cdj-export recording dvs automix
+// Shots: hero four-decks library stems video visualizers lighting controllers cdj-export recording dvs automix
 //        settings-appearance themes gif   (default: all)
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,7 +22,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const a = argv.find((x) => x.startsWith(`--${k}=`)); return a ? a.slice(k.length + 3) : d; };
-const ALL = ['hero', 'four-decks', 'library', 'stems', 'video', 'lighting', 'controllers', 'cdj-export', 'recording', 'automix', 'settings-appearance', 'themes', 'gif', 'dvs'];
+const ALL = ['hero', 'four-decks', 'library', 'stems', 'video', 'visualizers', 'lighting', 'controllers', 'cdj-export', 'recording', 'automix', 'settings-appearance', 'themes', 'gif', 'dvs'];
 let wanted = argv.filter((a) => !a.startsWith('--'));
 if (!wanted.length) wanted = ALL.filter((s) => !(s === 'gif' && argv.includes('--no-gif')));
 const OUT = path.resolve(opt('out', path.join(ROOT, 'docs/images')));
@@ -224,13 +224,40 @@ const shots = {
     await ev(async () => {
       const a = window.opendj;
       const api = (a.videoUi ||= (await import('/js/video/video-ui.js')).setupVideo(a));
+      const m = a.video.mixer; m.setVisualStyle(0, 'tunnel'); m.setVisualStyle(1, 'orbit'); m.setOverlay({ text: 'WAREHOUSE · SAT' });
       api.openPanel();
-      const m = a.video.mixer; m.setFx(0, 'kaleido', true); m.setOverlay({ text: 'WAREHOUSE · SAT' });
       m.showNowPlaying('Kairo Vance – Pressure Index');
     });
+    await page.waitForFunction(() => document.querySelector('[data-visual-deck="0"]')?.value === 'tunnel' && document.querySelector('[data-visual-deck="1"]')?.value === 'orbit');
     await sleep(2500);
     await save('video', { type: 'jpeg' });
     await ev(() => { const a = window.opendj; a.video.mixer.setFx(0, 'kaleido', false); a.video.mixer.setOverlay({ text: '' }); a.video.api.closePanel(); });
+  },
+
+  async visualizers() {
+    await heroState();
+    await ev(async () => { (await import('/js/video/video-ui.js')).setupVideo(window.opendj); });
+    const styles = await ev(async () => (await import('/js/video/video-core.js')).VISUAL_STYLES.filter(s => s.id !== 'ring'));
+    const cards = [];
+    for (const style of styles) {
+      const url = await ev(async (id) => {
+        const a = window.opendj, m = a.video.mixer;
+        m.setMode(0, 'visual'); m.setVisualStyle(0, id);
+        const v = m.layers[0].visual;
+        for (let k = 0; k < 12; k++) { v.draw(a.engine.decks[0], performance.now()); await new Promise(r => setTimeout(r, 16)); }
+        return v.canvas.toDataURL('image/png');
+      }, style.id);
+      cards.push(`<figure><img src="${url}"><figcaption>${style.name}</figcaption></figure>`);
+    }
+    const gallery = await context.newPage();
+    await gallery.setViewportSize({ width: 1328, height: 830 });
+    await gallery.setContent(`<!doctype html><style>body{margin:0;background:#080d15;color:#edf5ff;font:600 22px system-ui}main{display:grid;grid-template-columns:1fr 1fr;gap:24px;padding:24px}figure{margin:0}img{display:block;width:100%;border:1px solid #243246;border-radius:12px}figcaption{padding:12px 0;text-align:center}</style><main>${cards.join('')}</main>`);
+    await gallery.locator('img').evaluateAll(imgs => Promise.all(imgs.map(img => img.decode())));
+    const file = path.join(OUT, 'visualizers.jpg');
+    await gallery.locator('main').screenshot({ path: file, type: 'jpeg', quality: 90, scale: 'css' });
+    sizes.push(['visualizers.jpg', Math.round(fs.statSync(file).size / 1024)]); log(`visualizers.jpg ${sizes.at(-1)[1]} KB`);
+    await gallery.close();
+    await ev(() => { const m = window.opendj.video.mixer; m.setVisualStyle(0, 'ring'); m.setVisualStyle(1, 'ring'); m.setMode(0, 'auto'); });
   },
 
   async lighting() {
