@@ -11,7 +11,7 @@ import { Emitter } from './util.js';
 import { api } from './api.js';
 import { toCamelot, camelotCompatible, analyzeStructure } from './audio/analysis-core.js';
 import { smartMix, liveNext, shuffle, camelotRelation, genreSimilarity, explain, skipFeedback, playFeedback, emptyFeedback, arcPhase, familiarityInfo, isFamiliar } from './smartmix.js';
-import { planTricks, rollSize } from './automix-tricks.js';
+import { planTricks, rollSize, planTease } from './automix-tricks.js';
 import { decodeVocalMap } from './shared/vocal-map.js';
 import { t } from './i18n.js';
 import { planBestTransition, stemLevels, learnChoice, STEM_STYLES } from './mix-planner.js';
@@ -131,9 +131,9 @@ export function planMixOut(t, { transitionBeats = 32, skipSilence = true } = {})
 }
 
 /** Bounds of the automatic transition length (bars). */
-export const AUTO_LENGTH_MIN_BARS = 4, AUTO_LENGTH_MAX_BARS = 32;
+export const AUTO_LENGTH_MIN_BARS = 4, AUTO_LENGTH_MAX_BARS = 64, AUTO_LENGTH_DROP_MAX_BARS = 32;
 /** Auto length per style: [usual bars without structure info, most bars it is stretched to]. */
-const AUTO_LENGTH_STYLE = { blend: [16, 32], stemswap: [16, 32], filter: [16, 16], crossfade: [8, 16], bassswap: [4, 4] }; // bass swap: planTransition keeps it to 16 beats
+const AUTO_LENGTH_STYLE = { blend: [16, 64], stemswap: [16, 64], filter: [16, 16], crossfade: [8, 16], bassswap: [4, 4] }; // bass swap: planTransition keeps it to 16 beats
 /** Round down to a phrase: multiples of 8 bars from 8 bars up, else 4 bars. */
 const phraseBars = (b) => (b >= 8 ? Math.floor(b / 8 + 1e-6) * 8 : AUTO_LENGTH_MIN_BARS);
 
@@ -174,7 +174,7 @@ export function autoTransitionLength(out, inn, style, { keySync = false } = {}) 
   const [usual, most] = AUTO_LENGTH_STYLE[style] || [8, 16];
   const ob = outroBars(out), ib = drop ? null : introBars(inn);
   const reasons = [];
-  let bars, cap = drop ? AUTO_LENGTH_MAX_BARS : most;
+  let bars, cap = drop ? AUTO_LENGTH_DROP_MAX_BARS : most; // an effect build-up stays at most 32 bars
   if (ob == null && ib == null) { bars = usual; reasons.push(t(drop ? 'no outro analysis' : 'no phrase analysis: usual length for the style')); }
   else {
     const known = [ob, ib].filter((x) => x != null);
@@ -682,7 +682,7 @@ export class AutoMix extends Emitter {
     }
     if (add.length) this.queue.push(...add);
   }
-  stop() { this.endTrick(true); this.trickPlan = null; this._finale = null; if (this.engine.prefetched) this.engine.prefetched.clear(); this.enabled = false; this.forceTransitionRequested = false; this.watchdog?.reset(); if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
+  stop() { this.endTease(true); this.endTrick(true); this.trickPlan = null; this._finale = null; if (this.engine.prefetched) this.engine.prefetched.clear(); this.enabled = false; this.forceTransitionRequested = false; this.watchdog?.reset(); if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
   /** Start the next transition immediately, waiting for its deck preload if necessary. */
   skip({ feedback = true } = {}) {
     if (!this.enabled || this.transition || !this.current || !this.nextTrack()) return false;
@@ -1119,6 +1119,7 @@ export class AutoMix extends Emitter {
     if (this.tempoRamp) this.stepTempoRamp();
     if (this.levelEase) this.stepLevelEase();
     if (this.opts.tricks !== 'off') this.stepTricks();
+    if (this.opts.tricks !== 'off' && this.opts.tease !== false) this.stepTease();
     const next = this.nextTrack();
     if (this.forceTransitionRequested) {
       const incoming = this.other(cur);
@@ -1330,6 +1331,72 @@ export class AutoMix extends Emitter {
     else this._trickSilence = false;
   }
 
+  // ---------- teasing the next record (planTease in automix-tricks.js) ----------
+  /**
+   * Plan (once per pair) and play the tease: a bit of the next record under the on-air one, a phrase or two before
+   * the real mix, then out again; the next deck goes back to its cue, untouched for the transition.
+   */
+  stepTease() {
+    const cur = this.current, inn = cur && this.other(cur), next = this.nextTrack();
+    if (this.tease?.on) return this.stepTeaseOn();
+    if (!cur?.playing || !cur.bpm || !inn?.track || inn.loading || inn.playing || inn.track.id !== next?.id || this.transition) return;
+    const pairKey = `${cur.track.id}>${next.id}`;
+    if (this.tease?.key !== pairKey) {
+      const nt = this.nextTransition(); if (!nt) return;
+      const oi = this.info(cur), ii = this.info(inn);
+      const plan = planTease({ ...oi, id: cur.track.id, vocalMap: oi.vocalMap || decodeVocalMap(oi.stems?.vocals) }, { ...ii, id: next.id, vocalMap: ii.vocalMap || decodeVocalMap(ii.stems?.vocals) },
+        { from: cur.position + 4 * (240 / cur.bpm), to: nt.begin, mode: this.opts.tricks || 'subtle', stemsIn: !!inn.stemsReady, keyClash: keysClash(cur.playingCamelot || cur.track?.key, inn.camelot || inn.track?.key) });
+      this.tease = { key: pairKey, plan, on: false, done: !plan };
+    }
+    const t = this.tease;
+    if (t.done || !t.plan) return;
+    const ahead = (t.plan.start - cur.position) / (cur.rate || 1);
+    if (ahead < -0.3) { t.done = true; return; } // passed (a seek)
+    if (ahead <= 0.12) this.startTease(cur, inn, t);
+  }
+  startTease(cur, inn, t) {
+    const ch = this.engine.channels[inn.index], posAt = this.engine.ctx?.currentTime;
+    if (!ch || !Number.isFinite(posAt)) { t.done = true; return; }
+    const pos = typeof cur.positionAt === 'function' ? cur.positionAt(posAt) : cur.position;
+    const oi = this.info(cur);
+    // in phase from the first beat: the hook starts on the same beat of the bar as the outgoing track
+    const offBeats = barOffsetBeats(oi, pos, t.plan.start);
+    inn.syncOn = true; inn.matchTempo?.();
+    t.saved = { stems: inn.stemLevels ? [...inn.stemLevels] : null };
+    if (t.plan.kind !== 'filtered' && inn.stemsReady) [0, 1, 2, 3].forEach((i) => inn.setStemLevel?.(i, t.plan.kind === 'vocal' ? (i === 0 ? 1 : 0) : (i === 1 ? 1 : 0)));
+    ch.set('xfAssign', 'THRU'); ch.set('volume', 0);
+    if (t.plan.kind === 'filtered') { ch.set('eqLow', -1); ch.set('eqMid', -0.6); ch.set('filter', 0.45); }
+    inn.seek(t.plan.cue + offBeats * inn.beatLen);
+    inn.play({ at: posAt, instant: true });
+    Object.assign(t, { on: true, inn, cur, ch, peak: t.plan.kind === 'filtered' ? 0.55 : t.plan.kind === 'vocal' ? 0.6 : 0.5, phase: {} });
+    this.emit('trick', { id: 'tease', label: 'tease of the next record', why: t.plan.why });
+    this.emit('state');
+  }
+  stepTeaseOn() {
+    const t = this.tease, { cur, inn, ch } = t;
+    if (cur !== this.current || !cur.playing || !inn.playing || this.transition) return this.endTease(true);
+    const bar = 240 / cur.bpm, k = (cur.position - t.plan.start) / t.plan.len;
+    const env = k < 0.25 ? k / 0.25 : k < 0.75 ? 1 : (1 - k) / 0.25; // 2 bars in, 4 held, 2 out (of 8)
+    ch.set('volume', t.peak * ease(clamp01(env)));
+    t.phase.out = cur; t.phase.inn = inn; this.keepPhase(t.phase, 0.5);
+    if (cur.position >= t.plan.end - 0.02 * bar) this.endTease(false);
+  }
+  /** Take the tease out (or abort it): the next deck stops, gets its levels back and waits on its cue again. */
+  endTease(abort) {
+    const t = this.tease;
+    if (!t?.on) { if (abort && t) t.done = true; return; }
+    t.on = false; t.done = true;
+    const { inn, ch } = t;
+    try {
+      inn.pause();
+      if (inn.bend) inn.setBend?.(0);
+      ch.set('volume', 0); ch.set('eqLow', 0); ch.set('eqMid', 0); ch.set('filter', 0);
+      if (t.saved?.stems) t.saved.stems.forEach((v, i) => inn.setStemLevel?.(i, v));
+      inn.seek(this.upcoming?.adaptive?.inStart ?? incomingStart(this.info(inn)));
+    } catch (e) { console.warn('[automix] tease', e); }
+    this.emit('state');
+  }
+
   /** Ease a landing trim back to the track's own level-match gain over 8 bars. */
   stepLevelEase() {
     const e = this.levelEase;
@@ -1342,6 +1409,7 @@ export class AutoMix extends Emitter {
   beginTransition(immediate = false) {
     this.tempoRamp = null;
     this.endTrick(true); this.trickPlan = null;
+    this.endTease(true);
     const out = this.current, inn = this.other(out);
     const next = this.nextTrack();
     if (!next) { if (!out.playing) this.stop(); return; }
@@ -1494,9 +1562,14 @@ export class AutoMix extends Emitter {
     tr.phaseAt = t;
     // what is heard first (the kicks of both tracks, audio/beat-phase.js), the beat grids when that is unclear
     const heard = out.onsets && inn.onsets && !out.loop?.active && !inn.loop?.active
-      ? audibleOffset({ curve: out.onsets, pos: out.positionAt(t), rate: out.rate }, { curve: inn.onsets, pos: inn.positionAt(t), rate: inn.rate }) : null;
-    const audible = heard && heard.confidence >= MIN_CONFIDENCE;
-    const err = audible ? heard.offset : phaseErrorSeconds(out, inn, t);
+      ? this.__heard ? this.__heard() /* test hook: fake readings */ : audibleOffset({ curve: out.onsets, pos: out.positionAt(t), rate: out.rate }, { curve: inn.onsets, pos: inn.positionAt(t), rate: inn.rate }) : null;
+    // trusted only when clear (confidence) and steady: the last three readings within 4 ms of their median. Soft or
+    // busy kicks give readings that jump by tens of ms, and chasing those swings the pitch and the phase with it.
+    const hist = (tr.heardHist ||= []);
+    if (heard && heard.confidence >= MIN_CONFIDENCE) { hist.push(heard.offset); if (hist.length > 3) hist.shift(); } else hist.length = 0;
+    const med = hist.length === 3 ? [...hist].sort((x, y) => x - y)[1] : null;
+    const audible = med != null && hist.every((x) => Math.abs(x - med) < 0.004);
+    const err = audible ? med : phaseErrorSeconds(out, inn, t);
     if (err == null) return;
     tr.phaseErr = err; tr.phaseSource = audible ? 'audio' : 'grid';
     if (Math.abs(err) > PHASE_SNAP && k < 0.2 && !tr.phaseSnapped) {

@@ -23,6 +23,11 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.5.9
+- **Longer blends, like a club DJ.** In house, techno and trance, Automix now layers compatible records (matching keys and genre, close tempo) for 32 bars and up to 64 when their intros and outros allow it, letting the incoming intro run under the outgoing track's last part. Disco and drum & bass blend a little longer too; open format stays quick.
+- **Teases of the next record.** Sometimes (about one transition in three, every other one in party mode) Automix brings a bit of the next track in a phrase or two before the real mix and takes it out again: its vocal over an instrumental part or its drums with AI stems, otherwise its top end. *Settings → Automix → Sometimes tease the next track* turns it off.
+- **Fixed: beats drifting out of phase during blends** (in 0.5.8). On tracks with soft or busy kicks the by-ear beat check gave jumpy readings, and following them pulled the two tracks up to ~30 ms apart. It now only follows the kicks when its readings are clear and steady, and uses the beat grids otherwise: the kicks land within about 3 ms again.
+
 ### New in 0.5.8
 - **Never goes silent.** If the music stops, stalls or the on-air fader is left down, Automix restores the level, finishes a stuck transition or starts the next track on the beat.
 - **Same loudness for every track.** Tracks are measured in LUFS (their loudest main section) and Automix sets each one's level before it is heard; a cut onto a much louder drop is eased in.
@@ -135,9 +140,3 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **The controller's own sound card**: OpenDJ offers once to send the master to its outputs 1-2 and the headphone cue to 3-4 (or suggests split cue when the interface only has 2 channels).
 - **Controller test** (Settings → Controllers): every incoming message live, which function it hits, a checklist of mapped controls, an LED check, and a capture recorder that saves a JSON file to attach to a bug report.
 - **Deck select for 2-deck controllers**: in 4-deck mode, switch the left or right side of a controller to deck 3 or 4 (Settings → Controllers, or map a button to "Deck select").
-
-### New in 0.4.3
-
-- Added Silverline and Walnut Hi-Fi and refreshed Club Decks, Vinyl Booth and Pad Performance.
-- Choose Brushed Metal, Digital Jog, Vinyl Turntable or OpenDJ Classic in Settings → Appearance. Each skin remembers its own jog wheel style.
-- Vinyl Turntable adds a grooved record, spindle, strobe dots and a tonearm that moves during playback.

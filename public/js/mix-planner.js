@@ -1,6 +1,6 @@
 // Automix transition planner: works out the best way to mix one track into the next.
 //
-// For each pair of tracks it tries every transition style at every sensible length (4, 8, 16, 32 bars) and scores
+// For each pair of tracks it tries every transition style at every sensible length (4, 8, 16, 32, 64 bars) and scores
 // each option on what the analysis knows about the two tracks:
 //   - tempo gap (a long beat-matched overlap far from a track's own tempo sounds stretched; > 8 % is never blended),
 //   - key (clashing keys only overlap briefly or under a filter, unless key sync fixes them),
@@ -25,9 +25,9 @@ export const PLANNER_STYLES = ['blend', 'bassswap', 'crossfade', 'filter', 'stem
 /** Stem transitions (P2.5): need AI stems on both decks. */
 export const STEM_STYLES = new Set(['stemswap', 'drumbridge', 'vocalcarry', 'acapellain']);
 const BLEND_STYLES = new Set(['blend', 'bassswap', 'crossfade', 'filter', 'stemswap', 'drumbridge', 'vocalcarry', 'acapellain', 'pingpong']);
-const LENGTHS = [4, 8, 16, 32];
+const LENGTHS = [4, 8, 16, 32, 64];
 /** Longest overlap each blend style is used for (bars). */
-const MAX_BARS = { blend: 32, stemswap: 32, drumbridge: 16, vocalcarry: 16, acapellain: 16, pingpong: 8, filter: 16, crossfade: 16, bassswap: 8 };
+const MAX_BARS = { blend: 64, stemswap: 64, drumbridge: 16, vocalcarry: 16, acapellain: 16, pingpong: 8, filter: 16, crossfade: 16, bassswap: 8 };
 /** Prior per style: how good the style is "in general", before the tracks are looked at. Novelty styles are rare. */
 const PRIOR = { blend: 4, stemswap: 5, drumbridge: 1, vocalcarry: 0.5, acapellain: 0.5, pingpong: -2, bassswap: 2.5, filter: 1.5, crossfade: 0, echo: 1, cut: -1, loop: -1.5, reverb: -1, backspin: -4, brake: -4.5 };
 export const BIAS_LIMIT = 5;
@@ -137,7 +137,8 @@ export function planBestTransition(out, inn, opts = {}) {
         const p = [...base];
         if (fam) {
           if (bars > fam.maxBars) p.push([-(bars - fam.maxBars) * 0.4, `long for ${fam.label}`]);
-          else if (fam.bestBars.includes(bars)) p.push([0.8, null]);
+          // the family's usual overlap (house: 32 bars); stronger for club music, which is blended rather than cut
+          else if (fam.bestBars.includes(bars)) p.push([['house', 'techno', 'trance', 'lounge', 'disco'].includes(famId) ? 1.6 : 0.8, null]);
         }
         // tempo: the incoming track plays at the outgoing tempo for the whole overlap
         if (d > 0.005) p.push([-d * 100 * (0.5 + bars / 16), d > 0.03 ? `${Math.round((Math.exp(d) - 1) * 100)} % tempo gap` : null]);
@@ -145,15 +146,25 @@ export function planBestTransition(out, inn, opts = {}) {
         if (clash) p.push([-(bars / 4) * (style === 'filter' ? 0.6 : 2.5), style === 'filter' ? 'filter hides the key clash' : 'key clash']);
         else if (key.kind !== 'unknown' && bars >= 16) p.push([2 * Math.max(0, key.value), key.value >= 0.8 ? 'keys match' : null]);
         // phrasing
-        if (ob != null) p.push(bars > ob ? [-(bars - ob) * 0.7, `longer than the ${ob}-bar outro`] : [1.5, null]);
+        // compatible club pair (keys and genre agree, tempo close): a DJ lets the incoming intro run under the outgoing
+        // track's last main section too (long blend); vocals that would collide are scored below either way
+        const club = ['house', 'techno', 'trance', 'lounge', 'disco'].includes(famId);
+        const longBlend = club && key.value >= 0.8 && g != null && g >= 0.8 && d < 0.02;
+        if (ob != null) p.push(bars > ob ? [-(bars - ob) * (longBlend ? 0.15 : 0.7), longBlend ? null : `longer than the ${ob}-bar outro`] : [1.5, null]);
+        // like a club DJ: compatible club records are layered for a long time (32 bars and more)
+        if (longBlend && bars >= 32 && famId !== 'disco') p.push([2, 'long blend']);
         if (ib != null) {
           if (ib === 0) p.push([-(bars - 4) * 0.6, bars > 4 ? 'incoming track has no intro' : null]);
           else if (Math.abs(bars - ib) <= 1) p.push([3, `lands on the incoming track's main part (${ib}-bar intro)`]);
-          else if (bars > ib) p.push([-(bars - ib) * 0.35, null]);
+          // past the incoming intro its main part plays under the outgoing outro: the classic long blend when keys
+          // and genre agree, so it costs little then; otherwise the full penalty
+          else if (bars > ib) p.push([-(bars - ib) * (longBlend ? 0.1 : 0.35), null]);
         }
         if (ob == null && ib == null) p.push([-Math.abs(bars - 16) * 0.15, null]); // no structure: a middle length
         // energy and genre
-        if (de >= 2) p.push([style === 'bassswap' ? 3 : -bars * 0.25, style === 'bassswap' ? 'energy rises: quick swap' : null]);
+        // energy rises: the swap should not drag on; in club music the incoming intro is the quiet part, so the first 16
+        // bars of a blend over it are fine (a DJ still layers it), only what is longer than that costs
+        if (de >= 2) p.push([style === 'bassswap' ? 3 : club ? -Math.max(0, bars - 16) * 0.25 - (bars >= 16 ? 1 : 0) : -bars * 0.25, style === 'bassswap' ? 'energy rises: quick swap' : null]);
         if (de <= -2) p.push([style === 'filter' ? 3 : 0, style === 'filter' ? 'energy drops: filter sweep' : null]);
         if (g === 0) p.push([style === 'filter' ? 1.5 : -(bars / 4) * 1.2, style === 'filter' ? 'genre change: filter sweep' : 'genre change']);
         else if (g != null && g >= 0.8 && bars >= 16 && (style === 'blend' || style === 'stemswap')) p.push([1.5, 'same genre: long blend']);

@@ -165,7 +165,9 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
         : outSections.filter((p) => p.start < exit).map((p) => ({ ...p, end: Math.min(exit, p.end) })) };
     const n = { ...inn, mixIn: cue, phrases: inSections.filter((p) => p.end > cue) };
     const landing = landingAfter(inn, cue);
-    const landBars = landing == null ? null : Math.round((landing - cue) / barOf(inn));
+    // landing on the incoming main part counts only as whole 4-bar phrases (an 18-bar blend starts mid-phrase)
+    const landRaw = landing == null ? null : Math.round((landing - cue) / barOf(inn));
+    const landBars = landRaw != null && landRaw % 4 === 0 ? landRaw : null;
     const candidateBars = [Math.floor(remainingBars / 4) * 4, ...inSections.filter((p) => p.start <= cue && p.end > cue).map((p) => Math.floor((p.end - cue) / barOf(inn) / 4) * 4), ...(landBars >= 4 ? [landBars] : []), ...(family === 'bass' && landBars >= 4 ? [landBars + 16] : [])];
     const ddBars = dd && landBars >= 4 && !opts.fixedBars && (!styles || styles.includes('blend')) ? landBars + 16 : null;
     if (dd && !ddBars) continue;

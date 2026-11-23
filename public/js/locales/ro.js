@@ -2247,7 +2247,7 @@ export default {
   "Not in the list": "Nu e în listă",
   "Syncing the controller list from GitHub…": "Se sincronizează lista de controllere de pe GitHub…",
   "Couldn't reach GitHub": "GitHub nu poate fi contactat",
-  "list built into this file (v0.5.8)": "lista inclusă în acest fișier (v0.5.8)",
+  "list built into this file (v0.5.9)": "lista inclusă în acest fișier (v0.5.9)",
   "synced from GitHub just now": "sincronizat acum de pe GitHub",
   "offline: using the {0}": "offline: se folosește {0}",
   "Plug in your controller to see whether OpenDJ already has a mapping for it.": "Conectează controllerul ca să vezi dacă OpenDJ are deja un mapping pentru el.",

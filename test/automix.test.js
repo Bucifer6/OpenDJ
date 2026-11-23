@@ -210,7 +210,7 @@ test('N3: after a transition the incoming deck eases back to its original tempo 
 });
 
 // ---------------------------------------------------------------- automatic transition length (lengthMode 'auto')
-test('autoTransitionLength: picked from the outro / intro phrases, whole phrases, 4..32 bars', async () => {
+test('autoTransitionLength: picked from the outro / intro phrases, whole phrases, 4..64 bars', async () => {
   const { autoTransitionLength, outroBars, introBars } = await import('../public/js/automix.js');
   const out = (bars, over = {}) => { const end = 0.1 + 160 * BAR; const s = end - bars * BAR; return { bpm: BPM, duration: end + 1, endTime: end, mixOut: s, phrases: [{ start: 0.1, end: s, type: 'drop' }, { start: s, end, type: 'outro' }], ...over }; };
   const inn = (bars, over = {}) => ({ bpm: BPM, mixIn: 0.1, duration: 300, phrases: [...(bars ? [{ start: 0.1, end: 0.1 + bars * BAR, type: 'intro' }] : []), { start: 0.1 + bars * BAR, end: 200, type: 'drop' }], ...over });
@@ -219,7 +219,8 @@ test('autoTransitionLength: picked from the outro / intro phrases, whole phrases
   let r = autoTransitionLength(out(16), inn(32), 'blend');
   assert.equal(r.bars, 16); assert.equal(r.beats, 64); assert.match(r.why, /16-bar outro/); assert.match(r.why, /32-bar intro/);
   assert.equal(autoTransitionLength(out(32), inn(32), 'blend').bars, 32, 'long outro + long intro: long blend');
-  assert.equal(autoTransitionLength(out(64), inn(64), 'blend').bars, 32, 'never more than 32 bars');
+  assert.equal(autoTransitionLength(out(64), inn(64), 'blend').bars, 64, 'long outro + long intro: up to 64 bars (club long blend)');
+  assert.equal(autoTransitionLength(out(128), inn(128), 'blend').bars, 64, 'never more than 64 bars');
   r = autoTransitionLength(out(32), inn(32), 'crossfade');
   assert.equal(r.bars, 16); assert.match(r.why, /max 16 bars/);
   assert.equal(autoTransitionLength(out(24), inn(32), 'blend').bars, 24, 'multiple of 8');
@@ -246,7 +247,7 @@ test('autoTransitionLength: picked from the outro / intro phrases, whole phrases
   assert.equal(autoTransitionLength(out(32), inn(32), 'bassswap').bars, 4, 'bass swap stays quick');
   for (const ob of [1, 3, 5, 8, 13, 20, 33, 47, 70]) for (const ib of [0, 2, 9, 17, 40]) for (const st of ['blend', 'filter', 'crossfade', 'bassswap', 'echo', 'loop']) {
     const b = autoTransitionLength(out(ob), inn(ib), st).bars;
-    assert.ok(b >= 4 && b <= 32 && (b === 4 || b % 8 === 0), `${ob}/${ib}/${st}: ${b}`);
+    assert.ok(b >= 4 && b <= (st === 'blend' ? 64 : 32) && (b === 4 || b % 8 === 0), `${ob}/${ib}/${st}: ${b}`);
   }
 });
 
@@ -460,7 +461,25 @@ test('phase keeper: trusts the audible kicks over the beat grid (grid says in ph
   const app = fakeApp(); app.engine.ctx = { currentTime: 5 };
   const am = new AutoMix(app), tr = { out, inn };
   am.keepPhase(tr, 0.5);
-  assert.equal(tr.phaseSource, 'audio');
+  assert.equal(tr.phaseSource, 'grid', 'one reading is not trusted yet');
+  for (let i = 0; i < 2; i++) { app.engine.ctx.currentTime += 0.3; inn.bend = 0; am.keepPhase(tr, 0.5); }
+  assert.equal(tr.phaseSource, 'audio', 'three steady readings');
   assert.ok(Math.abs(tr.phaseErr - 0.01) < 0.001, `heard ${tr.phaseErr}`);
   assert.ok(inn.bend > 0, 'pushed forward');
+});
+
+test('phase keeper: jumpy by-ear readings (soft or busy kicks) are not chased: the beat grid is used', async () => {
+  const beatPhase = await import('../public/js/audio/beat-phase.js');
+  const out = phaseDeck(0, { pos: 10 }), inn = phaseDeck(1, { pos: 10 });
+  out.onsets = inn.onsets = { rate: 689, env: new Float32Array(10) }; // present, but the readings are faked below
+  const app = fakeApp(); app.engine.ctx = { currentTime: 5 };
+  const am = new AutoMix(app), tr = { out, inn };
+  const readings = [0.03, -0.02, 0.035, -0.04, 0.01];
+  let n = 0;
+  const real = beatPhase.audibleOffset;
+  // the keeper's input, as measured on real tracks with soft kicks: confidence ~0.4, offsets jumping by tens of ms
+  am.__heard = () => ({ offset: readings[n++ % readings.length], confidence: 0.4 });
+  for (let i = 0; i < 5; i++) { app.engine.ctx.currentTime += 0.3; am.keepPhase(tr, 0.5); assert.equal(tr.phaseSource, 'grid', `reading ${i}`); }
+  assert.equal(inn.bend, 0, 'grids agree: nothing to bend');
+  void real;
 });

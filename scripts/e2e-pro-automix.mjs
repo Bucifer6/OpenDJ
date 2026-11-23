@@ -150,10 +150,10 @@ try {
     const mid = new Int16Array(await blob.slice(44 + Math.floor(bytes / 8) * 4, 44 + Math.floor(bytes / 8) * 4 + sr * 4).arrayBuffer());
     let pk = 0; for (const v of mid) pk = Math.max(pk, Math.abs(v));
     return { riff: tag(0), wave: tag(8), data: tag(36), type: blob.type, size: blob.size, sr, channels: h.getUint16(22, true), bits: h.getUint16(34, true),
-      seconds: bytes / (sr * 4), planned: timeline?.seconds, kinds: timeline?.segments.map((s) => s.kind).join(','), calls, peak: pk / 32767, ms: Math.round(performance.now() - t0) };
+      bytes, seconds: bytes / (sr * 4), planned: timeline?.seconds, kinds: timeline?.segments.map((s) => s.kind).join(','), calls, peak: pk / 32767, ms: Math.round(performance.now() - t0) };
   });
   check(exported.riff === 'RIFF' && exported.wave === 'WAVE' && exported.data === 'data' && exported.type === 'audio/wav' && exported.channels === 2 && exported.bits === 16
-    && exported.size > 1048576 && exported.size === 44 + exported.seconds * exported.sr * 4 && exported.seconds > 10 && exported.seconds <= 180 && Math.abs(exported.seconds - exported.planned) < 0.05
+    && exported.size > 1048576 && exported.size === 44 + exported.bytes && exported.bytes % 4 === 0 && exported.seconds > 10 && exported.seconds <= 180 && Math.abs(exported.seconds - exported.planned) < 0.05
     && exported.peak > 0.01, `set exported to WAV (${(exported.size / 1048576).toFixed(1)} MB, ${exported.seconds.toFixed(1)} s: ${exported.kinds}; peak ${exported.peak.toFixed(2)}; ${exported.ms} ms) ${JSON.stringify({ planned: exported.planned, seconds: exported.seconds, size: exported.size, peak: exported.peak })}`);
   check(!errors.length, `no console errors ${errors.join(' | ')}`);
   console.log('\nE2E PRO AUTOMIX PASSED');

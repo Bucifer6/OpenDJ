@@ -99,4 +99,4 @@ export function audibleOffset(out, inn, { window = 2, maxLag = 0.06, step = 0.00
 /** Mean onset strength per point below which a curve has no kicks to lock to (see audibleOffset). */
 export const MIN_ONSET = 0.004;
 /** Below this confidence the audible measurement is not trusted (no clear kicks): the beat grids are used. */
-export const MIN_CONFIDENCE = 0.15;
+export const MIN_CONFIDENCE = 0.35; // clean kicks score 0.5 and more; soft or busy ones ~0.2 and jump around
