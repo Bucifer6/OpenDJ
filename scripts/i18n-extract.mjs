@@ -83,6 +83,13 @@ export function scanJs(src) {
 
 const CODE_CONTEXT = /(class:\s*|className\s*=\s*|classList\.\w+\(\s*|querySelector(All)?\(\s*|closest\(\s*|addEventListener\(\s*|removeEventListener\(\s*|\.on\(\s*|\.off\(\s*|\.emit\(\s*|import\(\s*|from\s*|require\(\s*|getAttribute\(\s*|setAttribute\(\s*|dataset\.\w+\s*[=!]==?\s*|console\.\w+\(\s*|setProperty\(\s*|getPropertyValue\(\s*|createElement\(\s*|cssVar\(\s*|icon\(\s*|el\(\s*|fetch\(\s*|case\s*|[=!]==?\s*|typeof\s+\w+\s*[=!]==?\s*|new Error\(\s*|\.startsWith\(\s*|\.endsWith\(\s*|\.includes\(\s*|\.split\(\s*|\.join\(\s*|\.replace\(\s*|localStorage\.\w+\(\s*|postMessage\(\s*|\.set\(\s*|\.get\(\s*|\.has\(\s*|\.delete\(\s*)$/;
 
+/** Text without its tags, for the prose test below (repeated until nothing changes, so "<<b>i>" leaves no tag). */
+export function stripTags(t) {
+  let prev;
+  do { prev = t; t = t.replace(/<[^<>]*>/g, ''); } while (t !== prev);
+  return t.replace(/[<>]/g, '');
+}
+
 export function looksLikeUi(s) {
   const t = s.text.trim().replace(/\{\d+\}/g, '').trim(); // template placeholders are not code
   if (s.template && !/[A-Za-z]{3}/.test(t.replace(/(px|rem|em|ms|deg|rgba?|var|calc|translate\w*|scale|rotate)/g, ''))) return false;
@@ -90,7 +97,7 @@ export function looksLikeUi(s) {
   if (CODE_CONTEXT.test(s.before)) return /\b(new Error\(|throw)/.test(s.before) && / /.test(t); // error messages may be shown
   if (/^\s*:/.test(s.after) && !/ /.test(t)) return false; // object key
   if (/^(https?:|\/|\.\/|\.\.\/|#|data:|blob:|mailto:)/.test(t) || /\.(js|css|json|html|png|svg|wav|mp3|xml)$/.test(t)) return false;
-  if (/[<>]/.test(t) && /<\/?[a-z]/i.test(t)) return /[A-Z][a-z]+ [a-z]+/.test(t.replace(/<[^>]+>/g, '')); // html with prose
+  if (/[<>]/.test(t) && /<\/?[a-z]/i.test(t)) return /[A-Z][a-z]+ [a-z]+/.test(stripTags(t)); // html with prose
   if (/[{}]|=>|\(\)|\$\{/.test(t) ||(/;/.test(t) && !/[A-Za-z]{3,} [a-z]{2,}/.test(t))) return false; // code; prose may contain ";"
   if (/^[a-z0-9_.\-:/[\]]+$/.test(t)) return false; // ids, keys, single lowercase words
   if (/^[a-z][\w-]*( [a-z][\w-]*)*$/.test(t) && !/\b(the|a|an|to|of|and|or|in|on|for|is|no|not|with)\b/.test(t)) return false; // class lists
@@ -107,8 +114,8 @@ async function main() {
     const src = readFileSync(f, 'utf8');
     const rel = relative(root, f).replace(/\\/g, '/');
     const strings = f.endsWith('.html')
-      ? [...src.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].flatMap((m) => scanJs(m[1]).map((x) => ({ ...x, offset: x.offset + m.index })))
-        .concat([...src.replace(/<script\b[\s\S]*?<\/script>|<style\b[\s\S]*?<\/style>/g, (m) => ' '.repeat(m.length)).matchAll(/>([^<>]*[A-Za-z]{2}[^<>]*)<|(?:title|placeholder|aria-label|alt)="([^"]+)"/g)]
+      ? [...src.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)].flatMap((m) => scanJs(m[1]).map((x) => ({ ...x, offset: x.offset + m.index })))
+        .concat([...src.replace(/<script\b[\s\S]*?<\/script\b[^>]*>|<style\b[\s\S]*?<\/style\b[^>]*>/gi, (m) => ' '.repeat(m.length)).matchAll(/>([^<>]*[A-Za-z]{2}[^<>]*)<|(?:title|placeholder|aria-label|alt)="([^"]+)"/g)]
           .map((m) => ({ text: (m[1] ?? m[2]).replace(/\s+/g, ' ').trim(), offset: m.index, before: '', after: '' })))
       : scanJs(src);
     for (const s of strings) {
