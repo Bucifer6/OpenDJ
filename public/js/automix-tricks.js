@@ -120,3 +120,51 @@ export function rollSize(beatIndex, beats = 8) {
   const left = beats - beatIndex;
   return left > 4 ? 1 : left > 2 ? 0.5 : left > 1 ? 0.25 : 0.125;
 }
+
+// ---------------------------------------------------------------- teasing the next record
+/** Bars of a tease: 2 in, 4 held, 2 out. */
+export const TEASE_BARS = 8;
+/** Share of transitions that get a tease: "sometimes" (subtle) or every other one (party). */
+export const TEASE_CHANCE = { subtle: 1 / 3, party: 1 / 2 };
+
+/** Stable 0..1 from a string (the same pair always decides the same way, so the preview matches what plays). */
+function unit(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return ((h >>> 0) % 10000) / 10000; }
+
+/**
+ * A tease of the next record, like a DJ hinting at what comes: a phrase or two before the real mix, a bit of the
+ * incoming track (its hook) is brought in under the outgoing one and taken out again. With AI stems on the incoming
+ * deck only its vocal (when the outgoing part is instrumental) or its drums are heard; without stems it is the top
+ * end only (bass and low mids cut, high-pass filter).
+ * out / inn: track info (bpm, key, phrases, vocalMap, id). ctx: { from, to (outgoing track seconds: the tease must
+ * end 8 bars before `to`, the planned transition), mode: 'subtle'|'party', stemsIn, keyRelation: (a, b) => kind }.
+ * Returns { start, end, len, cue, kind: 'vocal'|'drums'|'filtered', why } or null (not this time / no good spot).
+ */
+export function planTease(out, inn, { from, to, mode = 'subtle', stemsIn = false, keyClash = false } = {}) {
+  const chance = TEASE_CHANCE[mode];
+  if (!chance || !out?.bpm || !inn?.bpm || !finite(from) || !finite(to)) return null;
+  if (unit(`${out.id}>${inn.id}`) >= chance) return null; // sometimes, not every time
+  const ratio = out.bpm / inn.bpm;
+  if (Math.abs(Math.log(ratio)) > Math.log(1.04)) return null; // only when the two are close in tempo (beat-matched)
+  const bar = barOf(out), len = TEASE_BARS * bar, latest = to - 8 * bar - len, earliest = Math.max(from, to - 56 * bar - len);
+  if (latest < earliest) return null;
+  // where: a phrase line of the outgoing track, best in a breakdown / build or a part without vocals, as close to the
+  // mix as allowed (so the tease leads into it)
+  const ph = sections(out);
+  const lines = [];
+  for (const p of ph) for (let x = p.start; x < p.end - 1e-6; x += 8 * bar) if (x >= earliest - 1e-6 && x <= latest + 1e-6) lines.push({ x, p });
+  if (!lines.length) return null;
+  const vOut = (a) => vocalIn(out, a, a + len);
+  const score = ({ x, p }) => (['breakdown', 'buildup', 'intro'].includes(p.type) ? 2 : 0) + ((vOut(x) ?? 0.5) < 0.3 ? 1.5 : 0) + (x - earliest) / Math.max(1, latest - earliest);
+  const best = lines.reduce((a, b) => (score(b) > score(a) ? b : a));
+  // what: the incoming hook (its first drop / chorus), else 16 bars into it
+  const inSec = sections(inn), ibar = barOf(inn);
+  const hook = inSec.find((p) => MAIN.has(p.type));
+  const cue = hook ? hook.start : (finite(inn.mixIn) ? inn.mixIn : 0) + 16 * ibar;
+  if (finite(inn.duration) && cue + len * (inn.bpm / out.bpm) > inn.duration - 8 * ibar) return null;
+  const vIn = vocalIn(inn, cue, cue + len), vo = vOut(best.x) ?? 0.5;
+  let kind = 'filtered';
+  if (stemsIn) kind = (vIn ?? 0) > 0.4 && vo < 0.3 && !keyClash ? 'vocal' : 'drums';
+  if (kind !== 'drums' && keyClash) return null; // a clashing key is only teased with drums
+  const what = { vocal: 'its vocal', drums: 'its drums', filtered: 'its top end' }[kind];
+  return { start: best.x, end: best.x + len, len, cue, kind, why: `tease of the next record: ${what} for ${TEASE_BARS} bars, ${Math.round((to - best.x - len) / bar)} bars before the mix` };
+}
