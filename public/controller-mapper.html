@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-kalOupjauiGO1SYQbYG2VRXG1TLLLNDAFVymM1Bod9k=' 'sha256-MJIdbps4b3cZkp8zVDDMjCDJ1NM/U01L7nEGpL/41UU='; style-src 'unsafe-inline'; font-src 'self'; img-src data:; connect-src 'self' https://raw.githubusercontent.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-kalOupjauiGO1SYQbYG2VRXG1TLLLNDAFVymM1Bod9k=' 'sha256-snNCJ6jnWD3wSIgIGKvyE54ExNNYgTXI0hjYAl6Uv6I='; style-src 'unsafe-inline'; font-src 'self'; img-src data:; connect-src 'self' https://raw.githubusercontent.com; base-uri 'none'; form-action 'none'">
 <title>OpenDJ Controller Mapper</title>
 <style>
 :root {
@@ -134,7 +134,7 @@ html.embed #monitor { height: calc(100vh - 160px); }
 </head>
 <body>
 <header>
-  <h1>OpenDJ Controller Mapper <small>v0.5.9</small></h1>
+  <h1>OpenDJ Controller Mapper <small>v0.5.10</small></h1>
   <label>Controller <select id="device" aria-label="MIDI controller"><option value="">No controller found</option></select></label>
   <label>Mapping name <input type="text" id="mapName" placeholder="My controller" size="16"></label>
   <span id="status">Starting…</span>
@@ -696,7 +696,7 @@ function addMonitor(m) {
 $('btnPause').onclick = (ev) => { paused = !paused; ev.target.textContent = paused ? 'Resume' : 'Pause'; ev.target.setAttribute('aria-pressed', String(paused)); };
 $('btnLog').onclick = () => {
   if (!log.length) { toast('No messages captured yet'); return; }
-  const lines = [`# OpenDJ Controller Mapper ${'0.5.9'} MIDI log`, `# device: ${deviceName}`, `# columns: ms since start, raw bytes (hex), decoded`, ...log];
+  const lines = [`# OpenDJ Controller Mapper ${'0.5.10'} MIDI log`, `# device: ${deviceName}`, `# columns: ms since start, raw bytes (hex), decoded`, ...log];
   download(`${safeName(deviceName || 'controller')}.midi-log.txt`, lines.join('\n'), 'text/plain');
 };
 
@@ -802,7 +802,7 @@ $('btnContrib').onclick = () => {
   if (!brand || !model) { toast('Fill in the brand and model'); (brand ? $('cModel') : $('cBrand')).focus(); return; }
   if (!$('cCc0').checked) { toast('Tick the CC0 box to contribute'); $('cCc0').focus(); return; }
   const contributed = { brand, model, author: $('cAuthor').value.trim() || undefined, testedOn: $('cOs').value.trim() || undefined,
-    notes: $('cNotes').value.trim() || undefined, license: 'CC0-1.0', tool: 'OpenDJ Controller Mapper 0.5.9' };
+    notes: $('cNotes').value.trim() || undefined, license: 'CC0-1.0', tool: 'OpenDJ Controller Mapper 0.5.10' };
   if (!$('mapName').value.trim() || $('mapName').value.trim() === deviceName) $('mapName').value = `${brand} ${model}`;
   const f = mappingFile({ contributed });
   const base = safeName(`${brand}-${model}`);
@@ -871,7 +871,7 @@ async function syncIndex(manual = false) {
     if (manual) toast("Couldn't reach GitHub");
   }
   const n = index.controllers.length, mapped = index.controllers.filter((c) => c.status !== 'wanted').length;
-  $('syncLine').innerHTML = `${n} controllers in the list, ${mapped} with a mapping · ${indexFrom === 'github' ? 'synced from GitHub just now' : `offline: using the ${esc(indexFrom === 'snapshot' ? 'list built into this file (v0.5.9)' : indexFrom)}`} · <a href="#" id="resync">Refresh</a>`;
+  $('syncLine').innerHTML = `${n} controllers in the list, ${mapped} with a mapping · ${indexFrom === 'github' ? 'synced from GitHub just now' : `offline: using the ${esc(indexFrom === 'snapshot' ? 'list built into this file (v0.5.10)' : indexFrom)}`} · <a href="#" id="resync">Refresh</a>`;
   $('resync').onclick = (ev) => { ev.preventDefault(); syncIndex(true); };
   matchCurrent(); renderList();
 }
@@ -995,7 +995,7 @@ function submitChange(kind) {
     if (base && !changes.length) { toast('Nothing changed yet. Re-learn or edit controls first, or use "It works: verify it".'); return; }
     if (!$('cCc0').checked) { $('contrib').open = true; toast('Tick the CC0 box under "Contribute this mapping" first'); $('cCc0').focus(); return; }
     const prev = base?.contributed || {};
-    const contributed = { ...prev, brand: c.brand, model: c.model, license: 'CC0-1.0', tool: 'OpenDJ Controller Mapper 0.5.9',
+    const contributed = { ...prev, brand: c.brand, model: c.model, license: 'CC0-1.0', tool: 'OpenDJ Controller Mapper 0.5.10',
       changedBy: [...(prev.changedBy || []), $('cAuthor').value.trim() || 'anonymous'], verifiedBy: [] };
     const f = mappingFile({ contributed });
     lastFile = f.json;

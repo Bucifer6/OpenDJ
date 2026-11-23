@@ -23,7 +23,7 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
-### Unreleased
+### New in 0.5.10
 - **Automix no longer adds effects of its own.** Tricks inside tracks (bass teases, filter builds, loop rolls, horns…), teases of the next track and transitions built from AI stems (stem swap, drum bridge, acapella) are now off, also on existing installs (once). Isolated AI stems can carry audible artefacts. Each can be turned back on in *Settings → Automix*. Normal blends and echo-outs are unchanged.
 - **AI stems are never prepared twice at once.** The app window no longer takes a track the server is already preparing (the two runs could cancel each other and waste minutes of work).
 
