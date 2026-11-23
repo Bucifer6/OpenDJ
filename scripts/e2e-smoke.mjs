@@ -113,7 +113,7 @@ try {
   // automix with a short transition
   await page.evaluate(async () => {
     const a = window.opendj;
-    a.engine.decks.forEach((d) => d.pause());
+    a.engine.decks.forEach((d) => { d.pause(); d.eject(); }); // empty decks: automix would start with their tracks
     await a.setSetting('automix', { ...a.settings.automix, transitionBeats: 8, style: 'eqswap' });
     await a.automix.start([...a.library.tracks.values()]);
     const d = a.automix.current; d.seek(d.duration - 12);

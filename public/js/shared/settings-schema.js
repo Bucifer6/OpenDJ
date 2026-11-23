@@ -60,6 +60,7 @@ const SCHEMA = {
     keepSync: bool(), skipSilence: bool(), shuffle: bool(), keySync: bool(), order: oneOf('harmonic', 'build', 'peak', 'wave'),
     varyStyles: bool(), onAirLoad: oneOf('ask', 'queue', 'stop'), shape: oneOf('warmup', 'rising', 'steady', 'peak', 'wave'),
     preset: oneOf('balanced', 'harmonic', 'energy', 'variety', 'custom'), liveSetLength: num(2, 1000),
+    setLength: oneOf('all', '30', '60', '120', '180', 'endless'),
     sliders: (v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(['harmonic', 'energy', 'variety'].map((k) => [k, num(0, 1)(v[k]) ?? 0.5])) : undefined),
   }),
   midiMappings: obj(),

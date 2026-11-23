@@ -146,7 +146,11 @@ try {
     app.settings.automix = window.__adaptiveSaved.automix; app.settings.mixLearning = window.__adaptiveSaved.learning;
   });
 
+  // empty decks: automix would otherwise start with the tracks left on them (tested in A2)
+  const ejectDecks = () => page.evaluate(() => { for (const d of window.opendj.engine.decks.slice(0, 2)) { d.pause(); d.eject(); } });
+
   // ================= A) smart mix from the demo library =================
+  await ejectDecks();
   await page.evaluate(() => window.opendj.setSetting('automix', { ...window.opendj.settings.automix, style: 'blend', transitionBeats: 16 }));
   const sm = await page.evaluate(async () => {
     const a = window.opendj;
@@ -174,11 +178,37 @@ try {
   await page.locator('.am-queue-btn').click();
   await page.evaluate(() => window.opendj.automix.stop());
 
+  // ================= A2) AUTOMIX starts with the tracks the DJ loaded; ▾ menu: endless library mix =================
+  await ejectDecks();
+  const loaded = await page.evaluate(async () => {
+    const a = window.opendj, all = [...a.library.tracks.values()];
+    await a.loadTrack(0, all[2].id); await a.loadTrack(1, all[4].id);
+    const loads = []; const orig = a.loadTrack.bind(a);
+    a.loadTrack = (i, id, o) => { loads.push([i, id]); return orig(i, id, o); };
+    await a.automixFrom({ kind: 'library' }, { mode: 'shuffle', length: 'endless' });
+    a.loadTrack = orig;
+    const [d1, d2] = a.engine.decks, am = a.automix;
+    return { playing: d1.playing, cur: am.current === d1, first: am.queue[0].id, next: am.nextTrack()?.id, want: [all[2].id, all[4].id], d2: d2.track?.id, loads, upcoming: am.queue.length - am.idx, refill: !!am.refill?.endless };
+  });
+  check(loaded.playing && loaded.cur && loaded.first === loaded.want[0], 'AUTOMIX plays the track loaded on deck 1 first');
+  check(loaded.next === loaded.want[1] && loaded.d2 === loaded.want[1] && !loaded.loads.length, 'the track loaded on deck 2 plays next (not reloaded)');
+  check(loaded.refill && loaded.upcoming >= 2, `endless library mix keeps tracks queued (${loaded.upcoming} upcoming)`);
+  await page.evaluate(() => window.opendj.automix.stop());
+  await page.locator('.am-menu-btn').click();
+  const menu = await page.evaluate(() => [...document.querySelectorAll('.am-menu .ctx-item')].map((x) => x.textContent));
+  check(menu.some((x) => /Shuffle the whole library/.test(x)) && menu.some((x) => /Mix a playlist/.test(x)) && menu.some((x) => /Mix genres/.test(x)) && menu.some((x) => /1 hour/.test(x)), `▾ menu offers library / playlist / genres / timed / endless (${menu.length} items)`);
+  await page.locator('.am-menu .ctx-item', { hasText: 'Mix genres' }).click();
+  await page.waitForSelector('[data-am="genres"]');
+  const dlg = await page.evaluate(() => ({ src: document.querySelector('[data-am="source"]').value, genres: document.querySelectorAll('[data-am="genres"] input').length, length: document.querySelector('[data-am="length"]').options.length }));
+  check(dlg.src === 'genres' && dlg.genres > 0 && dlg.length === 6, `Automix dialog: genres source with ${dlg.genres} genres, ${dlg.length} set lengths`);
+  await page.keyboard.press('Escape');
+  await ejectDecks();
+
   // ================= B) every transition style: level, clipping, clicks =================
   const STYLES = ['blend', 'bassswap', 'crossfade', 'filter', 'echo', 'cut', 'backspin', 'brake', 'loop', 'reverb'];
   await page.evaluate(async () => {
     const a = window.opendj;
-    for (const d of a.engine.decks.slice(0, 2)) if (d.playing) d.pause();
+    for (const d of a.engine.decks.slice(0, 2)) { d.pause(); d.eject(); }
     await a.setSetting('automix', { ...a.settings.automix, style: 'blend', transitionBeats: 8, varyStyles: false, keySync: false });
     const house = [...a.library.tracks.values()].filter((t) => t.bpm > 115 && t.bpm < 132).sort((x, y) => x.bpm - y.bpm).slice(0, 3);
     const q = []; for (let i = 0; i < 14; i++) q.push(house[i % house.length]);
@@ -233,7 +263,7 @@ try {
   for (const [style, from, to] of [['crossfade', 'Saturday Satellite', 'Iron Meridian'], ['cut', 'Midnight Transit', 'Pressure Index']]) {
     await page.evaluate(async ({ style, from, to }) => {
       const a = window.opendj;
-      for (const d of a.engine.decks.slice(0, 2)) if (d.playing) d.pause();
+      for (const d of a.engine.decks.slice(0, 2)) { d.pause(); d.eject(); }
       await a.setSetting('automix', { ...a.settings.automix, style, transitionBeats: 8, varyStyles: false });
       const all = [...a.library.tracks.values()], t = (x) => all.find((y) => y.title === x);
       await a.automix.start([t(from), t(to), t(from)], { mode: 'order' });
@@ -257,7 +287,7 @@ try {
   const ids = await page.evaluate(() => [...window.opendj.library.tracks.values()].map((t) => t.id));
   const startAm = () => page.evaluate(async () => {
     const a = window.opendj;
-    for (const d of a.engine.decks.slice(0, 2)) if (d.playing) d.pause();
+    for (const d of a.engine.decks.slice(0, 2)) { d.pause(); d.eject(); }
     await a.setSetting('automix', { ...a.settings.automix, style: 'blend', transitionBeats: 8, onAirLoad: 'ask' });
     const all = [...a.library.tracks.values()];
     await a.automix.start([all[0], all[1], all[2]], { mode: 'order' });
@@ -331,7 +361,7 @@ try {
   const startFive = () => page.evaluate(async () => {
     const a = window.opendj;
     a.automix.stop();
-    for (const d of a.engine.decks.slice(0, 2)) if (d.playing) d.pause();
+    for (const d of a.engine.decks.slice(0, 2)) { d.pause(); d.eject(); }
     await a.setSetting('automix', { ...a.settings.automix, style: 'blend', transitionBeats: 8, onAirLoad: 'ask' });
     await a.automix.start([...a.library.tracks.values()].slice(0, 5), { mode: 'order' });
   });
@@ -384,7 +414,7 @@ try {
   // stop while automix loads its FIRST track (decks stopped): it must not start playing once the load finishes
   const stopFirst = await page.evaluate(async () => {
     const a = window.opendj; a.automix.stop();
-    for (const d of a.engine.decks) if (d.playing) d.pause();
+    for (const d of a.engine.decks) { d.pause(); d.eject(); }
     const before = document.querySelectorAll('.toast').length;
     const p = a.automix.start([...a.library.tracks.values()].slice(2, 5), { mode: 'order' }).then(() => 'ok', (e) => e.message);
     await new Promise((r) => setTimeout(r, 30)); a.automix.stop();
@@ -396,7 +426,7 @@ try {
   // AUTOMIX (one click, no dialog): starts a smart mix of the library view; again while starting = cancel;
   // repeated starts are coalesced; Shift-click / right-click opens the options dialog; no AUTOMIX NOW button any more
   const oneClick = await page.evaluate(async () => {
-    const a = window.opendj; a.automix.stop(); for (const d of a.engine.decks) d.pause();
+    const a = window.opendj; a.automix.stop(); for (const d of a.engine.decks) { d.pause(); d.eject(); }
     a.automix.queue = []; a.automix.idx = 0;
     a.library.setView({ kind: 'all' }, 'Collection');
     let starts = 0, mode = null; const orig = a.automix.start.bind(a.automix); a.automix.start = (l, o) => { starts++; mode = o.mode; return orig(l, o); };
@@ -432,7 +462,7 @@ try {
     return { got: (got || []).sort(), want: [all[3].id, all[4].id].sort() };
   });
   check(JSON.stringify(fromQueue.got) === JSON.stringify(fromQueue.want), 'AUTOMIX (key A / MIDI automix.toggle) starts from the remaining queue when there is one');
-  await page.evaluate(() => { window.opendj.automix.stop(); for (const d of window.opendj.engine.decks) d.pause(); });
+  await page.evaluate(() => { window.opendj.automix.stop(); for (const d of window.opendj.engine.decks) { d.pause(); d.eject(); } });
 
   // ================= D) media-server playlists → automix =================
   const add = await page.evaluate(async (url) => (await fetch('/api/sources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'subsonic', name: 'Navidrome', url, username: 'dj', password: 'secret' }) })).json(), sub.url);
@@ -506,8 +536,8 @@ try {
   await lp.locator('.ctx-menu .ctx-item', { hasText: 'Shuffle & mix' }).click();
   await lp.locator('.overlay button', { hasText: 'Start automix' }).click();
   await lp.waitForFunction(() => window.opendj.automix.enabled && window.opendj.automix.mode === 'shuffle' && window.opendj.automix.current?.playing, null, { timeout: 60000 });
-  const lq = await lp.evaluate(() => window.opendj.automix.queue.map((t) => window.opendj.library.track(t.id)?.sourceType));
-  check(lq.length === 3 && lq.every((x) => x === 'remote'), 'local mode: media-server playlist "Shuffle & mix" plays the remote tracks');
+  const lq = await lp.evaluate(() => { const a = window.opendj.automix; return a.queue.slice(a.idx).map((t) => window.opendj.library.track(t.id)?.sourceType); }); // upcoming (the deck still playing stays first)
+  check(lq.filter((x) => x === 'remote').length === 3, `local mode: media-server playlist "Shuffle & mix" plays the remote tracks (upcoming: ${lq.join(", ")})`);
   await lp.evaluate(() => window.opendj.automix.stop());
   const lbad = lerr.filter((e) => !/Failed to load resource/.test(e));
   check(lbad.length === 0, `local mode: no console errors ${lbad.join(' | ')}`);

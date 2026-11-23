@@ -279,3 +279,117 @@ test('settings schema: automix.lengthMode', async () => {
   const bad = sanitizeSetting('automix', { lengthMode: 'sometimes', transitionBeats: 32 });
   assert.notEqual(bad.value?.lengthMode, 'sometimes');
 });
+
+// ---------------------------------------------------------------- start with the loaded decks; endless / timed sets
+function deckApp(tracks, decks = {}) {
+  const lib = new Map(tracks.map((t) => [t.id, t]));
+  const mkDeck = (index) => ({
+    index, track: null, playing: false, loading: false, position: 0, duration: 0,
+    play() { this.playing = true; }, pause() { this.playing = false; }, seek(p) { this.position = p; }, setKeyLock() {},
+  });
+  const ds = [mkDeck(0), mkDeck(1)];
+  for (const [i, d] of Object.entries(decks)) Object.assign(ds[i], d);
+  const channels = ds.map(() => { const state = {}; return { state, set(k, v) { state[k] = v; } }; });
+  const loads = [];
+  const app = {
+    engine: { on() {}, decks: ds, channels, resume: async () => {} },
+    settings: { automix: { transitionBeats: 32, style: 'blend' } },
+    library: { track: (id) => lib.get(id) },
+    toast() {}, loads,
+    async loadTrack(i, id) { loads.push([i, id]); ds[i].track = lib.get(id); ds[i].duration = lib.get(id)?.duration || 0; },
+  };
+  return app;
+}
+const lib5 = (n, dur = 300) => Array.from({ length: n }, (_, i) => ({ id: `t${i}`, title: `T${i}`, duration: dur }));
+
+test('automix starts with the track loaded on deck 1, and the track on deck 2 plays next', async () => {
+  const tracks = lib5(6);
+  const app = deckApp(tracks, { 0: { track: tracks[3], position: 12 }, 1: { track: tracks[5] } });
+  const am = new AutoMix(app);
+  await am.start(tracks, { mode: 'shuffle' });
+  const [a, b] = app.engine.decks;
+  assert.equal(am.current, a); assert.equal(a.playing, true); assert.equal(a.position, 12, 'cued position kept');
+  assert.equal(am.queue[0].id, 't3'); assert.equal(am.idx, 1);
+  assert.equal(am.nextTrack().id, 't5', 'deck 2 plays next');
+  assert.equal(b.playing, false); assert.equal(app.engine.channels[1].state.volume, 0, 'deck 2 waits with its fader down');
+  assert.deepEqual(app.loads, [], 'nothing loaded over the DJ\'s tracks');
+  assert.deepEqual(am.queue.map((t) => t.id).sort(), tracks.map((t) => t.id).sort(), 'each track once');
+});
+
+test('automix starts with deck 2 when only deck 2 is loaded; keeps a playing deck playing', async () => {
+  let tracks = lib5(4);
+  let app = deckApp(tracks, { 1: { track: tracks[2] } });
+  let am = new AutoMix(app);
+  await am.start(tracks, { mode: 'order' });
+  assert.equal(am.current, app.engine.decks[1]); assert.equal(app.engine.decks[1].playing, true);
+  assert.deepEqual(am.queue.map((t) => t.id), ['t2', 't0', 't1', 't3']);
+  assert.deepEqual(app.loads, [[0, 't0']], 'the next track is preloaded on deck 1');
+
+  tracks = lib5(4);
+  app = deckApp(tracks, { 0: { track: tracks[0] }, 1: { track: tracks[1], playing: true, position: 80 } });
+  am = new AutoMix(app);
+  await am.start(tracks, { mode: 'order' });
+  assert.equal(am.current, app.engine.decks[1]); assert.equal(app.engine.decks[0].playing, false);
+  assert.equal(am.nextTrack().id, 't0', 'loaded deck 1 is next after the playing deck 2');
+  assert.deepEqual(am.queue.slice(am.idx).map((t) => t.id), ['t0', 't2', 't3']);
+});
+
+test('automix without loaded decks loads the first track on deck 1 as before', async () => {
+  const tracks = lib5(3);
+  const app = deckApp(tracks);
+  const am = new AutoMix(app);
+  await am.start(tracks, { mode: 'order' });
+  assert.equal(app.loads[0][0], 0); assert.equal(app.loads[0][1], 't0');
+  assert.equal(am.current, app.engine.decks[0]); assert.equal(am.nextTrack().id, 't1');
+});
+
+test('endless automix keeps adding tracks and plays the whole pool before repeating', async () => {
+  const tracks = lib5(10);
+  const app = deckApp(tracks);
+  const am = new AutoMix(app);
+  await am.start(tracks, { mode: 'shuffle', endless: true });
+  const played = [];
+  for (let i = 0; i < 35; i++) { // fake transitions
+    const t = am.nextTrack(); assert.ok(t, `track ${i} queued`);
+    played.push(t.id); am.idx++; am.fillMore();
+  }
+  assert.equal(new Set(played.slice(0, 9)).size, 9, 'no repeats while the pool lasts');
+  for (let i = 1; i < played.length; i++) assert.notEqual(played[i], played[i - 1], 'never the same track twice in a row');
+});
+
+test('endless automix in order loops a playlist in its order', async () => {
+  const tracks = lib5(3);
+  const am = new AutoMix(deckApp(tracks));
+  await am.start(tracks, { mode: 'order', endless: true });
+  for (let i = 0; i < 6; i++) { am.idx = am.queue.length; am.fillMore(); }
+  assert.deepEqual(am.queue.slice(0, 9).map((t) => t.id), ['t0', 't1', 't2', 't0', 't1', 't2', 't0', 't1', 't2']);
+});
+
+test('a 1 hour automix queues about an hour of music and stops adding', async () => {
+  const tracks = lib5(40, 300); // 5-minute tracks
+  const am = new AutoMix(deckApp(tracks));
+  await am.start(tracks, { mode: 'shuffle', minutes: 60 });
+  for (let i = 0; i < 30; i++) { am.idx = Math.min(am.idx + 1, am.queue.length); am.fillMore(); }
+  assert.equal(am.queue.length, 12, `12 x 5 min (${am.queue.length})`);
+  assert.equal(new Set(am.queue.map((t) => t.id)).size, 12);
+  const { trimToMinutes } = await import('../public/js/automix.js');
+  assert.equal(trimToMinutes(lib5(5, 0), 10 * 60).length, 3, 'unknown length counts 4 minutes');
+});
+
+test('automix sources: library, playlist, genres, view / queue; set lengths', async () => {
+  const { sourceTracks, libraryGenres, splitGenres, lengthOptions } = await import('../public/js/automix-sources.js');
+  const tracks = [
+    { id: 'a', genre: 'House; Deep House' }, { id: 'b', genre: 'house' }, { id: 'c', genre: 'Hip-Hop/Rap' },
+    { id: 'd', genre: '' }, { id: 'e', genre: 'Techno', unreadable: true },
+  ];
+  const ctx = { tracks, view: [tracks[2]], queue: [], playlists: [{ id: 'p1', name: 'Warmup', trackIds: ['b', 'zz', 'a'] }], track: (id) => tracks.find((t) => t.id === id) };
+  assert.deepEqual(splitGenres('Hip-Hop/Rap'), ['Hip-Hop', 'Rap']);
+  assert.deepEqual(libraryGenres(tracks).map((g) => [g.name, g.count]), [['House', 2], ['Deep House', 1], ['Hip-Hop', 1], ['Rap', 1], ['Techno', 1]]);
+  assert.deepEqual(sourceTracks({ kind: 'library' }, ctx).tracks.map((t) => t.id), ['a', 'b', 'c', 'd'], 'unreadable files left out');
+  const pl = sourceTracks({ kind: 'playlist', id: 'p1' }, ctx);
+  assert.deepEqual(pl.tracks.map((t) => t.id), ['b', 'a']); assert.equal(pl.title, '"Warmup"');
+  assert.deepEqual(sourceTracks({ kind: 'genres', genres: ['house', 'Rap'] }, ctx).tracks.map((t) => t.id), ['a', 'b', 'c']);
+  assert.deepEqual(sourceTracks({ kind: 'view' }, ctx).tracks.map((t) => t.id), ['c']);
+  assert.deepEqual(sourceTracks({ kind: 'view' }, { ...ctx, queue: [tracks[3]] }).tracks.map((t) => t.id), ['d'], 'a waiting queue comes first');
+  assert.deepEqual(lengthOptions('60'), { minutes: 60 }); assert.deepEqual(lengthOptions('endless'), { endless: true }); assert.deepEqual(lengthOptions('all'), {});
+});

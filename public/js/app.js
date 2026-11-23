@@ -11,6 +11,7 @@ import { DetailWaveform } from './ui/waveform.js';
 import { LibraryUI } from './ui/library-ui.js';
 import { Dialogs } from './ui/dialogs.js';
 import { AutoMix, STYLES, STYLE_LABEL, DROP_STYLES } from './automix.js';
+import { sourceTracks, lengthOptions, SET_LENGTHS } from './automix-sources.js';
 import { MidiManager } from './midi/midi.js';
 import { Sequencer } from './audio/sequencer.js';
 import { applyTheme } from './ui/themes.js';
@@ -149,7 +150,8 @@ class App {
     this.recTime = el('span', { class: 'rec-time' });
     // one click: start a smart automix of the queue / this library view at once (what the separate AUTOMIX NOW
     // button did); click again to stop. Shift-click or right-click: the Automix dialog (order, profile, transitions).
-    this.amBtn = el('button', { class: 'btn automix-btn', onclick: (e) => this.toggleAutomix({ dialog: e.shiftKey || this.shift }), oncontextmenu: (e) => { e.preventDefault(); if (!this.automix.enabled && !this._amStarting) this.toggleAutomix({ dialog: true }); }, title: 'Automix: start a smart mix of the queue, or else of this library view, with your saved preferences. Click again to stop. Shift-click or right-click: Automix options. Key: A' }, iconLabel('automix', 'AUTOMIX'));
+    this.amBtn = el('button', { class: 'btn automix-btn', onclick: (e) => this.toggleAutomix({ dialog: e.shiftKey || this.shift }), oncontextmenu: (e) => { e.preventDefault(); if (!this.automix.enabled && !this._amStarting) this.toggleAutomix({ dialog: true }); }, title: 'Automix: start a smart mix of the queue, or else of this library view, with your saved preferences. Tracks already loaded on decks 1 and 2 play first. Click again to stop. ▾: whole library, a playlist, genres, 1 hour, endless. Shift-click or right-click: Automix options. Key: A' }, iconLabel('automix', 'AUTOMIX'));
+    this.amMenuBtn = el('button', { class: 'btn sm icon-only am-menu-btn', title: 'Automix: what to mix and for how long (whole library, a playlist, genres, 1 hour, endless…)', 'aria-label': 'Automix options', 'aria-haspopup': 'menu', onclick: (e) => this.automixMenu(e.currentTarget) }, '▾');
     this.amSkip = el('button', { class: 'btn sm icon-only', onclick: () => this.automix.skip(), title: 'Mix to next track now', 'aria-label': 'Mix to next track now' }, icon('next'));
     this.amInfo = el('span', { class: 'am-info' });
     this.amQueueBtn = el('button', { class: 'btn sm am-queue-btn', onclick: () => this.toggleQueuePanel(), title: 'Automix queue: upcoming tracks, transition styles, smart-mix reasons' }, 'QUEUE');
@@ -169,7 +171,7 @@ class App {
     const topbar = el('header', { class: 'topbar' },
       el('div', { class: 'logo', translate: 'no' }, logoMark(), el('span', { class: 'logo-word' }, 'Open', el('b', {}, 'DJ'))),
       deckSel, shiftBtn,
-      el('div', { class: 'tb-group automix-actions' }, this.amBtn, this.amSkip, this.amQueueBtn), this.amInfo,
+      el('div', { class: 'tb-group automix-actions' }, this.amBtn, this.amMenuBtn, this.amSkip, this.amQueueBtn), this.amInfo,
       el('div', { class: 'tb-spacer' }),
       el('div', { class: 'tb-group' }, this.recBtn, this.recTime),
       this.midiDot, this.cpu, this.clock,
@@ -446,15 +448,67 @@ class App {
   }
   /**
    * One-click start with the saved preferences: a smart mix of the remaining queue, else of the library view
-   * (playlist, crate, search…); shuffled when "shuffle" is the saved preference.
+   * (playlist, crate, search…); shuffled when "shuffle" is the saved preference. Tracks already loaded on decks 1 / 2
+   * play first (AutoMix.start). The saved set length (settings.automix.setLength) applies: whole list, timed, endless.
    */
-  async automixStart() {
-    const { tracks, from } = this.automixSource();
-    if (!tracks.length) { this.toast('No tracks in this view: open a playlist or add music, or right-click AUTOMIX for options'); return; }
+  async automixStart() { return this.automixFrom({ kind: 'view' }); }
+
+  /** What the automix sources read: library view, queue, all tracks, playlists. */
+  automixCtx() {
+    const lib = this.library, a = this.automix;
+    return { view: lib?.rows || [], queue: a.queue.slice(a.idx), tracks: [...(lib?.tracks?.values?.() || [])], playlists: lib?.playlists || [], track: (id) => lib?.track?.(id) };
+  }
+
+  /**
+   * Start automix on a source ({ kind: 'view' | 'library' | 'playlist' | 'genres', … }, see automix-sources.js) with
+   * the saved preferences, or the given mode ('shuffle' | 'smart' | 'order' | 'live') and length ('all' | minutes |
+   * 'endless').
+   */
+  async automixFrom(source, { mode, length } = {}) {
+    const { tracks, title } = sourceTracks(source, this.automixCtx());
+    const onDecks = this.engine.decks.slice(0, 2).some((d) => d.track);
+    if (!tracks.length && !onDecks) {
+      this.toast(source.kind === 'view' ? 'No tracks in this view: open a playlist or add music, or use the ▾ menu next to AUTOMIX' : `No tracks in ${title}`);
+      return;
+    }
     const opts = this.settings.automix || {};
-    const mode = opts.shuffle ? 'shuffle' : 'smart';
-    // same set length as the Automix dialog's default: a smart order over a whole big library would block the UI
-    await this.startAutomix(tracks, { mode, shape: opts.shape, sliders: opts.sliders, limit: from === 'view' && tracks.length > 200 ? 40 : undefined });
+    mode ||= opts.shuffle ? 'shuffle' : 'smart';
+    const lo = lengthOptions(length || opts.setLength || 'all');
+    // a smart order over a whole big library would block the UI: order 40, and endless / timed sets add more as they go
+    const limit = (mode === 'smart' || mode === 'live') && tracks.length > 200 ? 40 : undefined;
+    // the deck tracks alone (empty view): keep mixing from the whole library
+    const list = tracks.length ? tracks : this.automixCtx().tracks;
+    await this.startAutomix(list, { mode, shape: opts.shape, sliders: opts.sliders, limit, pool: list, ...lo });
+  }
+
+  /** The ▾ menu next to AUTOMIX: what to mix (library, playlist, genres, this view) and for how long. */
+  automixMenu(anchor) {
+    document.querySelector('body > .ctx-menu.am-menu')?.remove();
+    const running = this.automix.enabled || !!this._amStarting;
+    const go = (source, o = {}) => () => { if (running) { this.automix.stop(); this._amStarting && (this._amStarting.cancelled = true); } this.automixFrom(source, o); };
+    const saved = this.settings.automix?.setLength || 'all';
+    const lengthLabel = (SET_LENGTHS.find(([v]) => v === saved) || SET_LENGTHS[0])[1];
+    const items = [
+      ['Shuffle the whole library · endless', go({ kind: 'library' }, { mode: 'shuffle', length: 'endless' })],
+      ['Smart mix the whole library · endless', go({ kind: 'library' }, { mode: 'smart', length: 'endless' })],
+      ['Endless mix of this view', go({ kind: 'view' }, { length: 'endless' })],
+      ['1 hour mix of this view', go({ kind: 'view' }, { length: '60' })],
+      null,
+      ['Mix a playlist…', () => this.dialogs.automixQueue(null, { source: 'playlist' })],
+      ['Mix genres…', () => this.dialogs.automixQueue(null, { source: 'genres' })],
+      ['All automix options…', () => this.dialogs.automixQueue(this.automixSource().tracks)],
+      null,
+      ...SET_LENGTHS.map(([v, l]) => [`${v === saved ? '✓ ' : ''}AUTOMIX button plays: ${l}`, () => { this.setSetting('automix', { ...this.settings.automix, setLength: v }); this.toast(`AUTOMIX now plays: ${l}`); }]),
+    ];
+    if (running) items.unshift(['Stop automix', () => this.toggleAutomix()], null);
+    const menu = el('div', { class: 'ctx-menu am-menu', role: 'menu', 'aria-label': `Automix (button plays: ${lengthLabel})` },
+      ...items.map((it) => (it ? el('div', { class: 'ctx-item', role: 'menuitem', tabindex: 0, onclick: () => { menu.remove(); it[1](); }, onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); menu.remove(); it[1](); } } }, it[0]) : el('div', { class: 'ctx-sep' }))));
+    document.body.append(menu);
+    const r = anchor.getBoundingClientRect(), z = parseFloat(document.documentElement.style.zoom) || 1;
+    menu.style.top = `${r.bottom / z + 4}px`; menu.style.left = `${Math.max(8, r.left / z)}px`;
+    menu.querySelector('.ctx-item')?.focus({ preventScroll: true });
+    const close = (e) => { if (e.type === 'keydown' ? e.key === 'Escape' : !menu.contains(e.target) && e.target !== anchor) { menu.remove(); document.removeEventListener('pointerdown', close, true); document.removeEventListener('keydown', close, true); } };
+    setTimeout(() => { document.addEventListener('pointerdown', close, true); document.addEventListener('keydown', close, true); });
   }
   queueAdd(tracks, { next = false } = {}) {
     next = next || this.shift; // Shift = play next

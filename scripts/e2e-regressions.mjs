@@ -93,7 +93,7 @@ try {
 
   // automix: first track missing -> skips it instead of hanging "on"
   const am = await page.evaluate(async ({ short }) => {
-    const a = window.opendj; a.engine.decks.forEach((d) => d.pause());
+    const a = window.opendj; a.engine.decks.forEach((d) => { d.pause(); d.eject(); });
     const bogus = { id: 'does-not-exist', title: 'Ghost' };
     try { await a.automix.start([bogus, a.library.track(short)]); } catch (e) { return { err: e.message }; }
     await new Promise((r) => setTimeout(r, 300));
@@ -104,7 +104,7 @@ try {
 
   // stopping automix mid-transition leaves a clean mixer
   const stopMid = await page.evaluate(async ({ s, t }) => {
-    const a = window.opendj; a.engine.decks.forEach((d) => d.pause());
+    const a = window.opendj; a.engine.decks.forEach((d) => { d.pause(); d.eject(); });
     await a.setSetting('automix', { ...a.settings.automix, transitionBeats: 16, style: 'eqswap' });
     await a.automix.start([a.library.track(s), a.library.track(t)]);
     await new Promise((r) => setTimeout(r, 1500));

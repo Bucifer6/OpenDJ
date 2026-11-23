@@ -10,6 +10,7 @@ import { stemsSettingsPane } from '../stems/stems-ui.js';
 import { platform, MOBILE_UNAVAILABLE, APP_VERSION } from '../platform.js';
 import { STYLES, normStyle } from '../automix.js';
 import { SET_SHAPES, PRESETS } from '../smartmix.js';
+import { SET_LENGTHS, lengthOptions, libraryGenres, sourceTracks } from '../automix-sources.js';
 import { LANGUAGES, initI18n, resolveLanguage, currentLanguage, rememberLanguage, translateFrame, t } from '../i18n.js';
 
 /** Automix modes offered in the start dialog. */
@@ -291,9 +292,45 @@ export class Dialogs {
    * Start automix on a list of tracks. opts.mode preselects 'order' | 'shuffle' | 'smart' | 'live'; opts.title names
    * the source (playlist name). Smart modes analyse unanalysed tracks first where possible.
    */
-  async automixQueue(tracks, { mode, title } = {}) {
-    if (!tracks?.length) return this.app.toast('No tracks in this view');
+  async automixQueue(tracks, { mode, title, source: sourceKind } = {}) {
+    const ctx = this.app.automixCtx?.() || { tracks: [], playlists: [], view: tracks || [] };
+    const given = tracks?.length ? tracks : null;
+    if (!given && !sourceKind && !ctx.tracks.length) return this.app.toast('No tracks in this view');
     const o = this.app.settings.automix;
+    // what to mix: the tracks this dialog was opened with (view, queue, a playlist's menu), the whole library, a
+    // playlist, or genres
+    const source = el('select', { class: 'sel', 'data-am': 'source' },
+      ...(given ? [el('option', { value: 'given' }, `${title ? `"${title}"` : 'This view / queue'} (${given.length} tracks)`)] : []),
+      el('option', { value: 'library' }, `Whole library (${ctx.tracks.length} tracks)`),
+      el('option', { value: 'playlist' }, 'A playlist'),
+      el('option', { value: 'genres' }, 'Genres'));
+    source.value = sourceKind || (given ? 'given' : 'library');
+    const playlists = (ctx.playlists || []).filter((p) => p.trackIds?.length);
+    const playlistSel = el('select', { class: 'sel', 'data-am': 'playlist' }, ...playlists.map((p) => el('option', { value: p.id }, `${p.name} (${p.trackIds.length})`)));
+    const genres = libraryGenres(ctx.tracks);
+    const genreBoxes = genres.map((g) => el('input', { type: 'checkbox', value: g.name }));
+    const genreList = el('div', { class: 'am-genres', 'data-am': 'genres' }, ...(genres.length
+      ? genres.map((g, i) => el('label', { class: 'check' }, genreBoxes[i], ` ${g.name} (${g.count})`))
+      : [el('span', { class: 'hint' }, 'No genres in the library tags yet.')]));
+    const playlistRow = el('label', { class: 'field' }, el('span', {}, 'Playlist'), playlists.length ? playlistSel : el('span', { class: 'hint' }, 'No playlists yet.'));
+    const genreRow = el('div', { class: 'field' }, el('span', {}, 'Genres'), genreList);
+    const setLength = el('select', { class: 'sel', 'data-am': 'length' }, ...SET_LENGTHS.map(([v, l]) => el('option', { value: v }, l)));
+    setLength.value = o.setLength || 'all';
+    const pick = () => {
+      if (source.value === 'given') return { tracks: given, title: title ? `"${title}"` : 'this view' };
+      if (source.value === 'playlist') return sourceTracks({ kind: 'playlist', id: playlistSel.value }, ctx);
+      if (source.value === 'genres') return sourceTracks({ kind: 'genres', genres: genreBoxes.filter((b) => b.checked).map((b) => b.value) }, ctx);
+      return sourceTracks({ kind: 'library' }, ctx);
+    };
+    const summary = el('p', { 'data-am': 'summary' });
+    const deckNote = this.app.engine?.decks?.slice(0, 2).filter((d) => d.track).map((d) => `deck ${d.index + 1}`) || [];
+    const showSource = () => {
+      playlistRow.hidden = source.value !== 'playlist'; genreRow.hidden = source.value !== 'genres';
+      const n = pick().tracks.length;
+      summary.textContent = `Auto-mix ${n} track${n === 1 ? '' : 's'} on decks 1 & 2 with beat-matched transitions.${deckNote.length ? ` Starts with the track${deckNote.length > 1 ? 's' : ''} on ${deckNote.join(' and ')}.` : ''}`;
+      limit.max = Math.max(2, n);
+    };
+    tracks = given || pick().tracks;
     const modeSel = el('select', { class: 'sel', 'data-am': 'mode' }, ...AUTOMIX_MODES.map(([v, l]) => el('option', { value: v }, l)));
     modeSel.value = mode || (o.shuffle ? 'shuffle' : 'smart');
     const style = el('select', { class: 'sel', 'data-am': 'style' }, ...STYLES.map(([v, l]) => el('option', { value: v }, l)));
@@ -305,8 +342,8 @@ export class Dialogs {
     const smartStart = el('input', { type: 'checkbox', checked: o.smartStart !== false });
     const bars = el('select', { class: 'sel', 'data-am': 'bars' }, ...LENGTH_CHOICES.map(([v, l]) => el('option', { value: v }, l)));
     bars.value = lengthValue(o);
-    const big = tracks.length > 200;
-    const limit = el('input', { class: 'inp', type: 'number', min: 2, max: tracks.length, value: big ? 40 : tracks.length, 'data-am': 'limit' });
+    const big = source.value !== 'given' || tracks.length > 200;
+    const limit = el('input', { class: 'inp', type: 'number', min: 2, max: Math.max(2, tracks.length), value: big ? 40 : tracks.length, 'data-am': 'limit' });
     const smartBox = smartControls(o);
     const profile = el('select', { class: 'sel', 'data-am': 'profile' },
       el('option', { value: 'custom' }, 'Custom settings'), ...MIX_PROFILES.map((p) => el('option', { value: p.id }, p.label)));
@@ -327,8 +364,12 @@ export class Dialogs {
       el('label', { class: 'field' }, el('span', {}, 'Tracks in the set'), limit), smartBox.el);
     const showSmart = () => { smartPart.hidden = !['smart', 'live'].includes(modeSel.value); };
     modeSel.addEventListener('change', showSmart); showSmart();
+    for (const c of [source, playlistSel, ...genreBoxes]) c.addEventListener('change', showSource);
+    showSource();
     const body = el('div', { class: 'form' },
-      el('p', {}, `Auto-mix ${tracks.length} tracks${title ? ` from "${title}"` : ''} on decks 1 & 2 with beat-matched transitions.`),
+      summary,
+      el('label', { class: 'field' }, el('span', {}, 'Mix'), source), playlistRow, genreRow,
+      el('label', { class: 'field' }, el('span', {}, 'Set length'), setLength),
       el('label', { class: 'field' }, el('span', {}, 'Mix profile'), profile),
       el('label', { class: 'field' }, el('span', {}, 'Order'), modeSel),
       smartPart,
@@ -363,8 +404,13 @@ export class Dialogs {
       profile.addEventListener('change', showLocal);
       body.append(settings);
     }
-        const r = await this.modal('Automix', body, [{ label: 'Cancel', value: null }, { label: 'Start automix', primary: true, value: true }]);
+    const r = await this.modal('Automix', body, [{ label: 'Cancel', value: null }, { label: 'Start automix', primary: true, value: true }]);
     if (!r) return;
+    const chosen = pick();
+    tracks = chosen.tracks;
+    const onDecks = this.app.engine?.decks?.slice(0, 2).some((d) => d.track);
+    if (!tracks.length && !onDecks) return this.app.toast(source.value === 'genres' ? 'Choose at least one genre' : `No tracks in ${chosen.title}`);
+    if (!tracks.length) tracks = ctx.tracks; // only the deck tracks: carry on with the library
     if (modeSel.value === 'local') {
       const candidates = tracks.slice(0, 60);
       try {
@@ -381,8 +427,8 @@ export class Dialogs {
     const sm = smartBox.value();
     await this.app.setSetting('automix', { ...o, style: style.value, ...lengthPatch(bars.value, o), keySync: keySync.checked,
       varyStyles: vary.checked, shape: shape.value, preset: sm.preset, sliders: sm.sliders,
-      shuffle: modeSel.value === 'shuffle', smartStart: smartStart.checked, profile: profile.value });
-    return this.app.startAutomix(tracks, { mode: modeSel.value, shape: shape.value, sliders: sm.sliders, limit: Number(limit.value) || undefined });
+      shuffle: modeSel.value === 'shuffle', smartStart: smartStart.checked, profile: profile.value, setLength: setLength.value });
+    return this.app.startAutomix(tracks, { mode: modeSel.value, shape: shape.value, sliders: sm.sliders, limit: Number(limit.value) || undefined, pool: tracks, ...lengthOptions(setLength.value) });
   }
 
   gridEditor(deck) {
