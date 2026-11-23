@@ -215,7 +215,7 @@ export function smartStartPoint(t) {
   const duration = Number(t?.duration) || 0;
   const end = Number(t?.endTime) || duration || Infinity;
   const floor = Number(t?.startTime) || 0;
-  const limit = Math.min(end, duration ? duration * 0.4 : Infinity);
+  const limit = Math.min(end, duration ? duration * 0.25 : Infinity); // skip an intro, never a quarter of the song
   const valid = (p) => Number.isFinite(Number(p)) && Number(p) > floor + 0.5 && Number(p) <= limit && Number(p) < end - 4;
   if (valid(t?.mixIn)) return Number(t.mixIn);
   const main = new Set(['buildup', 'verse', 'drop', 'chorus']);
@@ -395,6 +395,24 @@ export function tempoRampValue(from, k) {
 }
 
 const structureCache = new WeakMap();
+
+/** Phase drift (seconds) the phase keeper leaves alone; above it the incoming deck's pitch is bent back. */
+export const PHASE_TOLERANCE = 0.003;
+/** Largest pitch bend the phase keeper uses (2 %, with key lock not audible as a pitch change). */
+export const MAX_PHASE_BEND = 0.02;
+/** A phase error this big (seconds) at the start of a blend is snapped by a seek rather than bent. */
+export const PHASE_SNAP = 0.03;
+/**
+ * How far the incoming deck's beats are behind the outgoing deck's (seconds of audio time; negative = ahead) at
+ * audio time t, from both beat grids. null when the tempos differ by more than 5 % (half / double time sync).
+ */
+export function phaseErrorSeconds(out, inn, t) {
+  const ob = out.effectiveBpm || out.bpm, ib = inn.effectiveBpm || inn.bpm;
+  if (!ob || !ib || Math.abs(Math.log(ob / ib)) > 0.05) return null;
+  let d = out.beatPhase(out.positionAt(t)) - inn.beatPhase(inn.positionAt(t));
+  if (d > 0.5) d -= 1; if (d < -0.5) d += 1;
+  return d * 60 / ob;
+}
 
 /** Endless live sets: length of one energy-curve cycle (tracks). */
 const LIVE_ENDLESS_CYCLE = 30;
@@ -886,7 +904,8 @@ export class AutoMix extends Emitter {
     if (!next) { if (!out.playing) this.stop(); return; }
     if (!inn.track || inn.loading || inn.track.id !== next.id) { if (!inn.loading && !this._loading) this.preloadNext(); return; }
     const oi = this.info(out), ii = this.info(inn);
-    const pos = out.position;
+    const posAt = this.engine.ctx?.currentTime; // the start is planned for this audio time
+    const pos = Number.isFinite(posAt) && typeof out.positionAt === 'function' ? out.positionAt(posAt) : out.position;
     if (!immediate) this.nextTransition();
     const upcoming = !immediate ? this.upcoming : null;
     let { style, why, plan: planned } = this.styleFor(this.idx, this.app.library?.track?.(out.track.id) || out.track) || { style: 'blend' };
@@ -942,7 +961,7 @@ export class AutoMix extends Emitter {
       const durWall = Math.max(2, len / (out.rate || 1));
       const inStart = cue + (upcoming?.adaptive ? Math.max(0, pos - plan.start) * (inn.rate || 1) / (out.rate || 1) : inn.bpm && out.bpm ? offBeats * inn.beatLen : 0);
       inn.seek(inStart); inn._autoMixEntry = inStart;
-      inn.play();
+      inn.play({ at: posAt, instant: true }); // on the beat even if the message reaches the audio thread late
       const lenIn = upcoming?.adaptive ? len * (inn.rate || 1) / (out.rate || 1) : inn.bpm && out.bpm ? (len / out.beatLen) * inn.beatLen : len;
       Object.assign(tr, { dur: durWall * 1000, inStart, swapAt: style === 'blend' ? phraseSwapPoint(ii, inStart, lenIn) : null, kSwap: null });
       if (tr.vocals === 'hold-in') chI.set('vocal', 0);
@@ -974,6 +993,7 @@ export class AutoMix extends Emitter {
     const k = Math.min(1, (this.now() - tr.t0) / tr.dur);
     if (tr.style === 'blend' && tr.kSwap == null && (tr.inn.position >= tr.swapAt - 0.005 || k >= 0.9)) tr.kSwap = k;
     if (tr.style === 'stemswap') { this.applyStemSwap(tr, k); if (k >= 1) this.finishTransition(); return; }
+    this.keepPhase(tr, k);
     const L = mixLevels(tr.style, k, tr.kSwap);
     if (tr.vocals === 'hold-in') {
       // incoming vocals wait for the swap (blend: the bass swap; other styles: 60 %), then trade places with the outgoing ones
@@ -985,6 +1005,26 @@ export class AutoMix extends Emitter {
     for (const [k2, [ch, key]] of Object.entries(map)) if (L[k2] != null) ch.set(key, L[k2]);
     if (L.echo && !chO.state.fxOn) { chO.set('fxType', 'echo'); chO.set('fxBeats', 0.75); chO.set('fxMix', 0.6); chO.set('fxOn', true); }
     if (k >= 1) this.finishTransition();
+  }
+
+  /**
+   * Like a DJ riding the pitch during a blend: four times a second, compare the two decks' beat phases at the same
+   * audio time; drift over PHASE_TOLERANCE is pulled back with a small pitch bend (at most MAX_PHASE_BEND), and a big
+   * error early in the blend (the incoming track still quiet) is snapped into phase. Only for synced decks at the same
+   * tempo (not half / double time).
+   */
+  keepPhase(tr, k) {
+    const { out, inn } = tr;
+    if (!inn.syncOn || !out.playing || !inn.playing || !out.bpm || !inn.bpm || inn._pendingPlay || typeof inn.positionAt !== 'function' || typeof inn.setBend !== 'function') return;
+    const t = this.engine.ctx?.currentTime;
+    if (!Number.isFinite(t) || t - (tr.phaseAt || 0) < 0.25) return;
+    tr.phaseAt = t;
+    const err = phaseErrorSeconds(out, inn, t);
+    if (err == null) return;
+    tr.phaseErr = err;
+    if (Math.abs(err) > PHASE_SNAP && k < 0.2 && !tr.phaseSnapped) { tr.phaseSnapped = true; inn.setBend(0); inn.alignPhase(); return; }
+    const bend = Math.abs(err) < PHASE_TOLERANCE ? 0 : Math.max(-MAX_PHASE_BEND, Math.min(MAX_PHASE_BEND, err / 0.5)); // fix it over ~0.5 s
+    if (bend !== (inn.bend || 0)) { inn.setBend(bend); tr.phaseBend = true; }
   }
 
   /** Stem swap: per-stem levels on both decks (AI stems), see stemSwapLevels in mix-planner.js. */
@@ -1031,7 +1071,7 @@ export class AutoMix extends Emitter {
     else chO.set('volume', 0);
     for (const k of ['eqLow', 'eqMid', 'eqHigh', 'filter']) chI.set(k, 0);
     chI.set('volume', 0.8);
-    inn.play();
+    inn.play({ at: tr.dropWall / 1000, instant: true }); // exactly on the bar line (the tick may come a little early or late)
     if (tr.style === 'loop' || tr.style === 'cut') setTimeout(() => { if (out !== this.current || this.transition?.out === out) { out.exitLoop?.(); out.loop = null; } }, 30);
     this.emit('state');
   }
@@ -1041,6 +1081,7 @@ export class AutoMix extends Emitter {
     const { out, inn } = tr;
     this.transition = null;
     const chO = this.engine.channels[out.index], chI = this.engine.channels[inn.index];
+    if (tr.phaseBend && inn.bend) inn.setBend(0); // the phase keeper's pitch bend ends with the blend
     out.pause();
     if (out.loop?.active) out.exitLoop();
     out.loop = null;

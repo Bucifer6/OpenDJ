@@ -5,6 +5,12 @@ import { camelotRelation } from './smartmix.js';
 import { decodeVocalMap } from './shared/vocal-map.js';
 
 const finite = (x) => typeof x === 'number' && Number.isFinite(x);
+/** Share of a track (from where it came in) that plays before the next transition may begin. */
+export const MIN_PLAY = 0.6;
+/** ...and at least this long (seconds) when the track has that much left. */
+export const MIN_PLAY_SECONDS = 90;
+/** Latest point (share of the incoming track) it may come in at, when its intro would clash. */
+export const MAX_CUE = 0.25;
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const endOf = (t) => Math.min(t.duration, finite(t.endTime) && t.endTime > 0 ? t.endTime : t.duration);
 const barOf = (t) => finite(t.bpm) && t.bpm > 0 ? 240 / t.bpm : 2;
@@ -26,7 +32,7 @@ function localEnergy(t, a, b) {
   return weight ? sum / weight : finite(t.energy) ? t.energy : 5;
 }
 
-/** Track-time window search across section boundaries, not just intro/outro.
+/** Track-time window search across section boundaries near the outgoing outro and the incoming intro.
  * position/entry are outgoing track seconds. Returns null when timing is unusable.
  * Explicit low beat confidence forbids tempo-matched overlaps; legacy grids remain usable.
  */
@@ -37,9 +43,15 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
   inn = { ...inn, vocalMap: inn.vocalMap || decodeVocalMap(inn.stems?.vocals) };
   const outSections = sections(out), inSections = sections(inn);
   const position = finite(opts.position) ? Math.max(0, opts.position) : 0;
-  const minTime = Math.max(position + barOf(out) * 2, (opts.entry || 0) + Math.max(32, barOf(out) * 16));
-  const earliest = anchor(out) + Math.ceil((minTime - anchor(out)) / barOf(out) - 1e-6) * barOf(out);
+  const entry = finite(opts.entry) ? Math.max(0, opts.entry) : 0;
   const end = endOf(out), inEnd = endOf(inn);
+  // Like a DJ: the outgoing track plays most of what is left from where it came in (MIN_PLAY of it, at least
+  // MIN_PLAY_SECONDS when the track has that much) before a transition may begin; minPlay lowers it (tests, MCP).
+  const share = finite(opts.minPlay) ? clamp(opts.minPlay, 0, 1) : MIN_PLAY;
+  const left = Math.max(0, end - entry);
+  const played = Math.min(left * 0.9, Math.max(left * share, share > 0 ? Math.min(MIN_PLAY_SECONDS, left * 0.8) : 0));
+  const minTime = Math.max(position + barOf(out) * 2, entry + Math.max(Math.min(32, left * 0.5), played));
+  const earliest = anchor(out) + Math.ceil((minTime - anchor(out)) / barOf(out) - 1e-6) * barOf(out);
   const rate = finite(opts.rate) && opts.rate > 0 ? opts.rate : 1;
   const rawRatio = out.bpm * rate / inn.bpm;
   // Mirror Deck.syncTargetRatio: matching half/double BPM does not double the audio's playback speed.
@@ -53,8 +65,12 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
   const exits = [...new Set([lastBar, ...outSections.map((p) => snap(out, p.end))])]
     .filter((x) => x > earliest && x <= end + 1e-6).sort((a, b) => a - b);
   const boundedExits = spread(exits);
-  const allEntries = [...new Set([incomingStart(inn), ...inSections.map((p) => snap(inn, p.start))])]
-    .filter((x) => x >= (inn.startTime || 0) && x < inEnd - Math.max(16, barOf(inn) * 8));
+  // The incoming track comes in on its intro / mix-in point, or a section start in its first quarter (MAX_CUE), so
+  // most of it is still to come; never a section deep inside it.
+  const home = incomingStart(inn);
+  const cueLimit = Math.max(home, (inn.startTime || 0) + (inEnd - (inn.startTime || 0)) * (finite(opts.maxCue) ? clamp(opts.maxCue, 0, 1) : MAX_CUE));
+  const allEntries = [...new Set([home, ...inSections.map((p) => snap(inn, p.start))])]
+    .filter((x) => x >= (inn.startTime || 0) && x <= cueLimit + 1e-6 && x < inEnd - Math.max(16, barOf(inn) * 8));
   const entries = spread(allEntries);
   let best = null, evaluated = 0;
   for (const exit of boundedExits) for (const cue of entries) {
@@ -84,8 +100,10 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
     // Compare actual windows. Holding quick-stem vocals is not treated as perfect source separation.
     const vocalCost = drop ? vo.v * 2 : Math.min(vo.v, vi.v) * (p.style === 'stemswap' ? 2 : 12);
     const clashCost = !drop && harmonic.kind === 'clash' ? Math.min(8, inSpan / 4) : 0;
-    const score = p.score - vocalCost - clashCost - Math.abs(ei - eo) * 0.7
-      - (exit - earliest) / Math.max(1, end - earliest) * 1.5 - cue / inEnd * 0.5;
+    // music left unplayed in the outgoing track, and the incoming intro skipped, both cost: a DJ mixes out late and
+    // in early, and only moves off those points to avoid two voices or a bad key / energy match
+    const unplayed = (end - exit) / Math.max(1, left), skipped = Math.max(0, cue - home) / Math.max(1, inEnd);
+    const score = p.score - vocalCost - clashCost - Math.abs(ei - eo) * 0.7 - unplayed * 6 - skipped * 8;
     evaluated++;
     if (!best || score > best.score) best = { ...p, score, timing, inStart: cue,
       vocals: !drop && !['stemswap', 'crossfade'].includes(p.style) && Math.min(vo.v, vi.v) > 0.2 ? 'hold-in' : null,

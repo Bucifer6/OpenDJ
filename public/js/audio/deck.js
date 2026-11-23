@@ -213,11 +213,16 @@ export class Deck extends Emitter {
   eject() { if (this.playing) return; if (this.scratchSample) this.scratchSampleReturn(); ++this._loadSeq; this.post('unload'); this.reset(); this.emit('load', null); this.emit('state'); }
 
   // ---------- transport ----------
-  play() {
+  /**
+   * Start playback. opts.at: the audio-clock time the current position was planned for (the worklet catches up if
+   * the message arrives late, waits if early); opts.instant: no turntable motor spin-up. Automix uses both so the
+   * incoming track starts exactly on the beat.
+   */
+  play({ at, instant = false } = {}) {
     if (!this.track || this.loading) return;
     this.cuePreview = false; this.hotPreview = null;
     if (this.syncOn) this.alignPhase();
-    this.playing = true; this.post('play', { value: true });
+    this.playing = true; this.post('play', { value: true, ...(Number.isFinite(at) ? { at } : {}), ...(instant ? { instant: true } : {}) });
     this._pendingPlay = true; setTimeout(() => { this._pendingPlay = false; }, 60);
     if (!this._countedPlay) { this._countedPlay = true; api.played(this.track.id).catch(() => {}); }
     this.engine.onDeckPlay(this);
