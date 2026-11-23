@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { start, LAUNCH_COOKIE } from '../server/index.js';
+import { appLog, logLine } from '../server/applog.js';
 import { installKind, normArch, updatePlan, installHint, downloadVerified, downloadDir, replaceAppImage, sha256File } from './updater.js';
 import { handlePlanRequest, listModels } from './local-planner.js';
 import { startOnStablePort } from './stable-port.js';
@@ -48,7 +49,7 @@ async function createWindow() {
   // The desktop server is guarded by the launch token, so the hosted-mode login variables (OPENDJ_PASSWORD,
   // OPENDJ_TRUST_PROXY, OPENDJ_ALLOWED_HOSTS, OPENDJ_AUTH) must not switch a login page on in the app window.
   // a stable port keeps the page's origin, and so its browser storage (sampler sounds, sequencer…), across launches
-  ({ server } = await startOnStablePort((port) => start({ port, dataDir: process.env.OPENDJ_DATA || path.join(app.getPath('userData'), 'library'), launchToken, auth: false, password: '', trustProxy: '', allowedHosts: [] }), path.join(app.getPath('userData'), 'server-port.json')));
+  ({ server } = await startOnStablePort((port) => start({ port, dataDir: process.env.OPENDJ_DATA || path.join(app.getPath('userData'), 'library'), launchToken, auth: false, password: '', trustProxy: '', allowedHosts: [], logs: true }), path.join(app.getPath('userData'), 'server-port.json')));
   appOrigin = new URL(server.url).origin;
   await session.defaultSession.cookies.set({ url: server.url, name: LAUNCH_COOKIE, value: launchToken, path: '/', httpOnly: true, sameSite: 'strict', secure: false });
   const allowed = new Set(['midi', 'midiSysex', 'media', 'speaker-selection', 'hid', 'clipboard-sanitized-write', 'fullscreen', 'serial', 'window-management']);
@@ -122,6 +123,11 @@ ipcMain.handle('pick-files', async (e, filters) => {
   return r.canceled ? [] : r.filePaths;
 });
 ipcMain.handle('reveal', (e, p) => { if (trusted(e) && typeof p === 'string') shell.showItemInFolder(p); });
+// Settings → General → Open logs folder: the folder comes from the server's own log setup, never from the page
+ipcMain.handle('open-logs', async (e) => { const l = appLog(); if (!trusted(e) || !l) return false; return (await shell.openPath(l.dir)) === ''; });
+// crashes of Chromium's own processes (page, GPU, utility) go to the app log with their exit codes
+app.on('child-process-gone', (_e, d) => logLine(`child process gone: ${d.type}${d.name ? ` (${d.name})` : ''}, ${d.reason}, exit ${d.exitCode}`, 'electron'));
+app.on('render-process-gone', (_e, _wc, d) => logLine(`page process gone: ${d.reason}, exit ${d.exitCode}`, 'electron'));
 
 // ---- updates (see updater.js) ----
 // The page only asks: info / download / install / cancel. Which file, from where, and what runs is decided here from

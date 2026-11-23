@@ -1,5 +1,6 @@
 import { el, fmtTime } from './util.js';
 import { api } from './api.js';
+import { setupClientLog } from './client-log.js';
 import { Engine } from './audio/engine.js';
 import { SAMPLE_CATALOG } from './audio/sample-catalog.js';
 import { VoiceBus } from './audio/voice.js';
@@ -795,6 +796,7 @@ class App {
   }
 }
 
+setupClientLog(); // page errors into the app log (Settings → About → Logs)
 const app = new App();
 window.opendj = app;
 app.init().catch((e) => {

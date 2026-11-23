@@ -4,24 +4,22 @@
 // CUDA on Linux when its libraries are installed). A separate process at below-normal priority, so neither the
 // server's event loop nor the audio in the browser waits for it, and a cancel simply kills it.
 //
-// in  (IPC): { type: 'init', model, backend: 'auto'|'gpu'|'cpu', threads, stub, stubGpu?: 'ok'|'broken' (tests) }
+// in  (IPC): { type: 'init', model, backend: 'auto'|'gpu'|'cpu', threads, stub, stubGpu?: 'ok'|'broken'|'crash' (tests) }
 //            { type: 'job', id, ffmpeg, input: { file } | { url, headers }, dir, overlap, maxFrames }
-// out (IPC): { type: 'ready', backend, threads, loadMs } { type: 'progress', id, phase, done, total }
+// out (IPC): { type: 'ready', backend, threads, loadMs, gpuFailed? } { type: 'progress', id, phase, done, total }
 //            { type: 'done', id, frames, ms, chunks, backend, gpuFailed? } { type: 'error', id?, message }
 // A job writes <dir>/{vocals,drums,bass,other}.raw: interleaved stereo s16le, 44.1 kHz, the whole track.
 import fs from 'node:fs';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { separateChunked, interleaveInt16, STEMS, DEMUCS_SOURCES, MODEL_RATE } from '../public/js/stems/stem-dsp.js';
-import { createRunner, createStubSession, StubTensor, verifiedRunChunk } from '../public/js/stems/stems-model.js';
+import { separateChunked, interleaveInt16, STEMS, DEMUCS_SOURCES, MODEL_RATE, stemsDifference, MAX_BACKEND_DIFFERENCE, backendMismatchError } from '../public/js/stems/stem-dsp.js';
+import { createRunner, createStubSession, StubTensor, backendTestInput } from '../public/js/stems/stems-model.js';
 
 const send = (m) => process.send?.(m);
 const order = STEMS.map((n) => DEMUCS_SOURCES.indexOf(n));
-let runner = null, info = null, ort = null, gpuFailed = false, initMsg = null;
-// A GPU backend is only trusted once its stems match the CPU's for one chunk of real audio (verifiedRunChunk):
-// DirectML has been seen returning noise in every stem that still adds up to the track, so mixtureError passes it.
-let gpuRun = null, cpuReference = null;
+const log = (msg) => process.stderr.write(`[stems] ${msg}\n`);
+let runner = null, info = null, ort = null, gpuFailed = null, initMsg = null, session = null;
 
 /** Test stand-in for a GPU whose output layout is wrong: every stem gets slices of the others (sum unchanged). */
 function scrambleSources(out, sources, channels, segment) {
@@ -41,52 +39,102 @@ export function gpuProviders(platform = process.platform, supported = []) {
   return [];
 }
 
+/**
+ * The CPU's stems for the fixed test signal: computed once per model and cached next to it (<model>.cpu-ref.f32),
+ * with its own session that is released before any GPU session is created, so the two never share the process.
+ */
+async function cpuReference(m, makeCpu, input) {
+  const file = m.model ? `${m.model}.cpu-ref.f32` : null;
+  if (file) {
+    try {
+      const b = fs.readFileSync(file);
+      if (b.length % 4 === 0 && b.length > 0) return new Float32Array(b.buffer, b.byteOffset, b.length / 4);
+    } catch { /* not cached yet */ }
+  }
+  const t0 = Date.now();
+  const cpu = await makeCpu();
+  try {
+    const out = await cpu.runner.runChunk(input);
+    if (file) { try { fs.writeFileSync(file, new Uint8Array(out.buffer, out.byteOffset, out.byteLength)); } catch (e) { log(`could not cache the CPU reference: ${e.message}`); } }
+    log(`CPU reference for the GPU check computed in ${Date.now() - t0} ms`);
+    return out;
+  } finally { await cpu.release?.(); }
+}
+
+/**
+ * Load the model. With a GPU backend, its stems for a fixed test signal must match the CPU's
+ * (stemsDifference <= MAX_BACKEND_DIFFERENCE): DirectML has been seen returning noise in every stem that still adds
+ * up to the track, which the per-chunk mixture check cannot see. A GPU that fails is released and the CPU is used.
+ */
 async function load(m, { cpuOnly = false } = {}) {
   const t0 = Date.now();
-  gpuRun = null; cpuReference = null;
+  await release();
+  const wantGpu = !cpuOnly && m.backend !== 'cpu';
   if (m.stub) {
-    runner = createRunner(createStubSession(), StubTensor);
-    info = { backend: 'stub', threads: 1 };
-    // tests: a fake GPU in front of the stub ('ok' returns the stub's stems, 'broken' scrambles them)
-    if (m.stubGpu && !cpuOnly && m.backend !== 'cpu') {
-      const cpu = runner, S = cpu.sources.length;
-      const fake = m.stubGpu === 'broken' ? async (x) => scrambleSources(await cpu.runChunk(x), S, 2, cpu.segment) : cpu.runChunk;
-      runner = { ...cpu, runChunk: fake };
-      info = { backend: 'stub-gpu', threads: 0 };
-      cpuReference = async () => ({ runChunk: cpu.runChunk });
+    const cpu = createRunner(createStubSession(), StubTensor);
+    runner = cpu; info = { backend: 'stub', threads: 1 };
+    // tests: a fake GPU in front of the stub ('ok' returns the stub's stems, 'broken' scrambles them, 'crash' dies)
+    if (m.stubGpu && wantGpu) {
+      const S = cpu.sources.length;
+      const fake = m.stubGpu === 'broken' ? async (x) => scrambleSources(await cpu.runChunk(x), S, 2, cpu.segment)
+        : m.stubGpu === 'crash' ? async () => { process.kill(process.pid, 'SIGKILL'); return new Promise(() => {}); }
+          : cpu.runChunk;
+      const gpu = { ...cpu, runChunk: fake };
+      const verdict = await checkGpu('stub-gpu', gpu, () => ({ runner: createRunner(createStubSession(), StubTensor) }), m);
+      if (verdict.ok) { runner = gpu; info = { backend: 'stub-gpu', threads: 0 }; }
     }
+    info.loadMs = Date.now() - t0;
     return;
   }
   ort ||= createRequire(import.meta.url)('onnxruntime-node');
   const threads = Math.max(1, Math.floor(m.threads) || Math.max(1, (os.availableParallelism?.() || os.cpus().length) - 2));
   const opts = { graphOptimizationLevel: 'all', intraOpNumThreads: threads, interOpNumThreads: 1 };
-  let session = null, backend = 'cpu';
-  if (!cpuOnly && m.backend !== 'cpu') {
+  const makeCpu = async () => {
+    const s = await ort.InferenceSession.create(m.model, { ...opts, executionProviders: ['cpu'] });
+    return { session: s, runner: createRunner(s, ort.Tensor), release: () => s.release?.() };
+  };
+  if (wantGpu) {
     for (const ep of gpuProviders(process.platform, ort.listSupportedBackends?.() || [])) {
-      try { session = await ort.InferenceSession.create(m.model, { ...opts, executionProviders: [ep] }); backend = ep; break; }
-      catch (e) { process.stderr.write(`[stems] ${ep} unavailable, using the CPU: ${e.message}\n`); }
+      // DirectML needs sequential execution without memory patterns
+      const epOpts = ep === 'dml' ? { ...opts, enableMemPattern: false, executionMode: 'sequential' } : opts;
+      let s = null;
+      try {
+        const input = backendTestInput();
+        const ref = await cpuReference(m, makeCpu, input); // before the GPU session exists
+        log(`loading the model on ${ep}`);
+        s = await ort.InferenceSession.create(m.model, { ...epOpts, executionProviders: [ep] });
+        const gpu = createRunner(s, ort.Tensor);
+        const verdict = await checkGpu(ep, gpu, null, m, { input, ref });
+        if (verdict.ok) { session = s; runner = gpu; info = { backend: ep, threads: 0, loadMs: Date.now() - t0 }; return; }
+      } catch (e) {
+        gpuFailed ||= { backend: ep, message: e.message };
+        log(`${ep} unavailable, using the CPU: ${e.message}`);
+      }
+      try { await s?.release?.(); } catch { /* already gone */ }
     }
   }
-  if (!session) session = await ort.InferenceSession.create(m.model, { ...opts, executionProviders: ['cpu'] });
-  runner = createRunner(session, ort.Tensor);
-  info = { backend, threads: backend === 'cpu' ? threads : 0, loadMs: Date.now() - t0 };
-  if (backend !== 'cpu') {
-    // the CPU session for the one-time check: loaded only when the first chunk with audio arrives, released after
-    cpuReference = async () => {
-      const cpu = await ort.InferenceSession.create(m.model, { ...opts, executionProviders: ['cpu'] });
-      return { runChunk: createRunner(cpu, ort.Tensor).runChunk, release: () => cpu.release?.() };
-    };
-  }
+  const cpu = await makeCpu();
+  session = cpu.session; runner = cpu.runner;
+  info = { backend: 'cpu', threads, loadMs: Date.now() - t0 };
 }
 
-/** runChunk for this job: a GPU that has not passed the CPU comparison yet is checked on its first audible chunk. */
-function jobRunChunk() {
-  if (!cpuReference) return runner.runChunk;
-  gpuRun ||= verifiedRunChunk(runner.runChunk, cpuReference, {
-    backend: info.backend,
-    onVerified: (diff) => process.stderr.write(`[stems] ${info.backend} output matches the CPU (difference ${diff.toExponential(1)})\n`),
-  });
-  return gpuRun.isVerified() ? runner.runChunk : gpuRun;
+/** Compare a GPU runner with the CPU on the test signal; records gpuFailed when it does not match. */
+async function checkGpu(name, gpu, makeCpu, m, { input = backendTestInput(), ref = null } = {}) {
+  const t0 = Date.now();
+  ref ||= await cpuReference(m, makeCpu, input);
+  const out = await gpu.runChunk(input);
+  const diff = stemsDifference(out, ref);
+  if (diff <= MAX_BACKEND_DIFFERENCE) { log(`${name} output matches the CPU (difference ${diff.toExponential(1)}, ${Date.now() - t0} ms)`); return { ok: true, diff }; }
+  const message = backendMismatchError(name, diff).message;
+  gpuFailed = { backend: name, message };
+  log(`${message}: using the CPU`);
+  return { ok: false, diff };
+}
+
+/** Free the loaded model (native memory, GPU) before another one is loaded. */
+async function release() {
+  const s = session; session = null; runner = null;
+  try { await s?.release?.(); } catch { /* already released */ }
 }
 
 /** Decode any input FFmpeg reads to planar float 44.1 kHz stereo. */
@@ -131,7 +179,7 @@ async function job(m) {
   let lastSent = 0;
   const run = async () => separateChunked({
     channels: [audio.left, audio.right], length: audio.length, segment: runner.segment, overlap: m.overlap ?? 0.25, sources: runner.sources.length,
-    runChunk: jobRunChunk(),
+    runChunk: runner.runChunk,
     onProgress: (done, total) => {
       const now = Date.now();
       if (done === 0 || done === total || now - lastSent > 500) { lastSent = now; send({ type: 'progress', id: m.id, phase: 'separating', done, total, backend: info.backend }); }
@@ -145,10 +193,10 @@ async function job(m) {
     try { r = await run(); }
     catch (e) {
       // a GPU provider that loads but fails on the first chunk (driver, memory): redo the track on the CPU
-      if (info.backend === 'cpu' || info.backend === 'stub' || gpuFailed) throw e;
-      process.stderr.write(`[stems] ${info.backend} failed (${e.message}), using the CPU\n`);
+      if (info.backend === 'cpu' || info.backend === 'stub') throw e;
+      log(`${info.backend} failed (${e.message}), using the CPU`);
       gpuFailed = { backend: info.backend, message: e.message };
-      await load(initMsg, { cpuOnly: true });
+      await load(initMsg, { cpuOnly: true }); // releases the GPU session first
       for (const fd of fds) fs.ftruncateSync(fd, 0);
       pos.fill(0);
       r = await run();
@@ -162,9 +210,14 @@ let chain = Promise.resolve();
 process.on('message', (m) => {
   chain = chain.then(async () => {
     try {
-      if (m.type === 'init') { initMsg = m; await load(m, { cpuOnly: gpuFailed }); send({ type: 'ready', ...info }); }
+      if (m.type === 'init') {
+        initMsg = m; await load(m, { cpuOnly: !!gpuFailed });
+        log(`ready: ${info.backend}${info.threads ? ` x${info.threads} threads` : ''}, loaded in ${info.loadMs} ms`);
+        send({ type: 'ready', ...info, ...(gpuFailed ? { gpuFailed } : {}) });
+      }
       else if (m.type === 'job') {
         if (!runner) throw new Error('Model not loaded');
+        log(`job ${m.id}: separating on ${info.backend}`);
         await job(m);
       }
     } catch (e) { send({ type: 'error', id: m.id, message: e?.message || String(e) }); }

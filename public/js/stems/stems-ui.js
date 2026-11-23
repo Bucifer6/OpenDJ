@@ -177,6 +177,9 @@ export function stemsSettingsPane(app) {
         el('div', { class: 'muted' }, st.native?.installed
           ? `Server engine: ONNX Runtime ${st.native.version}${st.native.backend ? ` · ${backendName(st.native.backend)}${st.native.threads > 1 ? ` ×${st.native.threads}` : ''}` : ' (GPU when available, else CPU)'}${st.native.last ? ` · last track ${Math.round(st.native.last.ms / 1000)} s for ${Math.round(st.native.last.seconds)} s of audio` : ''}`
           : `Server engine: not available (${st.native?.reason || 'old server'}) — this browser separates instead`),
+        st.native?.gpuFailed ? el('div', { class: 'stems-gpu-off', 'data-stems': 'gpu-off' },
+          el('span', { class: 'muted' }, `Graphics card not used for stems (${backendName(st.native.gpuFailed.backend) || st.native.gpuFailed.backend}): ${st.native.gpuFailed.message} — separating on the CPU instead. `),
+          el('button', { class: 'btn sm', onclick: async () => { await fetch('/api/stems/gpu/retry', { method: 'POST', credentials: 'same-origin' }); app.toast('The graphics card will be tried again for the next track'); refresh(); } }, 'Try the graphics card again')) : null,
         el('div', { class: 'muted' }, `Browser engine: ${st.ort ? `ONNX Runtime Web ${st.ortVersion || ''}` : 'missing from this app build — update or reinstall OpenDJ'} · ${globalThis.crossOriginIsolated ? 'multi-threaded' : 'single-threaded'} WASM, WebGPU ${'gpu' in navigator ? 'available' : 'not available'} · stems saved as ${st.format.toUpperCase()}`),
         el('div', { class: 'stems-settings-actions' },
           m.ready ? el('button', { class: 'btn sm', onclick: async () => { await fetch('/api/stems/model', { method: 'DELETE', credentials: 'same-origin' }); refresh(); } }, 'Delete model')
