@@ -2,7 +2,8 @@
 
 *Status: research + proposal, 2026-11-23. Companion to `INTELLIGENT_AUTOMIX_PLAN.md` (the long-range plan) and
 `ADAPTIVE_DJ.md` (what shipped in 0.5.x). Raw research with all citations: `docs/automix-research/01-transitions.md`,
-`02-selection.md`, `03-systems-mir.md`.*
+`02-selection.md`, `03-systems-mir.md`; measured timing from real mixes, compared with Automix:
+`04-real-mixes.md`.*
 
 > **Owner goal:** *"Work as well as a pro DJ, so I can leave it on at a party and it will just play"*, and
 > *"also do tricks and previews."*
