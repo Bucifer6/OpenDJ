@@ -36,6 +36,9 @@ export class Library extends LibraryCore {
     const s = st.data && typeof st.data === 'object' ? st.data : {};
     const clean = sanitizeSettings(s, DEFAULT_SETTINGS); // known keys only, invalid values -> default (a bad value must not brick the UI)
     this.settings = { ...this.settings, ...clean, automix: { ...this.settings.automix, ...(clean.automix || {}) } };
+    // 0.5.10: Automix's added effects (tricks, teases, AI-stem transitions) were reported as odd beeps in mixes; they
+    // are switched off once for everyone (effectsOff marks it done), and stay opt-in in Settings → Automix
+    if (!(clean.automix?.effectsOff >= 1)) Object.assign(this.settings.automix, { tricks: 'off', tease: false, stemTransitions: false, effectsOff: 1 });
     for (const e of this.loadErrors) console.error('[opendj]', e);
   }
 
