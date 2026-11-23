@@ -276,7 +276,13 @@ test('automix uses the auto length for the plan and reports it; fixed mode keeps
 test('settings schema: automix.lengthMode', async () => {
   const { sanitizeSetting } = await import('../public/js/shared/settings-schema.js');
   const { DEFAULT_SETTINGS } = await import('../public/js/shared/library-core.js');
-  assert.equal(DEFAULT_SETTINGS.automix.lengthMode, 'fixed');
+  // new installs mix like the recommended setup: Auto style and length, varied styles, beat-matched, best phrase
+  assert.equal(DEFAULT_SETTINGS.automix.lengthMode, 'auto');
+  assert.equal(DEFAULT_SETTINGS.automix.style, 'auto');
+  assert.equal(DEFAULT_SETTINGS.automix.varyStyles, true);
+  assert.equal(DEFAULT_SETTINGS.automix.keepSync, true);
+  assert.equal(DEFAULT_SETTINGS.automix.smartStart, true);
+  assert.equal(DEFAULT_SETTINGS.automix.keySync, false);
   const ok = sanitizeSetting('automix', { lengthMode: 'auto', transitionBeats: 32 });
   assert.equal(ok.ok, true); assert.equal(ok.value.lengthMode, 'auto');
   const bad = sanitizeSetting('automix', { lengthMode: 'sometimes', transitionBeats: 32 });
@@ -440,4 +446,21 @@ test('phase keeper: measures the beat offset and bends the incoming deck back, s
   const tr3 = { out, inn: Object.assign(phaseDeck(1, { pos: 19.9 }), { syncOn: false }) };
   now += 0.3; am.keepPhase(tr3, 0.5);
   assert.equal(tr3.inn.bends, undefined);
+});
+
+test('phase keeper: trusts the audible kicks over the beat grid (grid says in phase, the music is 10 ms behind)', async () => {
+  const { onsetCurve } = await import('../public/js/audio/beat-phase.js');
+  const SR = 44100, beat = 0.5;
+  const kick = (first) => { const x = new Float32Array(SR * 20); for (let i = 0; i < x.length; i++) { const k = (i / SR - first) % beat; if (i / SR >= first && k < 0.15) x[i] = Math.sin(2 * Math.PI * (50 + 80 * Math.exp(-k * 40)) * k) * Math.exp(-k * 18) * 0.8; } return x; };
+  const quick = { yieldFn: () => null };
+  const out = phaseDeck(0, { pos: 10 }), inn = phaseDeck(1, { pos: 10 }); // same grid position: the grid says in phase
+  out.onsets = await onsetCurve(kick(0), null, SR, quick);
+  inn.onsets = await onsetCurve(kick(0.01), null, SR, quick); // its kicks really sit 10 ms later in the track
+  Object.defineProperty(out, 'rate', { value: 1 }); Object.defineProperty(inn, 'rate', { get() { return 1 + this.bend; } });
+  const app = fakeApp(); app.engine.ctx = { currentTime: 5 };
+  const am = new AutoMix(app), tr = { out, inn };
+  am.keepPhase(tr, 0.5);
+  assert.equal(tr.phaseSource, 'audio');
+  assert.ok(Math.abs(tr.phaseErr - 0.01) < 0.001, `heard ${tr.phaseErr}`);
+  assert.ok(inn.bend > 0, 'pushed forward');
 });

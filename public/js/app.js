@@ -134,12 +134,13 @@ class App {
     }
   }
 
-  toast(msg) {
+  /** Short message at the bottom; opts.duration (ms, default 4200) for longer notices. */
+  toast(msg, { duration = 4200 } = {}) {
     // "⚠ …" messages are warnings: shown with an icon and the warning colour instead of the emoji
     const warn = typeof msg === 'string' && /^⚠\uFE0F?\s*/.test(msg);
     const t = el('div', { class: `toast${warn ? ' warn' : ''}`, role: warn ? 'alert' : 'status' }, icon(warn ? 'warn' : 'info'), el('span', { class: 'toast-msg' }, warn ? msg.replace(/^⚠\uFE0F?\s*/, '') : msg));
     this.toasts.append(t);
-    setTimeout(() => t.classList.add('out'), 4200); setTimeout(() => t.remove(), 4700);
+    setTimeout(() => t.classList.add('out'), duration); setTimeout(() => t.remove(), duration + 500);
   }
 
   // ---------------- layout ----------------
@@ -454,6 +455,22 @@ class App {
    * play first (AutoMix.start). The saved set length (settings.automix.setLength) applies: whole list, timed, endless.
    */
   async automixStart() { return this.automixFrom({ kind: 'view' }); }
+
+  /**
+   * AI stems for the automix set, in play order (Automix dialog "Prepare AI stems for the whole set now"): the tracks
+   * still to come that have none yet, at most `max` (an endless set adds more as it goes, see the automix 'state'
+   * hook in stems-ui.js, which prepares the next two).
+   */
+  async prepareSetStems(max = 200) {
+    const a = this.automix, lib = this.library;
+    const ids = a.queue.slice(Math.max(0, a.idx - 1)).map((t) => t?.id).filter((id) => id && !lib?.track(id)?.stems?.ready).slice(0, max);
+    if (!ids.length) { this.toast('Every track in the set already has AI stems'); return 0; }
+    try {
+      const n = await this.stems.enqueue(ids, { interactive: true });
+      if (n) this.toast(`AI stems: ${n} track${n > 1 ? 's' : ''} of the set queued, in play order`);
+      return n;
+    } catch (e) { this.toast(`⚠ ${e.message}`); return 0; }
+  }
 
   /** What the automix sources read: library view, queue, all tracks, playlists. */
   automixCtx() {

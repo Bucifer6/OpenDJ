@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import { decodeWaveform, toCamelot, camelotCompatible, analyzeStructure, analysisPatch, carryPhraseLufs } from './analysis-core.js';
 import { effectiveGains, LOADED_STEMS } from '../stems/stem-mix.js';
 import { floatToInt16 } from '../stems/stem-dsp.js';
+import { onsetCurve } from './beat-phase.js';
 import { StemEcho } from '../stems/stem-fx.js';
 import { VINYL_DEFAULTS, secPerRev, snapTo, nextQuantizeDiv, glideDuration, bendAt, needleTarget, jumpSizeStep, semitoneRate } from './vinyl.js';
 
@@ -191,6 +192,9 @@ export class Deck extends Emitter {
       if (stale()) return false;
       this.frames = left.length;
       this.node.port.postMessage({ type: 'load', left, right, sampleRate: buf.sampleRate, scale }, right ? [left.buffer, right.buffer] : [left.buffer]);
+      // kick onset curve for automix's audible phase check (audio/beat-phase.js), built in the background in slices
+      this.onsets = null;
+      onsetCurve(ch0, ch1, buf.sampleRate).then((c) => { if (!stale()) this.onsets = c; }, () => {});
       this.resetStemControls(); this.postStemGains();
       this.rateMul = 1; this.post('rate', { value: this.rate }); this.post('keylock', { value: this.keyLock });
       this.keyShift = 0; this.post('pitch', { value: 1 });

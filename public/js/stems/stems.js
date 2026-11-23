@@ -51,8 +51,25 @@ export class StemsManager extends Emitter {
   get settings() { return this.app.settings || {}; }
   hasStems(t) { return !!t?.stems?.ready; }
   get busy() { return !!this.current || this.queue.length > 0; }
-  /** The server separates (onnxruntime-node there), unless the settings ask for the browser engine. */
-  get serverEngine() { return !this.stub && !!this._status?.native?.installed && this.settings.stemsEngine !== 'browser'; }
+  /** The server separates (onnxruntime-node there), unless the settings ask for the browser engine, or the graphics
+   * card can only be used from this window (browserGpu). */
+  get serverEngine() { return !this.stub && !!this._status?.native?.installed && this.settings.stemsEngine !== 'browser' && !this.browserGpu; }
+  /**
+   * Separate here on the graphics card (WebGPU) instead of on the server's CPU: when the server could not use the
+   * graphics card (its GPU check failed, e.g. DirectML returned noise) but this window has WebGPU that has not
+   * failed its own check. WebGPU is checked against the server's CPU stems once per model (stems-worker.js) and the
+   * verdict is remembered here; if it fails, tracks go back to the server. Settings: stemsEngine 'server' turns it off.
+   */
+  get browserGpu() {
+    const n = this._status?.native;
+    return !this.stub && !!n?.installed && !!n.gpuFailed && !!this._status?.ort && this.settings.stemsEngine !== 'server'
+      && this.settings.stemsEngine !== 'browser' && this.settings.stemsBackend !== 'wasm' && 'gpu' in navigator && !this.gpuFailed && this.webgpuVerdict() !== 'bad';
+  }
+  /** 'ok' / 'bad' / null: this window's WebGPU result for the current model, remembered across sessions. */
+  webgpuVerdict(set) {
+    const key = `opendj-stems-webgpu:${this._status?.model?.sha256 || ''}`;
+    try { if (set !== undefined) { if (set) localStorage.setItem(key, set); else localStorage.removeItem(key); } return localStorage.getItem(key); } catch { return null; }
+  }
   state() { return { current: this.current && { ...this.current }, queue: [...this.queue] }; }
   /** Test hook: use the band-splitting stub instead of the real model (no download). */
   useStub(kind = 'bands') { this.stub = kind; this.disposeWorker(); }
@@ -93,6 +110,11 @@ export class StemsManager extends Emitter {
    * server engine: in the browser this would compete with playback.
    */
   async prefetch(ids, { front = false } = {}) {
+    if (this.browserGpu && this.settings.stemsAutoPrepare !== false) { // on this window's graphics card
+      const lib = this.app.library;
+      const todo = [...new Set(ids)].filter((id) => !this.hasStems(lib?.track(id)) && this.current?.id !== id && !this.queue.includes(id));
+      return todo.length ? this.enqueue(todo, { interactive: false }).catch(() => 0) : 0;
+    }
     if (!this.serverEngine || this.settings.stemsAutoPrepare === false || !this._status?.native?.available) return 0;
     const lib = this.app.library;
     const list = [...new Set(ids)].filter((id) => { const t = lib?.track(id); return t && !this.hasStems(t) && (front || (this.current?.id !== id && !this.queue.includes(id))); });
@@ -185,7 +207,14 @@ export class StemsManager extends Emitter {
           await this.prepare(t);
           this.emit('finished', { id, title: this.current.title, ...this.lastRun });
         } catch (e) {
-          if (e.name !== 'AbortError') { console.warn('[stems]', e); this.emit('failed', { id, title: this.current.title, message: e.message }); }
+          if (e.code === 'NO_GPU') {
+            // this window's graphics card cannot do it after all: the server separates this track (and the rest) on its CPU
+            console.warn('[stems]', e.message, '— the server prepares the stems instead');
+            if (!/not available/.test(e.message)) this.webgpuVerdict('bad');
+            this.gpuFailed = true;
+            const rest = [id, ...this.queue]; this.queue = [];
+            stemsApi.queue(rest, { front: true }).then((r) => this.serverState(r), (err) => this.emit('failed', { id, title: this.current?.title, message: err.message }));
+          } else if (e.name !== 'AbortError') { console.warn('[stems]', e); this.emit('failed', { id, title: this.current.title, message: e.message }); }
           else this.emit('cancelled', { id });
         } finally {
           this.current = null;
@@ -208,8 +237,10 @@ export class StemsManager extends Emitter {
       w.onmessage = (e) => {
         const m = e.data;
         if (m.type === 'ready') { this.backend = m; resolve(w); }
+        else if (m.type === 'verified') { this.gpuVerified = true; this.webgpuVerdict('ok'); console.warn(`[stems] WebGPU matches the CPU (difference ${m.diff?.toExponential?.(1)}, ${m.ms} ms)`); }
+        else if (m.type === 'backend' && m.failed) { this.gpuFailed = true; this.webgpuVerdict('bad'); console.warn(`[stems] WebGPU returned different stems from the CPU: not used`); }
         else if (m.type === 'model-progress') this.current && this.setPhase('loading model', { done: m.received, total: m.total });
-        else if (m.type === 'error') reject(new Error(m.message));
+        else if (m.type === 'error') reject(Object.assign(new Error(m.message), { code: m.code }));
       };
       w.onerror = (e) => reject(new Error(e.message || 'Stems worker failed to start'));
     });
@@ -221,7 +252,9 @@ export class StemsManager extends Emitter {
       modelUrl: new URL(`/api/stems/model?sha=${st?.model?.sha256 || ''}`, location.href).href,
       threads: Math.max(1, Math.min(4, hc - 2)),
       backend: this.gpuFailed ? 'wasm' : this.settings.stemsBackend || 'auto',
-      gpuVerified: !!this.gpuVerified,
+      gpuVerified: !!this.gpuVerified || this.webgpuVerdict() === 'ok',
+      refUrl: new URL('/api/stems/model/cpu-ref', location.href).href, // the server's CPU stems for the GPU check
+      requireGpu: !this.stub && this.browserGpu, // here only for the graphics card: never fall back to slow WASM
     });
     this.workerReady.catch(() => this.disposeWorker());
     return this.workerReady;

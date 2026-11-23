@@ -132,11 +132,11 @@ try {
     return { begin: nt.begin, cue: p?.inStart, style: nt.style, adaptive: !!p, outLen: am.current.duration, inLen: am.other(am.current).duration };
   });
   // like a DJ: most of the outgoing track plays first, and the incoming one comes in early (here on its instrumental
-  // section at 16 s, inside its first quarter, so the two vocals never overlap)
-  check(adaptivePlan.adaptive && adaptivePlan.cue >= 16 && adaptivePlan.cue <= adaptivePlan.inLen * 0.25 + 0.01 && adaptivePlan.begin >= Math.min(adaptivePlan.outLen * 0.6, adaptivePlan.outLen - 16) - 2, `adaptive plan: mix out late, in early (${JSON.stringify(adaptivePlan)})`);
+  // section at 16 s, inside its first quarter, so the two vocals never overlap; the demo grid may snap it ~0.1 s early)
+  check(adaptivePlan.adaptive && adaptivePlan.cue >= 15.5 && adaptivePlan.cue <= adaptivePlan.inLen * 0.25 + 0.01 && adaptivePlan.begin >= Math.min(adaptivePlan.outLen * 0.6, adaptivePlan.outLen - 16) - 2, `adaptive plan: mix out late, in early (${JSON.stringify(adaptivePlan)})`);
   await page.waitForFunction(() => !!window.__adaptiveHeard, null, { timeout: 15000 });
   const heard = await page.evaluate(() => window.__adaptiveHeard);
-  check(heard.style === adaptivePlan.style && Math.abs(heard.cue - adaptivePlan.cue) < 0.25, 'real deck transport follows the selected adaptive cue');
+  check(heard.style === adaptivePlan.style && Math.abs(heard.cue - adaptivePlan.cue) < 0.25, `real deck transport follows the selected adaptive cue (${JSON.stringify({ heard, plan: adaptivePlan })})`);
   await page.waitForFunction(() => !window.opendj.automix.transition, null, { timeout: 40000 });
   await page.evaluate(async () => {
     const app = window.opendj; app.automix.stop();
@@ -218,16 +218,20 @@ try {
     for (let i = 0; i < 60 && !am.transition; i++) await new Promise((r) => setTimeout(r, 50));
     const tr = am.transition; if (!tr) return { error: 'no transition' };
     const { phaseErrorSeconds } = await import('/js/automix.js');
-    const errs = [];
+    const { audibleOffset } = await import('/js/audio/beat-phase.js');
+    const errs = [], heard = [];
     // a busy main thread right as it starts (what makes a late start), then sample the phase for 3 s
     const t0 = performance.now(); while (performance.now() - t0 < 40) { /* block */ }
-    for (let i = 0; i < 30 && am.transition === tr; i++) { await new Promise((r) => setTimeout(r, 100)); const e = phaseErrorSeconds(tr.out, tr.inn, a.engine.ctx.currentTime); if (e != null && i >= 3) errs.push(Math.abs(e) * 1000); }
+    for (let i = 0; i < 30 && am.transition === tr; i++) { await new Promise((r) => setTimeout(r, 100)); const t = a.engine.ctx.currentTime, e = phaseErrorSeconds(tr.out, tr.inn, t); if (e != null && i >= 3) errs.push(Math.abs(e) * 1000);
+      const h = tr.out.onsets && tr.inn.onsets ? audibleOffset({ curve: tr.out.onsets, pos: tr.out.positionAt(t), rate: tr.out.rate }, { curve: tr.inn.onsets, pos: tr.inn.positionAt(t), rate: tr.inn.rate }) : null;
+      if (h && i >= 5) heard.push(Math.abs(h.offset) * 1000); }
     am.stop();
     for (const d of a.engine.decks.slice(0, 2)) { d.pause(); d.eject(); }
-    errs.sort((x, y) => x - y);
-    return { n: errs.length, median: errs[errs.length >> 1], max: errs.at(-1) };
+    errs.sort((x, y) => x - y); heard.sort((x, y) => x - y);
+    return { n: errs.length, median: errs[errs.length >> 1], max: errs.at(-1), heardN: heard.length, heardMedian: heard[heard.length >> 1], heardMax: heard.at(-1), source: tr.phaseSource };
   });
-  check(!phase.error && phase.n >= 10 && phase.median < 5 && phase.max < 15, `blend stays in phase (beat offset median ${phase.median?.toFixed(1)} ms, max ${phase.max?.toFixed(1)} ms over ${phase.n} samples)`);
+  check(!phase.error && phase.n >= 10 && phase.median < 5 && phase.max < 15, `blend stays in phase on the grids (median ${phase.median?.toFixed(1)} ms, max ${phase.max?.toFixed(1)} ms over ${phase.n} samples)`);
+  check(phase.heardN >= 10 && phase.heardMedian < 3 && phase.heardMax < 8, `blend stays in phase by ear: the kicks land together (median ${phase.heardMedian?.toFixed(1)} ms, max ${phase.heardMax?.toFixed(1)} ms over ${phase.heardN} samples; keeper used: ${phase.source})`);
 
   // ================= B) every transition style: level, clipping, clicks =================
   const STYLES = ['blend', 'bassswap', 'crossfade', 'filter', 'echo', 'cut', 'backspin', 'brake', 'loop', 'reverb'];

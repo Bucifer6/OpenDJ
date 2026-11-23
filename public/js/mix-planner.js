@@ -119,7 +119,10 @@ export function planBestTransition(out, inn, opts = {}) {
     if (blend && (!grid || bigJump)) continue; // never beat-match far off a track's tempo, nor without beat grids
     if (!grid && !['echo', 'cut', 'reverb'].includes(style)) continue; // spins, brakes and loops need a beat grid
     const base = [[PRIOR[style] ?? 0, null], [bias[style] || 0, bias[style] > 0.5 ? 'you often pick it' : bias[style] < -0.5 ? 'you often change it' : null]];
-    if (opts.prevStyle && opts.prevStyle === style) base.push([opts.vary ? -6.5 : EFFECT_STYLES.has(style) ? -5 : -1.5, 'same as the last transition']);
+    // variety: an effect never twice running; with "vary styles" other styles rotate too, except the core EQ blends
+    // of club music (house, techno, trance, drum & bass DJs blend transition after transition)
+    const clubCore = ['house', 'techno', 'trance', 'bass'].includes(famId) && ['blend', 'bassswap', 'stemswap'].includes(style);
+    if (opts.prevStyle && opts.prevStyle === style) base.push([EFFECT_STYLES.has(style) ? -5 : opts.vary && !clubCore ? -6.5 : -1.5, 'same as the last transition']);
     if (opts.recent?.includes(style)) base.push([-0.8, null]);
     if (fam?.prior[style]) base.push([fam.prior[style], fam.prior[style] >= 1 ? `${fam.label}: ${style === 'cut' ? 'cut on the 1' : style === 'blend' ? 'long EQ blend' : style}` : null]);
     // effects are seasoning: past the family's budget they are held back (P2.6)

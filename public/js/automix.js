@@ -18,6 +18,7 @@ import { planBestTransition, stemLevels, learnChoice, STEM_STYLES } from './mix-
 import { planAdaptiveTransition } from './adaptive-dj.js';
 import { Watchdog, quietAt } from './automix-watchdog.js';
 import { echoBeatsFor, styleFamily } from './dj-styles.js';
+import { audibleOffset, MIN_CONFIDENCE } from './audio/beat-phase.js';
 
 export const LOG_BPM_JUMP = Math.log(1.08); // > 8 % tempo change (after half/double matching) is a "big jump"
 
@@ -1479,10 +1480,11 @@ export class AutoMix extends Emitter {
   }
 
   /**
-   * Like a DJ riding the pitch during a blend: four times a second, compare the two decks' beat phases at the same
-   * audio time; drift over PHASE_TOLERANCE is pulled back with a small pitch bend (at most MAX_PHASE_BEND), and a big
-   * error early in the blend (the incoming track still quiet) is snapped into phase. Only for synced decks at the same
-   * tempo (not half / double time).
+   * Like a DJ riding the pitch during a blend: four times a second, compare where the two tracks' kicks actually
+   * land (audibleOffset, from each deck's onset curve), or their beat grids when the kicks are unclear (pads,
+   * breakdowns, half / double time without kicks); drift over PHASE_TOLERANCE is pulled back with a small pitch bend
+   * (at most MAX_PHASE_BEND), and a big error early in the blend (the incoming track still quiet) is snapped into
+   * phase. Only for synced decks.
    */
   keepPhase(tr, k) {
     const { out, inn } = tr;
@@ -1490,10 +1492,18 @@ export class AutoMix extends Emitter {
     const t = this.engine.ctx?.currentTime;
     if (!Number.isFinite(t) || t - (tr.phaseAt || 0) < 0.25) return;
     tr.phaseAt = t;
-    const err = phaseErrorSeconds(out, inn, t);
+    // what is heard first (the kicks of both tracks, audio/beat-phase.js), the beat grids when that is unclear
+    const heard = out.onsets && inn.onsets && !out.loop?.active && !inn.loop?.active
+      ? audibleOffset({ curve: out.onsets, pos: out.positionAt(t), rate: out.rate }, { curve: inn.onsets, pos: inn.positionAt(t), rate: inn.rate }) : null;
+    const audible = heard && heard.confidence >= MIN_CONFIDENCE;
+    const err = audible ? heard.offset : phaseErrorSeconds(out, inn, t);
     if (err == null) return;
-    tr.phaseErr = err;
-    if (Math.abs(err) > PHASE_SNAP && k < 0.2 && !tr.phaseSnapped) { tr.phaseSnapped = true; inn.setBend(0); inn.alignPhase(); return; }
+    tr.phaseErr = err; tr.phaseSource = audible ? 'audio' : 'grid';
+    if (Math.abs(err) > PHASE_SNAP && k < 0.2 && !tr.phaseSnapped) {
+      tr.phaseSnapped = true; inn.setBend(0);
+      if (audible) inn.seek(inn.positionAt(t) + err * inn.rate); else inn.alignPhase(); // behind: jump forward by the lag
+      return;
+    }
     const bend = Math.abs(err) < PHASE_TOLERANCE ? 0 : Math.max(-MAX_PHASE_BEND, Math.min(MAX_PHASE_BEND, err / 0.5)); // fix it over ~0.5 s
     if (bend !== (inn.bend || 0)) { inn.setBend(bend); tr.phaseBend = true; }
   }
