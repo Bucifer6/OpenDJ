@@ -4,6 +4,7 @@ import { planTransition, incomingStart, DROP_STYLES } from './automix.js';
 import { camelotRelation } from './smartmix.js';
 import { decodeVocalMap } from './shared/vocal-map.js';
 import { pairFamily } from './dj-styles.js';
+import { checkTransition } from './transition-check.js';
 
 const finite = (x) => typeof x === 'number' && Number.isFinite(x);
 /** Share of a track (from where it came in) that plays before the next transition may begin. */
@@ -161,11 +162,14 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
       const measuredClash = vo.known && vi.known && Math.min(vo.v, vi.v) > 0.3;
       if (hit && !measuredClash && harmonic.value >= 0.8 && Math.abs(Math.log(ratio)) <= Math.log(1.02) && Math.min(eo, ei) >= 6 && !opts.recent?.includes('doubledrop')) doubleDrop = true;
     }
+    // objective check of the simulated blend (P4.1): loudness bump / dip, two basslines, vocals on vocals, stretch
+    const check = drop ? null : checkTransition(out, inn, { style: p.style, begin: timing.begin, len: timing.len, inStart: cue, ratio: ratio / rate, rate });
+    if (check) phrasing -= check.penalty;
     const score = p.score - vocalCost - clashCost - Math.abs(ei - eo) * 0.7 - unplayed * 6 - skipped * 8 + phrasing;
     evaluated++;
     if (doubleDrop) {
       // kept aside: a double drop is a peak-time move, not something to score against ordinary blends
-      if (!ddBest || score > ddBest.score) ddBest = { ...p, score, timing, inStart: cue, vocals: null, landed: false, landing, doubleDrop: true, swapIn: landing,
+      if (!ddBest || score > ddBest.score) ddBest = { ...p, score, timing, inStart: cue, vocals: null, landed: false, landing, doubleDrop: true, swapIn: landing, check,
         confidence: lowConfidence ? 'low' : vo.known && vi.known ? 'measured-vocals' : 'estimated',
         why: `double drop: both drops hit together, one bassline; section search: ${timing.begin.toFixed(1)}s → ${cue.toFixed(1)}s` };
       continue;
@@ -173,7 +177,7 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
     if (!best || score > best.score) best = { ...p, score, timing, inStart: cue,
       vocals: !drop && !['stemswap', 'crossfade'].includes(p.style) && Math.min(vo.v, vi.v) > 0.2 ? 'hold-in' : null,
       confidence: lowConfidence ? 'low' : vo.known && vi.known ? 'measured-vocals' : 'estimated',
-      landed, landing: landed ? landing : null, doubleDrop: false, swapIn: null,
+      landed, landing: landed ? landing : null, doubleDrop: false, swapIn: null, check,
       why: `${p.why}${landed ? '; the incoming main part lands on the phrase' : ''}; section search: ${timing.begin.toFixed(1)}s → ${cue.toFixed(1)}s${lowConfidence ? '; uncertain grid: no beat-matched overlap' : ''}` };
   }
   // drum & bass DJs double-drop on roughly a quarter to a third of their transitions (never twice running, checked

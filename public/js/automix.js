@@ -1167,7 +1167,17 @@ export class AutoMix extends Emitter {
     const chO = this.engine.channels[tr.out.index], chI = this.engine.channels[tr.inn.index];
     if (tr.drop) return this.stepDrop(tr, chO, chI);
     const k = Math.min(1, (this.now() - tr.t0) / tr.dur);
-    if (tr.swapAt != null && tr.kSwap == null && (tr.inn.position >= tr.swapAt - 0.005 || k >= 0.9)) tr.kSwap = k;
+    if (tr.swapAt != null && tr.kSwap == null) {
+      // the bass swap is scheduled on the audio clock a little ahead, so it lands exactly on the phrase line however
+      // late this tick runs (P0.5)
+      const ctxT = this.engine.ctx?.currentTime, rate = tr.inn.rate || 1;
+      const ahead = (tr.swapAt - tr.inn.position) / rate;
+      if (Number.isFinite(ctxT) && ahead <= 0.15 && ahead > -0.05 && typeof chI.scheduleEq === 'function' && tr.inn.playing) {
+        const at = ctxT + Math.max(0, ahead);
+        chI.scheduleEq({ eqLow: 0 }, at); chO.scheduleEq({ eqLow: -1 }, at);
+        tr.kSwap = Math.min(1, k + Math.max(0, ahead) * 1000 / tr.dur); tr.swapScheduledAt = at;
+      } else if (ahead <= 0 || k >= 0.9) tr.kSwap = k;
+    }
     if (tr.morph && tr.out.isMaster !== false) { const v = tr.morph.from + (tr.morph.to - tr.morph.from) * ease(clamp01(k / 0.9)); if (Math.abs(v - (tr.out.tempo || 0)) > 0.01) tr.out.setTempo(v); }
     if (tr.style === 'stemswap') { this.applyStemSwap(tr, k); if (k >= 1) this.finishTransition(); return; }
     this.keepPhase(tr, k);

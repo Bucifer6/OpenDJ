@@ -144,3 +144,23 @@ test('P0.3: a cut that lands on a much louder section is pre-trimmed', async () 
   assert.equal(landingTrim(out, 10, { gain: 0, phrases: [{ start: 0, end: 9, lufs: -13 }] }, 1), null, '+1 LU is fine');
   assert.equal(landingTrim(out, 10, { phrases: [] }, 1), null, 'unknown');
 });
+
+test('P4.1: transition checker measures level continuity, basslines, vocals and stretch', async () => {
+  const { checkTransition } = await import('../public/js/transition-check.js');
+  const bpm = 125, bar = 240 / bpm;
+  const tr = (lufs, gain, vocal) => ({ bpm, gain, phrases: [{ start: 0, end: 400, lufs }], vocalMap: new Float32Array(400).fill(vocal) });
+  const plan = { style: 'blend', begin: 100, len: 32 * bar, inStart: 0, ratio: 1 };
+  const same = checkTransition(tr(-10, -4, 0), tr(-12, -2, 0), plan);
+  assert.equal(same.ok, true, JSON.stringify(same));
+  assert.equal(same.metrics.lowOverlapBeats, 0);
+  assert.ok(same.metrics.bumpLu <= 2, `bump ${same.metrics.bumpLu}`);
+  // crossfade with vocals on both sides: flagged
+  const voc = checkTransition(tr(-14, 0, 1), tr(-14, 0, 1), { ...plan, style: 'crossfade' });
+  assert.ok(voc.issues.some((x) => /vocals/.test(x)), JSON.stringify(voc));
+  assert.ok(voc.penalty > 0);
+  // 8 % stretch
+  const st = checkTransition({ ...tr(-14, 0, 0), bpm: 135 }, tr(-14, 0, 0), plan);
+  assert.ok(st.metrics.stretchPct > 7 && st.issues.some((x) => /stretched/.test(x)));
+  // nothing to check
+  assert.equal(checkTransition(null, null, {}).ok, true);
+});

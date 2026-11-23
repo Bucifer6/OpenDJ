@@ -165,6 +165,20 @@ export class Channel extends Emitter {
     this.emit('change', key, value);
     this.engine.emit('mixer', this.index, key, value);
   }
+  /**
+   * EQ moves at a future audio time (automix bass swap on the beat, P0.5): the EQ is scheduled now for `at`; until then
+   * other updates leave the EQ alone so they can't pull the swap forward.
+   */
+  scheduleEq(changes, at) {
+    const t = this.ctx.currentTime; at = Math.max(t, Number(at) || t);
+    const next = { ...this.state };
+    for (const [key, v] of Object.entries(changes)) if (CHANNEL_LIMITS[key]) next[key] = clamp(Number(v), ...CHANNEL_LIMITS[key]);
+    if (next.eqMid !== this.state.eqMid) next.eqMidHigh = next.eqMidLow = next.eqMid;
+    this.eq?.set(next, at, 0.004);
+    this._eqHoldUntil = at;
+    for (const key of Object.keys(changes)) if (next[key] !== this.state[key]) { this.state[key] = next[key]; this.emit('change', key, next[key]); this.engine.emit('mixer', this.index, key, next[key]); }
+    if (next.eqMid !== undefined) { this.state.eqMidHigh = next.eqMidHigh; this.state.eqMidLow = next.eqMidLow; }
+  }
   /** Logical control as set from the UI or a controller: Center Lock applies to the filter knob there (not automix). */
   controlSet(key, value, lock) { if (lock && key === 'filter' && mixerOf(this.engine).centerLock) value = lock.filter(value); this.set(key, value); }
 
@@ -267,7 +281,7 @@ export class Channel extends Emitter {
   apply() {
     const s = this.state, t = this.ctx.currentTime, k = 0.012, mx = mixerOf(this.engine);
     this.trimNode.gain.setTargetAtTime(dbToGain(s.trim * 12 + s.autoGain), t, k);
-    this.eq?.set(s, t, k);
+    if (!(this._eqHoldUntil > t)) this.eq?.set(s, t, k); // (a scheduled swap is pending: see scheduleEq)
     const db = (v) => 20 * Math.log10(Math.max(0.01, v));
     // AI stems (deck worklet) when the track has them, else the DSP "quick stems" approximation (fallback)
     const ai = !!this.aiStems, vocal = ai ? 1 : s.vocal, inst = ai ? 1 : s.inst;
