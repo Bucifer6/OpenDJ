@@ -22,36 +22,34 @@ marked [verify] in the raw files should be checked against the paper before bein
 
 | Item | Status | Where |
 |---|---|---|
-| P0.1 dead-air watchdog | **Done**: silent master, stalled or stopped on-air deck → restore fader/EQ, finish a stuck transition, or cut in the next track. *Not done:* keeping two tracks decoded ahead (only the next deck is preloaded). | `automix-watchdog.js`, `AutoMix.watch/rescue` |
-| P0.2 analysed-only party pools | **Partial**: live/endless/smart pools prefer analysed tracks (≥ 5 available). Analysis of the next candidates is not triggered ahead. | `AutoMix.playable` |
-| P0.3 loudness | **Done**: BS.1770 integrated + per-phrase LUFS, `mainLufs`, gain = −14 − mainLufs, forced level matching in automix, cut-landing pre-trim eased back over 8 bars, summed-blend loudness judged by the checker. | `audio/loudness.js`, `analysis-core.js`, `AutoMix.prepare`, `landingTrim` |
-| P0.4 per-region confidence ladder | **Not done**: the existing global beat-confidence gate (0.35) still decides. | — |
-| P0.5 sample-accurate execution | **Partial**: bass swaps and trick EQ moves are scheduled on the audio clock (`Channel.scheduleEq`); incoming starts were already scheduled. Fader/filter curves are still tick-driven. | `engine.js`, `stepTransition` |
-| P0.6 clean mixer | **Done** (existing reset + trick restore/abort). | |
-| P1.1 phrase grid | **Done**: `phraseAnchor` / `phraseConfidence`, 8-bar snapping, both tracks' grids aligned (pickup intros). | `analysis-core.js`, `adaptive-dj.js` |
-| P1.2 one bassline | **Done** for every blend style (`twoBasslines` invariant tested). | `mixLevels` |
-| P1.3 landing | **Done**: landing cues, landing bonus, swap/landing markers. | `adaptive-dj.js` |
+| P0.1 dead-air watchdog | **Done**: silent master, stalled or stopped on-air deck → restore fader/EQ, finish a stuck transition, or cut in the next track. The track after next is fetched ahead (bytes kept in memory and used by its deck load; an unreadable file is retried once, then dropped a track early). | `automix-watchdog.js`, `AutoMix.watch/rescue/prefetchAhead`, `deck.load` |
+| P0.2 analysed-only party pools | **Done** for live / endless / smart pools (analysed tracks preferred when ≥ 5 exist; smart and live starts already analyse first). | `AutoMix.playable` |
+| P0.3 loudness | **Done**: BS.1770 integrated + per-phrase LUFS, `mainLufs`, gain = −14 − mainLufs, forced level matching, cut-landing pre-trim, summed-blend loudness judged by the checker. | `audio/loudness.js`, `AutoMix.prepare`, `landingTrim` |
+| P0.4 per-region confidence ladder | **Done**: per-phrase `pulse` / `gridErr`; long overlap, short overlap only, or no overlap per region (a beatless incoming intro may fade under a steady outro). | `regionBeatSafety`, `adaptive-dj.js` |
+| P0.5 sample-accurate execution | **Partial**: bass swaps, trick EQ moves and ping-pong bars are scheduled on the audio clock; fader / filter curves are still tick-driven. | `Channel.scheduleEq` |
+| P0.6 clean mixer | **Done**. | |
+| P1.1 phrase grid | **Done**, both tracks' grids aligned; 100 % of blends start on a phrase line in the long-set simulation. | `analysis-core.js`, `adaptive-dj.js` |
+| P1.2 one bassline | **Done** for every style (tested invariant, simulated sets: 0 beats of overlap). | `mixLevels`, `stemLevels` |
+| P1.3 landing | **Done**. | `adaptive-dj.js` |
 | P1.4 club EQ curves | **Done**. | `mixLevels` |
-| P1.5 vocal rules | Existing vocal maps / hold-in; the checker adds a measured vocal-overlap penalty. Mosaikbox segmenting not added. | |
-| P1.6 tempo | **Done**: morph across blends ≤ 4 %, ride-back ≤ 1 BPM / 16 bars. *Not done:* set-level target tempo curve. | `morphTarget`, `restoreBars` |
-| P2.1 genre families | **Done**. | `dj-styles.js`, `mix-planner.js` |
-| P2.2 loop-extend | **Not done**. | — |
-| P2.3 double drop | **Done** (DnB/dubstep, peak energy, ~35 % of eligible pairs, never twice running). | `adaptive-dj.js` |
-| P2.4 echo/reverb exits | **Done**: family delay length, ~50 % feedback. | `startEffect` |
-| P2.5 stem recipes | Existing stem swap only; drum bridge / acapella carry **not done**. | |
-| P2.6 variety / effect budget | **Done**. | `effectsOverBudget` |
-| P3.1–P3.3 selection | **Done**: party arc from the clock, key confidence, tempo tolerance by family, energy steps, familiarity, vocal alternation, artist gap 8, remix detection, beam lookahead. | `smartmix.js` |
-| P3.4 party controls | **Done**: energy ±, keep this vibe, never play, skip feedback (context reset after 2 skips in 4). *Not done:* explicit-lyrics filter, wind-down end time. | queue panel, `AutoMix.noteSkip` |
-| P4.1 checker | **Done** as a simulation from automation + section loudness (not an audio render); used in planning and shown in the preview. | `transition-check.js` |
-| P4.2 corpus / listening tests | **Partial**: `scripts/e2e-pro-automix.mjs` in a real browser; no fixed 2-hour CI render or listening tests yet. | |
-| P5 tricks | **Done for 7**: bass-cut tease, one-bar groove lift, filter build, loop-roll build, pause drop, echo freeze, horn, rewind (+ double drop in P2.3). *Not done:* scratch fill, ping-pong, acapella drop-in, light cues. | `automix-tricks.js`, `AutoMix.*Trick*` |
-| P6.1–P6.3 previews | **Done**: one plan object, timeline + verdict + nudges in the queue panel, headphone render (no key lock / stems in the render). | `previewPlan`, `automix-preview.js`, `ui/automix-preview-ui.js` |
-| P6.4 rehearse then lock | **Partial**: plans are cached and re-planned on change; no explicit lock 2 bars before. | |
-| P6.5 set preview | **Partial**: the planned next tracks are listed; no drag/pin in the plan, no whole-set offline render/export. | |
+| P1.5 vocal rules | Vocal maps / hold-in, plus the checker's measured vocal-overlap penalty (> 2 s). | |
+| P1.6 tempo | **Done**: morph across blends ≤ 4 %, ride-back ≤ 1 BPM / 16 bars, blends capped at 6 % stretch, set tempo journey (≈ 3 BPM per hour through warm-up and build, held at the peak; not for open format). | `morphTarget`, `restoreBars`, `targetBpm` |
+| P2.1 genre families | **Done**. | `dj-styles.js` |
+| P2.2 loop-extend | **Done**: a short ending loops its last clean 8-bar phrase (no vocals, steady beat) so a full blend fits. | `adaptive-dj.js`, `beginTransition` |
+| P2.3 double drop | **Done** (bass family, peak energy, both channels −3 dB, may leave after 45 % of the track). | |
+| P2.4 echo/reverb exits | **Done**. | |
+| P2.5 stem recipes | **Done**: stem swap, drum bridge, acapella carry, acapella in (AI stems on both decks). | `stemLevels` |
+| P2.6 variety / effect budget | **Done**. | |
+| P3.1–P3.3 selection | **Done** (artist gap 8 enforced; artist names matched as whole words). | `smartmix.js` |
+| P3.4 party controls | **Done**: energy ±, keep this vibe, never play, skip feedback, clean versions only (by tag / title: the library has no advisory flag), end time with wind-down and a reverb-wash finale. | queue panel, Settings → Automix |
+| P4.1 checker | **Done** (simulation from automation + section loudness). | `transition-check.js` |
+| P4.2 corpus | **Done without audio**: deterministic 3-hour party-set simulations across genres with asserted quality limits (`test/automix-corpus.test.js`, `docs/automix-research/CORPUS.md`); browser e2e `scripts/e2e-pro-automix.mjs`. No listening tests. | |
+| P5 tricks | **Done**: bass-cut tease, groove lift, filter build, loop-roll build, pause drop, echo freeze, horn, rewind, scratch fill (needs a scratch sound on a sampler pad), ping-pong (as a transition), acapella drop-in (as a stem transition), light cues (blackout / strobe, when lighting is on). | `automix-tricks.js` |
+| P6.1–P6.4 previews | **Done**: one plan object, timeline + verdict + nudges, headphone render, plan locked 2 bars before it begins. | |
+| P6.5 set preview | **Done**: planned tracks listed, queue drag / play next / remove, export of the planned set to WAV (offline render: no key lock, stems or tricks in the file). | `automix-export.js` |
 
-Still needed before trusting it unattended at a real party: listening tests on real music across genres (synthetic
-e2e fixtures prove timing and DSP, not taste), a long soak test (hours) on the target laptop, and the items marked
-*not done* above.
+Still needed before trusting it unattended at a real party: listening on real music across genres (synthetic fixtures
+prove timing, levels and rules, not taste) and a long soak test (hours) on the target laptop.
 
 ---
 

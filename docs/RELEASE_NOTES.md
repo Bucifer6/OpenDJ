@@ -30,6 +30,9 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **Picks the music for the room.** A *Party* set shape follows the clock (background early, peak around midnight to 2 am, deeper late), looks a few tracks ahead, mixes familiar and new tracks, alternates vocals, keeps artists 8 tracks apart, weighs keys by how sure their detection is, and learns from skips.
 - **Tricks.** Bass-cut teases, filter builds, loop-roll builds, pause drops, echo freezes, horns and rewinds, timed to land on the drop, never over vocals, and rationed (Settings → Automix → Tricks: off, subtle, party).
 - **Preview.** The Automix queue shows the next transition as a timeline with a quality check, buttons to move it a phrase or change its length, and a *Preview ♪* button that plays it in the headphones before the crowd hears it. Party controls: energy −/+, keep this vibe, never play this track.
+- **Plan a night.** *End the set at* a clock time (the energy winds down and the last track fades out in a reverb wash), *Clean versions only*, and *Export set (WAV)* renders the planned upcoming set to a file you can listen to the day before.
+- **More ways to mix.** With AI stems on both decks: drum bridge (only the drums overlap, so keys and genres never clash), acapella carry and acapella in. Ping-pong chops for open-format sets, a looped last phrase when a radio edit ends too soon, per-section beat checks so live-drummed or beatless passages never get a long beat-matched blend, scratch fills (with a scratch sound on a sampler pad) and light cues on tricks.
+- **Safer on shaky networks.** The track after next is fetched while the current one plays; a file that can't be read is dropped a track early instead of stopping the music.
 - Research and design notes: `docs/PRO_DJ_AUTOMIX_RESEARCH.md`.
 
 ### New in 0.5.6
