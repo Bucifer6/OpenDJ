@@ -1,7 +1,7 @@
 // A playback deck: transport, cue logic (CDJ-style), hot cues, loops, beat jump, sync, key lock, scratch.
 import { Emitter, clamp } from '../util.js';
 import { api } from '../api.js';
-import { decodeWaveform, toCamelot, camelotCompatible, analyzeStructure, analysisPatch } from './analysis-core.js';
+import { decodeWaveform, toCamelot, camelotCompatible, analyzeStructure, analysisPatch, carryPhraseLufs } from './analysis-core.js';
 import { effectiveGains, LOADED_STEMS } from '../stems/stem-mix.js';
 import { floatToInt16 } from '../stems/stem-dsp.js';
 import { onsetCurve } from './beat-phase.js';
@@ -144,9 +144,15 @@ export class Deck extends Emitter {
       const phase = (name, pct = null) => { this.loadPhase = { name, pct }; this.emit('load-progress', this.loadPhase); };
       phase('Loading', 0);
       if ((Number(track.duration) || 0) > LONG_TRACK_SEC) this.engine.emit('warning', `"${track.title || 'This track'}" is ${Math.round(track.duration / 60)} minutes long: loading takes a while and needs a lot of memory`);
-      const res = await fetch(api.streamUrl(track.id));
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
-      const ab = await readWithProgress(res, (p) => { if (!stale()) phase('Loading', p); });
+      // bytes fetched ahead by automix (a NAS or media server that hiccups mid-party doesn't stop the next track)
+      const pre = this.engine.prefetched?.get(track.id);
+      if (pre) this.engine.prefetched.delete(track.id);
+      let ab = pre || null;
+      if (!ab) {
+        const res = await fetch(api.streamUrl(track.id));
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+        ab = await readWithProgress(res, (p) => { if (!stale()) phase('Loading', p); });
+      }
       if (stale()) return false; // another load superseded this one
       phase('Decoding');
       const buf = await this.ctx.decodeAudioData(ab);
@@ -809,7 +815,8 @@ export class Deck extends Emitter {
     try {
       const t = this.track;
       const st = analyzeStructure(this.waveform, this.bpm, this.gridOffset, { startTime: t.startTime, endTime: t.endTime, duration: this.duration || t.duration });
-      const patch = { phrases: st.phrases, mixIn: st.mixIn, mixOut: st.mixOut, downbeat: st.downbeat };
+      // phrase loudness needs the audio: carry it over from the old phrases (energy-weighted by overlap)
+      const patch = { phrases: carryPhraseLufs(t.phrases, st.phrases), mixIn: st.mixIn, mixOut: st.mixOut, downbeat: st.downbeat, phraseAnchor: st.phraseAnchor, phraseConfidence: st.phraseConfidence };
       Object.assign(t, patch);
       api.updateTrack(t.id, patch).catch(() => {});
       this.emit('cues');

@@ -12,6 +12,7 @@ import { DetailWaveform } from './ui/waveform.js';
 import { LibraryUI } from './ui/library-ui.js';
 import { Dialogs } from './ui/dialogs.js';
 import { AutoMix, STYLES, STYLE_LABEL, DROP_STYLES } from './automix.js';
+import { buildPreviewBox } from './ui/automix-preview-ui.js';
 import { sourceTracks, lengthOptions, SET_LENGTHS } from './automix-sources.js';
 import { MidiManager } from './midi/midi.js';
 import { Sequencer } from './audio/sequencer.js';
@@ -625,7 +626,9 @@ class App {
       const what = DROP_STYLES.has(style) ? t('drop after {bars} of outro', { bars }) : bars;
       return len.auto ? (len.why ? t('{what} (auto: {why})', { what, why: len.why }) : t('{what} (auto)', { what })) : what;
     };
+    const preview = buildPreviewBox(this);
     const render = () => {
+      try { preview.render(); } catch (e) { console.warn('[automix] preview', e); }
       shuffleBtn.disabled = (!!a.live && a.enabled) || a.queue.length - a.idx < 2;
       const nt = a.enabled ? a.nextTransition() : null;
       const key = `${a.enabled}|${a.idx}|${a.queue.length}|${a.queue.slice(a.idx, a.idx + 50).map((t) => t.id).join()}|${[...a.overrides.values()].join()}|${a.opts.style}|${a.opts.lengthMode}|${a.opts.transitionBeats}|${!!a.transition}|${nt?.length?.bars}|${nt?.length?.why}`;
@@ -666,7 +669,7 @@ class App {
         el('button', { class: 'btn sm', onclick: () => a.skip(), title: 'Mix to the next track now' }, 'Mix now'),
         shuffleBtn,
         el('button', { class: 'btn sm icon-only', title: 'Close', 'aria-label': 'Close', onclick: () => this.toggleQueuePanel() }, icon('x'))),
-      head, list);
+      head, preview.el, list);
     panel.render = render;
     // Escape closes the panel (unless a dialog or menu on top of it gets the key)
     const onKey = (e) => { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.overlay, .ctx-menu')) this.toggleQueuePanel(); };

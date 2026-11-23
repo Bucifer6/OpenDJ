@@ -74,10 +74,12 @@ export const normTags = (v) => {
   return out;
 };
 // Track fields edited through the API are rendered by the UI: coerce them to the expected types.
-const NUM_FIELDS = new Set(['bpm', 'energy', 'rating', 'year', 'duration', 'gridOffset', 'startTime', 'endTime', 'mixIn', 'mixOut', 'downbeat', 'keyShift', 'gain', 'playCount', 'lastPlayed']);
+const NUM_FIELDS = new Set(['bpm', 'energy', 'rating', 'year', 'duration', 'gridOffset', 'startTime', 'endTime', 'mixIn', 'mixOut', 'downbeat', 'keyShift', 'gain', 'playCount', 'lastPlayed',
+  'lufs', 'mainLufs', 'phraseAnchor']); // lufs / mainLufs: LUFS (BS.1770); phraseAnchor: s (a downbeat starting an 8-bar phrase)
+const UNIT_FIELDS = new Set(['bpmConfidence', 'keyConfidence', 'phraseConfidence']); // 0..1
 const STR_FIELDS = { title: 500, artist: 500, album: 500, genre: 200, comment: 2000, key: 16, color: 32 };
 export function sanitizeField(k, v) {
-  if (k === 'bpmConfidence') return v == null || v === '' || !Number.isFinite(Number(v)) ? null : Math.max(0, Math.min(1, Number(v)));
+  if (UNIT_FIELDS.has(k)) return v == null || v === '' || !Number.isFinite(Number(v)) ? null : Math.max(0, Math.min(1, Number(v)));
   if (NUM_FIELDS.has(k)) { if (v === null || v === undefined || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
   if (Object.hasOwn(STR_FIELDS, k)) return v === null || v === undefined ? (k === 'key' || k === 'color' ? null : '') : String(v).slice(0, STR_FIELDS[k]);
   if (k === 'analyzed' || k === 'bpmLocked' || k === 'gridLocked' || k === 'unreadable') return !!v;
@@ -92,7 +94,8 @@ export const okId = (id) => typeof id === 'string' && id.length > 0 && !BAD_IDS.
 /** Track fields the API may edit (PATCH /api/tracks/:id). */
 export const EDITABLE_TRACK_FIELDS = ['title', 'artist', 'album', 'genre', 'year', 'bpm', 'key', 'rating', 'comment', 'cues', 'loops',
   'gridOffset', 'analyzed', 'gain', 'color', 'playCount', 'lastPlayed', 'duration', 'endTime', 'startTime', 'energy', 'bpmLocked', 'gridLocked',
-  'phrases', 'tags', 'hotLoops', 'keyShift', 'mixIn', 'mixOut', 'downbeat', 'unreadable', 'bpmConfidence'];
+  'phrases', 'tags', 'hotLoops', 'keyShift', 'mixIn', 'mixOut', 'downbeat', 'unreadable', 'bpmConfidence',
+  'keyConfidence', 'lufs', 'mainLufs', 'phraseAnchor', 'phraseConfidence'];
 
 export class LibraryCore {
   constructor() {
@@ -143,6 +146,7 @@ export class LibraryCore {
       cues: prev.cues, loops: prev.loops, gridOffset: prev.gridOffset, analyzed: prev.analyzed, bpmConfidence: prev.bpmConfidence,
       rating: prev.rating, playCount: prev.playCount, lastPlayed: prev.lastPlayed, addedAt: prev.addedAt,
       localPath: prev.localPath, gain: prev.gain, color: prev.color, comment: prev.comment || t.comment,
+      keyConfidence: prev.keyConfidence, lufs: prev.lufs, mainLufs: prev.mainLufs, phraseAnchor: prev.phraseAnchor, phraseConfidence: prev.phraseConfidence,
       tags: prev.tags, phrases: prev.phrases, mixIn: prev.mixIn, mixOut: prev.mixOut, downbeat: prev.downbeat, hotLoops: prev.hotLoops, keyShift: prev.keyShift, bpmLocked: prev.bpmLocked, gridLocked: prev.gridLocked,
       ...(prev.userEdited ? { title: prev.title, artist: prev.artist, album: prev.album, genre: prev.genre, year: prev.year } : {}),
       bpm: prev.analyzed ? prev.bpm : (t.bpm || prev.bpm), key: prev.key || t.key,
@@ -156,7 +160,10 @@ export class LibraryCore {
   updateTrack(tid, patch) {
     const t = this.getTrack(tid);
     if (!t) return null;
+    const oldKey = t.key;
     for (const k of EDITABLE_TRACK_FIELDS) if (k in patch) t[k] = sanitizeField(k, patch[k]);
+    // a key changed without a confidence (typed by the user, imported) is trusted: 1; a cleared key has none
+    if ('key' in patch && !('keyConfidence' in patch) && t.key !== oldKey) t.keyConfidence = t.key ? 1 : null;
     if ('tags' in patch) t.tags = normTags(patch.tags);
     // Tag edits made in OpenDJ survive a rescan of the file.
     if (['title', 'artist', 'album', 'genre', 'year'].some((k) => k in patch)) t.userEdited = true;

@@ -88,8 +88,11 @@ test('planner: learns from overrides and repeats less', () => {
   const p = planBestTransition(track(), track({ key: '9A' }), { learning });
   assert.equal(p.style, 'filter');
   assert.deepEqual(learnChoice(learning, 'nonsense', 'blend').bias, learnedBias(learning));
-  const vary = planBestTransition(track(), track({ key: '9A' }), { prevStyle: 'blend', vary: true, styles: ['blend', 'bassswap', 'filter'] });
+  const vary = planBestTransition(track({ genre: 'Disco' }), track({ key: '9A', genre: 'Disco' }), { prevStyle: 'blend', vary: true, styles: ['blend', 'bassswap', 'filter'] });
   assert.notEqual(vary.style, 'blend');
+  // club music keeps blending even with "vary styles" on (house DJs blend transition after transition)
+  const club = planBestTransition(track(), track({ key: '9A' }), { prevStyle: 'blend', vary: true, styles: ['blend', 'bassswap', 'filter'] });
+  assert.equal(club.style, 'blend');
 });
 
 test('stem swap levels: drums first, bass swaps in the middle, incoming vocals after the outgoing ones', () => {
