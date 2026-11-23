@@ -10,6 +10,10 @@ export function describe(args) {
   return args.map((a) => (a instanceof Error ? (a.stack || `${a.name}: ${a.message}`) : typeof a === 'string' ? a : (() => { try { return JSON.stringify(a); } catch { return String(a); } })())).join(' ').slice(0, 2000);
 }
 
+let sendLine = null;
+/** A line for the app log from the page (not an error: e.g. "[stems] job … done on webgpu in 41 s"). */
+export function appLog(text) { try { sendLine?.(`info: ${String(text).slice(0, 2000)}`); } catch { /* logging must not break anything */ } }
+
 export function setupClientLog({ send = (lines) => fetch('/api/logs/client', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines }), keepalive: true }).catch(() => {}), win = globalThis.window } = {}) {
   if (platform.local || !win || win.__odjClientLog) return null;
   win.__odjClientLog = true;
@@ -30,5 +34,6 @@ export function setupClientLog({ send = (lines) => fetch('/api/logs/client', { m
     const orig = console[level].bind(console);
     console[level] = (...args) => { orig(...args); try { report(level, describe(args)); } catch { /* never break logging */ } };
   }
+  sendLine = (line) => { batch.push(line); timer ||= setTimeout(flush, 2000); };
   return { report, flush };
 }

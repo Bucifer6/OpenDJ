@@ -40,7 +40,8 @@ writeWav(path.join(music, 'Update Artist - Long Tone.wav'), 30);
 
 // ---------------------------------------------------------------- fake GitHub API
 // the test injects its own (hostile) "New in 99.0": drop the real one so there is exactly one
-const NOTES = fs.readFileSync(path.join(root, 'docs', 'RELEASE_NOTES.md'), 'utf8').replace(/### New in 0\.5\n[\s\S]*?(?=### New in 0\.4)/, '');
+// (a fixed copy of the notes with their full history: docs/RELEASE_NOTES.md keeps only the 10 most recent versions)
+const NOTES = fs.readFileSync(path.join(root, 'test', 'fixtures', 'release-notes-history.md'), 'utf8').replace(/### New in 0\.5\.7\n[\s\S]*?(?=### New in 0\.4\n)/, '');
 const NEW_SECTION = `### New in 99.0
 **Update prompt**
 - OpenDJ tells you when a new version is out, with *what's new* and an **Update now** button.

@@ -529,6 +529,10 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
       current: cur && { id: cur.id, title: cur.title, phase: cur.phase, done: cur.done, total: cur.total, elapsed: Date.now() - cur.started, separating: cur.sepAt ? Date.now() - cur.sepAt : 0, backend: cur.backend || backend?.backend || null, background: !!cur.background },
       queue: [...queue],
       background: bgState(),
+      // whether the graphics card is used: 'unknown' until the engine has loaded once (its GPU check), then 'ok' /
+      // 'failed'; clients route tracks to their own WebGPU when it failed (stems.js browserGpu)
+      gpu: gpuFailed ? 'failed' : backend?.backend ? (['cpu', 'stub'].includes(backend.backend) ? (settings().stemsBackend === 'wasm' ? 'off' : 'failed') : 'ok') : 'unknown',
+      gpuFailed,
     });
     const changed = () => emit('stems-queue', state());
     const killChild = () => { const c = child; child = null; ready = null; backend = null; c?.kill(); };
@@ -548,6 +552,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
             if (m.gpuFailed) setGpuFailed(m.gpuFailed);
             if (child === c) backend = m;
             resolve(m);
+            changed(); // clients learn at once whether the graphics card is used
           }
           else if (m.type === 'progress') { if (cur?.id === m.id) { Object.assign(cur, { phase: m.phase, done: m.done, total: m.total }, m.backend ? { backend: m.backend } : {}); if (m.phase === 'separating') cur.sepAt ||= Date.now(); changed(); } }
           else if (m.type === 'done') pending?.resolve(m);
@@ -674,6 +679,17 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
       cancelAll() { queue.length = 0; if (cur) this.cancel(cur.id); changed(); },
       /** Start background preparation when it is turned on (called on settings changes and every minute). */
       kick() { if (!pumping && bgOn()) pump(); },
+      /**
+       * Load the engine now (and so run its GPU check) without a track, so clients know whether the graphics card is
+       * used before they queue anything. Resolves with status(); the engine is freed again after idleMs.
+       */
+      async warm() {
+        if (installed() && modelOk() && !backend && !gpuFailed) {
+          try { await (ready || startChild()); } catch (e) { console.warn('[stems] warm-up', e.message); }
+          if (!pumping) { clearTimeout(idleT); idleT = setTimeout(() => { if (!pumping) killChild(); }, idleMs); idleT.unref?.(); }
+        }
+        return this.status();
+      },
       /** Try the graphics card again (after a driver update): forget the recorded GPU failure, reload the model. */
       retryGpu() {
         gpuFailed = null; crashRetried.clear();
@@ -704,7 +720,13 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
   route('POST', '/api/stems/queue', ({ body }) => engine.add(Array.isArray(body?.ids) ? body.ids.slice(0, 5000) : [], { force: !!body?.force, front: !!body?.front }));
   route('POST', '/api/stems/background', ({ body }) => (body?.retry ? engine.retryBackground() : (engine.kick(), engine.state())));
   route('POST', '/api/stems/gpu/retry', () => engine.retryGpu());
-  route('POST', '/api/stems/queue/cancel', ({ body }) => { if (body?.all) engine.cancelAll(); else engine.cancel(String(body?.id || '')); return engine.state(); });
+  route('POST', '/api/stems/engine/warm', () => engine.warm());
+  route('POST', '/api/stems/queue/cancel', ({ body }) => {
+    if (body?.all) engine.cancelAll();
+    else if (Array.isArray(body?.ids)) for (const id of body.ids.slice(0, 5000)) engine.cancel(String(id));
+    else engine.cancel(String(body?.id || ''));
+    return engine.state();
+  });
   route('DELETE', '/api/stems/:id', async ({ params }) => {
     const id = checkId(params.id);
     engine.cancel(id);

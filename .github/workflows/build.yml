@@ -132,10 +132,13 @@ jobs:
         run: cp public/controller-mapper.html artifacts/OpenDJ-Controller-Mapper.html
       - name: Checksums
         run: cd artifacts && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      # the release page says what changed in this release only (introduction + its "New in" section), not the history
+      - name: Release notes for this version
+        run: node scripts/release-notes.mjs "${{ inputs.release_tag || github.ref_name }}" > "$RUNNER_TEMP/release-notes.md"
       - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           files: artifacts/*
-          body_path: docs/RELEASE_NOTES.md
+          body_path: ${{ runner.temp }}/release-notes.md
           generate_release_notes: true
           # manual runs create the tag on the commit that was built
           tag_name: ${{ inputs.release_tag || github.ref_name }}
