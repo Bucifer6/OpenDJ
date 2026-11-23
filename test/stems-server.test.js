@@ -307,6 +307,25 @@ test('stems server: a GPU failure recorded by an older check is retried', async 
   try { assert.equal((await h.json('GET', '/api/stems/status')).native.gpuFailed, null); } finally { h.close(); }
 });
 
+test('stems server: warm-up runs the GPU check without a track, and the queue state says whether the GPU is used', { skip: !hasFfmpeg && 'ffmpeg not installed' }, async () => {
+  for (const [kind, want] of [['broken', 'failed'], ['ok', 'ok']]) {
+    const queued = [];
+    const h = await harness({ ffmpeg: true, native: { stub: true, stubGpu: kind, idleMs: 60e3 }, onEvent: (t, p) => { if (t === 'stems-queue') queued.push(p); } });
+    try {
+      assert.equal((await h.json('GET', '/api/stems/status')).native.gpu, 'unknown', 'not checked before the engine loads');
+      const st = await h.json('POST', '/api/stems/engine/warm');
+      assert.equal(st.gpu, want, kind);
+      assert.equal(st.backend, kind === 'ok' ? 'stub-gpu' : 'stub');
+      assert.ok(queued.some((q) => q.gpu === want), 'clients are told as soon as the check is done');
+      if (kind === 'broken') assert.match(st.gpuFailed.message, /different stems from the CPU/);
+      // bulk cancel of queued tracks (a client moving them to its own WebGPU)
+      h.library.upsertTrack({ id: 'trk2', title: 'Two', sourceType: 'local', path: path.join(h.dir, 'x.wav') });
+      const c = await h.json('POST', '/api/stems/queue/cancel', { ids: ['trk1', 'trk2'] });
+      assert.deepEqual(c.queue, []);
+    } finally { h.close(); }
+  }
+});
+
 test('stems server: exit codes and error tails are readable (Windows NTSTATUS in hex, crash-reporter lines skipped)', () => {
   assert.equal(exitText(0, null), '');
   assert.equal(exitText(1, null), ' (exit 1)');

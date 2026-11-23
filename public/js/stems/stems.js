@@ -8,6 +8,7 @@
 // Created once by the app: `app.stems = new StemsManager(app)` (see stems-ui.js setupStems()).
 import { Emitter } from '../util.js';
 import { STEMS, MODEL_RATE } from './stem-dsp.js';
+import { appLog } from '../client-log.js';
 
 const j = async (method, url, body) => {
   const opts = { method, credentials: 'same-origin', headers: {} };
@@ -28,7 +29,8 @@ export const stemsApi = {
   finish: (id, token) => j('POST', `/api/stems/${encodeURIComponent(id)}/finish?token=${token}`),
   remove: (id) => j('DELETE', `/api/stems/${encodeURIComponent(id)}`),
   queue: (ids, { force = false, front = false } = {}) => j('POST', '/api/stems/queue', { ids, force, front }),
-  cancelQueued: (id) => j('POST', '/api/stems/queue/cancel', id ? { id } : { all: true }),
+  cancelQueued: (id) => j('POST', '/api/stems/queue/cancel', Array.isArray(id) ? { ids: id } : id ? { id } : { all: true }),
+  warm: () => j('POST', '/api/stems/engine/warm'),
 };
 
 /** Human name of a separation backend. */
@@ -83,16 +85,54 @@ export class StemsManager extends Emitter {
   // ---------------- server engine ----------------
   /** Mirror the server's queue ({ current, queue } from /api/stems/status or the 'stems-queue' event). */
   serverState(s) {
-    if (!s || this._pumping) return; // the browser engine is running here
+    if (!s) return;
+    this.gpuNews(s);
+    if (this._pumping || !this.serverEngine) return; // the browser engine is running here
     const c = s.current;
     this.current = c ? { id: c.id, title: c.title, phase: c.phase, done: c.done, total: c.total, backend: c.backend, started: performance.now() - (c.separating || c.elapsed || 0), server: true, background: !!c.background } : null;
     this.queue = [...(s.queue || [])];
     this.background = s.background || null; // { enabled, remaining, done, failed, cacheBytes, capBytes, full }
     this.emit('progress', this.current && { ...this.current }); this.emit('queue', this.state());
   }
+  /**
+   * The server's word on its graphics card ({ gpu: 'unknown'|'ok'|'failed'|'off', gpuFailed } in its queue state).
+   * When it turns out the server cannot use it, the tracks still waiting in the server's queue (asked for before
+   * that was known) move to this window's WebGPU (browserGpu), so they are not left to the CPU.
+   */
+  gpuNews(s) {
+    const n = this._status?.native;
+    if (!n || !('gpu' in s)) return;
+    n.gpuFailed = s.gpuFailed || null; n.gpu = s.gpu;
+    if (!this.browserGpu || !s.queue?.length || this._moving) return;
+    const ids = s.queue.filter((id) => id !== s.current?.id);
+    if (!ids.length) return;
+    this._moving = true;
+    appLog(`[stems] the server cannot use the graphics card: ${ids.length} queued track(s) move to this window's graphics card (WebGPU)`);
+    stemsApi.cancelQueued(ids)
+      .then(() => this.enqueue(ids, { interactive: false }))
+      .catch((e) => console.warn('[stems] moving the queue', e.message))
+      .finally(() => { this._moving = false; });
+  }
+  /**
+   * Before routing a track: if the server has not loaded its engine since it started, its GPU check has not run
+   * and nobody knows yet whether the graphics card works there. Load it now (once) and wait, so tracks go to the
+   * right place from the start instead of piling up on a CPU. Only when this window could use WebGPU instead.
+   */
+  async ensureGpuKnown() {
+    const n = this._status?.native;
+    if (this.stub || !n?.available || n.gpuFailed || n.backend || n.gpu === 'ok' || n.gpu === 'failed' || !('gpu' in navigator)) return;
+    if (['server', 'browser'].includes(this.settings.stemsEngine) || this.settings.stemsBackend === 'wasm') return;
+    this._gpuCheck ||= (async () => {
+      this.emit('checking', true);
+      try { const st = await stemsApi.warm(); if (this._status) this._status.native = { ...this._status.native, ...st }; }
+      catch (e) { console.warn('[stems] engine warm-up', e.message); }
+      finally { this.emit('checking', false); }
+    })();
+    await this._gpuCheck;
+  }
   /** Server events: 'stems-queue', 'stems-done', 'stems-failed', 'stems' (wired in app.js). */
   serverEvent(type, e) {
-    if (type === 'stems-queue') return this.serverEngine && this.serverState(e);
+    if (type === 'stems-queue') return this.serverState(e);
     if (type === 'stems') { if (e.ready && e.stems) this.updateTrack(e.id, e.stems); else if (e.ready === false) this.updateTrack(e.id, null); return; }
     const mine = this._asked.delete(e.id); // only the page that asked gets the toast (Automix's own prefetches stay quiet)
     if (type === 'stems-done') {
@@ -110,6 +150,7 @@ export class StemsManager extends Emitter {
    * server engine: in the browser this would compete with playback.
    */
   async prefetch(ids, { front = false } = {}) {
+    if (this._status?.native?.available && this.settings.stemsAutoPrepare !== false) await this.ensureGpuKnown();
     if (this.browserGpu && this.settings.stemsAutoPrepare !== false) { // on this window's graphics card
       const lib = this.app.library;
       const todo = [...new Set(ids)].filter((id) => !this.hasStems(lib?.track(id)) && this.current?.id !== id && !this.queue.includes(id));
@@ -154,6 +195,7 @@ export class StemsManager extends Emitter {
     });
     if (!list.length) return 0;
     if (!(await this.ensureModel({ interactive }))) return 0;
+    await this.ensureGpuKnown(); // the server's GPU check decides where these go
     if (this.serverEngine) {
       if (!this._status?.native?.available) await this.status();
       if (this._status?.native?.available) {
@@ -204,7 +246,10 @@ export class StemsManager extends Emitter {
         this.current = { id, title: t.title || 'Untitled', phase: 'decoding', done: 0, total: 0, started: performance.now() };
         this.emit('progress', { ...this.current }); this.emit('queue', this.state());
         try {
+          appLog(`[stems] job ${id}: separating in this window`);
           await this.prepare(t);
+          const r = this.lastRun || {};
+          appLog(`[stems] job ${id}: done on ${r.backend || '?'} in ${Math.round((r.ms || 0) / 1000)} s for ${Math.round(r.seconds || 0)} s of audio`);
           this.emit('finished', { id, title: this.current.title, ...this.lastRun });
         } catch (e) {
           if (e.code === 'NO_GPU') {
@@ -237,7 +282,7 @@ export class StemsManager extends Emitter {
       w.onmessage = (e) => {
         const m = e.data;
         if (m.type === 'ready') { this.backend = m; resolve(w); }
-        else if (m.type === 'verified') { this.gpuVerified = true; this.webgpuVerdict('ok'); console.warn(`[stems] WebGPU matches the CPU (difference ${m.diff?.toExponential?.(1)}, ${m.ms} ms)`); }
+        else if (m.type === 'verified') { this.gpuVerified = true; this.webgpuVerdict('ok'); appLog(`[stems] WebGPU matches the CPU (difference ${m.diff?.toExponential?.(1)}, ${m.ms} ms)`); }
         else if (m.type === 'backend' && m.failed) { this.gpuFailed = true; this.webgpuVerdict('bad'); console.warn(`[stems] WebGPU returned different stems from the CPU: not used`); }
         else if (m.type === 'model-progress') this.current && this.setPhase('loading model', { done: m.received, total: m.total });
         else if (m.type === 'error') reject(Object.assign(new Error(m.message), { code: m.code }));

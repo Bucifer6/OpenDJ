@@ -23,6 +23,10 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### Unreleased
+- **AI stems use the graphics card from the first track.** When DirectML cannot separate correctly on a computer (an RTX 3070 here), the tracks you ask for are now sent to the graphics card in the app window (WebGPU) from the start: OpenDJ checks the graphics card first instead of queueing tracks on the CPU, and tracks already waiting on the CPU move to the graphics card. Before, the first tracks (and a whole Automix set prepared ahead) stayed on the CPU.
+- The log now shows stems prepared in the app window, with the time each took.
+
 ### New in 0.5.7
 - **Faster AI stems on graphics cards where DirectML gets it wrong.** OpenDJ now tries DirectML at simpler model optimisation levels too, and checks each against the CPU. If none is right (seen on an RTX 3070), the tracks you ask for are separated in the app window on the graphics card through WebGPU, which is checked against the CPU first. The server's CPU keeps preparing the background tracks. Anything that does not match the CPU is never used, so stems stay correct. *Settings → AI stems → Where* can force the server.
 - **Prepare stems ahead:** the Automix dialog can prepare AI stems for the whole set when it starts (in play order), and OpenDJ tells you once when stems run on the CPU, with the time per track and how to prepare playlists ahead.
