@@ -27,7 +27,8 @@ test('score: harmonic, tempo (half/double), genre, variety and unknown data', ()
   const s = (o) => scoreTransition(cur, T('x', o)).score;
   assert.ok(s({ key: '9A' }) > s({ key: '3B' }), 'compatible key beats a clash');
   assert.ok(s({ bpm: 126 }) > s({ bpm: 140 }), 'closer tempo wins');
-  assert.ok(Math.abs(s({ bpm: 248 }) - s({ bpm: 124 })) < 1e-9, 'double time is no jump');
+  // half / double time is no jump, but a feel change: × 0.85 on the tempo part (02-selection.md §2.3)
+  assert.ok(s({ bpm: 248 }) < s({ bpm: 124 }) && s({ bpm: 248 }) > s({ bpm: 124 }) - 1.5 && s({ bpm: 248 }) > s({ bpm: 128 }), 'double time is no jump');
   assert.ok(s({ genre: 'House' }) > s({ genre: 'Drum & Bass' }), 'same genre wins');
   assert.ok(s({ artist: 'Artist c' }) < s({}) - 4, 'same artist as the previous track is penalised');
   // unknown key / bpm / energy: neutral, between a clash and a perfect match
