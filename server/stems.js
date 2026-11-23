@@ -80,6 +80,22 @@ export function bgOrder(a, b) {
     || (b.lastPlayed || 0) - (a.lastPlayed || 0) || (b.addedAt || 0) - (a.addedAt || 0);
 }
 
+/**
+ * " (exit 3)" / " (exit 0xC0000005)" / " (signal SIGKILL)" for a process that ended. Windows reports crashes as
+ * NTSTATUS codes (0xC0000005 access violation, 0xC0000409 stack buffer overrun…), shown in hex.
+ */
+export function exitText(code, signal) {
+  if (signal) return ` (signal ${signal})`;
+  if (!code) return '';
+  return code > 255 || code < 0 ? ` (exit 0x${(code >>> 0).toString(16).toUpperCase()})` : ` (exit ${code})`;
+}
+/** Last line of a child's stderr that says something (Chromium / Electron crash-reporter chatter is skipped). */
+export function lastMeaningfulLine(text) {
+  const lines = String(text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+    .filter((l) => !/crashpad|^\[\d+\/\d+\.\d+:(ERROR|WARNING|INFO|VERBOSE)/i.test(l));
+  return lines.pop()?.slice(0, 300) || '';
+}
+
 const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 const ID_RE = /^[\w-]{1,64}$/;
 const isHex64 = (s) => /^[0-9a-f]{64}$/i.test(String(s || ''));
@@ -348,6 +364,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
   route('DELETE', '/api/stems/model', async () => {
     const spec = modelSpec(settings());
     await fs.promises.rm(modelFile(spec), { force: true }); await fs.promises.rm(modelFile(spec) + '.json', { force: true });
+    await fs.promises.rm(modelFile(spec) + '.cpu-ref.f32', { force: true }); // the GPU check's CPU reference (stems-child.js)
     return { ok: true };
   });
 
@@ -460,7 +477,18 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     const queue = [];          // track ids
     let cur = null;            // { id, title, phase, done, total, started, backend, cancelled }
     let child = null, ready = null, backend = null, pending = null, idleT = null, pumping = false, last = null;
-    let gpuFailed = null; // { backend, message }: the GPU failed its check, later model loads use the CPU directly
+    // { backend, message, at }: the GPU failed its check or crashed, so later model loads use the CPU directly. Kept in
+    // <stems>/gpu-check.json across restarts until onnxruntime-node changes (a new version may fix it) or
+    // POST /api/stems/gpu/retry clears it.
+    const gpuFile = path.join(root, 'gpu-check.json');
+    let gpuFailed = (() => { try { const g = JSON.parse(fs.readFileSync(gpuFile, 'utf8')); return g.ort === rt.version && g.backend ? g : null; } catch { return null; } })();
+    const setGpuFailed = (g) => {
+      if (gpuFailed) return;
+      gpuFailed = { backend: String(g.backend || 'gpu'), message: String(g.message || '').slice(0, 500), at: Date.now() };
+      console.warn(`[stems] the graphics card (${gpuFailed.backend}) is not used for stems from now on: ${gpuFailed.message}`);
+      try { fs.writeFileSync(gpuFile, JSON.stringify({ ...gpuFailed, ort: rt.version })); } catch { /* read-only data dir: this session only */ }
+    };
+    const crashRetried = new Set(); // tracks already redone on the CPU after a GPU crash (only once each)
 
     const installed = () => !!rt.version && !!ffmpeg();
     const modelOk = () => { if (native?.stub) return true; try { return modelReady(modelSpec(settings())); } catch { return false; } };
@@ -499,23 +527,35 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
       const spec = native?.stub ? null : modelSpec(settings());
       const c = child = fork(childPath, [], { stdio: ['ignore', 'inherit', 'pipe', 'ipc'], serialization: 'advanced', windowsHide: true, execArgv: [] });
       try { os.setPriority(c.pid, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* not allowed here: normal priority */ }
+      const backendArg = settings().stemsBackend === 'wasm' || gpuFailed ? 'cpu' : 'auto';
+      c.usingGpu = backendArg !== 'cpu'; // until 'ready' says which backend loaded (a crash while loading counts too)
       let err = '';
-      c.stderr.on('data', (d) => { err = (err + d).slice(-2000); process.stderr.write(d); });
+      c.stderr.on('data', (d) => { err = (err + d).slice(-4000); process.stderr.write(d); });
       const p = new Promise((resolve, reject) => {
         c.on('message', (m) => {
-          if (m.type === 'ready') { if (child === c) backend = m; resolve(m); }
+          if (m.type === 'ready') {
+            c.usingGpu = !['cpu', 'stub'].includes(m.backend);
+            if (m.gpuFailed) setGpuFailed(m.gpuFailed);
+            if (child === c) backend = m;
+            resolve(m);
+          }
           else if (m.type === 'progress') { if (cur?.id === m.id) { Object.assign(cur, { phase: m.phase, done: m.done, total: m.total }, m.backend ? { backend: m.backend } : {}); if (m.phase === 'separating') cur.sepAt ||= Date.now(); changed(); } }
           else if (m.type === 'done') pending?.resolve(m);
           else if (m.type === 'error') { if (m.id) pending?.reject(new Error(m.message)); else { reject(new Error(m.message)); if (child === c) killChild(); } }
         });
-        c.on('exit', (code) => {
-          const tail = err.trim().split('\n').pop();
-          const e = new Error(`The stems engine stopped${code ? ` (exit ${code})` : ''}${tail ? `: ${tail}` : ''}`);
+        c.on('exit', (code, signal) => {
+          const tail = lastMeaningfulLine(err);
+          const e = new Error(`The stems engine stopped${exitText(code, signal)}${tail ? `: ${tail}` : ''}`);
+          const crashed = child === c && (!!code || !!signal); // not a kill of ours (cancel, idle, preempt)
+          if (crashed) {
+            console.warn(`[stems] engine process ended${exitText(code, signal)} while using ${c.usingGpu ? `the graphics card (${backend?.backend || 'loading'})` : 'the CPU'}`);
+            if (c.usingGpu) e.gpuCrash = backend?.backend && backend.backend !== 'cpu' ? backend.backend : 'gpu';
+          }
           if (child === c) { child = null; ready = null; backend = null; }
           reject(e); pending?.reject(e);
         });
       });
-      c.send({ type: 'init', model: spec ? modelFile(spec) : null, stub: !!native?.stub, stubGpu: native?.stubGpu || null, backend: settings().stemsBackend === 'wasm' || gpuFailed ? 'cpu' : 'auto', threads: Number(process.env.OPENDJ_STEMS_THREADS) || 0 });
+      c.send({ type: 'init', model: spec ? modelFile(spec) : null, stub: !!native?.stub, stubGpu: native?.stubGpu || null, backend: backendArg, threads: Number(process.env.OPENDJ_STEMS_THREADS) || 0 });
       ready = p; p.catch(() => {});
       return p;
     }
@@ -543,7 +583,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
           child.send({ type: 'job', id, ffmpeg: ffmpeg().path, input: src, dir, overlap: Number(settings().stemsOverlap) || 0.25, maxFrames: STEM_RATE * 60 * maxMinutes });
         });
         pending = null;
-        if (r.gpuFailed && !gpuFailed) { gpuFailed = r.gpuFailed; console.warn(`[stems] ${r.gpuFailed.backend} is not used for stems: ${r.gpuFailed.message}`); }
+        if (r.gpuFailed) setGpuFailed(r.gpuFailed);
         if (!mine()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
         cur.phase = 'saving'; changed();
         const u = uploads.get(id);
@@ -557,7 +597,14 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
         pending = null;
         if (mine()) await dropUpload(id);
         else await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+        if (e.gpuCrash && !cur?.cancelled) setGpuFailed({ backend: e.gpuCrash, message: e.message });
         if (cur?.preempted) { /* a background track made way for a track someone asked for: it is tried again later */ }
+        else if (e.gpuCrash && !cur?.cancelled && !crashRetried.has(id)) {
+          // the graphics card crashed the engine: the next start uses the CPU, and this track is redone first
+          crashRetried.add(id);
+          console.warn(`[stems] ${id}: redoing on the CPU after the crash`);
+          if (!queue.includes(id)) queue.unshift(id);
+        }
         else if (background && !cur?.cancelled && !e.cancelled) { bg.failed.add(id); console.warn('[stems] background', id, e.message); }
         else if (cur?.cancelled || e.cancelled) emit('stems-failed', { id, title: cur?.title, cancelled: true });
         else { console.warn('[stems]', id, e.message); emit('stems-failed', { id, title: cur?.title, message: e.message }); }
@@ -617,6 +664,14 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
       cancelAll() { queue.length = 0; if (cur) this.cancel(cur.id); changed(); },
       /** Start background preparation when it is turned on (called on settings changes and every minute). */
       kick() { if (!pumping && bgOn()) pump(); },
+      /** Try the graphics card again (after a driver update): forget the recorded GPU failure, reload the model. */
+      retryGpu() {
+        gpuFailed = null; crashRetried.clear();
+        fs.rmSync(gpuFile, { force: true });
+        if (!cur) killChild(); // loaded again (GPU first) for the next track
+        console.warn('[stems] the graphics card will be tried again for stems');
+        return { gpuFailed };
+      },
       /** Forget background failures (e.g. after FFmpeg or a source came back) and recount the cache. */
       retryBackground() { bg.failed.clear(); measureCache().then(() => this.kick(), () => {}); return state(); },
       close() { clearTimeout(idleT); clearInterval(bgT); queue.length = 0; killChild(); },
@@ -636,6 +691,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
   })().catch((e) => { console.warn('[stems] purge', e.message); return 0; });
   route('POST', '/api/stems/queue', ({ body }) => engine.add(Array.isArray(body?.ids) ? body.ids.slice(0, 5000) : [], { force: !!body?.force, front: !!body?.front }));
   route('POST', '/api/stems/background', ({ body }) => (body?.retry ? engine.retryBackground() : (engine.kick(), engine.state())));
+  route('POST', '/api/stems/gpu/retry', () => engine.retryGpu());
   route('POST', '/api/stems/queue/cancel', ({ body }) => { if (body?.all) engine.cancelAll(); else engine.cancel(String(body?.id || '')); return engine.state(); });
   route('DELETE', '/api/stems/:id', async ({ params }) => {
     const id = checkId(params.id);

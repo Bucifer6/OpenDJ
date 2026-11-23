@@ -15,7 +15,8 @@ const port = Number(flag('port') || process.env.PORT || positional[0] || 7380);
 const host = flag('host') || process.env.HOST || '127.0.0.1';
 let app;
 try {
-  app = await start({ port, host, dataDir: process.env.OPENDJ_DATA, auth: args.includes('--auth') || undefined });
+  // app log in <data>/logs (OPENDJ_LOG=0 turns it off, e.g. when a container's stdout is collected anyway)
+  app = await start({ port, host, dataDir: process.env.OPENDJ_DATA, auth: args.includes('--auth') || undefined, logs: process.env.OPENDJ_LOG !== '0' });
 } catch (e) {
   console.error(`[opendj] Not started: ${e.message}`); // e.g. a weak OPENDJ_PASSWORD, port in use
   process.exit(1);

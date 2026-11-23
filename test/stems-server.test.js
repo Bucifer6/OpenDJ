@@ -10,7 +10,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { Library } from '../server/library.js';
-import { registerStemRoutes, DEFAULT_MODEL, modelSpec, extractTarEntry, wavHeader, bgOrder, STEM_CHECK } from '../server/stems.js';
+import { registerStemRoutes, DEFAULT_MODEL, modelSpec, extractTarEntry, wavHeader, bgOrder, STEM_CHECK, exitText, lastMeaningfulLine } from '../server/stems.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-hide_banner', '-version']).status === 0;
 
@@ -256,6 +256,60 @@ test('stems server: a GPU whose stems do not match the CPU is not used; the trac
       assert.equal((await h.json('GET', '/api/stems/trk1')).checked, STEM_CHECK);
     } finally { h.close(); }
   }
+});
+
+test('stems server: a GPU that crashes the engine: the track is redone on the CPU, the GPU is skipped after a restart until retried', { skip: !hasFfmpeg && 'ffmpeg not installed' }, async () => {
+  let done; let finished = new Promise((r) => { done = r; });
+  const failed = [];
+  let h;
+  h = await harness({
+    ffmpeg: true, native: { stub: true, stubGpu: 'crash', idleMs: 20 },
+    input: async () => ({ file: path.join(h.dir, 'song.wav') }),
+    onEvent: (t, p) => { if (t === 'stems-failed') failed.push(p); if (t === 'stems-done') done([t, p]); },
+  });
+  try {
+    const frames = 44100 * 4, data = Buffer.alloc(frames * 4);
+    for (let i = 0; i < frames; i++) { const v = Math.round(Math.sin(i * 0.03) * 8000); data.writeInt16LE(v, i * 4); data.writeInt16LE(v, i * 4 + 2); }
+    fs.writeFileSync(path.join(h.dir, 'song.wav'), Buffer.concat([wavHeader(data.length), data]));
+    assert.equal((await h.json('POST', '/api/stems/queue', { ids: ['trk1'] })).added, 1);
+    const [, ev] = await finished;
+    assert.equal(ev.backend, 'stub', 'redone on the CPU');
+    assert.deepEqual(failed, [], 'the crash is not reported as a failure');
+    const st = await h.json('GET', '/api/stems/status');
+    assert.match(st.native.gpuFailed?.message || '', /stopped \(signal SIGKILL\)/);
+    const saved = JSON.parse(fs.readFileSync(path.join(h.dir, 'stems', 'gpu-check.json'), 'utf8'));
+    assert.equal(saved.backend, 'gpu'); assert.equal(saved.ort, 'stub');
+    // retry: the record is gone and the next load tries the GPU again
+    assert.equal((await h.json('POST', '/api/stems/gpu/retry')).gpuFailed, null);
+    assert.ok(!fs.existsSync(path.join(h.dir, 'stems', 'gpu-check.json')));
+  } finally { h.close(); }
+  // a new server (app restart) reads the record and does not touch the GPU
+  let h2; let done2; const fin2 = new Promise((r) => { done2 = r; });
+  h2 = await harness({
+    ffmpeg: true, native: { stub: true, stubGpu: 'crash', idleMs: 20 },
+    setup: (dir) => { fs.mkdirSync(path.join(dir, 'stems'), { recursive: true }); fs.writeFileSync(path.join(dir, 'stems', 'gpu-check.json'), JSON.stringify({ backend: 'dml', message: 'crashed', ort: 'stub' })); },
+    input: async () => ({ file: path.join(h2.dir, 'song.wav') }),
+    onEvent: (t, p) => { if (t === 'stems-done' || t === 'stems-failed') done2([t, p]); },
+  });
+  try {
+    const frames = 44100 * 2, data = Buffer.alloc(frames * 4);
+    fs.writeFileSync(path.join(h2.dir, 'song.wav'), Buffer.concat([wavHeader(data.length), data]));
+    assert.equal((await h2.json('GET', '/api/stems/status')).native.gpuFailed.backend, 'dml');
+    await h2.json('POST', '/api/stems/queue', { ids: ['trk1'] });
+    const [t2, ev2] = await fin2;
+    assert.equal(t2, 'stems-done', ev2.message); assert.equal(ev2.backend, 'stub');
+  } finally { h2.close(); }
+});
+
+test('stems server: exit codes and error tails are readable (Windows NTSTATUS in hex, crash-reporter lines skipped)', () => {
+  assert.equal(exitText(0, null), '');
+  assert.equal(exitText(1, null), ' (exit 1)');
+  assert.equal(exitText(3221225477, null), ' (exit 0xC0000005)');
+  assert.equal(exitText(-1073740791, null), ' (exit 0xC0000409)');
+  assert.equal(exitText(null, 'SIGKILL'), ' (signal SIGKILL)');
+  const tail = '[stems] loading the model on dml\n[stems] dml unavailable: out of memory\n[1123/124612.102:ERROR:third_party\\crashpad\\crashpad\\client\\crashpad_client_win.cc(868)] not connected\n';
+  assert.equal(lastMeaningfulLine(tail), '[stems] dml unavailable: out of memory');
+  assert.equal(lastMeaningfulLine(''), '');
 });
 
 test('stems server: native engine cancel, and off by default without onnxruntime-node', { skip: !hasFfmpeg && 'ffmpeg not installed' }, async () => {

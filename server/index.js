@@ -36,6 +36,7 @@ import { registerBroadcastRoutes } from './broadcast.js';
 import { registerCdjRoutes } from './cdj/routes.js';
 import { findIdenticalTrack } from './upload-dedupe.js';
 import { registerStemRoutes } from './stems.js';
+import { installAppLog, appLog, readAppLog, logLine } from './applog.js';
 import { registerUpdateRoutes } from './update.js';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -831,7 +832,23 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     return redactSettings(library.updateSettings(patch));
   }, { bodyLimit: BIG_JSON });
   route('GET', '/api/jobs', () => [...jobs.keys()]);
-  route('GET', '/api/info', () => ({ version: VERSION, dataDir, platform: process.platform, tracks: Object.keys(library.data.tracks).length, hosted: restricted, auth: auth.enabled }));
+  // app log: download (Settings → General → Download log), and errors from the page (window.onerror) so they end up
+  // in the same file; at most 30 page reports a minute, 2 KB each
+  route('GET', '/api/logs', ({ res }) => {
+    const text = readAppLog();
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="opendj-${VERSION}-log.txt"`, 'Cache-Control': 'no-store' });
+    res.end(appLog() ? text || '(the log is empty)\n' : 'Logging to a file is off for this server (it runs inside another program or a test).\n');
+  });
+  const clientLog = { n: 0, at: 0 };
+  route('POST', '/api/logs/client', ({ body }) => {
+    const now = Date.now();
+    if (now - clientLog.at > 60e3) { clientLog.at = now; clientLog.n = 0; }
+    if (++clientLog.n > 30) return { ok: false };
+    const lines = (Array.isArray(body?.lines) ? body.lines : [body?.message]).slice(0, 5).map((x) => String(x ?? '').replace(/\s+$/, '').slice(0, 2048)).filter(Boolean);
+    for (const l of lines) logLine(l, 'page');
+    return { ok: true };
+  });
+  route('GET', '/api/info', () => ({ version: VERSION, dataDir, platform: process.platform, tracks: Object.keys(library.data.tracks).length, hosted: restricted, auth: auth.enabled, logDir: appLog()?.dir || null }));
   // ---------------- lighting (DMX / Art-Net / sACN / WLED / Hue / OSC) ----------------
   const lighting = registerLightingRoutes({ route, library, emit });
   const link = registerLinkRoutes({ route, library, emit, log });
@@ -981,11 +998,13 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
  * Start the server. Binding to a non-loopback address (HOST=0.0.0.0 etc.) always turns on password login.
  * opts: { port, host, dataDir, auth, ffmpeg, allowedHosts, roots, password }
  */
-export async function start({ port = 0, host = '127.0.0.1', dataDir, ...opts } = {}) {
+export async function start({ port = 0, host = '127.0.0.1', dataDir, logs = false, ...opts } = {}) {
   // undefined lets createServer decide from the environment (password / proxy / allowed hosts turn login on)
   // Electron passes auth:false with a launch token (loopback only): the token guards it, env vars must not add a login.
   const desktop = opts.auth === false && !!opts.launchToken && isLoopback(host);
   const auth = desktop ? false : opts.auth === true || !isLoopback(host) || process.env.OPENDJ_AUTH === '1' ? true : opts.auth;
+  // the app log (<data>/logs/opendj.log) before anything else prints, so start-up problems are in it too
+  if (logs) installAppLog(path.join(dataDir || defaultDataDir(), 'logs'), { header: `OpenDJ ${VERSION}` });
   const app = createServer({ dataDir, ...opts, auth });
   await new Promise((resolve, reject) => { app.server.once('error', reject); app.server.listen(port, host, resolve); });
   app.port = app.server.address().port;

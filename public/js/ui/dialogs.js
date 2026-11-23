@@ -700,7 +700,22 @@ export class Dialogs {
       el('h3', {}, 'Updates'),
       el('label', { class: 'check' }, chk(app.settings.updateCheck !== false, (v) => { app.setSetting('updateCheck', v); app.updates?.setAuto(v); }), ' Check for updates automatically'),
       el('div', { class: 'row upd-check-row' }, btn, status),
-      el('p', { class: 'hint' }, `${who} asks GitHub (api.github.com) for the latest OpenDJ release at startup and every 12 hours. The request only says “OpenDJ/${APP_VERSION}”: nothing about you, your music or your settings is sent. Nothing is installed without your OK.`));
+      el('p', { class: 'hint' }, `${who} asks GitHub (api.github.com) for the latest OpenDJ release at startup and every 12 hours. The request only says “OpenDJ/${APP_VERSION}”: nothing about you, your music or your settings is sent. Nothing is installed without your OK.`),
+      ...(platform.local ? [] : this.logsSection()));
+  }
+
+  /** Settings → About → Logs: download the app log (server, stems engine, page errors) or open its folder. */
+  logsSection() {
+    const native = window.opendjNative;
+    const note = el('span', { class: 'hint', role: 'status', 'aria-live': 'polite' });
+    return [
+      el('h3', {}, 'Logs'),
+      el('div', { class: 'row logs-row' },
+        el('a', { class: 'btn sm', href: '/api/logs', download: `opendj-${APP_VERSION}-log.txt`, 'data-logs': 'download' }, 'Download log'),
+        native?.openLogs ? el('button', { class: 'btn sm', type: 'button', 'data-logs': 'open', onclick: async () => { note.textContent = (await native.openLogs()) ? '' : 'Logs are not available.'; } }, 'Open logs folder') : null,
+        note),
+      el('p', { class: 'hint' }, 'What OpenDJ did recently, with times: errors from the server, the AI stems engine and this page. Attach it when you report a problem. Passwords and media-server tokens are removed; file and track names stay in.'),
+    ];
   }
 
   /** Settings → Mobile: what the mobile app does differently, and why some features are hidden. */

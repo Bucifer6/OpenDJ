@@ -80,6 +80,29 @@ export function verifiedRunChunk(runChunk, reference, { backend = 'GPU', onVerif
   return run;
 }
 
+/**
+ * Fixed, music-like test input for comparing a GPU backend with the CPU (planar stereo [2][segment]): a kick, a
+ * bass line, a harmonic "voice" and noise hats, from a seeded generator so every run and every machine get the
+ * same samples.
+ */
+export function backendTestInput(segment = SEGMENT) {
+  const x = new Float32Array(2 * segment);
+  let seed = 12345;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) >>> 0; return seed / 2 ** 31 - 1; };
+  for (let i = 0; i < segment; i++) {
+    const t = i / MODEL_RATE, beat = t % 0.5;
+    const kick = Math.sin(2 * Math.PI * (50 + 90 * Math.exp(-beat * 30)) * beat) * Math.exp(-beat * 8) * 0.45;
+    const bass = Math.sin(2 * Math.PI * (55 * (1 + ((t * 2) | 0) % 2)) * t) * 0.2;
+    let voice = 0;
+    const f0 = 220 * (1 + 0.01 * Math.sin(2 * Math.PI * 5 * t));
+    for (let h = 1; h < 12; h++) voice += Math.sin(2 * Math.PI * f0 * h * t) * Math.exp(-((f0 * h - 800) ** 2) / 2e5) / h;
+    const hat = (t + 0.25) % 0.5 < 0.03 ? rnd() * 0.12 : 0;
+    x[i] = kick + bass + voice * 0.25 + hat;
+    x[segment + i] = kick + bass + voice * 0.2 + hat * 0.7;
+  }
+  return x;
+}
+
 /** Minimal tensor class for the stub (same shape as ort.Tensor). */
 export class StubTensor {
   constructor(type, data, dims) { this.type = type; this.data = data; this.dims = dims; }
