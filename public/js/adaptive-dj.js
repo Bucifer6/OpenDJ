@@ -3,6 +3,7 @@ import { planBestTransition, vocalsBetween } from './mix-planner.js';
 import { planTransition, incomingStart, DROP_STYLES } from './automix.js';
 import { camelotRelation } from './smartmix.js';
 import { decodeVocalMap } from './shared/vocal-map.js';
+import { pairFamily } from './dj-styles.js';
 
 const finite = (x) => typeof x === 'number' && Number.isFinite(x);
 /** Share of a track (from where it came in) that plays before the next transition may begin. */
@@ -19,6 +20,29 @@ const snap = (t, x) => anchor(t) + Math.round((x - anchor(t)) / barOf(t)) * barO
 const sections = (t) => (Array.isArray(t.phrases) ? t.phrases : [])
   .filter((p) => finite(p.start) && finite(p.end) && p.end > p.start)
   .slice(0, 200).sort((a, b) => a.start - b.start);
+/** Phrase grid (P1.1): 8-bar lines from the analysed phrase anchor, else from the first downbeat. */
+const PHRASE_BARS = 8;
+const phraseAnchor = (t) => (finite(t.phraseAnchor) ? t.phraseAnchor : anchor(t));
+const phraseTrusted = (t) => !finite(t.phraseConfidence) || t.phraseConfidence >= 0.3;
+/** Distance (bars) from x to the nearest phrase line of t. */
+export function offPhraseBars(t, x) {
+  const ph = barOf(t) * PHRASE_BARS, d = (x - phraseAnchor(t)) / ph;
+  return Math.abs(d - Math.round(d)) * PHRASE_BARS;
+}
+/** Snap x to the nearest phrase line when within a bar of it (trusted grids), else to the nearest bar. */
+const snapPhrase = (t, x) => {
+  const b = snap(t, x);
+  if (!phraseTrusted(t)) return b;
+  const ph = barOf(t) * PHRASE_BARS, line = phraseAnchor(t) + Math.round((b - phraseAnchor(t)) / ph) * ph;
+  return Math.abs(line - b) <= barOf(t) + 1e-6 ? line : b;
+};
+const MAIN = new Set(['drop', 'verse', 'chorus', 'buildup']);
+/** Start of the incoming track's first main section at or after `cue` (its "landing"), or null. */
+export function landingAfter(t, cue) {
+  const p = sections(t).find((x) => MAIN.has(x.type) && x.start >= cue - 0.05);
+  return p ? p.start : null;
+}
+const pairHash = (a, b) => { let h = 2166136261; for (const c of `${a}>${b}`) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return Math.abs(h); };
 const spread = (points, limit = 8) => points.length <= limit ? points :
   Array.from({ length: limit }, (_, i) => points[Math.round(i * (points.length - 1) / (limit - 1))]);
 
@@ -62,31 +86,48 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
   if (styles && !styles.length) return null;
   // Include the original endpoints as fallbacks; cap both axes independently of library/track size.
   const lastBar = anchor(out) + Math.floor((end - anchor(out)) / barOf(out) + 1e-6) * barOf(out);
-  const exits = [...new Set([lastBar, ...outSections.map((p) => snap(out, p.end))])]
+  const exits = [...new Set([lastBar, ...outSections.map((p) => snapPhrase(out, p.end))])]
     .filter((x) => x > earliest && x <= end + 1e-6).sort((a, b) => a - b);
-  const boundedExits = spread(exits);
+  // double drops (P2.3, drum & bass / dubstep): an exit 16 bars into each outgoing drop, so the incoming drop can hit
+  // together with it
+  const family = pairFamily(out, inn);
+  const ddExits = family === 'bass' ? outSections.filter((p) => p.type === 'drop').map((p) => snapPhrase(out, p.start + 16 * barOf(out)))
+    .filter((x) => x > earliest && x <= end + 1e-6 && !exits.includes(x)) : [];
+  const boundedExits = [...spread(exits), ...ddExits.slice(0, 2)];
   // The incoming track comes in on its intro / mix-in point, or a section start in its first quarter (MAX_CUE), so
   // most of it is still to come; never a section deep inside it.
   const home = incomingStart(inn);
   const cueLimit = Math.max(home, (inn.startTime || 0) + (inEnd - (inn.startTime || 0)) * (finite(opts.maxCue) ? clamp(opts.maxCue, 0, 1) : MAX_CUE));
-  const allEntries = [...new Set([home, ...inSections.map((p) => snap(inn, p.start))])]
+  // landing cues (P1.3): start the incoming track whole phrases before its first main part, so that part lands
+  // exactly where the outgoing track changes section (the classic "drop on the break")
+  const land = landingAfter(inn, home);
+  const landingCues = land == null ? [] : [4, 8, 16, 32].map((b) => land - b * barOf(inn)).filter((x) => x >= home - 0.05);
+  const allEntries = [...new Set([home, ...inSections.map((p) => snapPhrase(inn, p.start)), ...landingCues])]
     .filter((x) => x >= (inn.startTime || 0) && x <= cueLimit + 1e-6 && x < inEnd - Math.max(16, barOf(inn) * 8));
-  const entries = spread(allEntries);
-  let best = null, evaluated = 0;
+  const landSet = new Set(landingCues);
+  const entries = [...spread(allEntries.filter((x) => !landSet.has(x)), 8), ...allEntries.filter((x) => landSet.has(x))];
+  let best = null, ddBest = null, evaluated = 0;
   for (const exit of boundedExits) for (const cue of entries) {
     const remainingBars = Math.floor((exit - earliest) / barOf(out) + 1e-6);
     if (remainingBars < 1) continue;
     const section = outSections.find((p) => p.end >= exit - 0.01 && p.start < exit);
-    const o = { ...out, duration: exit, endTime: exit, mixOut: Math.max(earliest, section ? snap(out, section.start) : earliest),
+    // a double-drop exit sits inside a drop: its window may start in the section before it (the incoming intro
+    // plays under the outgoing breakdown / build)
+    const dd = ddExits.includes(exit);
+    const o = { ...out, duration: exit, endTime: exit, mixOut: Math.max(earliest, dd ? exit - 48 * barOf(out) : section ? snap(out, section.start) : earliest),
       phrases: outSections.filter((p) => p.start < exit).map((p) => ({ ...p, end: Math.min(exit, p.end) })) };
     const n = { ...inn, mixIn: cue, phrases: inSections.filter((p) => p.end > cue) };
-    const candidateBars = [remainingBars, ...inSections.filter((p) => p.start <= cue && p.end > cue).map((p) => Math.floor((p.end - cue) / barOf(inn)))];
-    let p = planBestTransition(o, n, { ...opts, candidateBars, styles, keySync: false });
+    const landing = landingAfter(inn, cue);
+    const landBars = landing == null ? null : Math.round((landing - cue) / barOf(inn));
+    const candidateBars = [remainingBars, ...inSections.filter((p) => p.start <= cue && p.end > cue).map((p) => Math.floor((p.end - cue) / barOf(inn))), ...(landBars >= 4 ? [landBars] : []), ...(family === 'bass' && landBars >= 4 ? [landBars + 16] : [])];
+    const ddBars = dd && landBars >= 4 && !opts.fixedBars && (!styles || styles.includes('blend')) ? landBars + 16 : null;
+    if (dd && !ddBars) continue;
+    let p = planBestTransition(o, n, { ...opts, candidateBars, keySync: false, ...(ddBars ? { styles: ['blend'], fixedBars: ddBars } : { styles }) });
     let timing = planTransition(o, p.style, { transitionBeats: p.beats, skipSilence: true });
     const drop = DROP_STYLES.has(p.style);
     if (!drop) {
       const bars = Math.min(p.bars, remainingBars, Math.floor(timing.len / barOf(out) + 1e-6));
-      if (bars < 4 || (opts.fixedBars && bars !== opts.fixedBars)) continue;
+      if (bars < 4 || ((opts.fixedBars || ddBars) && bars !== (opts.fixedBars || ddBars))) continue;
       const len = bars * barOf(out), start = exit - len;
       timing = { ...timing, begin: start, start, len, end: exit };
       p = { ...p, bars, beats: bars * 4, lengthWhy: `${bars} bars (section fit)` };
@@ -103,12 +144,42 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
     // music left unplayed in the outgoing track, and the incoming intro skipped, both cost: a DJ mixes out late and
     // in early, and only moves off those points to avoid two voices or a bad key / energy match
     const unplayed = (end - exit) / Math.max(1, left), skipped = Math.max(0, cue - home) / Math.max(1, inEnd);
-    const score = p.score - vocalCost - clashCost - Math.abs(ei - eo) * 0.7 - unplayed * 6 - skipped * 8;
+    // phrasing (P1.1 / P1.3): a blend starts on an outgoing phrase line, and the incoming main part should land on the
+    // outgoing exit (the end of the overlap) rather than somewhere inside it
+    let phrasing = 0, landed = false;
+    if (!drop && phraseTrusted(out)) phrasing -= Math.min(3, offPhraseBars(out, timing.begin) * 0.75);
+    if (!drop && landing != null) {
+      const miss = Math.abs(cue + inSpan - landing) / barOf(inn);
+      if (miss < 0.25) { phrasing += 3; landed = true; }
+      else if (landing < cue + inSpan) phrasing -= Math.min(2, (cue + inSpan - landing) / barOf(inn) * 0.15); // lands mid-overlap: two main parts at once
+    }
+    // double drop: the incoming drop hits exactly on an outgoing drop, keys and tempo tight, at high energy
+    let doubleDrop = false;
+    if (!drop && family === 'bass' && landing != null && !landed && landing < cue + inSpan - 4 * barOf(inn)) {
+      const tLand = timing.begin + (landing - cue) * rate / ratio;
+      const hit = outSections.some((q) => q.type === 'drop' && Math.abs(q.start - tLand) < barOf(out) * 0.25);
+      const measuredClash = vo.known && vi.known && Math.min(vo.v, vi.v) > 0.3;
+      if (hit && !measuredClash && harmonic.value >= 0.8 && Math.abs(Math.log(ratio)) <= Math.log(1.02) && Math.min(eo, ei) >= 6 && !opts.recent?.includes('doubledrop')) doubleDrop = true;
+    }
+    const score = p.score - vocalCost - clashCost - Math.abs(ei - eo) * 0.7 - unplayed * 6 - skipped * 8 + phrasing;
     evaluated++;
+    if (doubleDrop) {
+      // kept aside: a double drop is a peak-time move, not something to score against ordinary blends
+      if (!ddBest || score > ddBest.score) ddBest = { ...p, score, timing, inStart: cue, vocals: null, landed: false, landing, doubleDrop: true, swapIn: landing,
+        confidence: lowConfidence ? 'low' : vo.known && vi.known ? 'measured-vocals' : 'estimated',
+        why: `double drop: both drops hit together, one bassline; section search: ${timing.begin.toFixed(1)}s → ${cue.toFixed(1)}s` };
+      continue;
+    }
     if (!best || score > best.score) best = { ...p, score, timing, inStart: cue,
       vocals: !drop && !['stemswap', 'crossfade'].includes(p.style) && Math.min(vo.v, vi.v) > 0.2 ? 'hold-in' : null,
       confidence: lowConfidence ? 'low' : vo.known && vi.known ? 'measured-vocals' : 'estimated',
-      why: `${p.why}; section search: ${timing.begin.toFixed(1)}s → ${cue.toFixed(1)}s${lowConfidence ? '; uncertain grid: no beat-matched overlap' : ''}` };
+      landed, landing: landed ? landing : null, doubleDrop: false, swapIn: null,
+      why: `${p.why}${landed ? '; the incoming main part lands on the phrase' : ''}; section search: ${timing.begin.toFixed(1)}s → ${cue.toFixed(1)}s${lowConfidence ? '; uncertain grid: no beat-matched overlap' : ''}` };
+  }
+  // drum & bass DJs double-drop on roughly a quarter to a third of their transitions (never twice running, checked
+  // above): a stable hash of the pair picks which eligible pairs get it
+  if (ddBest && best && (opts.doubleDrops === true || (opts.doubleDrops !== false && pairHash(out.id, inn.id) % 100 < 35))) {
+    return { ...ddBest, score: best.score + 0.5, evaluated };
   }
   return best && { ...best, evaluated };
 }

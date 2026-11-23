@@ -14,6 +14,7 @@ import { t } from './i18n.js';
 import { planBestTransition, stemSwapLevels, learnChoice } from './mix-planner.js';
 import { planAdaptiveTransition } from './adaptive-dj.js';
 import { Watchdog, quietAt } from './automix-watchdog.js';
+import { echoBeatsFor } from './dj-styles.js';
 
 export const LOG_BPM_JUMP = Math.log(1.08); // > 8 % tempo change (after half/double matching) is a "big jump"
 
@@ -1074,13 +1075,14 @@ export class AutoMix extends Emitter {
       inn.seek(inStart); inn._autoMixEntry = inStart;
       inn.play({ at: posAt, instant: true }); // on the beat even if the message reaches the audio thread late
       const lenIn = upcoming?.adaptive ? len * (inn.rate || 1) / (out.rate || 1) : inn.bpm && out.bpm ? (len / out.beatLen) * inn.beatLen : len;
-      Object.assign(tr, { dur: durWall * 1000, inStart, swapAt: SWAP_STYLES.has(style) ? phraseSwapPoint(ii, inStart, lenIn) : null, kSwap: null });
+      Object.assign(tr, { dur: durWall * 1000, inStart, swapAt: upcoming?.adaptive?.swapIn ?? (SWAP_STYLES.has(style) ? phraseSwapPoint(ii, inStart, lenIn) : null), kSwap: null });
       if (tr.vocals === 'hold-in') chI.set('vocal', 0);
       if (style === 'stemswap') this.applyStemSwap(tr, 0);
     }
     this.transition = tr;
     this._lastStyle = style;
-    this._recent = [...this._recent.slice(-3), style];
+    this._recent = [...this._recent.slice(-5), upcoming?.adaptive?.doubleDrop ? 'doubledrop' : style];
+    tr.echoBeats = echoBeatsFor(this.fresh(out.track), this.fresh(inn.track));
     this.idx++;
     this.upcoming = null;
     this.emit('transition', { style, why, length: tr.length });
@@ -1090,7 +1092,8 @@ export class AutoMix extends Emitter {
   /** Drop styles: start the outgoing track's effect. */
   startEffect(tr) {
     const chO = this.engine.channels[tr.out.index], d = tr.out, bw = tr.beatWall / 1000;
-    if (tr.style === 'echo') { chO.set('fxType', 'echo'); chO.set('fxBeats', 0.75); chO.set('fxParam', 0.45); chO.set('fxMix', 0.25); chO.set('fxOn', true); }
+    // echo out (P2.4): tempo-synced delay of the family's length, feedback about 50 %, wet rising over the last bars
+    if (tr.style === 'echo') { chO.set('fxType', 'echo'); chO.set('fxBeats', tr.echoBeats || echoBeatsFor(this.fresh(tr.out.track), this.fresh(tr.inn.track))); chO.set('fxParam', 0.5); chO.set('fxMix', 0.25); chO.set('fxOn', true); }
     else if (tr.style === 'reverb') { chO.set('fxType', 'reverb'); chO.set('fxParam', 0.8); chO.set('fxMix', 0.2); chO.set('fxOn', true); }
     else if (tr.style === 'backspin') d.backspin(Math.max(0.4, tr.plan.pre * bw));
     else if (tr.style === 'brake') d.brake(Math.max(0.5, tr.plan.pre * bw));
@@ -1115,7 +1118,7 @@ export class AutoMix extends Emitter {
     }
     const map = { inVol: [chI, 'volume'], outVol: [chO, 'volume'], inLow: [chI, 'eqLow'], inMid: [chI, 'eqMid'], inHigh: [chI, 'eqHigh'], outLow: [chO, 'eqLow'], outMid: [chO, 'eqMid'], outHigh: [chO, 'eqHigh'], inFilter: [chI, 'filter'], outFilter: [chO, 'filter'] };
     for (const [k2, [ch, key]] of Object.entries(map)) if (L[k2] != null) ch.set(key, L[k2]);
-    if (L.echo && !chO.state.fxOn) { chO.set('fxType', 'echo'); chO.set('fxBeats', 0.75); chO.set('fxMix', 0.6); chO.set('fxOn', true); }
+    if (L.echo && !chO.state.fxOn) { chO.set('fxType', 'echo'); chO.set('fxBeats', tr.echoBeats || 0.75); chO.set('fxMix', 0.6); chO.set('fxOn', true); }
     if (k >= 1) this.finishTransition();
   }
 

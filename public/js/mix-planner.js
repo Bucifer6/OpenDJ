@@ -18,6 +18,7 @@
 import { tempoDistance, planMixOut, incomingStart, outroBars, introBars, DROP_STYLES, autoTransitionLength, LOG_BPM_JUMP } from './automix.js';
 import { camelotRelation, genreSimilarity } from './smartmix.js';
 import { decodeVocalMap } from './shared/vocal-map.js';
+import { FAMILIES, EFFECT_STYLES, pairFamily, effectsOverBudget } from './dj-styles.js';
 
 /** Styles the planner chooses from. 'stemswap' needs AI stems on both decks. */
 export const PLANNER_STYLES = ['blend', 'bassswap', 'crossfade', 'filter', 'stemswap', 'echo', 'cut', 'backspin', 'brake', 'loop', 'reverb'];
@@ -98,6 +99,8 @@ export function planBestTransition(out, inn, opts = {}) {
   const stemsBoth = !!(opts.stemsOut && opts.stemsIn);
   const allowed = new Set(opts.styles || PLANNER_STYLES);
   const inStart = incomingStart(inn || {});
+  // genre family of the pair (P2.1): technique preferences, blend lengths and the effect budget
+  const famId = opts.family !== undefined ? opts.family : pairFamily(out, inn), fam = FAMILIES[famId] || null;
   const outBar = ba ? 240 / ba : 2, inBar = bb ? 240 / bb : 2;
   const cands = [];
 
@@ -113,14 +116,21 @@ export function planBestTransition(out, inn, opts = {}) {
     if (blend && (!grid || bigJump)) continue; // never beat-match far off a track's tempo, nor without beat grids
     if (!grid && !['echo', 'cut', 'reverb'].includes(style)) continue; // spins, brakes and loops need a beat grid
     const base = [[PRIOR[style] ?? 0, null], [bias[style] || 0, bias[style] > 0.5 ? 'you often pick it' : bias[style] < -0.5 ? 'you often change it' : null]];
-    if (opts.prevStyle && opts.prevStyle === style) base.push([opts.vary ? -5 : -1.5, 'same as the last transition']);
+    if (opts.prevStyle && opts.prevStyle === style) base.push([opts.vary ? -6.5 : EFFECT_STYLES.has(style) ? -5 : -1.5, 'same as the last transition']);
     if (opts.recent?.includes(style)) base.push([-0.8, null]);
+    if (fam?.prior[style]) base.push([fam.prior[style], fam.prior[style] >= 1 ? `${fam.label}: ${style === 'cut' ? 'cut on the 1' : style === 'blend' ? 'long EQ blend' : style}` : null]);
+    // effects are seasoning: past the family's budget they are held back (P2.6)
+    if (EFFECT_STYLES.has(style) && effectsOverBudget(opts.recent, fam?.fxBudget ?? 0.3)) base.push([-2.5, null]);
 
     if (blend) {
       const lengths = opts.fixedBars ? [opts.fixedBars] : [...new Set([...LENGTHS, ...(opts.candidateBars || [])])]
         .filter((b) => Number.isInteger(b) && b >= 4 && b <= (MAX_BARS[style] || 16));
       for (const bars of lengths) {
         const p = [...base];
+        if (fam) {
+          if (bars > fam.maxBars) p.push([-(bars - fam.maxBars) * 0.4, `long for ${fam.label}`]);
+          else if (fam.bestBars.includes(bars)) p.push([0.8, null]);
+        }
         // tempo: the incoming track plays at the outgoing tempo for the whole overlap
         if (d > 0.005) p.push([-d * 100 * (0.5 + bars / 16), d > 0.03 ? `${Math.round((Math.exp(d) - 1) * 100)} % tempo gap` : null]);
         // key
@@ -181,7 +191,7 @@ export function planBestTransition(out, inn, opts = {}) {
   for (const c of cands) { if (seen.has(c.style)) continue; seen.add(c.style); options.push({ style: c.style, bars: c.bars, score: Math.round(c.score * 10) / 10 }); if (options.length >= 4) break; }
   return {
     style: best.style, bars: best.bars, beats: best.bars * 4, vocals: best.vocals || null, score: Math.round(best.score * 10) / 10,
-    why: `planned: ${[...new Set(reasons)].slice(0, 3).join(', ') || 'best fit for these two tracks'}`,
+    why: `planned: ${[...new Set(reasons)].slice(0, 3).join(', ') || 'best fit for these two tracks'}`, family: famId || null,
     lengthWhy: `${best.bars} bars (planned)`, options,
   };
 }

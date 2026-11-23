@@ -76,3 +76,61 @@ test('P1.6: tempo morph target rides the master to the incoming track\'s own tem
   assert.equal(morphTarget({ bpm: 120, tempo: 0 }, { bpm: 127.2 }), null);
   assert.equal(morphTarget({ bpm: 0 }, { bpm: 120 }), null);
 });
+
+test('P1.3: the planner lands the incoming main part on the outgoing phrase (drop on the break)', async () => {
+  const { planAdaptiveTransition, offPhraseBars, landingAfter } = await import('../public/js/adaptive-dj.js');
+  const bpm = 125, bar = 240 / bpm;
+  const sec = (type, a, b, energy) => ({ type, start: a * bar, end: b * bar, energy });
+  // outgoing: 96 bars, drop 32-64, outro 64-96; incoming: intro 0-16 (drums), drop from bar 16
+  const out = { id: 'a', bpm, key: '8A', energy: 7, duration: 96 * bar, downbeat: 0, gridOffset: 0, bpmConfidence: 0.9,
+    phrases: [sec('intro', 0, 16, 0.4), sec('verse', 16, 32, 0.6), sec('drop', 32, 64, 0.9), sec('outro', 64, 96, 0.5)] };
+  const inn = { id: 'b', bpm, key: '8A', energy: 7, duration: 96 * bar, downbeat: 0, gridOffset: 0, bpmConfidence: 0.9, mixIn: 0,
+    phrases: [sec('intro', 0, 16, 0.4), sec('drop', 16, 48, 0.9), sec('breakdown', 48, 64, 0.4), sec('outro', 64, 96, 0.5)] };
+  assert.equal(landingAfter(inn, 0), 16 * bar);
+  const p = planAdaptiveTransition(out, inn, { position: 40 * bar, entry: 0, minPlay: 0 });
+  assert.ok(p, 'a plan');
+  assert.ok(!['echo', 'cut', 'reverb', 'backspin', 'brake', 'loop'].includes(p.style), `blend expected, got ${p.style}`);
+  assert.equal(offPhraseBars(out, p.timing.begin) < 0.01, true, `starts on an 8-bar line (${p.timing.begin / bar} bars)`);
+  assert.equal(p.landed, true, p.why);
+  assert.ok(Math.abs(p.landing - 16 * bar) < 1e-6);
+});
+
+test('P2.1: genre families steer technique (club blends, open-format cuts, effect budget)', async () => {
+  const { styleFamily, pairFamily, effectShare, echoBeatsFor } = await import('../public/js/dj-styles.js');
+  const { planBestTransition } = await import('../public/js/mix-planner.js');
+  assert.equal(styleFamily({ genre: 'Tech House' }), 'house');
+  assert.equal(styleFamily({ genre: 'Drum & Bass' }), 'bass');
+  assert.equal(styleFamily({ genre: 'Hip-Hop' }), 'open');
+  assert.equal(styleFamily({ genre: 'Melodic Techno' }), 'techno');
+  assert.equal(styleFamily({ bpm: 174 }), 'bass'); assert.equal(styleFamily({}), null);
+  assert.equal(pairFamily({ genre: 'House' }, { genre: 'Reggaeton' }), 'open');
+  assert.equal(effectShare(['echo', 'blend', 'cut', 'reverb']), 0.5);
+  assert.equal(echoBeatsFor({ genre: 'house' }, { genre: 'house' }), 0.75);
+  const bpm = 96, bar = 240 / bpm;
+  const t = (over) => ({ bpm, key: '8A', energy: 6, duration: 64 * bar, endTime: 64 * bar, mixIn: 0, downbeat: 0, gridOffset: 0,
+    phrases: [{ type: 'intro', start: 0, end: 4 * bar }, { type: 'verse', start: 4 * bar, end: 56 * bar }, { type: 'outro', start: 56 * bar, end: 64 * bar }], ...over });
+  const hip = planBestTransition(t({ genre: 'Hip-Hop' }), t({ genre: 'Hip-Hop', key: '9A' }));
+  assert.ok(hip.bars <= 8 || ['cut', 'echo'].includes(hip.style), `open format: short (${hip.style} ${hip.bars})`);
+  // past the effect budget, the effect is held back
+  const echoScore = (r) => planBestTransition(t({ genre: 'Techno', bpm: 130 }), t({ genre: 'Techno', bpm: 145 }), { recent: r }).options.find((o) => o.style === 'echo').score;
+  assert.ok(echoScore(['echo', 'reverb', 'echo']) < echoScore(['blend', 'blend', 'blend']) - 2, 'effects past the budget cost');
+});
+
+test('P2.3: drum & bass pairs at peak energy can double drop (drops aligned, bass swapped on the drop)', async () => {
+  const { planAdaptiveTransition } = await import('../public/js/adaptive-dj.js');
+  const bpm = 174, bar = 240 / bpm;
+  const sec = (type, a, b, energy) => ({ type, start: a * bar, end: b * bar, energy });
+  const dnb = (id, key) => ({ id, genre: 'Drum & Bass', bpm, key, energy: 8, duration: 160 * bar, downbeat: 0, gridOffset: 0, bpmConfidence: 0.9, mixIn: 0,
+    phrases: [sec('intro', 0, 16, 0.4), sec('drop', 16, 64, 0.95), sec('breakdown', 64, 96, 0.5), sec('drop', 96, 144, 0.95), sec('outro', 144, 160, 0.4)] });
+  const p = planAdaptiveTransition(dnb('a', '5A'), dnb('b', '5A'), { position: 70 * bar, entry: 0, minPlay: 0, doubleDrops: true });
+  assert.ok(p, 'plan');
+  if (p.doubleDrop) {
+    assert.ok(Math.abs(p.swapIn - 16 * bar) < 1e-6, 'bass swap on the incoming drop');
+    assert.match(p.why, /double drop/);
+  } else assert.ok(p.landed || p.style, `some plan: ${p.why}`);
+  // never twice in a row
+  const q = planAdaptiveTransition(dnb('a', '5A'), dnb('b', '5A'), { position: 70 * bar, entry: 0, minPlay: 0, doubleDrops: true, recent: ['doubledrop'] });
+  assert.ok(!q.doubleDrop);
+  // the result must say whether a double drop was found for this textbook pair
+  assert.equal(p.doubleDrop, true, p.why);
+});
