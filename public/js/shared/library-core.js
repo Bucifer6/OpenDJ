@@ -25,8 +25,9 @@ export const DEFAULT_SETTINGS = {
   autoGain: true,
   waveformColors: 'rgb',      // 'rgb' | 'blue' | 'mono'
   downloadDir: '',
-  // Automix defaults (0.5.7): Auto style and length (the planner picks per transition), varied styles, beat-matched
-  automix: { transitionBeats: 32, lengthMode: 'auto', style: 'auto', keepSync: true, skipSilence: true, shuffle: false, keySync: false, order: 'harmonic', restoreTempo: true, varyStyles: true, smartStart: true, onAirLoad: 'ask', shape: 'warmup', preset: 'balanced', sliders: { harmonic: 0.5, energy: 0.5, variety: 0.5 } },
+  // Automix defaults (0.5.7): Auto style and length (the planner picks per transition), varied styles, beat-matched;
+  // (0.5.10) no added effects: tricks, teases of the next track and AI-stem transitions are opt-in
+  automix: { transitionBeats: 32, lengthMode: 'auto', style: 'auto', keepSync: true, skipSilence: true, shuffle: false, keySync: false, order: 'harmonic', restoreTempo: true, varyStyles: true, smartStart: true, tricks: 'off', tease: false, stemTransitions: false, effectsOff: 1, onAirLoad: 'ask', shape: 'warmup', preset: 'balanced', sliders: { harmonic: 0.5, energy: 0.5, variety: 0.5 } },
   midiMappings: {},           // deviceName -> mapping object
   recordFormat: 'wav',
   limiter: true,

@@ -61,3 +61,17 @@ test('stems routing: tracks already waiting on the server move to WebGPU when it
   assert.deepEqual(cancel?.[2], { ids: ['b', 'c'] }, 'the running one stays, the waiting ones are taken back');
   assert.deepEqual(m.pumped, ['b', 'c']);
 });
+
+test('stems routing: this window never takes a track the server is already preparing (they would cancel each other)', async () => {
+  const s = setup({ gpu: 'failed' });
+  const m = await manager();
+  await m.status();
+  // the server is on 'a' (it started before its GPU check failed) and has 'b' queued
+  m.serverEvent('stems-queue', { current: { id: 'a', title: 'A', phase: 'separating' }, queue: [], gpu: 'failed', gpuFailed: { backend: 'dml', message: 'x' } });
+  await m.prefetch(['a', 'c']);
+  assert.deepEqual(m.pumped, ['c'], 'a stays with the server');
+  m.pumped = undefined;
+  assert.equal(await m.enqueue(['a']), 0, 'asked for again: still the server');
+  assert.equal(m.pumped, undefined);
+  void s;
+});

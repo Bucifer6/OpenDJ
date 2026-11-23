@@ -23,6 +23,10 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.5.10
+- **Automix no longer adds effects of its own.** Tricks inside tracks (bass teases, filter builds, loop rolls, horns…), teases of the next track and transitions built from AI stems (stem swap, drum bridge, acapella) are now off, also on existing installs (once). Isolated AI stems can carry audible artefacts. Each can be turned back on in *Settings → Automix*. Normal blends and echo-outs are unchanged.
+- **AI stems are never prepared twice at once.** The app window no longer takes a track the server is already preparing (the two runs could cancel each other and waste minutes of work).
+
 ### New in 0.5.9
 - **Longer blends, like a club DJ.** In house, techno and trance, Automix now layers compatible records (matching keys and genre, close tempo) for 32 bars and up to 64 when their intros and outros allow it, letting the incoming intro run under the outgoing track's last part. Disco and drum & bass blend a little longer too; open format stays quick.
 - **Teases of the next record.** Sometimes (about one transition in three, every other one in party mode) Automix brings a bit of the next track in a phrase or two before the real mix and takes it out again: its vocal over an instrumental part or its drums with AI stems, otherwise its top end. *Settings → Automix → Sometimes tease the next track* turns it off.
@@ -97,46 +101,3 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **Automix queue editing:** compact rows, Shuffle for the remaining tracks, drag & drop or Alt+Up/Down to reorder, and *Play next in automix* in the library menu.
 - **Mixer:** two knob rows per channel and a taller MASTER meter with its buttons at the bottom.
 - Dialogs and settings fit the window at every interface size; the settings tabs wrap instead of hiding the last ones.
-
-### New in 0.5
-**Turntables and decks** (docs/MIXER_AND_TURNTABLES_PLAN.md §6). Every new option defaults to the old behaviour.
-- **Vinyl feel:** each deck's new *Vinyl* panel sets motor start and stop times (play, pause, reverse and the spin-up after you let go of the platter), jog weight, platter coast (a thrown record on a stopped deck), slip-mat, brake time, spin-back length and throw speed, 33 / 45 / 78 rpm (the scratch scale) and quartz lock. *Settings → Decks* has motor presets from instant (CDJ) to low torque.
-- **Scratching that follows your hand:** touch and mouse scratching drive the record by position, using each input event's own time (and the extra samples browsers collect between frames), so the record stays where your hand puts it. A second finger on the platter holds the record still. Optional *flick to spin back*.
-- **Platter styles** (*Settings → Decks*): Minimal (as before, the default, drawn in the skin's jog wheel style from 0.4.3), Vinyl (a spinning record with the cover art on its label, strobe dots that stand still at the right speed, a tonearm showing progress that you drag to drop the needle) and Player (a jog display: artwork, position ring, slip ghost, loop arc, hot-cue ticks, time left).
-- **Waveform styles** *Player Blue* and *Player RGB*.
-- **Scratch view** for phones and tablets: a big platter, a crossfader strip on your thumb side, a CUT button for transforms, scratch samples, the touch-to-sound latency, and haptic feedback (Off / Subtle / Full).
-- **Scratch samples:** a SCR pad mode swaps the deck to a short sound and back (8 built-in OpenDJ-made sounds, CC0 vinyl one-shots to download, or drop your own file).
-- **Deck tools:** tempo glide (hold RESET), ramped pitch bend, needle lock and needle snap, active loops, quantize divisions (1/8 beat to 1 bar), beat jump ½ to 64, loop in / out adjust with the jog (hold IN or OUT), SCALE pad mode (play a hot cue at scale steps by platter speed), deck lock, latching slip reverse (Shift + REV), slip brake, turntable start / stop.
-- New MIDI targets for all of it (`deckN.vinylMode`, `deckN.motorStart`, `deckN.brake`, `deckN.activeLoop`, `deckN.quantizeDiv.next`, `deckN.loopInAdjust`, `deckN.needle`, `deckN.rpm45`…); existing mappings keep working.
-
-#### Mixer
-- **Full-width crossfader** with a continuous curve (linear … smooth … fast cut), hamster reverse, cut-in and a fast-cut ramp of 1 ms (Battle) or 5 ms (Club); the old 4 ms time constant took 28 ms to reach -60 dB. Channel strips now fill the mixer edge to edge; the setup dropdowns live in the MASTER column.
-- **Channel-fader curves** (log, linear, smooth, cut) and per-channel fader reverse.
-- **EQ presets** that behave like the common mixer types: Isolator (default), Club Classic, 4-Band, Rotary, Battle, Vintage Warm and Sculpt. The automix and MIDI maps keep working with every preset. The old "Flat EQ" menu is now "Tone".
-- **Filters and Color FX:** a dual HP/LP filter mode, Center Lock, and three new Color FX (Sweep, Crunch, Pitch) with a PARAMETER control.
-- **Booth output** with a 2-band booth EQ and its own level, on another sound card or on outputs 3-4 or 5-6. The mic stays out of the booth by default, to avoid feedback.
-- **Headphones:** CUE MST, sampler cue, post-fader cue and a second headphone cue (B).
-- **Mic:** 3-band EQ, mic FX (echo, reverb, megaphone, pitch), voice-activated auto talkover (with an option that ducks only the voice band so the bass keeps going), and a feedback reducer. A voice bus lets the MC / text-to-speech voice duck the music like the mic.
-- **Beat FX units:** two global FX units, assignable to a channel, the master or a crossfader side, with FX frequency bands, quantise and a touch **FX strip**. Five new effects: Spiral, Helix, Triplet Filter, Low-Cut Echo and Shimmer.
-- **Send / return** to built-in delays and reverb (returned to the master or a channel), a **one-knob compressor** per channel, a **master isolator**, **warmth**, master balance / mono, an adjustable limiter ceiling with a gain-reduction LED, and a record level, with the mic in or out of the recording.
-- **Metering:** RMS bars with peak dots and an EBU R128 loudness card (momentary, short-term, integrated, true peak).
-- **Mixer personalities** (optional): Club (today's mixer), Classic, Rotary and Battle. A dismissible chip can suggest one from the automix queue's genres; it is never applied automatically.
-- An **Advanced mixer** drawer (⚙, closed by default; a bottom sheet on phones) holds everything above, and each control has a MIDI target.
-
-#### Voice, dedications and remote control
-- **MC voice in the mix:** spoken announcements now play through the master output, so they are heard, recorded and broadcast, with the music ducked underneath. OpenDJ uses your system's speech engine (Windows speech, macOS voices, or espeak-ng on Linux); nothing is downloaded.
-- **Live dedications:** press **MC** in the mixer, write "For Ana and Mihai…", pick English or Română, and it is spoken over the mix at the next phrase. It can also appear on screen, on the video output and in your stream's "now playing". Without a Romanian voice, OpenDJ tells you how to add one and shows the text instead.
-- **Local AI planning (desktop):** clearer messages when Ollama isn't running, the model isn't installed, or it answers badly; installed models are suggested; the spoken introduction goes into the mix.
-- **Remote control for AI assistants (MCP):** off by default. Turn it on in **Settings → Remote control** to let an assistant such as Claude read OpenDJ's status, search your library, control decks, automix, crossfader, sampler and dedications, and start or stop your saved stream targets. It uses a token you copy once and permissions you choose, listens on this computer only unless you change it, and every action is logged. It never sees your files, folders or passwords.
-- **One-click AUTOMIX:** AUTOMIX starts a smart mix of your queue or the view you're looking at straight away; Shift-click or right-click it for the options. The separate AUTOMIX NOW button is gone; each deck keeps **MIX NOW**.
-- **Fixes:** sampler sounds, the sequencer pattern and other preferences now survive restarting the desktop app; a wider crossfader in the mixer; stopping automix while it loads no longer starts the track anyway.
-
-#### Media servers
-- **Plex user switching:** a Plex server in the sidebar has a **Switch Plex user** button (👥). Pick a member of your Plex Home (with their PIN if they have one) and OpenDJ browses and streams as them: their libraries, playlists and restrictions; the sidebar shows who is active, and the library syncs again. Cues, analysis and downloaded tracks stay put. The PIN is never stored, and the plex.tv account token stays out of the UI and of library backups.
-
-#### Controllers
-- **AlphaTheta DDJ-FLX2: plug and play.** A first-party mapping (CC0), written from AlphaTheta's published MIDI message list, loads as soon as the controller is plugged in: jogs (scratch, bend, SHIFT + jog search), tempo faders, SHIFT, BEAT SYNC (long press: master; SHIFT: pad mode selection), the HOT CUE / PAD FX / LOOP / SAMPLER pad modes with 8 pads per deck and their SHIFT layers, CUE and PLAY/PAUSE with their SHIFT functions, HI / MID / LOW and CFX, channel faders, crossfader, master and headphone levels, MASTER and headphone cues 1 / 2, with LED feedback, track-loaded lights and vinyl mode.
-- **Smart Fader** (the SMART button next to the crossfader, or SMART FADER on the controller): the crossfader alone blends two tracks (both decks follow a BPM that morphs between the tracks, the basslines swap in the middle); Shift-click / SHIFT + SMART FADER runs a beat-synced 16-beat transition by itself. **SMART CFX** (SHIFT + MASTER): the CFX knobs play a Color FX preset (Space, Dub Echo, Crush, Noise, Jet), picked with FX SELECT (SHIFT + cue 1 / 2).
-- **The controller's own sound card**: OpenDJ offers once to send the master to its outputs 1-2 and the headphone cue to 3-4 (or suggests split cue when the interface only has 2 channels).
-- **Controller test** (Settings → Controllers): every incoming message live, which function it hits, a checklist of mapped controls, an LED check, and a capture recorder that saves a JSON file to attach to a bug report.
-- **Deck select for 2-deck controllers**: in 4-deck mode, switch the left or right side of a controller to deck 3 or 4 (Settings → Controllers, or map a button to "Deck select").

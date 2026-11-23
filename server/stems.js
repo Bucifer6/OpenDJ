@@ -412,12 +412,14 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     const sampleRate = Math.floor(Number(body.sampleRate)) || STEM_RATE;
     if (!(frames > 0 && frames <= sampleRate * 60 * maxMinutes)) throw bad(`Bad length (max. ${maxMinutes} minutes)`);
     if (sampleRate !== STEM_RATE) throw bad(`Stems must be ${STEM_RATE} Hz`);
+    // never two separations of one track: the server's engine already on it keeps it (a page asking too gets 409)
+    if (engine.busyWith(t.id)) throw bad('The server is already preparing the stems for this track', 409);
     await dropUpload(t.id);
     const token = crypto.randomBytes(12).toString('hex');
     const dir = path.join(root, `.upload-${t.id}-${token.slice(0, 8)}`);
     await fs.promises.mkdir(dir, { recursive: true });
     for (const s of STEM_NAMES) await fs.promises.writeFile(path.join(dir, `${s}.raw`), '');
-    uploads.set(t.id, { token, dir, frames, sampleRate, model: String(body.model || 'unknown').slice(0, 80), backend: String(body.backend || '').slice(0, 40), at: Date.now() });
+    uploads.set(t.id, { token, dir, frames, sampleRate, model: String(body.model || 'unknown').slice(0, 80), backend: String(body.backend || '').slice(0, 40), at: Date.now(), by: 'page' });
     emit('stems', { id: t.id, preparing: true });
     return { token };
   });
@@ -586,6 +588,8 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
       try {
         const src = input ? await input(t) : null;
         if (!src) throw bad('This track can only be separated in the browser');
+        // a page is uploading this track's stems (its own WebGPU): let it finish instead of cancelling it
+        if (uploads.get(id)?.by === 'page') throw Object.assign(new Error('Being prepared in a window'), { cancelled: true, quiet: true });
         await dropUpload(id);
         await fs.promises.mkdir(dir, { recursive: true });
         uploads.set(id, { token, dir, frames: 0, sampleRate: STEM_RATE, model: native?.stub ? 'stub-bands' : modelSpec(settings()).id, backend: '', at: Date.now() });
@@ -621,6 +625,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
           if (!queue.includes(id)) queue.unshift(id);
         }
         else if (background && !cur?.cancelled && !e.cancelled) { bg.failed.add(id); console.warn('[stems] background', id, e.message); }
+        else if (e.quiet) { /* a window has it */ }
         else if (cur?.cancelled || e.cancelled) emit('stems-failed', { id, title: cur?.title, cancelled: true });
         else { console.warn('[stems]', id, e.message); emit('stems-failed', { id, title: cur?.title, message: e.message }); }
       } finally { cur = null; changed(); }
@@ -690,6 +695,8 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
         }
         return this.status();
       },
+      /** Whether the engine is separating this track right now. */
+      busyWith: (id) => !!cur && cur.id === id && !cur.cancelled,
       /** Try the graphics card again (after a driver update): forget the recorded GPU failure, reload the model. */
       retryGpu() {
         gpuFailed = null; crashRetried.clear();

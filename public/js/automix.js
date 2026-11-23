@@ -942,7 +942,9 @@ export class AutoMix extends Emitter {
     const o = { ...this.fresh(prevTrack), ...(onCur ? this.info(cur) : {}) }, n = { ...this.fresh(t), ...(onNext ? this.info(nd) : {}) };
     for (const k of ['energy', 'key', 'genre', 'stems']) { if (o[k] == null) o[k] = this.fresh(prevTrack)?.[k]; if (n[k] == null) n[k] = this.fresh(t)?.[k]; }
     const autoLoad = this.engine.settings?.stemsAutoLoad !== false;
-    const stems = (deckOn, track) => !!(deckOn?.stemsReady || (autoLoad && track?.stems?.ready));
+    // transitions built from AI stems (stem swap, drum bridge, acapella) only when asked for: isolated stems carry
+    // separation artefacts that can be heard on their own
+    const stems = (deckOn, track) => this.opts.stemTransitions === true && !!(deckOn?.stemsReady || (autoLoad && track?.stems?.ready));
     try {
       const plan = planBestTransition(o, n, {
         stemsOut: stems(onCur ? cur : null, o), stemsIn: stems(onNext ? nd : null, n), keySync: !!this.opts.keySync,
@@ -1096,7 +1098,7 @@ export class AutoMix extends Emitter {
       if (s.plan && (!s.override || this.overrides.get(next) === 'auto')) {
         const adaptive = planAdaptiveTransition(oi, ii, {
           position: cur.position, entry: cur._autoMixEntry || 0, rate: cur.rate, keepSync: this.opts.keepSync,
-          stemsOut: !!cur.stemsReady, stemsIn: !!nd?.stemsReady,
+          stemsOut: this.opts.stemTransitions === true && !!cur.stemsReady, stemsIn: this.opts.stemTransitions === true && !!nd?.stemsReady,
           fixedBars: nudge?.bars || (this.opts.lengthMode === 'auto' ? null : length.bars), exitShift: nudge?.shift || 0,
           doubleDrops: this.opts.doubleDrops === false ? false : undefined,
           prevStyle: this._lastStyle, vary: !!this.opts.varyStyles, recent: this._recent, learning: this.app.settings.mixLearning,
@@ -1118,8 +1120,9 @@ export class AutoMix extends Emitter {
     if (this.transition) return this.stepTransition();
     if (this.tempoRamp) this.stepTempoRamp();
     if (this.levelEase) this.stepLevelEase();
-    if (this.opts.tricks !== 'off') this.stepTricks();
-    if (this.opts.tricks !== 'off' && this.opts.tease !== false) this.stepTease();
+    // added effects are opt-in (Settings → Automix): tricks need a mode, teases need tease: true
+    if ((this.opts.tricks || 'off') !== 'off') this.stepTricks();
+    if ((this.opts.tricks || 'off') !== 'off' && this.opts.tease === true) this.stepTease();
     const next = this.nextTrack();
     if (this.forceTransitionRequested) {
       const incoming = this.other(cur);
@@ -1238,7 +1241,7 @@ export class AutoMix extends Emitter {
   }
   /** Plan the tricks for the on-air track, in the window that is free of transitions. */
   planTricksNow(deck) {
-    const mode = this.opts.tricks || 'subtle', nt = this.nextTransition();
+    const mode = this.opts.tricks || 'off', nt = this.nextTransition();
     const key = `${deck.track.id}|${mode}|${Math.round((nt?.begin ?? -1) * 2)}|${Math.round((deck.position || 0) / 30)}`;
     if (this.trickPlan?.key === key) return;
     const t = { ...this.info(deck) };
@@ -1345,7 +1348,7 @@ export class AutoMix extends Emitter {
       const nt = this.nextTransition(); if (!nt) return;
       const oi = this.info(cur), ii = this.info(inn);
       const plan = planTease({ ...oi, id: cur.track.id, vocalMap: oi.vocalMap || decodeVocalMap(oi.stems?.vocals) }, { ...ii, id: next.id, vocalMap: ii.vocalMap || decodeVocalMap(ii.stems?.vocals) },
-        { from: cur.position + 4 * (240 / cur.bpm), to: nt.begin, mode: this.opts.tricks || 'subtle', stemsIn: !!inn.stemsReady, keyClash: keysClash(cur.playingCamelot || cur.track?.key, inn.camelot || inn.track?.key) });
+        { from: cur.position + 4 * (240 / cur.bpm), to: nt.begin, mode: this.opts.tricks || 'off', stemsIn: !!inn.stemsReady, keyClash: keysClash(cur.playingCamelot || cur.track?.key, inn.camelot || inn.track?.key) });
       this.tease = { key: pairKey, plan, on: false, done: !plan };
     }
     const t = this.tease;

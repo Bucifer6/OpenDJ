@@ -552,3 +552,22 @@ test('stems server: a requested track interrupts a background one', { skip: !has
     assert.equal(st.native.background.full, false); assert.equal(st.native.background.capBytes, 40 * 2 ** 30);
   } finally { h.close(); }
 });
+
+test('stems server: a window cannot start an upload for a track the engine is separating, nor the engine cancel a window\'s', { skip: !hasFfmpeg && 'ffmpeg not installed' }, async () => {
+  let h;
+  h = await harness({ ffmpeg: true, native: { stub: true, idleMs: 50 }, input: async () => ({ file: path.join(h.dir, 'song.wav') }) });
+  try {
+    // a window's upload in progress: the engine skips that track instead of cancelling it
+    const { token } = await h.json('POST', '/api/stems/trk1/begin', { model: 'm', sampleRate: 44100, frames: 44100 });
+    assert.ok(token);
+    fs.writeFileSync(path.join(h.dir, 'song.wav'), Buffer.concat([wavHeader(44100 * 4), Buffer.alloc(44100 * 4)]));
+    await h.json('POST', '/api/stems/queue', { ids: ['trk1'], force: true });
+    for (let i = 0; i < 100 && (await h.json('GET', '/api/stems/status')).native.current; i++) await new Promise((r) => setTimeout(r, 50));
+    const part = await h.json('PUT', `/api/stems/trk1/part?token=${token}&stem=vocals&frame=0`, Buffer.alloc(400));
+    assert.equal(part.status, 200, 'the window\'s upload is still alive');
+    // and the other way round: while the engine is on a track, a window's begin gets 409
+    h.stems.engine.busyWith = (id) => id === 'trk1';
+    const r = await h.json('POST', '/api/stems/trk1/begin', { model: 'm', sampleRate: 44100, frames: 44100 });
+    assert.equal(r.status, 409); assert.match(r.error, /already preparing/);
+  } finally { h.close(); }
+});

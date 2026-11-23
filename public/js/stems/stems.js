@@ -16,7 +16,7 @@ const j = async (method, url, body) => {
   else if (body !== undefined) { opts.body = JSON.stringify(body); opts.headers['Content-Type'] = 'application/json'; }
   const r = await fetch(url, opts);
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  if (!r.ok) throw Object.assign(new Error(data.error || `HTTP ${r.status}`), { status: r.status });
   return data;
 };
 export const stemsApi = {
@@ -100,6 +100,9 @@ export class StemsManager extends Emitter {
    * that was known) move to this window's WebGPU (browserGpu), so they are not left to the CPU.
    */
   gpuNews(s) {
+    // what the server is working on: this window never takes those (two separations of one track would cancel
+    // each other's upload)
+    this.serverBusy = new Set([s.current?.id, ...(s.queue || [])].filter(Boolean));
     const n = this._status?.native;
     if (!n || !('gpu' in s)) return;
     n.gpuFailed = s.gpuFailed || null; n.gpu = s.gpu;
@@ -109,7 +112,7 @@ export class StemsManager extends Emitter {
     this._moving = true;
     appLog(`[stems] the server cannot use the graphics card: ${ids.length} queued track(s) move to this window's graphics card (WebGPU)`);
     stemsApi.cancelQueued(ids)
-      .then(() => this.enqueue(ids, { interactive: false }))
+      .then(() => { for (const id of ids) this.serverBusy?.delete(id); return this.enqueue(ids, { interactive: false }); })
       .catch((e) => console.warn('[stems] moving the queue', e.message))
       .finally(() => { this._moving = false; });
   }
@@ -153,7 +156,7 @@ export class StemsManager extends Emitter {
     if (this._status?.native?.available && this.settings.stemsAutoPrepare !== false) await this.ensureGpuKnown();
     if (this.browserGpu && this.settings.stemsAutoPrepare !== false) { // on this window's graphics card
       const lib = this.app.library;
-      const todo = [...new Set(ids)].filter((id) => !this.hasStems(lib?.track(id)) && this.current?.id !== id && !this.queue.includes(id));
+      const todo = [...new Set(ids)].filter((id) => !this.hasStems(lib?.track(id)) && this.current?.id !== id && !this.queue.includes(id) && !this.serverBusy?.has(id));
       return todo.length ? this.enqueue(todo, { interactive: false }).catch(() => 0) : 0;
     }
     if (!this.serverEngine || this.settings.stemsAutoPrepare === false || !this._status?.native?.available) return 0;
@@ -205,10 +208,12 @@ export class StemsManager extends Emitter {
         return r.added || list.length;
       }
     }
-    this.queue.push(...list);
+    const mine = list.filter((id) => !this.serverBusy?.has(id)); // the server is already on the others
+    if (!mine.length) return 0;
+    this.queue.push(...mine);
     this.emit('queue', this.state());
     this.pump();
-    return list.length;
+    return mine.length;
   }
 
   cancel(id) {
@@ -252,7 +257,9 @@ export class StemsManager extends Emitter {
           appLog(`[stems] job ${id}: done on ${r.backend || '?'} in ${Math.round((r.ms || 0) / 1000)} s for ${Math.round(r.seconds || 0)} s of audio`);
           this.emit('finished', { id, title: this.current.title, ...this.lastRun });
         } catch (e) {
-          if (e.code === 'NO_GPU') {
+          if (e.status === 409 && /already preparing/.test(e.message)) {
+            appLog(`[stems] job ${id}: the server is already preparing it, not doubled here`); // its event brings the stems
+          } else if (e.code === 'NO_GPU') {
             // this window's graphics card cannot do it after all: the server separates this track (and the rest) on its CPU
             console.warn('[stems]', e.message, '— the server prepares the stems instead');
             if (!/not available/.test(e.message)) this.webgpuVerdict('bad');
