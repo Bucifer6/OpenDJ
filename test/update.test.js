@@ -17,8 +17,10 @@ import { installKind, updatePlan, installHint, downloadVerified, fetchReleaseFil
 import { start } from '../server/index.js';
 import { sanitizeSetting } from '../public/js/shared/settings-schema.js';
 
-// the fixtures model the 0.4.x releases: drop the unreleased "New in 0.5" section being written for the next release
-const NOTES = fs.readFileSync(new URL('../docs/RELEASE_NOTES.md', import.meta.url), 'utf8').replace(/### New in 0\.5\n[\s\S]*?(?=### New in 0\.4)/, '');
+// the fixtures model the 0.4.x releases with a release description holding the whole history (as releases up to
+// 0.5.7 had; a fixed copy, since docs/RELEASE_NOTES.md keeps only the 10 most recent versions): drop everything
+// newer than 0.4.3
+const NOTES = fs.readFileSync(new URL('./fixtures/release-notes-history.md', import.meta.url), 'utf8').replace(/### New in 0\.5\.7\n[\s\S]*?(?=### New in 0\.4\.3)/, '');
 const DL = (v, n) => `https://github.com/Bucifer6/OpenDJ/releases/download/v${v}/${n}`;
 const ALL_ASSETS = (v) => [`OpenDJ-Setup-${v}-x64.exe`, `OpenDJ-Setup-${v}-arm64.exe`, `OpenDJ-Setup-${v}.exe`, `OpenDJ-Portable-${v}.exe`, `OpenDJ-${v}-mac-arm64.dmg`, `OpenDJ-${v}-mac-arm64.zip`,
   `OpenDJ-${v}-mac-x64.dmg`, `OpenDJ-${v}-mac-x64.zip`, `OpenDJ-${v}-linux-x86_64.AppImage`, `OpenDJ-${v}-linux-arm64.AppImage`, `OpenDJ-${v}-linux-amd64.deb`, `OpenDJ-${v}-linux-arm64.deb`,
