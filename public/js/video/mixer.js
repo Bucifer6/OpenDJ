@@ -3,7 +3,7 @@
 // driven by the crossfader. Per-layer FX, text/logo overlay and a "now playing" lower third.
 // The canvas feeds the preview panel and (via captureStream) the pop-out output window.
 import { Emitter } from '../util.js';
-import { computeLayers, dominantLayer, nowPlayingText, lowerThirdAlpha, TRANSITIONS, FX } from './video-core.js';
+import { computeLayers, dominantLayer, nowPlayingText, lowerThirdAlpha, TRANSITIONS, FX, visualStyle } from './video-core.js';
 import { VideoDeckLayer } from './video-deck.js';
 import { GLRenderer, CanvasRenderer } from './renderers.js';
 import { withAlpha } from './visualizer.js';
@@ -15,11 +15,12 @@ function loadConfig() {
   const def = {
     transition: 'crossfade', resolution: '720p', renderer: 'auto',
     fx: [{}, {}, {}, {}], modes: ['auto', 'auto', 'auto', 'auto'],
+    visualStyles: ['ring', 'ring', 'ring', 'ring'],
     overlay: { text: '', textPos: 'tl', logo: '', logoPos: 'tr', lowerThird: true, hold: 8 },
   };
   try {
     const s = JSON.parse(localStorage.getItem(STORE) || '{}');
-    return { ...def, ...s, overlay: { ...def.overlay, ...(s.overlay || {}) }, fx: def.fx.map((d, i) => ({ ...(s.fx?.[i] || {}) })), modes: def.modes.map((d, i) => s.modes?.[i] || d) };
+    return { ...def, ...s, overlay: { ...def.overlay, ...(s.overlay || {}) }, fx: def.fx.map((d, i) => ({ ...(s.fx?.[i] || {}) })), modes: def.modes.map((d, i) => s.modes?.[i] || d), visualStyles: def.visualStyles.map((d, i) => visualStyle(s.visualStyles?.[i])) };
   } catch { return def; }
 }
 
@@ -42,7 +43,7 @@ export class VideoMixer extends Emitter {
     this.og = this.overlay.getContext('2d');
     this.overlay.width = this.canvas.width; this.overlay.height = this.canvas.height;
     this.overlayDirty = true; this.logoImg = null; this.setLogo(this.config.overlay.logo, false);
-    this.layers = this.engine.decks.map((d, i) => { const l = new VideoDeckLayer(app, d, this.host); l.mode = this.config.modes[i]; if (l.mode !== 'auto') l.setTrack(d.track, true); return l; });
+    this.layers = this.engine.decks.map((d, i) => { const l = new VideoDeckLayer(app, d, this.host); l.setVisualStyle(this.config.visualStyles[i]); l.mode = this.config.modes[i]; if (l.mode !== 'auto') l.setTrack(d.track, true); return l; });
     this.extra = null; // external CSS layer (YouTube): { active, volume, xfAssign, setWeight(w), title() }
     this.weights = []; this.outputs = new Set(); this.running = false;
     this.lt = { text: '', start: -1e9, key: null };
@@ -69,6 +70,7 @@ export class VideoMixer extends Emitter {
   setTransition(t) { if (TRANSITIONS.some((x) => x.id === t)) { this.config.transition = t; this.save(); this.emit('config'); } }
   setFx(i, id, on) { this.config.fx[i][id] = !!on; this.save(); this.emit('config'); }
   setMode(i, m) { this.config.modes[i] = m; this.layers[i].setMode(m); this.save(); this.emit('config'); }
+  setVisualStyle(i, id) { if (!this.layers[i]) return; this.config.visualStyles[i] = visualStyle(id); this.layers[i].setVisualStyle(id); this.save(); this.emit('config'); }
   setOverlay(patch) { Object.assign(this.config.overlay, patch); this.overlayDirty = true; this.save(); this.emit('config'); }
   setLogo(dataUrl, save = true) {
     this.config.overlay.logo = dataUrl || '';

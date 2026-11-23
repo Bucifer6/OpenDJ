@@ -104,7 +104,12 @@ export class TimecodeDecoder {
       this.pl = l; this.pr = r;
       // cycle counting + bits (only on a usable signal)
       if (this._sigHold > 0 && m2 > gateSq && (re !== 0 || im !== 0)) {
-        this.phi += Math.atan2(im, re) / TAU;
+        // Unwrap the measured carrier phase itself: capture can start anywhere
+        // in a cycle, and channel calibration can change its phase later.
+        // Integrating only phase differences from zero splits amplitude bits
+        // across the wrong boundaries and intermittently loses absolute lock.
+        const phase = Math.atan2(r, l) / TAU;
+        this.phi = phase + Math.round(this.phi - phase);
         // cycle k spans phase k-½ .. k+½; its mean amplitude is sliced into a bit when the phase leaves it
         // (with hysteresis, so phase noise near a boundary cannot produce runs of tiny partial cycles)
         const dc = this.phi - this.cyc;
@@ -176,7 +181,7 @@ export class TimecodeDecoder {
   _readBit(k, amp) {
     const def = this.def;
     // envelope-normalised amplitude with an adaptive slicer
-    if (!this.env) this._warm = 0;
+    if (!this.env) { this._warm = 0; this.hi = 1.1; this.lo = 0.9; }
     if (this._warm < WARM_CYCLES) { // (re)acquire: learn the mean level before slicing
       this._warm++; this.env = this.env + (amp - this.env) / this._warm;
       return;

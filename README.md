@@ -5,14 +5,14 @@
 # OpenDJ
 
 **Free, open-source DJ software for your own music.**
-Decks, mixer, AI stems, automix, controllers, video and lights, with a library that pulls from your folders, USB sticks, NAS and media servers.
+Mix manually or let adaptive Auto DJ choose tracks and plan musical handovers. Decks, mixer, AI stems, controllers, video and lights, with music from your folders, USB sticks, NAS and media servers.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/Bucifer6/OpenDJ?include_prereleases&sort=semver)](https://github.com/Bucifer6/OpenDJ/releases/latest)
 [![Build](https://github.com/Bucifer6/OpenDJ/actions/workflows/build.yml/badge.svg)](https://github.com/Bucifer6/OpenDJ/actions/workflows/build.yml)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Web%2FDocker-informational)
 
-[**Download**](https://github.com/Bucifer6/OpenDJ/releases/latest) · [Features](#features) · [Quick start](#quick-start) · [Comparison](docs/GAP_ANALYSIS.md) · [Contributing](CONTRIBUTING.md)
+[**Download**](https://github.com/Bucifer6/OpenDJ/releases/latest) · [Quick start](#quick-start) · [Auto DJ](#automix) · [Features](#features) · [QA](docs/QA_0.5.4.md) · [Contributing](CONTRIBUTING.md)
 
 <img src="docs/images/hero.jpg" alt="OpenDJ mid-set: two decks in sync with scrolling 3-band waveforms, phrase markers, hot cues, mixer and library" width="100%">
 
@@ -25,7 +25,18 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 - **Free and open source.** MIT licensed. No subscription, no account, no feature locked behind a paywall.
 - **Your music, wherever it lives.** Local folders, USB sticks and NAS shares, plus your own **Plex, Jellyfin, Emby, Subsonic/Navidrome and MediaMax** servers. Stream from them or download tracks for offline gigs.
 - **Runs everywhere.** Desktop app for Windows, macOS and Linux, or a self-hosted web app (Docker / NAS) you open in Chrome or Edge.
+- **Automatic mixing that follows the music.** Select tracks live using tempo, harmony and energy, then find suitable entry and exit sections throughout the tracks.
 - **Plays nicely with your other tools.** Imports rekordbox, Traktor, Serato and VirtualDJ libraries; exports rekordbox XML, M3U and CDJ-ready USB sticks.
+
+Choose how you want to mix:
+
+| Mode | What you control | What OpenDJ handles |
+| --- | --- | --- |
+| Manual | Track choice, cue points, decks, EQ, effects and crossfader | Playback, analysis, optional sync and key lock |
+| Prepared set | Playlist order and any transition overrides | Preloading, musical handovers and tempo recovery |
+| Adaptive Auto DJ | Music pool, energy shape and musical priorities | Live next-track selection, entry/exit planning, transition style and length |
+
+Start with [Quick start](#quick-start), or go straight to the [Auto DJ setup](#automix). You can take over during an automatic set.
 
 <p align="center"><img src="docs/images/demo.gif" alt="Animated demo: waveforms scrolling while the crossfader and EQs mix from deck 1 to deck 2" width="90%"></p>
 
@@ -78,7 +89,15 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 
 ### Automix
 
-**Adaptive Auto DJ:** Auto style searches section boundaries throughout both tracks for compatible handovers, including interior entry points. Live mode also compares executable transition quality when choosing the next track. See [the adaptive DJ guide](docs/ADAPTIVE_DJ.md) for setup, research, architecture, licensing and limitations.
+**Adaptive Auto DJ** chooses a next track and a playable handover from the music's beat grid, phrases, harmony, local energy and estimated vocal activity. It searches section boundaries throughout both tracks, including interior entry points, then drives the deck transport, EQ, filters and effects during playback.
+
+To use it:
+
+1. Add your music and let analysis finish. Check or lock the beat grid on tracks with difficult rhythms.
+2. Shift-click or right-click **AUTOMIX** to open its options. Select **Smart mix live (pick each next track while playing)**, **Auto** style and **Auto (from the tracks)** length for adaptive selection and timing.
+3. Start the mix. The queue explains each planned transition; use **MIX NOW**, reorder the queue or override a transition whenever you want to take control.
+
+Plans adapt to the available analysis and prepared stems. Missing or uncertain information uses conservative fallbacks; stem swaps require stems loaded on both decks. The planner is a local heuristic and needs no cloud service or language model. See [the adaptive DJ guide](docs/ADAPTIVE_DJ.md) for research, architecture, licensing and performance limits, and the [QA record](docs/QA_0.5.4.md) for verified coverage and remaining hardware/model checks.
 
 <img src="docs/images/automix.png" alt="Automix dialog with smart ordering, energy curve and transition options" width="60%">
 
@@ -108,6 +127,10 @@ Decks, mixer, AI stems, automix, controllers, video and lights, with a library t
 - **Ableton Link**: follow or lead the session tempo with bar-phase lock (own protocol implementation). *Not yet tested against Ableton Live itself.*
 
 ### Video & lighting
+
+**Eleven audio-reactive visualisers:** colourful **Aurora Ribbons**, **Cosmic Vortex**, **Fractal Mandala**, **Neon Terrain**, **Liquid Plasma** and **Warp Drive**, plus **Spectrum Skyline**, **Neon Waveform**, **Particle Orbit**, **Prism Tunnel** and the original cover spectrum ring. Open **VIDEO → Mix** and choose a style beside each deck. Select **Visualizer only** to use it even for a video track. Choices survive a restart, and the same picture reaches the preview and projector output.
+
+<img src="docs/images/visualizers.jpg" alt="Six colourful audio-reactive scenes: aurora ribbons, cosmic vortex, fractal mandala, neon terrain, liquid plasma and warp drive" width="100%">
 
 <table>
 <tr>
@@ -364,9 +387,9 @@ Tests:
 
 ```bash
 npm ci              # install the exact runtime and test dependencies
-npm test            # unit tests: analysis, media-server clients against mock servers, rekordbox round trip, CDJ export, DVS, Link…
+npm test            # unit/API/security/DSP tests plus syntax checks for every browser JS module
 npx playwright install chromium  # one-time browser download for end-to-end tests
-npm run test:e2e    # end-to-end checks in headless Chromium (smoke, performance, controllers, lighting, video, web app, DVS, Link/lyrics, recording, stems, analysis, sampler, automix)
+npm run test:e2e    # all 22 browser/desktop suites, including every advertised MCP tool
 ```
 
 The smoke test covers scan → load → analyse → play → sync → FX → record → automix; `scripts/e2e-automix.mjs` checks every mixing style on the master output (dropouts, level, clipping, clicks), smart mix, loading tracks while automix runs and media-server playlists; `scripts/e2e-sampler.mjs [outDir]` renders the sampler bank, measures loudness / spectrum and writes WAVs plus spectrogram PNGs; `node scripts/e2e-performance.mjs` measures pitch for key shift and key lock and checks key sync, quantized cues, saved loops, slicer, instant doubles, stems, Color FX, mic/talkover and the sequencer. `scripts/e2e-update.mjs [shotsDir]` runs the update prompt against a fake GitHub API (`OPENDJ_UPDATE_URL`, tests only, loopback URLs only): newer / same / older versions, *What's new*, Later / Skip, deferral during playback, desktop (mocked IPC and real Electron), hosted and phone modes.

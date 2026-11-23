@@ -3,6 +3,20 @@
 // Everything here is unit-tested in test/video-core.test.js.
 
 export const VIDEO_EXT = new Set(['mp4', 'm4v', 'mov', 'webm']);
+export const VISUAL_STYLES = [
+  { id: 'ring', name: 'Cover spectrum ring' },
+  { id: 'bars', name: 'Spectrum skyline' },
+  { id: 'scope', name: 'Neon waveform' },
+  { id: 'orbit', name: 'Particle orbit' },
+  { id: 'tunnel', name: 'Prism tunnel' },
+  { id: 'aurora', name: 'Aurora ribbons' },
+  { id: 'galaxy', name: 'Cosmic vortex' },
+  { id: 'mandala', name: 'Fractal mandala' },
+  { id: 'terrain', name: 'Neon terrain' },
+  { id: 'plasma', name: 'Liquid plasma' },
+  { id: 'warp', name: 'Warp drive' },
+];
+export const visualStyle = id => VISUAL_STYLES.some(s => s.id === id) ? id : 'ring';
 export const TRANSITIONS = [
   { id: 'crossfade', name: 'Crossfade (follow audio)' },
   { id: 'cut', name: 'Cut' },

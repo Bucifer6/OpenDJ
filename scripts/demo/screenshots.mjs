@@ -3,7 +3,7 @@
 //
 //   node scripts/demo/screenshots.mjs [shot ...] [--lib=<dir>] [--out=<dir>] [--no-gif]
 //
-// Shots: hero four-decks library stems video lighting controllers cdj-export recording dvs automix
+// Shots: hero four-decks library stems video visualizers lighting controllers cdj-export recording dvs automix
 //        settings-appearance themes gif   (default: all)
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,7 +22,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const a = argv.find((x) => x.startsWith(`--${k}=`)); return a ? a.slice(k.length + 3) : d; };
-const ALL = ['hero', 'four-decks', 'library', 'stems', 'video', 'lighting', 'controllers', 'cdj-export', 'recording', 'automix', 'settings-appearance', 'themes', 'gif', 'dvs'];
+const ALL = ['hero', 'four-decks', 'library', 'stems', 'video', 'visualizers', 'lighting', 'controllers', 'cdj-export', 'recording', 'automix', 'settings-appearance', 'themes', 'gif', 'dvs'];
 let wanted = argv.filter((a) => !a.startsWith('--'));
 if (!wanted.length) wanted = ALL.filter((s) => !(s === 'gif' && argv.includes('--no-gif')));
 const OUT = path.resolve(opt('out', path.join(ROOT, 'docs/images')));
@@ -44,7 +44,8 @@ fs.writeFileSync(tcWav, encodeWav(tc.L, tc.R, 44100));
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${tcWav}`] });
 const context = await browser.newContext({ viewport: VIEW, deviceScaleFactor: DSF, permissions: ['microphone'] });
 const page = await context.newPage();
-page.on('pageerror', (e) => console.error('[page error]', String(e)));
+const failures = [];
+page.on('pageerror', (e) => { failures.push(String(e)); console.error('[page error]', String(e)); });
 page.on('console', (m) => { if (m.type() === 'error' && !/favicon|404/.test(m.text())) console.error('[console]', m.text()); });
 const sleep = (ms) => page.waitForTimeout(ms);
 const ev = (fn, arg) => page.evaluate(fn, arg);
@@ -134,6 +135,7 @@ async function heroState() {
   await loadDeck(1, T('Copper Skyline'));
   await ev(() => {
     const a = window.opendj, E = a.engine, [d1, d2] = E.decks;
+    E.decks.forEach((d) => d.showPanel?.('cues'));
     d1.setMaster?.();
     d1.seek(d1.beatLen * 4 * 46); // inside the first drop
     d2.seek(d2.beatLen * 4 * 8);
@@ -204,6 +206,7 @@ const shots = {
     await page.waitForFunction(() => window.opendj.engine.decks[0].stemsReady, null, { timeout: 60000 });
     await ev(() => {
       const a = window.opendj, E = a.engine, d = E.decks[0];
+      d.showPanel('stems');
       d.seek(d.beatLen * 4 * 72); d.play(); d.sync?.();
       d.setStemMute(1, true); // drums out
       d.setStemLevel(2, 0.6);
@@ -221,13 +224,40 @@ const shots = {
     await ev(async () => {
       const a = window.opendj;
       const api = (a.videoUi ||= (await import('/js/video/video-ui.js')).setupVideo(a));
+      const m = a.video.mixer; m.setVisualStyle(0, 'galaxy'); m.setVisualStyle(1, 'aurora'); m.setOverlay({ text: 'WAREHOUSE · SAT' });
       api.openPanel();
-      const m = a.video.mixer; m.setFx(0, 'kaleido', true); m.setOverlay({ text: 'WAREHOUSE · SAT' });
       m.showNowPlaying('Kairo Vance – Pressure Index');
     });
+    await page.waitForFunction(() => document.querySelector('[data-visual-deck="0"]')?.value === 'galaxy' && document.querySelector('[data-visual-deck="1"]')?.value === 'aurora');
     await sleep(2500);
     await save('video', { type: 'jpeg' });
     await ev(() => { const a = window.opendj; a.video.mixer.setFx(0, 'kaleido', false); a.video.mixer.setOverlay({ text: '' }); a.video.api.closePanel(); });
+  },
+
+  async visualizers() {
+    await heroState();
+    await ev(async () => { (await import('/js/video/video-ui.js')).setupVideo(window.opendj); });
+    const styles = await ev(async () => (await import('/js/video/video-core.js')).VISUAL_STYLES.filter(s => ['aurora', 'galaxy', 'mandala', 'terrain', 'plasma', 'warp'].includes(s.id)));
+    const cards = [];
+    for (const style of styles) {
+      const url = await ev(async (id) => {
+        const a = window.opendj, m = a.video.mixer;
+        m.setMode(0, 'visual'); m.setVisualStyle(0, id);
+        const v = m.layers[0].visual;
+        for (let k = 0; k < 12; k++) { v.draw(a.engine.decks[0], performance.now()); await new Promise(r => setTimeout(r, 16)); }
+        return v.canvas.toDataURL('image/png');
+      }, style.id);
+      cards.push(`<figure><img src="${url}"><figcaption>${style.name}</figcaption></figure>`);
+    }
+    const gallery = await context.newPage();
+    await gallery.setViewportSize({ width: 1328, height: 830 });
+    await gallery.setContent(`<!doctype html><style>body{margin:0;background:#080d15;color:#edf5ff;font:600 22px system-ui}main{display:grid;grid-template-columns:1fr 1fr;gap:24px;padding:24px}figure{margin:0}img{display:block;width:100%;border:1px solid #243246;border-radius:12px}figcaption{padding:12px 0;text-align:center}</style><main>${cards.join('')}</main>`);
+    await gallery.locator('img').evaluateAll(imgs => Promise.all(imgs.map(img => img.decode())));
+    const file = path.join(OUT, 'visualizers.jpg');
+    await gallery.locator('main').screenshot({ path: file, type: 'jpeg', quality: 90, scale: 'css' });
+    sizes.push(['visualizers.jpg', Math.round(fs.statSync(file).size / 1024)]); log(`visualizers.jpg ${sizes.at(-1)[1]} KB`);
+    await gallery.close();
+    await ev(() => { const m = window.opendj.video.mixer; m.setVisualStyle(0, 'ring'); m.setVisualStyle(1, 'ring'); m.setMode(0, 'auto'); });
   },
 
   async lighting() {
@@ -306,7 +336,12 @@ const shots = {
     await heroState();
     await ev(() => { window.opendj.engine.decks.forEach((d) => d.pause()); });
     await view('playlist', 'Friday — Warehouse');
-    await ev(() => { window.opendj.dialogs.automixQueue(window.opendj.library.rows); }); // resolves when the dialog closes: don't wait for it
+    await ev(() => {
+      const a = window.opendj;
+      a.dialogs.automixQueue(a.library.rows, { mode: 'live', title: 'Friday — Warehouse' });
+    }); // resolves when the dialog closes: don't wait for it
+    await page.locator('[data-am="style"]').selectOption('auto');
+    await page.locator('[data-am="bars"]').selectOption('auto');
     await sleep(800);
     await save('automix', { locator: page.locator('.overlay .modal').last() });
   },
@@ -380,11 +415,16 @@ const shots = {
 for (const name of wanted) {
   if (!shots[name]) { log(`(no shot "${name}")`); continue; }
   log(`--- ${name}`);
-  try { await Promise.race([shots[name](), new Promise((_, rej) => setTimeout(() => rej(new Error('timed out after 5 min')), 300000))]); } catch (e) { console.error(`shot ${name} failed:`, e); }
+  let timer;
+  try {
+    await Promise.race([shots[name](), new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('timed out after 5 min')), 300000); })]);
+  } catch (e) { failures.push(`${name}: ${e.message}`); console.error(`shot ${name} failed:`, e); }
+  finally { clearTimeout(timer); }
   await closeOverlays();
 }
 log('sizes:', sizes.map(([f, k]) => `${f} ${k} KB`).join(', '));
 await browser.close();
 app.shutdown?.();
 app.server.close();
-process.exit(0);
+if (failures.length) console.error('Screenshot failures:', failures);
+process.exit(failures.length ? 1 : 0);

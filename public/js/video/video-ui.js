@@ -3,7 +3,7 @@
 import { icon } from '../ui/icons.js';
 import { el, uiZoom } from '../util.js';
 import { VideoMixer, RESOLUTIONS } from './mixer.js';
-import { TRANSITIONS, FX, parseYouTube } from './video-core.js';
+import { TRANSITIONS, FX, VISUAL_STYLES, parseYouTube } from './video-core.js';
 import { YouTubeSource, searchYouTube } from './youtube.js';
 import { OutputManager } from './output.js';
 
@@ -115,11 +115,13 @@ export function setupVideo(app) {
       meters.append(el('div', { class: 'vid-m yt', hidden: true }, el('b', {}, '▶'), yl, el('span', { class: 'vid-m-bar' }, yb)));
     }
     function live() {
-      if (meterEls.length !== mixer.deckCount + 1) buildMeters();
+      if (meterEls.length !== mixer.deckCount + 1) { buildMeters(); if (cur === 'mix' || cur === 'fx') show(cur); }
       const w = mixer.weights;
       let any = false;
       for (let i = 0; i < mixer.deckCount; i++) {
         const l = mixer.layers[i], m = meterEls[i];
+        const picker = root.querySelector(`[data-visual-deck="${i}"]`);
+        if (picker && picker.value !== l.visualStyle) picker.value = l.visualStyle;
         const a = w[i]?.alpha || 0; any ||= a > 0.01;
         m.bar.style.width = `${Math.round(a * 100)}%`;
         m.lbl.textContent = l.kind === 'video' ? `Video${l.lastDecision ? ` ${l.lastDecision.mode === 'locked' || l.lastDecision.mode === 'nudge' ? `±${Math.round(Math.abs(l.drift) * 1000)}ms` : l.lastDecision.mode}` : ''}` : l.kind === 'visual' ? 'Visualizer' : '—';
@@ -157,13 +159,16 @@ export function setupVideo(app) {
           el('option', { value: 'auto', selected: l.mode === 'auto' }, 'Video, else visualizer'),
           el('option', { value: 'visual', selected: l.mode === 'visual' }, 'Visualizer only'),
           el('option', { value: 'off', selected: l.mode === 'off' }, 'Off (black)'));
-        rows.push(el('div', { class: 'vid-deckrow', style: `--deck-color: var(--deck${i + 1})` }, el('b', {}, `Deck ${i + 1}`), ms));
+        ms.setAttribute('aria-label', `Deck ${i + 1} video source`);
+        const vs = el('select', { class: 'sel tiny', 'data-visual-deck': i, 'aria-label': `Deck ${i + 1} visualizer`, onchange: () => mixer.setVisualStyle(i, vs.value) },
+          ...VISUAL_STYLES.map(s => el('option', { value: s.id, selected: s.id === l.visualStyle }, s.name)));
+        rows.push(el('div', { class: 'vid-deckrow', style: `--deck-color: var(--deck${i + 1})` }, el('b', {}, `Deck ${i + 1}`), ms, vs));
       }
       return el('div', { class: 'form' },
         el('label', { class: 'field' }, el('span', {}, 'Transition'), sel),
         el('p', { class: 'hint' }, 'Crossfade follows the audio: each layer’s opacity is its channel fader² × crossfader gain (A/B/THRU, same curve as the audio). The other transitions use the crossfader to move from side A to side B.'),
         el('h3', {}, 'Layers'), ...rows,
-        el('p', { class: 'hint' }, 'Video files play muted in sync with the deck (audio always comes from the deck). Tracks without video show cover art with audio-reactive visuals.'));
+        el('p', { class: 'hint' }, 'Choose a visualizer for each deck. It appears for audio tracks, or for any track with Visualizer only. Choices are saved. Video files play muted in sync with the deck; audio always comes from the deck.'));
     }
 
     function fxTab() {
