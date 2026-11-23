@@ -105,7 +105,19 @@ class DeckProcessor extends AudioWorkletProcessor {
       case 'ext-port': m.port.onmessage = (e) => this.onMessage(e.data); break; // DVS decoder -> deck, audio thread to audio thread
       case 'stemGains': this.stemTarget.set(m.value); break;
       case 'stemSend': this.sendTarget.set(m.value); break;
-      case 'play': this.playing = m.value; if (m.value) { this.brake = 0; this.spin = null; this.coast = null; this.slipStop = false; } break;
+      case 'play': this.playing = m.value; this.startAt = null;
+        if (m.value) {
+          this.brake = 0; this.spin = null; this.coast = null; this.slipStop = false;
+          // m.at: the audio-clock time the start position was planned for (automix): starting late, the play head
+          // catches up by the time that passed; arriving early, it waits for that time, so beats land where planned
+          if (Number.isFinite(m.at) && !this.scratch) {
+            const late = currentTime - m.at;
+            if (late > 0) this.pos = Math.max(0, Math.min(Math.max(0, this.len - 1), this.pos + Math.min(0.5, late) * sampleRate * this.rate * this.dir * this.step));
+            else if (late > -1) this.startAt = m.at;
+          }
+          if (m.instant) { this.curRate = this.rate * this.dir; this.motorRamp = false; } // no motor spin-up: on the beat at once
+        }
+        break;
       case 'rate': this.rate = m.value; this.rateRamp = null; break;
       // tempo glide (T5; also the automix engine's rateRamp): the rate moves linearly from its current value to `to`
       // over `dur` seconds, starting at audio time `at` (default: now). Sample accurate; a 'rate' message cancels it.
@@ -337,6 +349,10 @@ class DeckProcessor extends AudioWorkletProcessor {
 
     for (let n = 0; n < frames; n++) {
       const tNow = currentTime + n / sampleRate;
+      if (this.startAt != null) { // a start scheduled for a precise audio time (see 'play'): silent until then
+        if (tNow < this.startAt) { oL[n] = 0; if (oR !== oL) oR[n] = 0; continue; }
+        this.startAt = null;
+      }
       if (this.rateRamp) { // tempo glide: linear in rate between t0 and t1
         const rr = this.rateRamp;
         if (tNow >= rr.t1) { this.rate = rr.r1; this.rateRamp = null; this.port.postMessage({ type: 'rampDone', rate: rr.r1, id: rr.id }); }

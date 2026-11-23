@@ -393,3 +393,48 @@ test('automix sources: library, playlist, genres, view / queue; set lengths', as
   assert.deepEqual(sourceTracks({ kind: 'view' }, { ...ctx, queue: [tracks[3]] }).tracks.map((t) => t.id), ['d'], 'a waiting queue comes first');
   assert.deepEqual(lengthOptions('60'), { minutes: 60 }); assert.deepEqual(lengthOptions('endless'), { endless: true }); assert.deepEqual(lengthOptions('all'), {});
 });
+
+// ---------------------------------------------------------------- staying in phase during a blend
+function phaseDeck(index, { pos = 0, bpm = 120, grid = 0 } = {}) {
+  return {
+    index, bpm, effectiveBpm: bpm, gridOffset: grid, playing: true, syncOn: true, bend: 0, _pos: pos,
+    get beatLen() { return 60 / this.bpm; },
+    beatPhase(p) { return (((p - this.gridOffset) / this.beatLen) % 1 + 1) % 1; },
+    positionAt() { return this._pos; },
+    setBend(b) { this.bend = b; this.bends = (this.bends || 0) + 1; },
+    alignPhase() { this.aligned = (this.aligned || 0) + 1; },
+  };
+}
+
+test('phase keeper: measures the beat offset and bends the incoming deck back, snaps big early errors', async () => {
+  const { phaseErrorSeconds, PHASE_TOLERANCE, MAX_PHASE_BEND } = await import('../public/js/automix.js');
+  const out = phaseDeck(0, { pos: 10 }), inn = phaseDeck(1, { pos: 20.01 });
+  assert.ok(Math.abs(phaseErrorSeconds(out, inn, 0) - -0.01) < 1e-9, 'incoming 10 ms ahead');
+  inn._pos = 19.99; assert.ok(Math.abs(phaseErrorSeconds(out, inn, 0) - 0.01) < 1e-9, 'incoming 10 ms behind');
+  inn._pos = 20.26; assert.ok(Math.abs(phaseErrorSeconds(out, inn, 0) - 0.24) < 1e-9 || Math.abs(phaseErrorSeconds(out, inn, 0) + 0.24) < 1e-9);
+  assert.equal(phaseErrorSeconds(out, phaseDeck(1, { bpm: 60 }), 0), null, 'half time: not compared');
+
+  const app = fakeApp(); let now = 1;
+  app.engine.ctx = { get currentTime() { return now; } };
+  const am = new AutoMix(app);
+  const tr = { out, inn };
+  inn._pos = 19.99; // 10 ms behind, mid-blend
+  am.keepPhase(tr, 0.5);
+  assert.ok(inn.bend > 0 && inn.bend <= MAX_PHASE_BEND, `speeds up: ${inn.bend}`);
+  inn._pos = 20.001; now += 0.1; am.keepPhase(tr, 0.55);
+  assert.ok(inn.bend > 0, 'checked at most four times a second');
+  now += 0.3; am.keepPhase(tr, 0.6);
+  assert.equal(inn.bend, 0, `inside ${PHASE_TOLERANCE * 1000} ms: no bend`);
+  inn._pos = 20.06; now += 0.3; am.keepPhase(tr, 0.7);
+  assert.equal(inn.bend, -MAX_PHASE_BEND, 'ahead: slows down, never more than the cap');
+  // a big error right at the start of the blend (incoming still quiet) is snapped, once
+  const tr2 = { out, inn: phaseDeck(1, { pos: 20.1 }) };
+  now += 0.3; am.keepPhase(tr2, 0.05);
+  assert.equal(tr2.inn.aligned, 1);
+  now += 0.3; tr2.inn._pos = 20.1; am.keepPhase(tr2, 0.1);
+  assert.equal(tr2.inn.aligned, 1, 'snapped only once, then bent');
+  // not synced / one deck stopped: left alone
+  const tr3 = { out, inn: Object.assign(phaseDeck(1, { pos: 19.9 }), { syncOn: false }) };
+  now += 0.3; am.keepPhase(tr3, 0.5);
+  assert.equal(tr3.inn.bends, undefined);
+});

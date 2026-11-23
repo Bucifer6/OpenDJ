@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planAdaptiveTransition } from '../public/js/adaptive-dj.js';
+import { planAdaptiveTransition, MIN_PLAY, MIN_PLAY_SECONDS, MAX_CUE } from '../public/js/adaptive-dj.js';
 import { AutoMix, DROP_STYLES } from '../public/js/automix.js';
 import { liveNext, smartMix } from '../public/js/smartmix.js';
 import { analysisPatch } from '../public/js/audio/analysis-core.js';
@@ -12,20 +12,43 @@ function track(id, extra = {}) {
     phrases: Array.from({ length: 8 }, (_, i) => ({ start: i * 32, end: (i + 1) * 32, type: i === 0 ? 'intro' : i === 7 ? 'outro' : 'breakdown', energy: 0.6 })), ...extra };
 }
 
-test('section search selects interior outgoing and incoming windows to avoid two voices', () => {
+test('section search mixes out late and in early, and moves only within those limits to avoid two voices', () => {
   const out = track('a', { vocalMap: Array.from({ length: 256 }, (_, i) => i >= 96 && i < 160 ? 0.4 : 1) });
   const inn = track('b', { vocalMap: Array.from({ length: 256 }, (_, i) => i >= 64 && i < 128 ? 0 : 1) });
   const p = planAdaptiveTransition(out, inn, { position: 70, styles: ['blend'] });
   assert.ok(p);
-  assert.ok(p.timing.begin > 70 && p.timing.begin < 224, JSON.stringify(p));
-  assert.ok(p.inStart >= 64 && p.inStart < 128, JSON.stringify(p));
-  assert.ok(p.timing.begin < out.mixOut);
+  assert.ok(p.timing.begin >= 256 * MIN_PLAY, `most of the outgoing track plays first: ${JSON.stringify(p.timing)}`);
+  assert.ok(p.inStart <= 256 * MAX_CUE, `comes in within its first quarter: ${p.inStart}`);
+  assert.ok(p.inStart >= 64 && p.inStart < 128, `on the incoming instrumental section, away from the vocals: ${p.inStart}`);
   assert.equal(p.timing.begin % 2, 0, 'outgoing bar line');
   assert.equal(p.inStart % 2, 0, 'incoming bar line');
   assert.equal((p.timing.start + p.timing.len) % 32, 0, 'handover lands on a section boundary');
   assert.ok(p.timing.start + p.timing.len <= out.duration);
   assert.ok(p.inStart + p.timing.len <= inn.duration);
   assert.ok(p.evaluated <= 64);
+  // no vocals in the way: the outro (mixOut 224) into the intro (0), a long blend
+  const plain = planAdaptiveTransition(track('a'), track('b'), {});
+  assert.equal(plain.inStart, 0);
+  assert.ok(plain.timing.begin >= 224 && plain.timing.start + plain.timing.len === 256 && plain.bars >= 8, JSON.stringify(plain.timing));
+});
+
+test('a track always plays most of its length: never mixed out seconds after it came in, nor entered near its end', () => {
+  // what users saw: the next track entered late in a section and was mixed out ~30 s later
+  for (const entry of [0, 16, 64, 96]) {
+    for (const position of [entry, entry + 10]) {
+      const out = track('a', { duration: 300, phrases: Array.from({ length: 10 }, (_, i) => ({ start: i * 30, end: (i + 1) * 30, type: i === 9 ? 'outro' : 'verse', energy: 0.6 })) });
+      const p = planAdaptiveTransition(out, track('b'), { position, entry });
+      assert.ok(p, `${entry}/${position}`);
+      const left = 300 - entry;
+      assert.ok(p.timing.begin - entry >= Math.min(left * 0.9, Math.max(left * MIN_PLAY, MIN_PLAY_SECONDS)) - 2, `entry ${entry}: plays ${p.timing.begin - entry} s of ${left}`);
+      assert.ok(p.inStart <= 256 * MAX_CUE + 1e-6, `cue ${p.inStart}`);
+    }
+  }
+  // a short track still gets most of its length, and the setting can lower it
+  const short = planAdaptiveTransition(track('a', { duration: 100, mixOut: 84, phrases: [] }), track('b'), {});
+  assert.ok(short && short.timing.begin >= 60, JSON.stringify(short?.timing));
+  const quick = planAdaptiveTransition(track('a'), track('b'), { minPlay: 0.2 });
+  assert.ok(quick && quick.timing.begin >= 32);
 });
 
 test('uncertain grids, disabled sync, and large tempo gaps never produce long beatmatched overlaps', () => {
@@ -50,12 +73,13 @@ test('bad durations, exhausted tracks and late starts degrade safely; candidates
   assert.ok(p && p.evaluated <= 64);
 });
 
-test('bounded search includes late interior sections in dense arrangements', () => {
+test('bounded search in dense arrangements stays near the outro and the intro', () => {
   const dense = { duration: 384, phrases: Array.from({ length: 48 }, (_, i) => ({ start: i * 8, end: (i + 1) * 8, type: 'verse' })) };
   const out = track('a', { ...dense, vocalMap: Array(384).fill(1) });
   const inn = track('b', { ...dense, vocalMap: Array.from({ length: 384 }, (_, i) => i >= 288 && i < 328 ? 0 : 1) });
   const p = planAdaptiveTransition(out, inn, { styles: ['blend'] });
-  assert.ok(p && p.inStart >= 288 && p.inStart < 328, JSON.stringify(p));
+  assert.ok(p && p.inStart <= 384 * MAX_CUE, `not deep inside the incoming track: ${JSON.stringify(p?.inStart)}`);
+  assert.ok(p.timing.begin >= 384 * MIN_PLAY, JSON.stringify(p.timing));
   assert.ok(p.evaluated <= 64);
 });
 

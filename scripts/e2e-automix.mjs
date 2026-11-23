@@ -104,7 +104,7 @@ try {
     window.__tap = sp;
   });
 
-  // Adaptive planning through the real decks/worklets: force a clear interior instrumental entry.
+  // Adaptive planning through the real decks/worklets: an early instrumental entry, mixed out late.
   await page.evaluate(async () => {
     const app = window.opendj, am = app.automix;
     window.__adaptiveSaved = { automix: app.settings.automix, learning: app.settings.mixLearning };
@@ -129,9 +129,11 @@ try {
     const nt = am.nextTransition(), p = am.upcoming.adaptive;
     const off = am.on('transition', () => { window.__adaptiveHeard = { cue: am.transition.inStart ?? am.transition.inn.position, style: am.transition.style }; off(); });
     am.current.seek(nt.begin - 0.2);
-    return { begin: nt.begin, cue: p?.inStart, style: nt.style, adaptive: !!p };
+    return { begin: nt.begin, cue: p?.inStart, style: nt.style, adaptive: !!p, outLen: am.current.duration, inLen: am.other(am.current).duration };
   });
-  check(adaptivePlan.adaptive && adaptivePlan.cue >= 16 && adaptivePlan.begin < 64, `adaptive interior plan: ${JSON.stringify(adaptivePlan)}`);
+  // like a DJ: most of the outgoing track plays first, and the incoming one comes in early (here on its instrumental
+  // section at 16 s, inside its first quarter, so the two vocals never overlap)
+  check(adaptivePlan.adaptive && adaptivePlan.cue >= 16 && adaptivePlan.cue <= adaptivePlan.inLen * 0.25 + 0.01 && adaptivePlan.begin >= Math.min(adaptivePlan.outLen * 0.6, adaptivePlan.outLen - 16) - 2, `adaptive plan: mix out late, in early (${JSON.stringify(adaptivePlan)})`);
   await page.waitForFunction(() => !!window.__adaptiveHeard, null, { timeout: 15000 });
   const heard = await page.evaluate(() => window.__adaptiveHeard);
   check(heard.style === adaptivePlan.style && Math.abs(heard.cue - adaptivePlan.cue) < 0.25, 'real deck transport follows the selected adaptive cue');
@@ -203,6 +205,29 @@ try {
   check(dlg.src === 'genres' && dlg.genres > 0 && dlg.length === 6, `Automix dialog: genres source with ${dlg.genres} genres, ${dlg.length} set lengths`);
   await page.keyboard.press('Escape');
   await ejectDecks();
+
+  // ================= A3) blends stay in phase: the incoming deck starts on the beat and is held there =================
+  const phase = await page.evaluate(async () => {
+    const a = window.opendj;
+    await a.setSetting('automix', { ...a.settings.automix, style: 'blend', transitionBeats: 16, lengthMode: 'fixed', varyStyles: false, keepSync: true, keySync: false });
+    const house = [...a.library.tracks.values()].filter((t) => t.bpm > 115 && t.bpm < 132).sort((x, y) => x.bpm - y.bpm).slice(0, 2);
+    await a.automix.start(house, { mode: 'order' });
+    for (let i = 0; i < 100 && !(a.automix.other(a.automix.current).track?.id === house[1].id && !a.automix.other(a.automix.current).loading); i++) await new Promise((r) => setTimeout(r, 100));
+    const am = a.automix, nt = am.nextTransition();
+    am.current.seek(Math.max(0, nt.begin - 0.5));
+    for (let i = 0; i < 60 && !am.transition; i++) await new Promise((r) => setTimeout(r, 50));
+    const tr = am.transition; if (!tr) return { error: 'no transition' };
+    const { phaseErrorSeconds } = await import('/js/automix.js');
+    const errs = [];
+    // a busy main thread right as it starts (what makes a late start), then sample the phase for 3 s
+    const t0 = performance.now(); while (performance.now() - t0 < 40) { /* block */ }
+    for (let i = 0; i < 30 && am.transition === tr; i++) { await new Promise((r) => setTimeout(r, 100)); const e = phaseErrorSeconds(tr.out, tr.inn, a.engine.ctx.currentTime); if (e != null && i >= 3) errs.push(Math.abs(e) * 1000); }
+    am.stop();
+    for (const d of a.engine.decks.slice(0, 2)) { d.pause(); d.eject(); }
+    errs.sort((x, y) => x - y);
+    return { n: errs.length, median: errs[errs.length >> 1], max: errs.at(-1) };
+  });
+  check(!phase.error && phase.n >= 10 && phase.median < 5 && phase.max < 15, `blend stays in phase (beat offset median ${phase.median?.toFixed(1)} ms, max ${phase.max?.toFixed(1)} ms over ${phase.n} samples)`);
 
   // ================= B) every transition style: level, clipping, clicks =================
   const STYLES = ['blend', 'bassswap', 'crossfade', 'filter', 'echo', 'cut', 'backspin', 'brake', 'loop', 'reverb'];
