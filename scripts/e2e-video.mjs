@@ -171,7 +171,8 @@ try {
     check(result.p95 < 16.7, `${name}: draw p95 ${result.p95.toFixed(2)} ms at 640×360 (<16.7 ms local budget)`);
     signatures.push(result.loud.hash);
   }
-  check(new Set(signatures).size === styles.length, 'all five visualizers produce distinct scenes');
+  check(new Set(signatures).size === styles.length, `all ${styles.length} visualizers produce distinct scenes`);
+  await page.locator('[data-visual-deck="1"]').selectOption('tunnel');
   await page.evaluate(() => window.opendj.setDeckCount(4, false));
   await page.waitForFunction(() => document.querySelectorAll('[data-visual-deck]').length === 4);
   await page.locator('[data-visual-deck="2"]').selectOption('scope');
@@ -322,7 +323,7 @@ try {
   await page.reload();
   await page.waitForFunction(() => window.opendj?.ready);
   await page.evaluate(async () => { (await import('/js/video/video-ui.js')).setupVideo(window.opendj).openPanel(); });
-  check(await page.locator('[data-visual-deck="1"]').inputValue() === 'tunnel', 'per-deck visualizer choice survives a full application reload');
+  check(await page.locator('[data-visual-deck="1"]').inputValue() === styles.at(-1).id, 'per-deck visualizer choice survives a full application reload');
   check(await page.evaluate(() => { const s = window.opendj.video.mixer.config.visualStyles; return s[2] === 'scope' && s[3] === 'orbit'; }), 'hidden deck 3/4 choices survive reload in two-deck mode');
   const real = errors.filter((e) => !/favicon|404 \(Not Found\)|youtube|ytimg/i.test(e));
   check(real.length === 0, `no console errors${real.length ? ': ' + real.join(' | ') : ''}`);

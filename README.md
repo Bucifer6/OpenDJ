@@ -128,9 +128,9 @@ Plans adapt to the available analysis and prepared stems. Missing or uncertain i
 
 ### Video & lighting
 
-**Five audio-reactive visualisers:** the cover spectrum ring plus **Spectrum Skyline**, **Neon Waveform**, **Particle Orbit** and **Prism Tunnel**. Open **VIDEO → Mix** and choose a style beside each deck. Select **Visualizer only** to use it even for a video track. Choices survive a restart, and the same picture reaches the preview and projector output.
+**Eleven audio-reactive visualisers:** colourful **Aurora Ribbons**, **Cosmic Vortex**, **Fractal Mandala**, **Neon Terrain**, **Liquid Plasma** and **Warp Drive**, plus **Spectrum Skyline**, **Neon Waveform**, **Particle Orbit**, **Prism Tunnel** and the original cover spectrum ring. Open **VIDEO → Mix** and choose a style beside each deck. Select **Visualizer only** to use it even for a video track. Choices survive a restart, and the same picture reaches the preview and projector output.
 
-<img src="docs/images/visualizers.jpg" alt="Four audio-reactive visualisers: spectrum skyline, neon waveform, particle orbit and prism tunnel" width="100%">
+<img src="docs/images/visualizers.jpg" alt="Six colourful audio-reactive scenes: aurora ribbons, cosmic vortex, fractal mandala, neon terrain, liquid plasma and warp drive" width="100%">
 
 <table>
 <tr>

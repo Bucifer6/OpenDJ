@@ -224,11 +224,11 @@ const shots = {
     await ev(async () => {
       const a = window.opendj;
       const api = (a.videoUi ||= (await import('/js/video/video-ui.js')).setupVideo(a));
-      const m = a.video.mixer; m.setVisualStyle(0, 'tunnel'); m.setVisualStyle(1, 'orbit'); m.setOverlay({ text: 'WAREHOUSE · SAT' });
+      const m = a.video.mixer; m.setVisualStyle(0, 'galaxy'); m.setVisualStyle(1, 'aurora'); m.setOverlay({ text: 'WAREHOUSE · SAT' });
       api.openPanel();
       m.showNowPlaying('Kairo Vance – Pressure Index');
     });
-    await page.waitForFunction(() => document.querySelector('[data-visual-deck="0"]')?.value === 'tunnel' && document.querySelector('[data-visual-deck="1"]')?.value === 'orbit');
+    await page.waitForFunction(() => document.querySelector('[data-visual-deck="0"]')?.value === 'galaxy' && document.querySelector('[data-visual-deck="1"]')?.value === 'aurora');
     await sleep(2500);
     await save('video', { type: 'jpeg' });
     await ev(() => { const a = window.opendj; a.video.mixer.setFx(0, 'kaleido', false); a.video.mixer.setOverlay({ text: '' }); a.video.api.closePanel(); });
@@ -237,7 +237,7 @@ const shots = {
   async visualizers() {
     await heroState();
     await ev(async () => { (await import('/js/video/video-ui.js')).setupVideo(window.opendj); });
-    const styles = await ev(async () => (await import('/js/video/video-core.js')).VISUAL_STYLES.filter(s => s.id !== 'ring'));
+    const styles = await ev(async () => (await import('/js/video/video-core.js')).VISUAL_STYLES.filter(s => ['aurora', 'galaxy', 'mandala', 'terrain', 'plasma', 'warp'].includes(s.id)));
     const cards = [];
     for (const style of styles) {
       const url = await ev(async (id) => {

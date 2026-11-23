@@ -18,7 +18,7 @@ The fix preserves stem-output validation and the WebGPU-to-WASM fallback. A new 
 
 ## Additional visualisers
 
-Four original Canvas2D scenes join the cover ring: Spectrum Skyline, Neon Waveform, Particle Orbit and Prism Tunnel. Each deck stores its own selection. Rendering remains at 640×360 per visible layer, uses bounded geometry and reuses the existing analyser and typed buffers; only the waveform style requests time-domain samples. No dependencies, downloaded art, models or additional audio paths are introduced.
+Ten original Canvas2D scenes join the cover ring: Spectrum Skyline, Neon Waveform, Particle Orbit, Prism Tunnel, Aurora Ribbons, Cosmic Vortex, Fractal Mandala, Neon Terrain, Liquid Plasma and Warp Drive. Each deck stores its own selection. Rendering remains at 640×360 per visible layer, uses bounded geometry and reuses the existing analyser and typed buffers; only the waveform style requests time-domain samples. The terrain grid reuses a preallocated coordinate buffer. No dependencies, downloaded art, models or additional audio paths are introduced.
 
 The expanded real-browser video suite checks every style's selector, audio response, distinct rendered pixels, independent saved choices, analyser reuse, invalid-style fallback and a local 16.7 ms draw-command p95 budget. It also checks all styles in the actual pop-out output during audio playback, 320 px panel layout, switching between two/four decks, lazy visualiser creation after an off/video source, and a full application reload. Both WebGL2 and Canvas2D compositors are covered. Drawing timing is a local workload check, not an end-to-end projector latency or hardware performance guarantee. The complete interface sweep is repeated after adding the selectors.
 
