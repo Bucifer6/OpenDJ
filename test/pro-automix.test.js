@@ -164,3 +164,36 @@ test('P4.1: transition checker measures level continuity, basslines, vocals and 
   // nothing to check
   assert.equal(checkTransition(null, null, {}).ok, true);
 });
+
+test('P5: trick planner picks musical slots, respects mode, arc, vocals, grid and spacing', async () => {
+  const { planTricks, trickSlots, rollSize } = await import('../public/js/automix-tricks.js');
+  const bpm = 125, bar = 240 / bpm;
+  const sec = (type, a, b) => ({ type, start: a * bar, end: b * bar });
+  const house = { genre: 'House', bpm, energy: 7, bpmConfidence: 0.9,
+    phrases: [sec('intro', 0, 16), sec('verse', 16, 48), sec('buildup', 48, 56), sec('drop', 56, 96), sec('breakdown', 96, 112), sec('drop', 112, 144), sec('outro', 144, 160)] };
+  const slots = trickSlots(house, 0, 160 * bar);
+  assert.ok(slots.some((s) => s.slot === 'preDrop' && Math.abs(s.at - 56 * bar) < 1e-6));
+  const base = { from: 20 * bar, to: 140 * bar, phase: 'peak', nowMs: 0, positionToMs: (s) => s * 1000 };
+  assert.deepEqual(planTricks(house, { ...base, mode: 'off' }), []);
+  const subtle = planTricks(house, { ...base, mode: 'subtle' });
+  assert.equal(subtle.length, 1, JSON.stringify(subtle));
+  assert.ok(['bassTease', 'filterBuild'].includes(subtle[0].id));
+  assert.ok(Math.abs(subtle[0].at - 56 * bar) < 1e-6 || Math.abs(subtle[0].at - 112 * bar) < 1e-6, 'resolves on a drop downbeat');
+  const party = planTricks(house, { ...base, mode: 'party', familiar: true });
+  assert.ok(party.length >= 1 && party.length <= 2);
+  for (let i = 1; i < party.length; i++) assert.ok(party[i].at - party[i - 1].at >= 32 * bar);
+  // subtle mode: nothing in the warm-up; nothing on a shaky grid; nothing over vocals
+  assert.deepEqual(planTricks(house, { ...base, mode: 'subtle', phase: 'warmup' }), []);
+  assert.deepEqual(planTricks({ ...house, bpmConfidence: 0.3 }, { ...base, mode: 'party' }), []);
+  const vocal = { ...house, vocalMap: new Float32Array(400).fill(1) };
+  assert.ok(planTricks(vocal, { ...base, mode: 'subtle' }).every((e) => e.id === 'echoFreeze'));
+  // spacing: a trick 2 minutes ago blocks subtle mode
+  assert.deepEqual(planTricks(house, { ...base, mode: 'subtle', history: [{ id: 'filterBuild', atMs: 0 }] }), []);
+  // lounge never
+  assert.deepEqual(planTricks({ ...house, genre: 'Lounge' }, { ...base, mode: 'party' }), []);
+  // rewind only at the peak, on familiar bass / open tracks
+  const dnb = { ...house, genre: 'Drum & Bass', bpm: 174, energy: 8 };
+  const r = planTricks(dnb, { from: 0, to: 1e9, mode: 'party', phase: 'peak', familiar: true, nowMs: 0, positionToMs: (s) => s * 1000 });
+  assert.ok(r.every((e) => e.id !== 'rewind' || e.restart != null));
+  assert.equal(rollSize(0, 8), 1); assert.equal(rollSize(5, 8), 0.5); assert.equal(rollSize(7, 8), 0.125);
+});

@@ -9,7 +9,9 @@
 // (autoTransitionLength).
 import { Emitter } from './util.js';
 import { toCamelot, camelotCompatible, analyzeStructure } from './audio/analysis-core.js';
-import { smartMix, liveNext, shuffle, camelotRelation, genreSimilarity, explain, skipFeedback, playFeedback, emptyFeedback } from './smartmix.js';
+import { smartMix, liveNext, shuffle, camelotRelation, genreSimilarity, explain, skipFeedback, playFeedback, emptyFeedback, arcPhase, familiarityInfo, isFamiliar } from './smartmix.js';
+import { planTricks, rollSize } from './automix-tricks.js';
+import { decodeVocalMap } from './shared/vocal-map.js';
 import { t } from './i18n.js';
 import { planBestTransition, stemSwapLevels, learnChoice } from './mix-planner.js';
 import { planAdaptiveTransition } from './adaptive-dj.js';
@@ -531,7 +533,7 @@ export class AutoMix extends Emitter {
    */
   async start(tracks, { smart = false, order, mode, shape, sliders, limit, minutes, endless = false, pool = null } = {}) {
     if (!tracks.length) throw new Error('Queue is empty');
-    this.reasons = new Map(); this.overrides = new Map(); this.live = null; this.refill = null; this.feedback = emptyFeedback(); this.livePlan = null;
+    this.reasons = new Map(); this.overrides = new Map(); this.live = null; this.refill = null; this.feedback = emptyFeedback(); this.livePlan = null; this.trickHistory = []; this.famInfo = familiarityInfo(tracks);
     mode = mode || (smart ? 'legacy-smart' : this.opts.shuffle ? 'shuffle' : 'order');
     shape = shape || this.opts.shape || 'warmup';
     sliders = sliders || this.opts.sliders;
@@ -659,7 +661,7 @@ export class AutoMix extends Emitter {
     }
     if (add.length) this.queue.push(...add);
   }
-  stop() { this.enabled = false; this.forceTransitionRequested = false; this.watchdog?.reset(); if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
+  stop() { this.endTrick(true); this.trickPlan = null; this.enabled = false; this.forceTransitionRequested = false; this.watchdog?.reset(); if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
   /** Start the next transition immediately, waiting for its deck preload if necessary. */
   skip({ feedback = true } = {}) {
     if (!this.enabled || this.transition || !this.current || !this.nextTrack()) return false;
@@ -965,6 +967,7 @@ export class AutoMix extends Emitter {
     if (this.transition) return this.stepTransition();
     if (this.tempoRamp) this.stepTempoRamp();
     if (this.levelEase) this.stepLevelEase();
+    if (this.opts.tricks !== 'off') this.stepTricks();
     const next = this.nextTrack();
     if (this.forceTransitionRequested) {
       const incoming = this.other(cur);
@@ -1051,6 +1054,89 @@ export class AutoMix extends Emitter {
     if (k >= 1) this.tempoRamp = null;
   }
 
+  // ---------- tricks (P5, automix-tricks.js) ----------
+  /** Where the set is (0..1) for the energy arc, and the arc phase there. */
+  setPhase() {
+    const shape = this.live?.shape || this.opts.shape || 'warmup';
+    const x = this.live ? (this.live.endless ? (this.idx % this.live.setLength) / this.live.setLength : this.idx / Math.max(1, this.live.setLength)) : this.idx / Math.max(1, this.queue.length);
+    try { return arcPhase(shape, Math.min(1, x), { now: Date.now(), elapsedMin: this.startedAt ? (Date.now() - this.startedAt) / 60000 : 0, endless: !!this.live?.endless || !!this.refill?.endless }); } catch { return 'build'; }
+  }
+  /** Plan the tricks for the on-air track, in the window that is free of transitions. */
+  planTricksNow(deck) {
+    const mode = this.opts.tricks || 'subtle', nt = this.nextTransition();
+    const key = `${deck.track.id}|${mode}|${Math.round((nt?.begin ?? -1) * 2)}|${Math.round((deck.position || 0) / 30)}`;
+    if (this.trickPlan?.key === key) return;
+    const t = { ...this.info(deck) };
+    t.vocalMap = t.vocalMap || decodeVocalMap(t.stems?.vocals);
+    const bar = 240 / (deck.bpm || 120), rate = deck.rate || 1, now = Date.now(), pos = deck.position || 0;
+    const to = (nt ? nt.begin : (deck.duration || 0) - 32 * bar) - 8 * bar;
+    const events = planTricks(t, { from: pos + 2 * bar, to, mode, phase: this.setPhase(), familiar: isFamiliar(this.fresh(deck.track), this.famInfo || familiarityInfo(this.queue)),
+      history: this.trickHistory || [], nowMs: now, positionToMs: (sec) => now + (sec - pos) / rate * 1000 });
+    this.trickPlan = { key, deck, events };
+  }
+  stepTricks() {
+    const cur = this.current;
+    if (this.trick) return this.stepTrick();
+    if (!cur?.playing || !cur.track || !cur.bpm || this.transition) return;
+    this.planTricksNow(cur);
+    const ev = this.trickPlan?.events.find((e) => !e.done);
+    if (!ev || this.trickPlan.deck !== cur) return;
+    const ahead = (ev.start - cur.position) / (cur.rate || 1);
+    if (ahead < -0.3) { ev.done = true; return; } // passed (a seek): skip it
+    if (ahead <= 0.15) this.startTrick(ev, cur);
+  }
+  startTrick(ev, d) {
+    const ch = this.engine.channels[d.index], ctxT = this.engine.ctx?.currentTime;
+    if (!ch || !Number.isFinite(ctxT)) { ev.done = true; return; }
+    const rate = d.rate || 1, beatSec = 60 / (d.effectiveBpm || d.bpm || 120);
+    const atStart = ctxT + Math.max(0, (ev.start - d.position) / rate), atRes = ctxT + Math.max(0, (ev.at - d.position) / rate);
+    const tr = this.trick = { ev, d, ch, atStart, atRes, beatSec, saved: { fxType: ch.state.fxType, fxMix: ch.state.fxMix, fxParam: ch.state.fxParam, fxBeats: ch.state.fxBeats } };
+    ev.done = true;
+    (this.trickHistory ||= []).push({ id: ev.id, atMs: Date.now() });
+    if (ev.id === 'bassTease' || ev.id === 'grooveLift') ch.scheduleEq?.({ eqLow: -1 }, atStart);
+    else if (ev.id === 'pauseDrop') { ch.scheduleEq?.({ eqLow: -1, eqMid: -1, eqHigh: -1 }, atStart); this._trickSilence = true; }
+    else if (ev.id === 'echoFreeze') { ch.set('fxType', 'echo'); ch.set('fxBeats', 0.5); ch.set('fxParam', 0.85); ch.set('fxMix', 0.5); ch.set('fxOn', true); }
+    else if (ev.id === 'horn') {
+      const sm = this.engine.sampler, i = sm?.slots?.findIndex((s) => s?.sound === 'airhorn' && s.buffer);
+      if (i >= 0) sm.trigger(i, { when: atRes, velocity: 0.55 });
+      this.trick = null; this.emit('trick', ev); return;
+    } else if (ev.id === 'rewind') { d.backspin(Math.max(0.4, 2 * beatSec)); tr.spinEnd = atStart + Math.max(0.4, 2 * beatSec); this._trickSilence = true; }
+    this.emit('trick', ev);
+  }
+  stepTrick() {
+    const tr = this.trick, ctxT = this.engine.ctx?.currentTime;
+    if (!tr || !Number.isFinite(ctxT)) return;
+    if (tr.d !== this.current) return this.endTrick(true);
+    const { ev, ch, d } = tr, k = clamp01((ctxT - tr.atStart) / Math.max(0.05, tr.atRes - tr.atStart));
+    if (ev.id === 'filterBuild') ch.set('filter', -0.7 * ease(k));
+    if (ev.id === 'loopRoll' && ctxT >= tr.atStart && tr.atRes - ctxT > 0.02) {
+      const size = rollSize(Math.floor((ctxT - tr.atStart) / tr.beatSec), Math.round(ev.bars * 4));
+      if (size !== tr.size) { if (tr.size) d.rollOff(); d.rollOn(size); tr.size = size; }
+      ch.set('filter', 0.5 * ease(k));
+    }
+    if (ev.id === 'rewind') {
+      if (!tr.restarted && ctxT >= tr.spinEnd + 0.05) {
+        tr.restarted = true; d.seek(ev.restart ?? Math.max(0, ev.at - 16 * 4 * tr.beatSec)); d.play({ at: ctxT + 0.03, instant: true });
+        this._trickSilence = false; this.trickPlan = null; this.upcoming = null; this.trick = null;
+      }
+      return;
+    }
+    if (tr.atRes - ctxT <= 0.15) this.endTrick(false);
+  }
+  /** Resolve the trick on its downbeat (scheduled), or undo it at once (abort). */
+  endTrick(abort) {
+    const tr = this.trick; if (!tr) return;
+    this.trick = null;
+    const { ev, ch, d } = tr, at = abort ? this.engine.ctx?.currentTime : tr.atRes;
+    if (['bassTease', 'grooveLift', 'pauseDrop'].includes(ev.id)) ch.scheduleEq?.(ev.id === 'pauseDrop' ? { eqLow: 0, eqMid: 0, eqHigh: 0 } : { eqLow: 0 }, at);
+    if (ev.id === 'filterBuild' || ev.id === 'loopRoll') ch.set('filter', 0);
+    if (ev.id === 'loopRoll' && d.rolling) d.rollOff();
+    if (ev.id === 'echoFreeze') { ch.set('fxOn', false); for (const [key, v] of Object.entries(tr.saved)) ch.set(key, v); }
+    if (ev.id === 'rewind' && abort && !d.playing && d.track) d.play();
+    if (ev.id === 'pauseDrop' && !abort) setTimeout(() => { this._trickSilence = false; }, Math.max(0, (tr.atRes - (this.engine.ctx?.currentTime || 0)) * 1000) + 200);
+    else this._trickSilence = false;
+  }
+
   /** Ease a landing trim back to the track's own level-match gain over 8 bars. */
   stepLevelEase() {
     const e = this.levelEase;
@@ -1062,6 +1148,7 @@ export class AutoMix extends Emitter {
 
   beginTransition(immediate = false) {
     this.tempoRamp = null;
+    this.endTrick(true); this.trickPlan = null;
     const out = this.current, inn = this.other(out);
     const next = this.nextTrack();
     if (!next) { if (!out.playing) this.stop(); return; }
