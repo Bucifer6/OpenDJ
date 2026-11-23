@@ -134,3 +134,13 @@ test('P2.3: drum & bass pairs at peak energy can double drop (drops aligned, bas
   // the result must say whether a double drop was found for this textbook pair
   assert.equal(p.doubleDrop, true, p.why);
 });
+
+test('P0.3: a cut that lands on a much louder section is pre-trimmed', async () => {
+  const { landingTrim, sectionLevel } = await import('../public/js/automix.js');
+  const out = { gain: -2, phrases: [{ start: 0, end: 60, lufs: -12 }] };   // heard at -14
+  const loud = { gain: -1, phrases: [{ start: 0, end: 30, lufs: -9 }] };   // heard at -10: +4 LU
+  assert.equal(sectionLevel(out, 10), -14);
+  assert.equal(landingTrim(out, 10, loud, 1), -3);
+  assert.equal(landingTrim(out, 10, { gain: 0, phrases: [{ start: 0, end: 9, lufs: -13 }] }, 1), null, '+1 LU is fine');
+  assert.equal(landingTrim(out, 10, { phrases: [] }, 1), null, 'unknown');
+});

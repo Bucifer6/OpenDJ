@@ -58,7 +58,12 @@ const SCHEMA = {
     transitionBeats: num(1, 256), lengthMode: oneOf('fixed', 'auto'), smartStart: bool(), profile: oneOf('club', 'harmonic', 'peak', 'open', 'quick', 'custom'),
     style: oneOf('auto', 'blend', 'bassswap', 'stemswap', 'crossfade', 'filter', 'echo', 'cut', 'backspin', 'brake', 'loop', 'reverb', 'phrase', 'eqswap'),
     keepSync: bool(), skipSilence: bool(), shuffle: bool(), keySync: bool(), order: oneOf('harmonic', 'build', 'peak', 'wave'),
-    varyStyles: bool(), onAirLoad: oneOf('ask', 'queue', 'stop'), shape: oneOf('warmup', 'rising', 'steady', 'peak', 'wave'),
+    varyStyles: bool(), onAirLoad: oneOf('ask', 'queue', 'stop'), shape: oneOf('warmup', 'rising', 'steady', 'peak', 'wave', 'party'),
+    // party mode (docs/PRO_DJ_AUTOMIX_RESEARCH.md): safety net, level matching, tempo morph, double drops, tricks,
+    // and the no-skill party controls
+    watchdog: bool(), levelMatch: bool(), tempoMorph: bool(), doubleDrops: bool(), tricks: oneOf('off', 'subtle', 'party'),
+    energyBias: num(-2, 2), vibeLock: bool(),
+    banned: (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' || Number.isFinite(x)).slice(0, 5000).map(String) : undefined),
     preset: oneOf('balanced', 'harmonic', 'energy', 'variety', 'custom'), liveSetLength: num(2, 1000),
     setLength: oneOf('all', '30', '60', '120', '180', 'endless'),
     sliders: (v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(['harmonic', 'energy', 'variety'].map((k) => [k, num(0, 1)(v[k]) ?? 0.5])) : undefined),

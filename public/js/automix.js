@@ -9,7 +9,7 @@
 // (autoTransitionLength).
 import { Emitter } from './util.js';
 import { toCamelot, camelotCompatible, analyzeStructure } from './audio/analysis-core.js';
-import { smartMix, liveNext, shuffle, camelotRelation, genreSimilarity, explain } from './smartmix.js';
+import { smartMix, liveNext, shuffle, camelotRelation, genreSimilarity, explain, skipFeedback, playFeedback, emptyFeedback } from './smartmix.js';
 import { t } from './i18n.js';
 import { planBestTransition, stemSwapLevels, learnChoice } from './mix-planner.js';
 import { planAdaptiveTransition } from './adaptive-dj.js';
@@ -488,6 +488,22 @@ export function trimToMinutes(list, seconds) {
   return out;
 }
 
+/** Loudness (LUFS) of the analysed section of t that contains `at` (track seconds), plus its level-match gain. */
+export function sectionLevel(t, at) {
+  const p = (Array.isArray(t?.phrases) ? t.phrases : []).find((x) => at >= x.start - 0.05 && at < x.end);
+  const l = Number(p?.lufs);
+  return Number.isFinite(l) ? l + (Number(t.gain) || 0) : null;
+}
+/**
+ * Cut / drop landings (P0.3): extra trim (dB, <= 0) for the incoming track when the section it lands on is more than
+ * 2 LU louder than the outgoing section it replaces (after level matching); null when fine or unknown.
+ */
+export function landingTrim(out, outAt, inn, innAt) {
+  const a = sectionLevel(out, outAt), b = sectionLevel(inn, innAt);
+  if (a == null || b == null || b - a <= 2) return null;
+  return -Math.min(6, b - a - 1);
+}
+
 export class AutoMix extends Emitter {
   constructor(app) {
     super();
@@ -515,7 +531,7 @@ export class AutoMix extends Emitter {
    */
   async start(tracks, { smart = false, order, mode, shape, sliders, limit, minutes, endless = false, pool = null } = {}) {
     if (!tracks.length) throw new Error('Queue is empty');
-    this.reasons = new Map(); this.overrides = new Map(); this.live = null; this.refill = null;
+    this.reasons = new Map(); this.overrides = new Map(); this.live = null; this.refill = null; this.feedback = emptyFeedback(); this.livePlan = null;
     mode = mode || (smart ? 'legacy-smart' : this.opts.shuffle ? 'shuffle' : 'order');
     shape = shape || this.opts.shape || 'warmup';
     sliders = sliders || this.opts.sliders;
@@ -530,7 +546,7 @@ export class AutoMix extends Emitter {
     const nextDeck = firstDeck && ready(this.other(firstDeck)) && this.other(firstDeck).track.id !== firstDeck.track.id ? this.other(firstDeck) : null;
     const firstTrack = libCopy(firstDeck?.track), pinnedNext = libCopy(nextDeck?.track);
     const onDecks = new Set([firstTrack?.id, pinnedNext?.id].filter(Boolean));
-    let list = tracks.filter((t) => t && !onDecks.has(t.id));
+    let list = tracks.filter((t) => t && !onDecks.has(t.id) && this.allowed(t));
     if (!list.length && !pinnedNext && !firstTrack) throw new Error('Queue is empty');
     const after = pinnedNext || firstTrack; // what the ordering continues from
     if (mode === 'shuffle') list = shuffle(list);
@@ -546,7 +562,9 @@ export class AutoMix extends Emitter {
       this.live = { ids: list.map((t) => t.id), shape, sliders, setLength, endless: !!endless };
       if (pinnedNext || !list.length) list = [];
       else {
-        const first = after ? liveNext(after, list, { shape, sliders, position: 0, setLength, transitionScore: (t) => this.transitionQuality(after, t, firstDeck) }) : null;
+        this.live.minutes = minutes > 0 ? minutes : 0;
+        list = this.playable(list);
+        const first = after ? liveNext(after, list, { shape, sliders, position: 0, setLength, ...this.partyCtx({ endless: !!endless, elapsedMin: 0, setMinutes: minutes > 0 ? minutes : undefined }), transitionScore: (t) => this.transitionQuality(after, t, firstDeck) }) : null;
         const r = first ? null : smartMix(list, { shape, sliders, limit: 1 });
         const t0 = first?.track || r.tracks[0];
         list = [t0];
@@ -617,7 +635,7 @@ export class AutoMix extends Emitter {
       const n = r.ids.length, from = r.ids.indexOf(this.queue.at(-1)?.id) + 1;
       if (!n || (!r.endless && from >= n)) return;
       let add = [];
-      for (let k = 0; k < Math.min(8, n); k++) { const id = r.ids[(from + k) % n]; if (!r.endless && from + k >= n) break; const t = lib?.track?.(id); if (t && !t.unreadable) add.push(t); }
+      for (let k = 0; k < Math.min(8, n); k++) { const id = r.ids[(from + k) % n]; if (!r.endless && from + k >= n) break; const t = lib?.track?.(id); if (t && !t.unreadable && this.allowed(t)) add.push(t); }
       if (!r.endless) { let planned = this.queue.reduce((x, t) => x + secs(t), 0); add = add.filter((t) => { const keep = planned < r.seconds; planned += secs(t); return keep; }); }
       if (add.length) this.queue.push(...add);
       return;
@@ -625,12 +643,12 @@ export class AutoMix extends Emitter {
     // not played in this set; endless: a track comes back once (nearly) every other track has played since
     const window = r.endless ? Math.min(this.queue.length, Math.max(1, Math.ceil(r.ids.length * 0.75))) : this.queue.length;
     const recent = new Set(this.queue.slice(this.queue.length - window).map((t) => t.id));
-    const pool = r.ids.filter((id) => !recent.has(id)).map((id) => lib?.track?.(id)).filter((t) => t && !t.unreadable);
+    const pool = this.playable(r.ids.filter((id) => !recent.has(id)).map((id) => lib?.track?.(id)).filter((t) => t && !t.unreadable));
     if (!pool.length) return;
     let add;
     const last = this.queue.at(-1) || this.current?.track;
     if (r.mode === 'smart' || r.mode === 'legacy-smart') {
-      const sm = smartMix(pool.length > 400 ? shuffle(pool).slice(0, 400) : pool, { shape: r.shape, sliders: r.sliders, limit: 8, start: last ? lib?.track?.(last.id) || last : null });
+      const sm = smartMix(pool.length > 400 ? shuffle(pool).slice(0, 400) : pool, { shape: r.shape, sliders: r.sliders, limit: 8, start: last ? lib?.track?.(last.id) || last : null, ...this.partyCtx({ endless: r.endless }) });
       add = sm.tracks; sm.steps.forEach((s) => this.reasons.set(s.track, s.reason));
     } else add = shuffle(pool).slice(0, 8);
     if (!r.endless) {
@@ -643,8 +661,10 @@ export class AutoMix extends Emitter {
   }
   stop() { this.enabled = false; this.forceTransitionRequested = false; this.watchdog?.reset(); if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
   /** Start the next transition immediately, waiting for its deck preload if necessary. */
-  skip() {
+  skip({ feedback = true } = {}) {
     if (!this.enabled || this.transition || !this.current || !this.nextTrack()) return false;
+    if (feedback) this.noteSkip();
+    this._skipNext = true;
     const incoming = this.other(this.current), next = this.nextTrack();
     if (incoming.track?.id === next.id && !incoming.loading && !this._loading) {
       this.beginTransition(true); return 'started';
@@ -720,6 +740,32 @@ export class AutoMix extends Emitter {
   other(d) { return d === this.engine.decks[0] ? this.engine.decks[1] : this.engine.decks[0]; }
   nextTrack() { return this.queue[this.idx] || null; }
 
+  /** Party controls and live feedback for track selection (smartmix.js options). */
+  partyCtx(extra = {}) {
+    const o = this.opts || {};
+    return {
+      energyBias: Number(o.energyBias) || 0, vibeLock: !!o.vibeLock, banned: new Set((o.banned || []).map(String)),
+      feedback: this.feedback || undefined, now: Date.now(), elapsedMin: this.startedAt ? (Date.now() - this.startedAt) / 60000 : 0, ...extra,
+    };
+  }
+  /** May this track be played (not banned)? */
+  allowed(t) { return !!t && !(this.opts?.banned || []).map(String).includes(String(t.id)); }
+  /**
+   * Party pools (P0.2): when enough analysed tracks are available, only those are picked, so every transition can be
+   * planned on beats and phrases; unanalysed ones come back only when nothing else is left.
+   */
+  playable(list) {
+    const ok = list.filter((t) => this.allowed(t) && !t.unreadable);
+    const analysed = ok.filter((t) => t.analyzed && Number(t.bpm) > 0);
+    return analysed.length >= 5 ? analysed : ok;
+  }
+  /** The DJ (or a guest) skipped the playing track: selection learns from it (smartmix skipFeedback). */
+  noteSkip(deck = this.current) {
+    const t = deck?.track; if (!t) return;
+    const played = Math.max(0, (deck.position || 0) - (deck._autoMixEntry || 0));
+    this.feedback = skipFeedback(this.feedback || emptyFeedback(), this.fresh(t), { playedSeconds: played, now: Date.now(), history: this.queue.slice(0, this.idx) });
+  }
+
   /** Live smart mode: when nothing is queued after the current track, pick the best next one from the pool. */
   fillLive() {
     if (!this.live || this.idx < this.queue.length) return;
@@ -729,14 +775,16 @@ export class AutoMix extends Emitter {
     const endless = !!this.live.endless;
     if (!endless && played.length >= this.live.setLength) return;
     const cur = fresh(this.current?.track) || played.at(-1) || null;
-    const pool = this.live.ids.map((id) => lib?.track?.(id)).filter(Boolean);
+    const pool = this.playable(this.live.ids.map((id) => lib?.track?.(id)).filter(Boolean));
     // endless: the energy curve repeats every LIVE_ENDLESS_CYCLE tracks, and a track can come back once every other
     // track of the pool has played since
     const history = endless ? played.slice(-Math.max(1, pool.length - 1)) : played;
     const position = endless ? played.length % this.live.setLength : played.length;
-    const r = liveNext(cur, pool, { history, shape: this.live.shape, sliders: this.live.sliders, position, setLength: this.live.setLength, transitionScore: (t) => this.transitionQuality(cur, t, this.current) });
+    const r = liveNext(cur, pool, { history, shape: this.live.shape, sliders: this.live.sliders, position, setLength: this.live.setLength,
+      ...this.partyCtx({ endless, setMinutes: this.live.minutes || undefined }), transitionScore: (t) => this.transitionQuality(cur, t, this.current) });
     if (!r) return;
     this.queue.push(r.track); this.reasons.set(r.track, r.reason);
+    this.livePlan = r.plan || null; // the planned continuation (set preview)
   }
 
   transitionQuality(out, inn, deck) {
@@ -916,6 +964,7 @@ export class AutoMix extends Emitter {
     if (this.opts.watchdog !== false && this.watch()) return;
     if (this.transition) return this.stepTransition();
     if (this.tempoRamp) this.stepTempoRamp();
+    if (this.levelEase) this.stepLevelEase();
     const next = this.nextTrack();
     if (this.forceTransitionRequested) {
       const incoming = this.other(cur);
@@ -1002,6 +1051,15 @@ export class AutoMix extends Emitter {
     if (k >= 1) this.tempoRamp = null;
   }
 
+  /** Ease a landing trim back to the track's own level-match gain over 8 bars. */
+  stepLevelEase() {
+    const e = this.levelEase;
+    if (e.deck !== this.current) { this.levelEase = null; return; }
+    const k = clamp01((this.now() - e.t0) / e.dur);
+    e.ch.setAutoGain(e.base + e.db * (1 - ease(k)));
+    if (k >= 1) this.levelEase = null;
+  }
+
   beginTransition(immediate = false) {
     this.tempoRamp = null;
     const out = this.current, inn = this.other(out);
@@ -1051,7 +1109,7 @@ export class AutoMix extends Emitter {
       if (keysClash(outKey, inn.camelot || inn.track?.key)) { try { inn.keySyncTo(out); } catch (e) { console.warn('keySyncTo failed', e); } }
     }
     const fx = { ...chO.state }; // FX / EQ settings to restore on the outgoing channel afterwards
-    const tr = { morph, out, inn, style, why, vocals: DROP_STYLES.has(style) ? null : vocals, length: immediate || !out.playing ? null : length, t0: this.now(), fxSaved: { fxType: fx.fxType, fxMix: fx.fxMix, fxParam: fx.fxParam, fxBeats: fx.fxBeats, fxOn: fx.fxOn } };
+    const tr = { skipped: !!this._skipNext, morph, out, inn, style, why, vocals: DROP_STYLES.has(style) ? null : vocals, length: immediate || !out.playing ? null : length, t0: this.now(), fxSaved: { fxType: fx.fxType, fxMix: fx.fxMix, fxParam: fx.fxParam, fxBeats: fx.fxBeats, fxOn: fx.fxOn } };
     if (DROP_STYLES.has(style)) {
       // the incoming track waits at its first downbeat and drops in on the outgoing track's bar line
       inn.seek(cue); inn._autoMixEntry = cue;
@@ -1059,6 +1117,10 @@ export class AutoMix extends Emitter {
       const toDrop = Math.max(0, (plan.drop - pos) / rate);
       Object.assign(tr, { drop: true, phase: 'pre', dropWall: tr.t0 + toDrop * 1000, beatWall: (out.bpm ? 60 / out.bpm / rate : 0.5) * 1000, plan });
       tr.postWall = tr.beatWall * plan.post;
+      if (this.opts.levelMatch !== false) {
+        const extra = landingTrim(this.fresh(out.track) && { ...this.fresh(out.track), ...oi }, plan.drop - 0.1, { ...this.fresh(inn.track), ...ii }, cue + 0.1);
+        if (extra != null) tr.landTrim = { db: extra, base: Number(this.fresh(inn.track)?.gain ?? inn.track?.gain) || 0 };
+      }
       this.startEffect(tr);
     } else {
       // blend styles: tempo-matched incoming track starts at its mix-in point, bar/phrase-aligned with the outgoing one
@@ -1079,7 +1141,7 @@ export class AutoMix extends Emitter {
       if (tr.vocals === 'hold-in') chI.set('vocal', 0);
       if (style === 'stemswap') this.applyStemSwap(tr, 0);
     }
-    this.transition = tr;
+    this.transition = tr; this._skipNext = false;
     this._lastStyle = style;
     this._recent = [...this._recent.slice(-5), upcoming?.adaptive?.doubleDrop ? 'doubledrop' : style];
     tr.echoBeats = echoBeatsFor(this.fresh(out.track), this.fresh(inn.track));
@@ -1186,6 +1248,10 @@ export class AutoMix extends Emitter {
     else chO.set('volume', 0);
     for (const k of ['eqLow', 'eqMid', 'eqHigh', 'filter']) chI.set(k, 0);
     chI.set('volume', 0.8);
+    if (tr.landTrim && typeof chI.setAutoGain === 'function') {
+      chI.setAutoGain(tr.landTrim.base + tr.landTrim.db);
+      this.levelEase = { ch: chI, deck: inn, ...tr.landTrim, t0: this.now(), dur: 8 * 4 * (60 / (inn.effectiveBpm || inn.bpm || 120)) * 1000 };
+    }
     inn.play({ at: tr.dropWall / 1000, instant: true }); // exactly on the bar line (the tick may come a little early or late)
     if (tr.style === 'loop' || tr.style === 'cut') setTimeout(() => { if (out !== this.current || this.transition?.out === out) { out.exitLoop?.(); out.loop = null; } }, 30);
     this.emit('state');
@@ -1216,6 +1282,7 @@ export class AutoMix extends Emitter {
       return;
     }
     if (!inn.playing) { chI.set('volume', 0.8); inn.play(); }
+    if (out.track && !tr.skipped) this.feedback = playFeedback(this.feedback || emptyFeedback(), this.fresh(out.track), { now: Date.now() });
     inn.setMaster(); inn.syncOn = false;
     this.current = inn;
     this.startTempoRamp(inn);
