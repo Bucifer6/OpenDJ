@@ -3,9 +3,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   fftPlan, demucsSpec, demucsISpec, planChunks, chunkInput, separateChunked, transitionWeight, mixtureError, MAX_MIXTURE_ERROR,
+  stemsDifference, MAX_BACKEND_DIFFERENCE,
   interleaveInt16, floatToInt16, specFrames, BINS, STEMS, DEMUCS_SOURCES,
 } from '../public/js/stems/stem-dsp.js';
-import { createRunner, createStubSession, StubTensor } from '../public/js/stems/stems-model.js';
+import { createRunner, createStubSession, StubTensor, verifiedRunChunk } from '../public/js/stems/stems-model.js';
 import { stemCoefficients, readStemMix, smoothGains, effectiveGains, isUnity, deckStemBytes } from '../public/js/stems/stem-mix.js';
 
 const maxAbs = (a, b, from = 0, to = a.length) => { let m = 0; for (let i = from; i < to; i++) m = Math.max(m, Math.abs(a[i] - b[i])); return m; };
@@ -104,6 +105,39 @@ test('stems: output that does not add up to the input (broken GPU backend) is re
   for (let i = 0; i < 2 * seg; i++) { near[i] = mix[i] * 0.97; near[2 * seg + i] = 1e-5; }
   assert.ok(mixtureError(mix, near, 4, 2, seg) < MAX_MIXTURE_ERROR);
   assert.ok(mixtureError(new Float32Array(2 * seg), new Float32Array(8 * seg).fill(1e-4), 4, 2, seg) < MAX_MIXTURE_ERROR);
+});
+
+// a GPU that mixes up the output layout: every stem gets slices of the others, so the sum is still the track
+const scramble = (out, S, C, seg) => { const r = new Float32Array(out.length); for (let c = 0; c < C; c++) for (let t = 0; t < seg; t++) for (let s = 0; s < S; s++) r[(((s + (t >> 6)) % S) * C + c) * seg + t] = out[(s * C + c) * seg + t]; return r; };
+
+test('stems: noise moved between the stems passes the mixture check but not the CPU comparison', async () => {
+  const seg = 16384, runner = createRunner(createStubSession({ segment: seg }), StubTensor);
+  const mix = noise(2 * seg, 3);
+  const good = await runner.runChunk(mix), bad = scramble(good, 4, 2, seg);
+  assert.ok(mixtureError(mix, bad, 4, 2, seg) < MAX_MIXTURE_ERROR, 'the sum alone cannot tell (what happened with DirectML)');
+  assert.ok(stemsDifference(bad, good) > MAX_BACKEND_DIFFERENCE, `scrambled stems differ (${stemsDifference(bad, good)})`);
+  assert.ok(stemsDifference(good.map((v) => v * (1 + 1e-4)), good) < 1e-6, 'float rounding passes');
+  assert.equal(stemsDifference(good.map((v, i) => (i === 9 ? NaN : v)), good), Infinity);
+});
+
+test('stems: a GPU is checked against the CPU once, on the first chunk with audio', async () => {
+  const seg = 16384, len = 60000, cpu = createRunner(createStubSession({ segment: seg }), StubTensor);
+  const L = noise(len, 11), R = noise(len, 12);
+  L.fill(0, 0, 20000); R.fill(0, 0, 20000); // silent intro: the first chunk is not used for the check
+  for (const [name, gpu, ok] of [['matching', cpu.runChunk, true], ['scrambling', async (m) => scramble(await cpu.runChunk(m), 4, 2, seg), false]]) {
+    let refs = 0, released = 0, verified = 0, blocks = 0;
+    const run = verifiedRunChunk(gpu, async () => { refs++; return { runChunk: cpu.runChunk, release: () => { released++; } }; }, { onVerified: () => verified++ });
+    const p = separateChunked({ channels: [L, R], length: len, segment: seg, sources: 4, runChunk: run, onBlock: () => { blocks++; } });
+    if (ok) {
+      const r = await p;
+      assert.equal(refs, 1, `${name}: one CPU check`); assert.equal(released, 1); assert.equal(verified, 1); assert.equal(blocks, r.chunks);
+      assert.equal(run.isVerified(), true);
+    } else {
+      await assert.rejects(p, (e) => e.code === 'BAD_STEM_OUTPUT' && e.mismatch === true, name);
+      assert.equal(refs, 1); assert.equal(released, 1, 'CPU session released'); assert.equal(verified, 0);
+      assert.equal(blocks, 1, 'only the silent chunk before the check was written (the caller redoes the track)');
+    }
+  }
 });
 
 test('stems: hybrid runner + stub model separates into bands that sum to the input', async () => {

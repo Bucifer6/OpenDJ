@@ -23,6 +23,9 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### Unreleased
+- **Fix AI stems that came out as noise on the graphics card.** The previous check only tested that the four stems add up to the track, but the GPU (DirectML) was returning noise spread across the stems that still added up exactly, so it passed. A GPU is now compared once with the CPU on real audio. If its stems differ, the track is redone on the CPU and the GPU is not used for stems again. Noisy GPU stems saved by 0.5.3–0.5.4 are deleted at start-up and prepared again. The browser engine checks WebGPU against WASM the same way.
+
 ### New in 0.5.4
 - Ten additional audio-reactive visualisers: Aurora Ribbons, Cosmic Vortex, Fractal Mandala, Neon Terrain, Liquid Plasma, Warp Drive, Spectrum Skyline, Neon Waveform, Particle Orbit and Prism Tunnel. Choose and save a style per deck in VIDEO → Mix; works with the preview, projector output and Canvas2D fallback. No new dependencies or downloaded assets.
 - Fix a browser startup syntax error in the stem backend fallback handler. CI now parses every browser JavaScript module and worker, including files not imported by unit tests.

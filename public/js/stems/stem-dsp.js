@@ -248,6 +248,25 @@ export const MAX_MIXTURE_ERROR = 0.25;
 export const badOutputError = (ratio) => Object.assign(new Error(`The stem model returned invalid audio (the stems do not add up to the track: error ${Number.isFinite(ratio) ? ratio.toFixed(2) : 'NaN'})`), { code: 'BAD_STEM_OUTPUT' });
 
 /**
+ * How far one backend's stems are from another's for the same chunk: error energy / reference energy, summed over
+ * every source (Infinity for NaN / Infinity). mixtureError cannot see audio moved between the sources (a GPU that
+ * mixes up the output layout returns noise in every stem that still adds up to the track exactly), so a GPU's
+ * output is compared once with the CPU's (see verifiedRunChunk in stems-model.js).
+ */
+export function stemsDifference(out, ref) {
+  let err = 0, energy = 0;
+  for (let i = 0; i < ref.length; i++) { const d = out[i] - ref[i]; err += d * d; energy += ref[i] * ref[i]; }
+  if (!Number.isFinite(err)) return Infinity;
+  return err / (energy + 1e-6 * ref.length);
+}
+/** A GPU whose stems differ from the CPU's by more than this (about -13 dB) is not used. fp32 / TF32 rounding is far below. */
+export const MAX_BACKEND_DIFFERENCE = 0.05;
+/** Mean square of a chunk (to skip silent intros when choosing the chunk a GPU is checked on). */
+export function meanSquare(x) { let s = 0; for (let i = 0; i < x.length; i++) s += x[i] * x[i]; return s / (x.length || 1); }
+/** Thrown when a GPU's stems do not match the CPU's for the same audio. */
+export const backendMismatchError = (backend, diff) => Object.assign(new Error(`The ${backend} backend returned different stems from the CPU (difference ${Number.isFinite(diff) ? diff.toFixed(2) : 'NaN'})`), { code: 'BAD_STEM_OUTPUT', mismatch: true });
+
+/**
  * Separate a whole track chunk by chunk.
  * runChunk(planar Float32Array [C][segment]) -> Promise<Float32Array> planar [S][C][segment]
  * onBlock({ frame, frames, data }) receives finished audio in order (planar [S][C][frames]).
