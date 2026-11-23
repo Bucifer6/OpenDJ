@@ -25,6 +25,7 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 ### New in 0.5.4
 - Fix a browser startup syntax error in the stem backend fallback handler. CI now parses every browser JavaScript module and worker, including files not imported by unit tests.
+- Stabilise absolute DVS position when audio capture begins partway through a carrier cycle, and reset bit thresholds on needle-lift reacquisition. A 48-case regression covers both timecode families, both directions and varying capture phases.
 - Refresh the README, feature screenshots and demo animation from the working application using the fictional demo library.
 - Includes the adaptive DJ improvements below and the stem-output validation fix. The 0.5.3 release candidate was stopped before publication after combined-branch QA detected the startup error.
 

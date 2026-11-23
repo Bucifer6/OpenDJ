@@ -21,6 +21,17 @@ function run(sig, opts) {
 }
 const between = (log, a, b) => log.filter((r) => r.t >= a && r.t < b);
 
+test('absolute timecode acquires a stable position at every capture start phase', () => {
+  for (const def of [TIMECODES.serato_2a, TIMECODES.traktor_a]) for (const speed of [1, -1]) for (let step = 0; step < 12; step++) {
+    const phase = step / 12;
+    const sig = generateTimecode({ def, sampleRate: SR, seconds: 0.8, startCycle: 20000 + phase, speed: () => speed, noise: 0.01, dropout: t => t >= 0.3 && t < 0.4 });
+    const { log } = run(sig, { def, table: tableFor(def) });
+    const steady = [...between(log, 0.2, 0.29), ...between(log, 0.55, 0.8)];
+    const bad = steady.filter(r => !r.lock || Math.abs(r.pos - (20000 + phase + r.t * def.carrier * speed)) >= 2);
+    assert.equal(bad.length, 0, `${def.id}, speed ${speed}, capture phase ${phase}: stable absolute lock before and after needle lift: ${JSON.stringify(bad.slice(0, 3))}`);
+  }
+});
+
 test('structured-cloned configuration preserves acquired absolute position; polarity changes reacquire it', () => {
   const def = TIMECODES.serato_2a, sig = generateTimecode({ def, sampleRate: SR, seconds: 0.3, startCycle: 20000 });
   const { d } = run(sig, { def, table: tableFor(def) });
