@@ -22,6 +22,9 @@ export const hostMicros = () => (performance.timeOrigin + performance.now()) * 1
 
 export const SESSION_EPS = 500000; // µs
 const PING_TIMEOUT = 50, MAX_PING_TRIES = 5, DATA_POINTS = 100, REMEASURE_MS = 30000;
+// a measurement cut short by a burst of lost (or late) round trips still counts with this many points; one that has
+// fewer is retried after each of these waits in turn (then every 5 s), not 5 s straight away
+const MIN_POINTS = 20, RETRY_MS = [500, 2000, 5000];
 
 export class LinkNode extends EventEmitter {
   /**
@@ -218,14 +221,16 @@ export class LinkNode extends EventEmitter {
 
   _sawOtherSession(sessionId, m) {
     let s = this.otherSessions.get(sessionId);
-    if (!s) { s = { timeline: m.timeline, intercept: null, measuring: false, lastTry: 0 }; this.otherSessions.set(sessionId, s); }
+    if (!s) { s = { timeline: m.timeline, intercept: null, measuring: false, lastTry: 0, fails: 0 }; this.otherSessions.set(sessionId, s); }
     if (!s.timeline || m.timeline.beatOrigin > s.timeline.beatOrigin) s.timeline = m.timeline;
     if (s.measuring || !m.endpoint) return;
     const now = Date.now();
-    if (s.lastTry && now - s.lastTry < (s.intercept == null ? 5000 : REMEASURE_MS)) return;
+    const wait = s.intercept != null ? REMEASURE_MS : RETRY_MS[Math.min(s.fails, RETRY_MS.length) - 1] ?? 0;
+    if (s.lastTry && now - s.lastTry < wait) return;
     s.measuring = true; s.lastTry = now;
     this._measure(m.endpoint, sessionId).then((intercept) => {
       s.measuring = false;
+      if (intercept == null) s.fails++; else s.fails = 0;
       if (intercept == null || !this.enabled) return;
       s.intercept = intercept;
       if (sessionId === this.sessionId) return; // joined meanwhile
@@ -275,7 +280,10 @@ export class LinkNode extends EventEmitter {
     const send = (prevGhost) => {
       this.timers.clearTimeout(m.timer);
       try { this.transport.send(encodePing(Math.round(this.clock()), prevGhost), endpoint); } catch { /* retried by timer */ }
-      m.timer = this.timers.setTimeout(() => { if (++m.tries >= MAX_PING_TRIES) m.finish(null); else send(); }, PING_TIMEOUT);
+      m.timer = this.timers.setTimeout(() => {
+        if (++m.tries < MAX_PING_TRIES) return send();
+        m.finish(m.data.length >= MIN_POINTS ? Math.round(median(m.data)) : null); // keep what a burst of losses left
+      }, PING_TIMEOUT);
       m.timer.unref?.();
     };
     m.finish = (v) => {

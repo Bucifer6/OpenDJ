@@ -45,9 +45,8 @@ try {
       return Array.from({ length: n / 2 }, (_, k) => Math.hypot(r[k], im[k]));
     };
     const sr = 48000, outp = {};
-    for (const { id, name } of S.SOUND_BANK) {
-      const buf = await S.renderSound(id, sr);
-      const L = buf.getChannelData(0), R = buf.getChannelData(1), n = L.length;
+    const analyse = (buf, name) => {
+      const L = buf.getChannelData(0), R = buf.getChannelData(buf.numberOfChannels > 1 ? 1 : 0), n = L.length;
       // envelope: 10 ms RMS frames
       const fr = Math.round(0.01 * sr), env = [];
       for (let s = 0; s + fr <= n; s += fr) { let e = 0; for (let i = s; i < s + fr; i++) e += (L[i] * L[i] + R[i] * R[i]) / 2; env.push(Math.sqrt(e / fr)); }
@@ -82,14 +81,18 @@ try {
       // f0 from the harmonic sum (sub-harmonic summation over 300..700 Hz)
       let f0 = 0, f0s = -1;
       for (let f = 300; f <= 700; f += 1) { let s = 0; for (let h = 1; h <= 8; h++) s += mag[Math.round(h * f / (sr / N))]; if (s > f0s) { f0s = s; f0 = f; } }
-      outp[id] = {
+      return {
         name, seconds: n / sr, lufs: buf.stats.lufs, peakDb: 20 * Math.log10(buf.stats.peak), gainDb: buf.stats.gainDb,
         first: Math.max(Math.abs(L[0]), Math.abs(R[0])), last: Math.max(Math.abs(L[n - 1]), Math.abs(R[n - 1])),
         attackMs, onsets, maxJump, peakHz: hz(peakK), centroid: num / den, harm466: harm(466), f0,
         sub: band(20, 150), mid: band(300, 4000), high: band(4000, 20000),
         wav: Array.from(S.toWav(buf)),
       };
-    }
+    };
+    // the synthesised bank (each sound's fallback), then what the pads with a bundled recording play
+    for (const { id, name } of S.SOUND_BANK) outp[id] = analyse(await S.renderSound(id, sr), name);
+    const ac = new OfflineAudioContext(1, 1, sr);
+    for (const { id, name, file } of S.SOUND_BANK) if (file) outp[`${id}-rec`] = analyse(await S.bankSound(id, ac), `${name} (recording)`);
     return outp;
   });
 
@@ -119,6 +122,11 @@ try {
   check(h.attackMs <= 40, `air horn fast attack (${h.attackMs} ms)`);
   check(h.onsets === 1 && h.seconds > 1.5, 'air horn: one long blast');
   check(res.airhorn3.onsets === 3, `air horn ×3: three blasts "ba-ba-baaah" (${res.airhorn3.onsets} onsets)`);
+  // the recording the Air Horn pads play (public/samples/air-horn.mp3)
+  const rh = res['airhorn-rec'], r3 = res['airhorn3-rec'];
+  check(rh.onsets === 1 && rh.seconds > 2.4 && rh.seconds < 2.9, `recorded air horn: one blast with its fade (${rh.seconds.toFixed(2)} s)`);
+  check(r3.onsets === 3 && Math.abs(r3.seconds - (rh.seconds + 0.38)) < 0.01, `recorded air horn ×3: two stabs, then the whole horn (${r3.onsets} onsets, ${r3.seconds.toFixed(2)} s)`);
+  check(Math.abs(rh.lufs + 14) < 1.5 && Math.abs(r3.lufs + 14) < 1.5, `recorded horns normalised to -14 LUFS (${rh.lufs.toFixed(1)} / ${r3.lufs.toFixed(1)})`);
   check(res.kick.sub > 0.5 && res.kick.attackMs <= 10, `kick: sub-heavy (${(res.kick.sub * 100).toFixed(0)} % below 150 Hz), instant attack`);
   check(res.impact.sub > 0.4, `impact: sub boom (${(res.impact.sub * 100).toFixed(0)} % below 150 Hz)`);
   check(res.clap.mid > 0.6 && res.clap.attackMs <= 20, `clap: mid-band noise burst (${(res.clap.mid * 100).toFixed(0)} %)`);
@@ -134,23 +142,16 @@ try {
     await s.ready;
     const names = s.slots.map((x) => x.name), loaded = s.slots.every((x) => x.buffer);
     await s.setSound(0, 'airhorn3'); s.setPadVolume(0, 0.5); s.setPadSync(0, true);
-    // Air Horn ×3 is cut from the recorded horn: two stabs, then the whole horn
-    const tb = s.slots[0].buffer, td = tb.getChannelData(0), fr = Math.round(0.01 * tb.sampleRate), tenv = [];
-    for (let i = 0; i + fr <= td.length; i += fr) { let e = 0; for (let j = i; j < i + fr; j++) e += td[j] * td[j]; tenv.push(Math.sqrt(e / fr)); }
-    const tmax = Math.max(...tenv); let tOn = 0, tLow = true;
-    for (const v of tenv) { if (tLow && v > tmax * 0.6) { tOn++; tLow = false; } else if (v < tmax * 0.25) tLow = true; }
-    const triple = { dur: tb.duration, onsets: tOn, recorded: !!tb.stats && Math.abs(tb.duration - 3.0) < 0.2 };
     await a.setSetting('sampler', s.config());
     const saved = (await (await fetch('/api/settings')).json()).sampler;
     s.nextBeat = () => a.engine.ctx.currentTime + 0.25;
     const quant = s.startTime(0) - a.engine.ctx.currentTime, free = s.startTime(1);
     const padText = [...document.querySelectorAll('.sampler-bar .spad')].map((b) => b.textContent);
-    return { names, loaded, saved, quant, free, padText, triple };
+    return { names, loaded, saved, quant, free, padText };
   });
   check(ui.loaded && ui.names.join(',') === 'Air Horn,Siren,Laser,Kick,Clap,Rewind,Riser,Impact', `app pads keep their order and names (${ui.names.join(', ')})`);
   check(ui.saved?.pads?.[0]?.sound === 'airhorn3' && ui.saved.pads[0].volume === 0.5 && ui.saved.pads[0].sync === true, 'pad sound / volume / sync saved in settings');
   check(ui.padText[0] === 'Air Horn ×3', `pad label follows the chosen sound (${ui.padText[0]})`);
-  check(ui.triple.recorded && ui.triple.onsets === 3, `Air Horn ×3 pad: three blasts cut from the recorded horn (${ui.triple.onsets} onsets, ${ui.triple.dur.toFixed(2)} s)`);
   check(ui.quant > 0.2 && ui.quant < 0.3 && ui.free === 0, `sync-to-beat pads start on the next beat (${ui.quant.toFixed(3)} s), others at once`);
   check(errors.length === 0, `no page errors ${errors.join(' | ')}`);
 

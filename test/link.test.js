@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { LinkNode, MemoryNetwork, UdpTransport, hostMicros, registerLinkRoutes, protocol as P, timeline as T } from '../server/link/index.js';
+import { prng } from './fixtures/automix-corpus.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const near = (a, b, eps, msg) => assert.ok(Math.abs(a - b) <= eps, `${msg || ''} ${a} ≈ ${b} (±${eps})`);
@@ -99,13 +100,8 @@ test('client tempo change keeps beat continuity and raises the session beatOrigi
 });
 
 // ------------------------------------------------------------------ two (three) nodes in-process
-/** Seeded PRNG (mulberry32): the simulated network drops and delays the same packets on every run. */
-function seeded(seed) {
-  return () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-}
-
 function pair({ latencyMs = 3, jitterMs = 4, loss = 0, seed = 1 } = {}) {
-  const net = new MemoryNetwork({ latencyMs, jitterMs, loss, rand: seeded(seed) });
+  const net = new MemoryNetwork({ latencyMs, jitterMs, loss, rand: prng(seed) }); // seeded: the same packets are dropped and delayed on every run
   const offA = 0, offB = -7_654_321_000; // B's host clock is ~2 h behind A's
   const a = new LinkNode({ transport: net.transport(), clock: () => hostMicros() + offA, bpm: 124, broadcastMs: 100 });
   const b = new LinkNode({ transport: net.transport(), clock: () => hostMicros() + offB, bpm: 95, broadcastMs: 100 });
@@ -151,12 +147,19 @@ test('two Link nodes discover each other, join one session and agree on tempo an
 test('clock-offset measurement is accurate despite latency jitter and packet loss', async () => {
   const { a, b, offB } = pair({ latencyMs: 2, jitterMs: 6, loss: 0.1 });
   await a.enable(); await sleep(600); await b.enable();
-  // a measurement gives up after 5 lost round trips in a row and is retried 5 s later (node.js _sawOtherSession); on a
-  // busy machine late timers count as lost too, so allow for one retry rather than failing on it
-  assert.ok(await until(() => b.sessionId === a.sessionId, 12000), 'b joins a\'s session');
+  // a burst of lost (or, on a busy machine, late) round trips can cut a measurement short; it is retried within 0.5-2 s
+  assert.ok(await until(() => b.sessionId === a.sessionId, 8000), 'b joins a\'s session');
   // ghost(host) must agree: a.hostToGhost(tA) ≈ b.hostToGhost(tB) for the same instant
   const t = hostMicros();
   near(a.hostToGhost(t + 0), b.hostToGhost(t + offB), 3000, 'ghost time (µs)');
+  await a.disable(); await b.disable();
+});
+
+test('a lossy network (30 % of packets lost) still joins: short measurements count, failed ones retry soon', async () => {
+  // (wall-clock bounds stay generous here: on a busy machine late timers count as lost packets too)
+  const { a, b } = pair({ latencyMs: 2, jitterMs: 6, loss: 0.3 });
+  await a.enable(); await sleep(600); await b.enable();
+  assert.ok(await until(() => b.sessionId === a.sessionId, 10000), 'b joins a\'s session');
   await a.disable(); await b.disable();
 });
 
