@@ -54,6 +54,7 @@ const SCHEMA = {
   syncMode: oneOf('beat', 'tempo'),
   waveformColors: oneOf('rgb', 'soft', 'pastel', 'amber', 'ocean', 'sunset', 'blue', 'mono', 'player-blue', 'player-rgb'),
   waveformShape: oneOf('bars', 'half', 'smooth', 'outline'),
+  waveformDefaults: num(0, 100),
   downloadDir: str(), uploadDir: str(),
   automix: shape({
     transitionBeats: num(1, 256), lengthMode: oneOf('fixed', 'auto'), smartStart: bool(), profile: oneOf('club', 'harmonic', 'peak', 'open', 'quick', 'custom'),

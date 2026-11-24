@@ -19,3 +19,12 @@ test('packaging: every platform files list keeps the top-level includes, so the 
     assert.ok(!own.some((p) => /^(docs|test|scripts|mobile|tools)\b/.test(p)), `${os}.files includes no repository-only folders`);
   }
 });
+
+test('packaging: each Windows installer refuses a PC it has no app for, before installing anything', () => {
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(pkg.build.nsis.include, 'build/installer.nsh');
+  const nsh = fs.readFileSync(new URL('../build/installer.nsh', import.meta.url), 'utf8');
+  assert.match(nsh, /!macro customInit/);
+  assert.match(nsh, /\$\{IfNot\} \$\{IsNativeARM64\}[\s\S]*Quit/, 'ARM64-only installer quits on an Intel/AMD PC');
+  assert.match(nsh, /\$\{IfNot\} \$\{RunningX64\}[\s\S]*\$\{AndIfNot\} \$\{IsNativeARM64\}[\s\S]*Quit/, 'quits on 32-bit Windows');
+});

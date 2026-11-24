@@ -9,7 +9,8 @@ import { cssVar } from './themes.js';
 import { smoothTime } from './clock.js';
 import { NEEDLE_HOLD_MS } from '../audio/vinyl.js';
 
-// 3-band colours: low (kick/bass), mid (vocals, synths), high (hats, cymbals). 'rgb' follows the theme tokens.
+// 3-band colours: low (kick/bass), mid (vocals, synths), high (hats, cymbals). 'rgb' follows the theme tokens; 'soft'
+// is the default.
 // `body` is how strongly the soft full-band envelope behind the bands shows (default 0.35); the softer palettes keep
 // their colours below full saturation and let the bands blend instead of stacking into solid blocks of colour.
 const PALETTES = {
@@ -26,7 +27,7 @@ const PALETTES = {
   sunset: { low: [150, 62, 92], mid: [222, 128, 96], high: [250, 214, 170], alpha: 0.85, body: 0.3 },
 };
 /** Waveform colour schemes offered in Settings → Appearance (the first is the default). */
-export const WAVEFORM_STYLES = [['rgb', '3-band RGB (theme)'], ['soft', 'Soft RGB'], ['pastel', 'Pastel'], ['amber', 'Amber'], ['ocean', 'Ocean'], ['sunset', 'Sunset'], ['blue', 'Blue'], ['mono', 'Monochrome'], ['player-blue', 'Player Blue'], ['player-rgb', 'Player RGB']];
+export const WAVEFORM_STYLES = [['soft', 'Soft RGB'], ['rgb', '3-band RGB (theme)'], ['pastel', 'Pastel'], ['amber', 'Amber'], ['ocean', 'Ocean'], ['sunset', 'Sunset'], ['blue', 'Blue'], ['mono', 'Monochrome'], ['player-blue', 'Player Blue'], ['player-rgb', 'Player RGB']];
 /** Waveform shapes: mirrored bars (default), one-sided bars from the bottom, a smooth filled envelope, outlines. */
 export const WAVEFORM_SHAPES = [['bars', 'Bars'], ['half', 'Half (from the bottom)'], ['smooth', 'Smooth'], ['outline', 'Outline']];
 const proStyle = (name) => name === 'player-blue' || name === 'player-rgb';
@@ -160,7 +161,7 @@ export class DetailWaveform {
     this.ro.observe(this.canvas);
   }
 
-  wfStyle() { return this.getSettings().waveformColors || 'rgb'; }
+  wfStyle() { return this.getSettings().waveformColors || 'soft'; }
   wfShape() { return this.getSettings().waveformShape || 'bars'; }
   resize() {
     const dpr = waveDpr();
@@ -337,7 +338,7 @@ export class OverviewWaveform {
     this.ro = new ResizeObserver((es) => { const r = es.at(-1).contentRect, z = uiZoom(); this.cw = r.width * z; this.ch = r.height * z; });
     this.ro.observe(this.canvas);
   }
-  wfStyle() { return this.getSettings().waveformColors || 'rgb'; }
+  wfStyle() { return this.getSettings().waveformColors || 'soft'; }
   wfShape() { return this.getSettings().waveformShape || 'bars'; }
   renderCache(W, H, played) {
     const w = this.deck.waveform; const s = this.getSettings();

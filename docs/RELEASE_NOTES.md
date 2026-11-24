@@ -7,6 +7,7 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 |---|---|
 | Windows 10/11 (most PCs) | `OpenDJ-Setup-<version>-x64.exe`, or `OpenDJ-Portable-<version>.exe` (no install) |
 | Windows on ARM | `OpenDJ-Setup-<version>-arm64.exe` |
+| Windows, not sure which | `OpenDJ-Setup-<version>.exe` (works on both, larger download) |
 | macOS, Apple Silicon (M1–M4) | `OpenDJ-<version>-mac-arm64.dmg` |
 | macOS, Intel | `OpenDJ-<version>-mac-x64.dmg` |
 | Linux, any distro | `OpenDJ-<version>-linux-x86_64.AppImage` (or `-arm64.AppImage`) |
@@ -22,6 +23,10 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **Linux AppImage:** `chmod +x` the file, then run it.
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
+
+### Unreleased
+- **Fixed: the Windows installer could install nothing but the uninstaller.** The ARM64 installer (for Windows on ARM) run on an ordinary Intel or AMD PC installed only the uninstaller to *C:\Program Files (x86)\OpenDJ*, with a desktop shortcut to a program that wasn't there. Each installer now checks the PC first: on the wrong one it says which file to download and installs nothing. If that happened to you: uninstall OpenDJ in *Settings → Apps*, then install `OpenDJ-Setup-<version>-x64.exe` (or `OpenDJ-Setup-<version>.exe`, which works on every PC).
+- **Soft RGB is the default waveform colour scheme.** Installs still on the old default switch to it once; the old look is *3-band RGB (theme)* in *Settings → Appearance*.
 
 ### New in 0.5.17
 - **Smoother waveforms and platters during mixes.** Under load, such as the next track loading during Automix, the audio clock runs in bursts, and the scrolling waveforms and spinning platters followed it with jumps of up to 60 ms. They now glide back into step instead, so the motion stays smooth. Track loading and Automix's beat-phase checks also do their work in smaller pieces, and Automix loads the next track a few seconds after a mix instead of straight away.
@@ -60,18 +65,4 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **Longer blends, like a club DJ.** In house, techno and trance, Automix now layers compatible records (matching keys and genre, close tempo) for 32 bars and up to 64 when their intros and outros allow it, letting the incoming intro run under the outgoing track's last part. Disco and drum & bass blend a little longer too; open format stays quick.
 - **Teases of the next record.** Sometimes (about one transition in three, every other one in party mode) Automix brings a bit of the next track in a phrase or two before the real mix and takes it out again: its vocal over an instrumental part or its drums with AI stems, otherwise its top end. *Settings → Automix → Sometimes tease the next track* turns it off.
 - **Fixed: beats drifting out of phase during blends** (in 0.5.8). On tracks with soft or busy kicks the by-ear beat check gave jumpy readings, and following them pulled the two tracks up to ~30 ms apart. It now only follows the kicks when its readings are clear and steady, and uses the beat grids otherwise: the kicks land within about 3 ms again.
-
-### New in 0.5.8
-- **Never goes silent.** If the music stops, stalls or the on-air fader is left down, Automix restores the level, finishes a stuck transition or starts the next track on the beat.
-- **Same loudness for every track.** Tracks are measured in LUFS (their loudest main section) and Automix sets each one's level before it is heard; a cut onto a much louder drop is eased in.
-- **Mixes like a club DJ.** Long EQ blends with the bass swapped in one move on the phrase line (exactly on time, scheduled on the audio clock), never two basslines at once, the incoming drop landing where the outgoing track changes section, each track eased back to its own tempo slowly enough that nobody hears it, technique per genre (long blends for house and techno, cuts and short blends for hip-hop, pop and Latin, double drops in drum & bass), effects used sparingly.
-- **Picks the music for the room.** A *Party* set shape follows the clock (background early, peak around midnight to 2 am, deeper late), looks a few tracks ahead, mixes familiar and new tracks, alternates vocals, keeps artists 8 tracks apart, weighs keys by how sure their detection is, and learns from skips.
-- **Tricks.** Bass-cut teases, filter builds, loop-roll builds, pause drops, echo freezes, horns and rewinds, timed to land on the drop, never over vocals, and rationed (Settings → Automix → Tricks: off, subtle, party).
-- **Preview.** The Automix queue shows the next transition as a timeline with a quality check, buttons to move it a phrase or change its length, and a *Preview ♪* button that plays it in the headphones before the crowd hears it. Party controls: energy −/+, keep this vibe, never play this track.
-- **Plan a night.** *End the set at* a clock time (the energy winds down and the last track fades out in a reverb wash), *Clean versions only*, and *Export set (WAV)* renders the planned upcoming set to a file you can listen to the day before.
-- **More ways to mix.** With AI stems on both decks: drum bridge (only the drums overlap, so keys and genres never clash), acapella carry and acapella in. Ping-pong chops for open-format sets, a looped last phrase when a radio edit ends too soon, per-section beat checks so live-drummed or beatless passages never get a long beat-matched blend, scratch fills (with a scratch sound on a sampler pad) and light cues on tricks.
-- **Safer on shaky networks.** The track after next is fetched while the current one plays; a file that can't be read is dropped a track early instead of stopping the music.
-- **AI stems use the graphics card from the first track.** When DirectML cannot separate correctly on a computer (an RTX 3070 here), the tracks you ask for are now sent to the graphics card in the app window (WebGPU) from the start: OpenDJ checks the graphics card first instead of queueing tracks on the CPU, and tracks already waiting on the CPU move to the graphics card. Before, the first tracks (and a whole Automix set prepared ahead) stayed on the CPU.
-- The log now shows stems prepared in the app window, with the time each took.
-- Automix research and design notes: `docs/PRO_DJ_AUTOMIX_RESEARCH.md`.
 
