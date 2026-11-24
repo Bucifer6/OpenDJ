@@ -1,6 +1,7 @@
 import { el, fmtTime } from './util.js';
 import { api } from './api.js';
 import { setupClientLog } from './client-log.js';
+import { startPerfWatch } from './perf-watch.js';
 import { Engine } from './audio/engine.js';
 import { SAMPLE_CATALOG } from './audio/sample-catalog.js';
 import { VoiceBus } from './audio/voice.js';
@@ -67,6 +68,7 @@ class App {
     this.sequencer = new Sequencer(this.engine);
     this.buildLayout();
     setupStems(this);
+    if (!platform.local) startPerfWatch(this); // page stalls / audio dropouts into the app log, with what was going on
     this.recording = setupRecording(this); this.engine.attachRecorder(this.recording.recorder);
     setupRemoteControl(this, api).then((r) => { this.remote = r; }).catch(() => {}); // AI assistant (MCP) actions, when on
     this.wireEvents(); // subscribe to server events before loading the library so no change is missed

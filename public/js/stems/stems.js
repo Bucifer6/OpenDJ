@@ -147,6 +147,7 @@ export class StemsManager extends Emitter {
     }
   }
   _asked = new Set();
+  _wanted = new Set(); // in-window jobs the DJ asked for (setHold leaves them alone)
 
   /**
    * Prepare tracks ahead (Automix's next tracks, a track just loaded on a deck) on the server, quietly. Only with the
@@ -210,6 +211,7 @@ export class StemsManager extends Emitter {
     }
     const mine = list.filter((id) => !this.serverBusy?.has(id)); // the server is already on the others
     if (!mine.length) return 0;
+    if (interactive) for (const id of mine) this._wanted.add(id); // asked for by the DJ: never held for the mix
     this.queue.push(...mine);
     this.emit('queue', this.state());
     this.pump();
@@ -269,6 +271,7 @@ export class StemsManager extends Emitter {
           } else if (e.name !== 'AbortError') { console.warn('[stems]', e); this.emit('failed', { id, title: this.current.title, message: e.message }); }
           else this.emit('cancelled', { id });
         } finally {
+          this._wanted.delete(id); this._held = false;
           this.current = null;
           this.emit('progress', null); this.emit('queue', this.state());
         }
@@ -279,12 +282,26 @@ export class StemsManager extends Emitter {
     }
   }
 
-  setPhase(phase, extra = {}) { Object.assign(this.current, { phase, ...extra }); this.emit('progress', { ...this.current }); }
+  /**
+   * Hold background separation in this window (between chunks) while playback needs the machine: a mix transition,
+   * a deck loading (stems-ui.js decides). Stems the DJ asked for are never held.
+   */
+  setHold(on) {
+    const hold = !!on && !!this.current && !this._wanted.has(this.current.id);
+    if (hold === !!this._held) return;
+    this._held = hold;
+    this.worker?.postMessage({ type: 'hold', on: hold });
+    if (this.current) this.setPhase('separating'); // shown as 'waiting for the mix' while held
+    appLog(`[stems] background job ${hold ? 'held: a mix transition or deck load is running' : 'resumed'}`);
+  }
+
+  setPhase(phase, extra = {}) { if (this._held && phase === 'separating') phase = 'waiting for the mix'; Object.assign(this.current, { phase, ...extra }); this.emit('progress', { ...this.current }); }
 
   async getWorker() {
     if (this.workerReady) return this.workerReady;
     const w = new Worker(new URL('./stems-worker.js', import.meta.url), { type: 'module' });
     this.worker = w;
+    if (this._held) w.postMessage({ type: 'hold', on: true }); // held before this job's worker existed
     this.workerReady = new Promise((resolve, reject) => {
       w.onmessage = (e) => {
         const m = e.data;

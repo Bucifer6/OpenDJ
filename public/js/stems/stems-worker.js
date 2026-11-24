@@ -8,7 +8,7 @@
 //      { type: 'progress', id, done, total } { type: 'block', id, frame, frames, stems: Int16Array[4] (STEMS order) }
 //      { type: 'backend', backend, threads, failed? } { type: 'verified', backend } (WebGPU matched WASM once)
 //      { type: 'done', id, ms, chunks } { type: 'error', id?, message }
-import { separateChunked, interleaveInt16, STEMS, DEMUCS_SOURCES, stemsDifference, MAX_BACKEND_DIFFERENCE } from './stem-dsp.js';
+import { separateChunked, interleaveInt16, STEMS, DEMUCS_SOURCES, stemsDifference, MAX_BACKEND_DIFFERENCE, makeHold } from './stem-dsp.js';
 import { createRunner, createStubSession, StubTensor, verifiedRunChunk, backendTestInput } from './stems-model.js';
 
 let runner = null, info = null, toWasm = null, wasmReference = null, gpuRun = null;
@@ -90,6 +90,10 @@ async function init(m) {
   postMessage({ type: 'ready', ...info, loadMs: Math.round(performance.now() - t0) });
 }
 
+// Hold (from the page): while a mix transition runs or a deck loads, background separation waits between chunks so
+// playback and the waveforms have the machine to themselves; it carries on from the same chunk when released.
+const hold = makeHold();
+
 async function separate(m) {
   if (!runner) throw new Error('Model not loaded');
   const t0 = performance.now();
@@ -101,7 +105,7 @@ async function separate(m) {
   };
   const run = () => separateChunked({
     channels: [left, right], length: m.length, segment: runner.segment, overlap: m.overlap ?? 0.25, sources: runner.sources.length,
-    runChunk: runChunk(),
+    runChunk: hold.gate(runChunk()),
     onProgress: (done, total) => postMessage({ type: 'progress', id: m.id, done, total }),
     onBlock: ({ frame, frames, data }) => {
       const stems = order.map((k) => interleaveInt16(data, 2, frames, k * 2 * frames));
@@ -122,6 +126,7 @@ async function separate(m) {
 
 self.onmessage = async (e) => {
   const m = e.data;
+  if (m.type === 'hold') { hold.set(m.on); return; }
   try {
     if (m.type === 'init') await init(m);
     else if (m.type === 'separate') await separate(m);

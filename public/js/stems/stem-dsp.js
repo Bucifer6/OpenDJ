@@ -317,3 +317,17 @@ export function floatToInt16(src, out = new Int16Array(src.length), scale = 1) {
   }
   return out;
 }
+
+/**
+ * A pause switch for chunked work: gate(fn) wraps fn so each call first waits while the switch is on; set(false)
+ * lets every waiting call go on. The stems worker uses it to hold background separation between chunks.
+ */
+export function makeHold() {
+  let held = false;
+  const waiting = [];
+  return {
+    get held() { return held; },
+    set(on) { held = !!on; if (!held) waiting.splice(0).forEach((r) => r()); },
+    gate: (fn) => async (...a) => { while (held) await new Promise((r) => waiting.push(r)); return fn(...a); },
+  };
+}

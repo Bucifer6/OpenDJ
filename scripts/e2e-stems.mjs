@@ -113,6 +113,22 @@ try {
   const ev = await page.evaluate(() => window.__stemEvents);
   check(ev.some(([e, x]) => e === 'progress' && x?.phase === 'separating' && x.total > 1), `progress events (${ev.filter(([e]) => e === 'progress').length})`);
   check(ev.some(([e]) => e === 'finished'), `stems prepared with the stub model in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+  // background preparation in this window waits while a mix transition runs (playback first), then carries on
+  const held = await page.evaluate(async (id) => {
+    const app = window.opendj, s = app.stems, am = app.automix;
+    const phases = []; const onP = (x) => x && phases.push(x.phase); s.on('progress', onP);
+    let finished = false; const onF = () => { finished = true; }; s.on('finished', onF);
+    am.transition = { style: 'blend' }; // a transition running (what stems-ui.js watches)
+    await s.enqueue([id], { interactive: false, force: true });
+    await new Promise((r) => setTimeout(r, 2500));
+    const during = { finished, waiting: s.current?.phase === 'waiting for the mix', held: !!s._held };
+    am.transition = null;
+    for (let k = 0; k < 300 && !finished; k++) await new Promise((r) => setTimeout(r, 100));
+    s.off?.('progress', onP); s.off?.('finished', onF);
+    return { during, finished, sawWaiting: phases.includes('waiting for the mix') };
+  }, ids['Three Bands']);
+  check(!held.during.finished && held.during.waiting && held.during.held, `background stems wait while a mix transition runs (${JSON.stringify(held.during)})`);
+  check(held.finished && held.sawWaiting, 'and finish once it is over');
   const info = await page.evaluate((id) => fetch(`/api/stems/${id}`).then((r) => r.json()), ids['Three Bands']);
   check(info.ready && info.frames === 24 * SR && info.stems.length === 4, `server stem cache (${info.format}, ${info.frames} frames)`);
 
