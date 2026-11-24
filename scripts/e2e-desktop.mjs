@@ -92,7 +92,7 @@ try {
     localStorage.setItem('e2e-probe', 'kept');
     return { saved: r.saved, name: s.slots[2].name, horn: s.slots[0].buffer?.duration };
   });
-  check(s1.saved && s1.name === 'Vinyl Scratch' && s1.horn > 0.4 && s1.horn < 1, `CC0 sound saved on pad 3, recorded air horn on pad 1 (${s1.horn?.toFixed(2)} s)`);
+  check(s1.saved && s1.name === 'Vinyl Scratch' && s1.horn > 2.4 && s1.horn < 2.9, `CC0 sound saved on pad 3, recorded air horn on pad 1 (${s1.horn?.toFixed(2)} s)`);
   // library + Ollama planning through the real dialog
   await page.evaluate((d) => fetch('/api/folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: d }) }), music);
   await page.waitForFunction(() => window.opendj.library.tracks.size === 3, null, { timeout: 30000 });
@@ -143,7 +143,7 @@ try {
     return { origin: location.origin, name: s.slots[2].name, creator: s.slots[2].creator, builtin: s.slots[2].builtin, probe: localStorage.getItem('e2e-probe'), model: localStorage.getItem('dj-model'), horn: s.slots[0].buffer?.duration };
   });
   check(s2.origin === origin1, `same origin after a restart (${s2.origin})`);
-  check(s2.name === 'Vinyl Scratch' && s2.creator && !s2.builtin && s2.probe === 'kept' && s2.model === 'llama3.2:3b' && s2.horn > 0.4, `after a restart: CC0 sound, air horn, localStorage and the Ollama model name kept (${JSON.stringify(s2)})`);
+  check(s2.name === 'Vinyl Scratch' && s2.creator && !s2.builtin && s2.probe === 'kept' && s2.model === 'llama3.2:3b' && s2.horn > 2.4, `after a restart: CC0 sound, air horn, localStorage and the Ollama model name kept (${JSON.stringify(s2)})`);
   await app.close(); app = null;
 } catch (e) {
   console.error(e instanceof CheckError ? e.message : e); failed = true;
