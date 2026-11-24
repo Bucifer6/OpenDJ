@@ -46,7 +46,7 @@ export function checkTransition(out, inn, plan, limits = CHECK_LIMITS) {
   let lowBeats = 0, vocalSec = 0;
   for (let i = 0; i <= steps; i++) {
     const k = i / steps, to = plan.begin + k * len, ti = plan.inStart + k * len * ratio;
-    const L = mixLevels(plan.style, k, kSwap != null && k >= kSwap ? kSwap : null, { previewFrom: plan.previewFrom ?? null });
+    const L = mixLevels(plan.style, k, kSwap != null && k >= kSwap ? kSwap : null);
     const vol = (v, d) => faderGain(v ?? d, 'log');
     const dd = plan.doubleDrop ? doubleDropTrim(k, kSwap) : 1;
     const go = vol((L.outVol ?? 0.8) * dd, 0.8) / faderGain(0.8, 'log'), gi = vol((L.inVol ?? 0) * dd, 0) / faderGain(0.8, 'log');
@@ -80,17 +80,4 @@ export function checkTransition(out, inn, plan, limits = CHECK_LIMITS) {
   if (metrics.vocalOverlapSec > limits.vocalOverlapSec) { issues.push(`vocals overlap ${metrics.vocalOverlapSec} s`); penalty += Math.min(6, metrics.vocalOverlapSec - limits.vocalOverlapSec); }
   if (metrics.stretchPct > limits.stretchPct) { issues.push(`stretched ${metrics.stretchPct} %`); penalty += (metrics.stretchPct - limits.stretchPct) * 0.5; }
   return { ok: !issues.length, issues, penalty: Math.round(penalty * 10) / 10, metrics };
-}
-
-/**
- * Is a bass preview (plan.previewFrom, see automix.js bassPreviewFrom) safe for this blend? The incoming bass under the
- * outgoing one adds low end (beat-matched kicks add up in phase): allowed only when the simulated mix stays within the
- * bump limit and the preview adds at most 1 LU to the blend without it. In practice: under a quieter intro, as DJs do,
- * not under two equally loud sections. (Two basslines are what the preview is, so that check is not used.)
- */
-export function checkBassPreview(out, inn, plan, limits = CHECK_LIMITS) {
-  if (plan?.previewFrom == null) return false;
-  const without = checkTransition(out, inn, { ...plan, previewFrom: null }, limits).metrics.bumpLu;
-  const withIt = checkTransition(out, inn, plan, limits).metrics.bumpLu;
-  return withIt <= limits.bumpLu && withIt - without <= 1;
 }

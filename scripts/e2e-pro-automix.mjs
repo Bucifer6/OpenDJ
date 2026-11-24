@@ -137,35 +137,6 @@ try {
   await page.waitForFunction(() => !window.opendj.automix.transition, null, { timeout: 60000 });
   const clean = await page.evaluate(() => { const a = window.opendj, ch = a.engine.channels[a.automix.current.index].state; return { eq: [ch.eqLow, ch.eqMid, ch.eqHigh, ch.filter], vol: ch.volume, fb: a.automix.feedback?.resetSuggested }; });
   check(clean.eq.every((v) => v === 0) && clean.vol > 0.7, `after the transition the on-air channel is clean (${JSON.stringify(clean)})`);
-  // ---------- bass preview (opt-in): the incoming bass at -8 dB for the bars before the swap, in a scheduled blend ----------
-  // a 32-bar club EQ blend into a next track 8 dB quieter (as an intro is): there the checker allows the preview
-  const savedAm = await page.evaluate(() => JSON.stringify(window.opendj.settings.automix));
-  await page.evaluate(() => window.opendj.setSetting('automix', { ...window.opendj.settings.automix, style: 'blend', varyStyles: false, lengthMode: 'fixed', transitionBeats: 128, bassPreview: true }));
-  await waitNextLoaded();
-  const pv = await page.evaluate(async () => {
-    const a = window.opendj, am = a.automix, cur = am.current, next = am.nextTrack();
-    const lib = a.library.tracks.get(next.id), gain0 = lib.gain;
-    lib.gain = (Number(gain0) || 0) - 8; am.upcoming = null;
-    try {
-      const nt = am.nextTransition(), pp = am.previewPlan();
-      if (!nt || !pp) return { none: true };
-      cur.seek(Math.max(0, nt.begin - 1.5)); // let the blend start on schedule (not MIX NOW)
-      const t0 = performance.now(); let tr = null;
-      while (!(tr = am.transition) && performance.now() - t0 < 8000) await new Promise((r) => setTimeout(r, 25));
-      if (!tr) return { started: false, planned: pp.previewFrom };
-      const ch = a.engine.channels[tr.inn.index], seen = [];
-      while (am.transition === tr) { seen.push({ k: Math.min(1, (am.now() - tr.t0) / tr.dur), low: ch.state.eqLow, swap: tr.kSwap }); await new Promise((r) => setTimeout(r, 40)); }
-      return { started: true, style: tr.style, bars: tr.length?.bars, planned: pp.previewFrom, from: tr.previewFrom ?? null, kSwap: seen.find((x) => x.swap != null)?.swap ?? null, seen };
-    } finally { lib.gain = gain0; }
-  });
-  check(pv.started && pv.style === 'blend', `a scheduled club EQ blend started (${pv.style}, ${pv.bars} bars)`);
-  check(pv.from != null, `the bass preview is used under a quieter incoming track (from ${pv.from?.toFixed(2)}, planned ${pv.planned?.toFixed(2)})`);
-  const pvBefore = pv.seen.filter((x) => x.swap == null && x.k < pv.from - 0.01), inWin = pv.seen.filter((x) => x.swap == null && x.k > pv.from + 0.01);
-  check(pvBefore.length > 0 && pvBefore.every((x) => x.low <= -0.99) && inWin.length > 0 && inWin.every((x) => Math.abs(x.low - (-8 / 26)) < 0.01),
-    `incoming bass cut until ${pv.from.toFixed(2)}, then -8 dB until the swap at ${pv.kSwap?.toFixed(2)} (${pvBefore.length} / ${inWin.length} samples)`);
-  check(pv.kSwap != null && pv.seen.filter((x) => x.swap != null).every((x) => x.low === 0), 'after the swap the incoming bass is full');
-  await page.evaluate((s) => window.opendj.setSetting('automix', JSON.parse(s)), savedAm);
-
   // ---------- render this set (P6.5): the planned upcoming set exported offline to a WAV file ----------
   const exported = await page.evaluate(async () => {
     const { exportSet } = await import('/js/automix-export.js');

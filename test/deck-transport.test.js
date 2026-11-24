@@ -24,3 +24,24 @@ test('a position report from the end of a worklet block reads exactly at any aud
   assert.ok(Math.abs(b.positionAt(at) - posAt10) < 1e-9, `deck b: ${b.positionAt(at)}`);
   assert.ok(Math.abs(a.positionAt(at) - b.positionAt(at)) < 1e-9, 'the two agree: no phantom phase offset of whole blocks');
 });
+
+test('tempo RESET: a playing deck glides back to 0 % (Settings → Decks), a second press or a stopped deck resets at once', () => {
+  const posted = [];
+  const mk = (extra = {}) => Object.assign(Object.create(Deck.prototype), { sr: 48000, ctx: { currentTime: 10 }, track: {}, bpm: 128, tempo: 6, tempoRange: 8, bend: 0, rateMul: 1, playing: true, syncOn: false,
+    engine: { settings: { deckOptions: {} }, onTempoChange() {} }, post: (type, m) => posted.push({ type, ...m }), emit() {} }, extra);
+  const d = mk();
+  d.resetTempoGlide();
+  const ramp = posted.find((m) => m.type === 'rateRamp');
+  assert.ok(d.gliding && ramp && Math.abs(ramp.to - 1) < 1e-9, 'a glide to 0 % was started on the audio thread');
+  assert.ok(Math.abs(ramp.dur - (2 * 16 * (60 / 128)) / (1.06 + 1)) < 1e-9, `over 16 beats by default (${ramp.dur.toFixed(2)} s)`);
+  assert.equal(d.tempo, 6, 'the fader moves with the glide, not at once');
+  d.resetTempoGlide();
+  assert.equal(d.tempo, 0, 'pressed again during the glide: 0 % at once'); assert.equal(d.gliding, false);
+  const stopped = mk({ playing: false }); stopped.resetTempoGlide();
+  assert.equal(stopped.tempo, 0, 'a stopped deck resets at once');
+  posted.length = 0;
+  const instant = mk({ engine: { settings: { deckOptions: { tempoResetBeats: 0 } }, onTempoChange() {} } }); instant.resetTempoGlide();
+  assert.equal(instant.tempo, 0, '"Jump to 0 % at once" setting'); assert.ok(!posted.some((m) => m.type === 'rateRamp'));
+  const eight = mk({ engine: { settings: { deckOptions: { tempoResetBeats: 8 } }, onTempoChange() {} } }); eight.resetTempoGlide();
+  assert.ok(Math.abs(posted.find((m) => m.type === 'rateRamp').dur - (2 * 8 * (60 / 128)) / 2.06) < 1e-9, '8 beats when set');
+});

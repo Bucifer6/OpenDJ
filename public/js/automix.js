@@ -17,7 +17,6 @@ import { t } from './i18n.js';
 import { planBestTransition, stemLevels, learnChoice, STEM_STYLES } from './mix-planner.js';
 import { planAdaptiveTransition } from './adaptive-dj.js';
 import { Watchdog, quietAt } from './automix-watchdog.js';
-import { checkBassPreview } from './transition-check.js';
 import { echoBeatsFor, styleFamily } from './dj-styles.js';
 import { audibleOffset, MIN_CONFIDENCE } from './audio/beat-phase.js';
 
@@ -285,30 +284,13 @@ const sq = (v) => (v <= 1e-12 ? 0 : Math.sqrt(v));
 /** Isolator knob positions for a few cuts (knob -1..0 = -26 dB..0, see curves.js isoKnobGain). */
 const EQ_M6 = -6 / 26, EQ_M20 = -20 / 26;
 
-/** Bass preview (opt-in): the incoming bass at BASS_PREVIEW_DB under the outgoing one for the last BASS_PREVIEW_BARS
- * bars before the swap, as in a real DJ's transition (docs/automix-research/04-real-mixes.md §2.4). */
-export const BASS_PREVIEW_DB = -8, BASS_PREVIEW_BARS = 8;
-const EQ_PREVIEW = BASS_PREVIEW_DB / 26; // isolator knob -1..0 = -26..0 dB (curves.js isoKnobGain)
-
-/**
- * Where a blend's bass preview starts (progress 0..1): BASS_PREVIEW_BARS incoming bars before the planned swap at
- * kSwap, or as many as fit after the first tenth of the blend; null when fewer than 2 bars fit.
- * lenIn: the blend's length in incoming-track seconds; barIn: one incoming bar in seconds.
- */
-export function bassPreviewFrom(kSwap, lenIn, barIn) {
-  if (kSwap == null || !(lenIn > 0) || !(barIn > 0)) return null;
-  const from = Math.max(0.1, kSwap - BASS_PREVIEW_BARS * barIn / lenIn);
-  return (kSwap - from) * lenIn >= 2 * barIn - 1e-6 ? from : null;
-}
-
 /**
  * Mixer settings at transition progress k (0..1) for the blend styles. kSwap: progress at which the blend's bass swap
- * happened (null = not yet). previewFrom (blend only): progress from which the incoming bass plays at
- * BASS_PREVIEW_DB until the swap (bassPreviewFrom). Returns only the controls the style touches: inVol, outVol
- * (0..0.8), inLow, inMid, inHigh, outLow, outMid, outHigh (EQ -1..1), inFilter, outFilter (-1 low-pass .. 1 high-pass),
- * echo (bool). Channel faders are squared (gain = vol²), so fades use sqrt curves where the sum must keep constant power.
+ * happened (null = not yet). Returns only the controls the style touches: inVol, outVol (0..0.8), inLow, inMid,
+ * inHigh, outLow, outMid, outHigh (EQ -1..1), inFilter, outFilter (-1 low-pass .. 1 high-pass), echo (bool).
+ * Channel faders are squared (gain = vol²), so fades use sqrt curves where the sum must keep constant power.
  */
-export function mixLevels(style, k, kSwap = null, { previewFrom = null } = {}) {
+export function mixLevels(style, k, kSwap = null) {
   style = STYLE_ALIASES[style] || style;
   if (style === 'blend' || style === 'phrase') {
     // long EQ blend, the club recipe (docs/PRO_DJ_AUTOMIX_RESEARCH.md P1.4): the incoming fader comes up over the first
@@ -317,7 +299,7 @@ export function mixLevels(style, k, kSwap = null, { previewFrom = null } = {}) {
     if (kSwap == null) {
       return {
         // incoming highs stay 6 dB down until the swap: its hats arrive with its bass, as a DJ opens them
-        inVol: 0.8 * ease(clamp01(k / 0.25)), outVol: 0.8, inLow: previewFrom != null && k >= previewFrom ? EQ_PREVIEW : -1, outLow: 0, outMid: 0,
+        inVol: 0.8 * ease(clamp01(k / 0.25)), outVol: 0.8, inLow: -1, outLow: 0, outMid: 0,
         inHigh: EQ_M6, inMid: EQ_M6 + (EQ_M6 / -2) * clamp01(k / 0.5),
         outHigh: EQ_M6 * ease(clamp01((k - 0.25) / 0.25)),
       };
@@ -714,8 +696,40 @@ export class AutoMix extends Emitter {
     }
     if (add.length) this.queue.push(...add);
   }
-  stop() { this.endTease(true); this.endTrick(true); this.trickPlan = null; this._finale = null; if (this.engine.prefetched) this.engine.prefetched.clear(); this.enabled = false; this.forceTransitionRequested = false; this.watchdog?.reset(); if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
+  stop() { this._oneShot = false; this.endTease(true); this.endTrick(true); this.trickPlan = null; this._finale = null; if (this.engine.prefetched) this.engine.prefetched.clear(); this.enabled = false; this.forceTransitionRequested = false; this.watchdog?.reset(); if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
   /** Start the next transition immediately, waiting for its deck preload if necessary. */
+  /**
+   * Why MIX NOW can't mix from `deck` with Automix off (null: it can): it needs Automix stopped, deck 1 or 2 playing,
+   * and a different track loaded on the other deck that is not playing yet.
+   */
+  mixOnceBlocked(deck) {
+    if (this.enabled) return 'Automix is running';
+    const [a, b] = this.engine.decks;
+    if (!deck || (deck !== a && deck !== b)) return 'MIX NOW mixes between decks 1 and 2';
+    if (!deck.track || deck.loading || !deck.playing) return 'Play a track on this deck first';
+    const o = this.other(deck);
+    if (!o?.track || o.loading) return `Load a track on deck ${o.index + 1} to mix into`;
+    if (o.playing) return `Deck ${o.index + 1} is already playing`;
+    if (String(o.track.id) === String(deck.track.id)) return 'Both decks hold the same track';
+    return null;
+  }
+
+  /**
+   * MIX NOW with Automix off: mix from `deck` (playing) into the track loaded on the other deck right away, as MIX NOW
+   * does in an Automix set, then stop (the new track plays on; nothing else is queued). 'started' or why not.
+   */
+  async mixOnce(deck) {
+    const why = this.mixOnceBlocked(deck);
+    if (why) return why;
+    this._oneShot = true;
+    try { await this.start([deck.track, this.other(deck).track], { mode: 'order' }); }
+    catch (e) { this._oneShot = false; return e.message || 'Could not start the transition'; }
+    if (this.current !== deck) { this.stop(); return 'Could not start the transition'; }
+    const r = this.skip({ feedback: false });
+    if (r !== 'started') { this.stop(); return 'Could not start the transition yet'; }
+    return 'started';
+  }
+
   skip({ feedback = true } = {}) {
     if (!this.enabled || this.transition || !this.current || !this.nextTrack()) return false;
     if (feedback) this.noteSkip();
@@ -909,18 +923,6 @@ export class AutoMix extends Emitter {
    * The next transition as one plan object (P6.1): what the executor will play, for the preview timeline, the
    * headphone render and the checker. null when nothing is planned.
    */
-  /**
-   * Bass preview for a blend (Settings → Automix, off by default): where it starts (progress 0..1), or null. Only
-   * for the club EQ blend with a known swap, never in a double drop, and only when the transition check finds no
-   * low-end bump from it (checkBassPreview).
-   */
-  bassPreviewFor(style, adaptive, outDeck, ii, { begin, len, inStart, ratio, kSwap, lenIn }) {
-    if (this.opts.bassPreview !== true || (STYLE_ALIASES[style] || style) !== 'blend' || adaptive?.doubleDrop || kSwap == null || !ii?.bpm) return null;
-    const from = bassPreviewFrom(kSwap, lenIn, 240 / ii.bpm);
-    if (from == null) return null;
-    return checkBassPreview(this.info(outDeck), ii, { style, begin, len, inStart, ratio, kSwap, previewFrom: from }) ? from : null;
-  }
-
   previewPlan() {
     const nt = this.nextTransition(), u = this.upcoming;
     if (!nt || !u) return null;
@@ -935,11 +937,10 @@ export class AutoMix extends Emitter {
     const len = drop ? 0 : plan.len, lenIn = len * innRate / outRate;
     const swapAt = drop ? null : u.adaptive?.swapIn ?? (SWAP_STYLES.has(style) ? phraseSwapPoint(ii, inStart, lenIn) : null);
     const kSwap = swapAt != null && lenIn > 0 ? clamp01((swapAt - inStart) / lenIn) : style === 'bassswap' ? 0.5 : null;
-    const previewFrom = drop ? null : this.bassPreviewFor(style, u.adaptive, cur, ii, { begin: plan.begin, len, inStart, ratio: innRate / outRate, kSwap, lenIn });
-    const lanes = drop ? null : Array.from({ length: 65 }, (_, i) => { const k = i / 64; return { k, ...mixLevels(style, k, kSwap != null && k >= kSwap ? kSwap : null, { previewFrom }) }; });
+    const lanes = drop ? null : Array.from({ length: 65 }, (_, i) => { const k = i / 64; return { k, ...mixLevels(style, k, kSwap != null && k >= kSwap ? kSwap : null) }; });
     return {
       style, why: u.why, length: u.length, begin: plan.begin, len, drop: drop ? plan.drop : null, end: drop ? plan.drop : plan.start + len,
-      inStart, kSwap, previewFrom, lanes, outRate, innRate: drop ? 1 : innRate, beatLen: outBpm ? 60 / (cur.bpm || outBpm) : 0.5,
+      inStart, kSwap, lanes, outRate, innRate: drop ? 1 : innRate, beatLen: outBpm ? 60 / (cur.bpm || outBpm) : 0.5,
       check: u.adaptive?.check || null, landing: u.adaptive?.landing ?? null, doubleDrop: !!u.adaptive?.doubleDrop,
       position: cur.position, beginsIn: nt.beginsIn, outTrack: cur.track, inTrack: next, nudge: this.nudges?.get(next) || null,
       echoBeats: echoBeatsFor(this.fresh(cur.track), this.fresh(next)),
@@ -1539,9 +1540,6 @@ export class AutoMix extends Emitter {
       inn.play({ at: posAt, instant: true }); // on the beat even if the message reaches the audio thread late
       const lenIn = upcoming?.adaptive ? len * (inn.rate || 1) / (out.rate || 1) : inn.bpm && out.bpm ? (len / out.beatLen) * inn.beatLen : len;
       Object.assign(tr, { dur: durWall * 1000, inStart, swapAt: upcoming?.adaptive?.swapIn ?? (SWAP_STYLES.has(style) ? phraseSwapPoint(ii, inStart, lenIn) : null), kSwap: null });
-      if (!immediate && tr.swapAt != null && lenIn > 0) {
-        tr.previewFrom = this.bassPreviewFor(style, upcoming?.adaptive, out, ii, { begin: pos, len, inStart, ratio: lenIn / len, kSwap: clamp01((tr.swapAt - inStart) / lenIn), lenIn });
-      }
       if (tr.vocals === 'hold-in') chI.set('vocal', 0);
       if (STEM_STYLES.has(style)) this.applyStemSwap(tr, 0);
     }
@@ -1586,7 +1584,7 @@ export class AutoMix extends Emitter {
     if (STEM_STYLES.has(tr.style)) { this.applyStemSwap(tr, k); if (k >= 1) this.finishTransition(); return; }
     if (tr.style === 'pingpong') return this.stepPingPong(tr, k, chO, chI);
     this.keepPhase(tr, k);
-    const L = mixLevels(tr.style, k, tr.kSwap, { previewFrom: tr.previewFrom });
+    const L = mixLevels(tr.style, k, tr.kSwap);
     if (tr.doubleDrop) { const f = doubleDropTrim(k, tr.kSwap); if (L.inVol != null) L.inVol *= f; if (L.outVol != null) L.outVol *= f; }
     if (tr.vocals === 'hold-in') {
       // incoming vocals wait for the swap (blend: the bass swap; other styles: 60 %), then trade places with the outgoing ones
@@ -1735,6 +1733,14 @@ export class AutoMix extends Emitter {
     if (out.track && !tr.skipped) this.feedback = playFeedback(this.feedback || emptyFeedback(), this.fresh(out.track), { now: Date.now() });
     inn.setMaster(); inn.syncOn = false;
     this.current = inn;
+    if (this._oneShot) {
+      // MIX NOW with Automix off (mixOnce): done after this one transition; the incoming track still goes back to its
+      // own tempo, with the deck's own glide (the tick-driven ramp stops with Automix)
+      this._oneShot = false;
+      if (this.opts.restoreTempo !== false && Math.abs(inn.tempo) >= 0.01) inn.tempoGlide(0, restoreBars(inn.tempo, inn.effectiveBpm || 120) * 4);
+      this.stop();
+      return;
+    }
     this.startTempoRamp(inn);
     this.fillLive();
     this.fillMore();

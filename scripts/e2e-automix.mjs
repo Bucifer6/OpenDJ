@@ -493,6 +493,48 @@ try {
   check(JSON.stringify(fromQueue.got) === JSON.stringify(fromQueue.want), 'AUTOMIX (key A / MIDI automix.toggle) starts from the remaining queue when there is one');
   await page.evaluate(() => { window.opendj.automix.stop(); for (const d of window.opendj.engine.decks) { d.pause(); d.eject(); } });
 
+  // ================= C3) MIX NOW with Automix off: mix the playing deck into the track loaded on the other one =================
+  const once = await page.evaluate(async () => {
+    const a = window.opendj, all = [...a.library.tracks.values()], [d1, d2] = a.engine.decks, am = a.automix;
+    const btn = () => document.querySelectorAll('.deck-mix-now')[0];
+    await a.loadTrack(0, all[1].id); await a.loadTrack(1, all[3].id);
+    const idle = { disabled: btn().disabled, title: btn().title };            // deck 1 not playing yet
+    d1.play(); await new Promise((r) => setTimeout(r, 400));
+    const ready = { disabled: btn().disabled, title: btn().title };
+    d2.play(); await new Promise((r) => setTimeout(r, 200));
+    const bothPlaying = { disabled: btn().disabled, title: btn().title }; d2.pause(); d2.seek(0); await new Promise((r) => setTimeout(r, 200));
+    btn().click();
+    for (let k = 0; k < 40 && !am.transition; k++) await new Promise((r) => setTimeout(r, 50));
+    const during = { mixing: !!am.transition, enabled: am.enabled, out: am.transition?.out === d1, inn: am.transition?.inn === d2 };
+    for (let k = 0; k < 400 && am.transition; k++) await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 300));
+    return { idle, ready, bothPlaying, during, after: { enabled: am.enabled, d1: d1.playing, d2: d2.playing, vol2: a.engine.channels[1].state.volume, master: d2.isMaster, queue: am.queue.length } };
+  });
+  check(once.idle.disabled && /Play a track on this deck first/.test(once.idle.title), `MIX NOW off while deck 1 is stopped ("${once.idle.title}")`);
+  check(!once.ready.disabled && /Mix into/.test(once.ready.title), `MIX NOW available with Automix off: deck 1 playing, a track loaded on deck 2 ("${once.ready.title}")`);
+  check(once.bothPlaying.disabled && /already playing/.test(once.bothPlaying.title), `not while deck 2 is already playing ("${once.bothPlaying.title}")`);
+  check(once.during.mixing && once.during.out && once.during.inn, `MIX NOW mixes deck 1 into deck 2 (${JSON.stringify(once.during)})`);
+  check(!once.after.enabled && !once.after.d1 && once.after.d2 && once.after.vol2 > 0.7 && once.after.master, `after the mix deck 2 plays on its own and Automix stays off (${JSON.stringify(once.after)})`);
+
+  // ================= C4) tempo RESET on a playing deck glides back to 0 % (a second press: at once) =================
+  const reset = await page.evaluate(async () => {
+    const a = window.opendj, d = a.engine.decks[1], btn = [...a.deckEls[1].querySelectorAll('.deck-tempo button')].find((b) => b.textContent === 'RESET');
+    await a.setSetting('deckOptions', { ...(a.settings.deckOptions || {}), tempoResetBeats: 4 });
+    d.syncOn = false; d.setTempo(6); await new Promise((r) => setTimeout(r, 300));
+    btn.click();
+    const seen = [];
+    for (let k = 0; k < 60; k++) { seen.push(+d.tempo.toFixed(3)); if (Math.abs(d.tempo) < 1e-6 && k > 2) break; await new Promise((r) => setTimeout(r, 100)); }
+    d.setTempo(5); await new Promise((r) => setTimeout(r, 200)); btn.click(); await new Promise((r) => setTimeout(r, 150)); btn.click();
+    const twice = d.tempo;
+    await a.setSetting('deckOptions', { ...(a.settings.deckOptions || {}), tempoResetBeats: 16 });
+    a.automix.stop(); for (const x of a.engine.decks) { x.pause(); x.eject(); }
+    return { seen, twice };
+  });
+  const between = reset.seen.filter((v) => v > 0.05 && v < 5.95);
+  check(reset.seen[0] > 5 && between.length >= 3 && reset.seen.at(-1) === 0 && reset.seen.every((v, k) => k === 0 || v <= reset.seen[k - 1] + 1e-6),
+    `RESET glides a playing deck from +6 % back to 0 % over 4 beats (${between.length} steps in between: ${reset.seen.slice(0, 6).join(', ')}…)`);
+  check(reset.twice === 0, 'RESET pressed again during the glide: 0 % at once');
+
   // ================= D) media-server playlists → automix =================
   const add = await page.evaluate(async (url) => (await fetch('/api/sources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'subsonic', name: 'Navidrome', url, username: 'dj', password: 'secret' }) })).json(), sub.url);
   check(add.source?.id, 'fake Subsonic server connected');

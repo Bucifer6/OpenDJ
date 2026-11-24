@@ -23,6 +23,12 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.5.16
+- **Tempo RESET glides.** On a playing deck, RESET (on screen or from a controller) now takes the tempo smoothly back to 0 % over 16 beats instead of jumping, so a track on air changes tempo without a bump; pressing it again during the glide jumps to 0 %. *Settings → Decks → Tempo RESET on a playing deck* sets 4, 8, 16 or 32 beats, or jumps at once as before. A stopped deck resets at once.
+- **MIX NOW without Automix.** On deck 1 or 2, MIX NOW now also works with Automix off: it mixes the playing track into the one loaded on the other deck right away, then leaves the new track playing on its own. Its tooltip says what is missing when it can't (nothing playing, nothing loaded, the other deck already playing).
+- **Smoother playback during mixes.** AI stems that OpenDJ prepares in the background in this window now pause while an Automix transition runs or a deck loads (and for 4 seconds after), then carry on; stems you ask for are never paused. Page stalls and, where the browser reports them, audio dropouts are written to the app log with what was going on, so a stutter can be traced (*Settings → About → Logs*).
+- **Bass preview removed** (added in 0.5.14): it did not sound right in use.
+
 ### New in 0.5.15
 - **Fixed: synced decks could seem a few milliseconds out of phase when they weren't.** Each deck's position was read up to several audio blocks (2.9 ms each) early, by a different amount per deck, so the beat-phase keeper sometimes saw phantom offsets of 3 to 13 ms and nudged the incoming track's pitch for nothing. Positions are now exact; in tests the measured offset between two synced decks holds steady instead of jumping.
 
@@ -70,12 +76,3 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **Prepare stems ahead:** the Automix dialog can prepare AI stems for the whole set when it starts (in play order), and OpenDJ tells you once when stems run on the CPU, with the time per track and how to prepare playlists ahead.
 - **Beat sync by ear:** during transitions OpenDJ now listens to where both tracks' kicks actually land and keeps them together (to about a millisecond), instead of trusting the beat grids alone, which can be slightly off. Grids are still used when there are no clear kicks.
 - **Recommended Automix settings are the default for new installs:** Auto transition style and length, varied styles.
-
-### New in 0.5.6
-- **Automix mixes like a DJ.** With the *Auto* transition style, each track now plays most of its length before the next one comes in: OpenDJ mixes out over the outro and brings the next track in on its intro (or early in it, to keep two vocals apart). Before, it could mix out after only half a minute, or start the next track deep inside it, so some songs played for only a few seconds.
-- **Tighter beat sync in transitions.** The incoming track now starts exactly on the beat even when the computer is busy (for example while AI stems are being prepared), without the turntable motor spin-up, and during the blend OpenDJ keeps both tracks in phase with small pitch nudges, the way a DJ rides the jog wheel.
-- **AI stems no longer fail when the graphics card crashes.** If the stems engine crashes on the graphics card (seen on Windows as "The stems engine stopped (exit …)"), the track is now separated again on the CPU instead of failing, and the graphics card is not used for stems from then on. After a driver update, *Settings → AI stems → Try the graphics card again* turns it back on.
-- **The graphics-card check is lighter and runs once.** OpenDJ now compares the graphics card with the CPU once, when the stems model loads, using a short built-in test sound. The CPU result is saved, so the CPU and graphics-card copies of the model are never in memory at the same time.
-- **Logs for troubleshooting.** OpenDJ now keeps a log of what it did: server messages, the AI stems engine, and errors from the app window, with times. *Settings → About → Logs* has **Download log** and, in the desktop app, **Open logs folder**. Attach the log when you report a problem. Passwords and media-server tokens are removed from it. The file is kept small (5 MB, 3 older copies).
-- **Clearer errors:** Windows crash codes are shown in hex (for example `0xC0000005`), and Electron's crash-reporter messages no longer hide the real cause.
-- **Security:** fixed four code-scanning findings in the translation code (none could be exploited in practice).

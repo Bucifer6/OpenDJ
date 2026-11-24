@@ -1,6 +1,7 @@
 import { el, fmtTime } from './util.js';
 import { api } from './api.js';
 import { setupClientLog } from './client-log.js';
+import { startPerfWatch } from './perf-watch.js';
 import { Engine } from './audio/engine.js';
 import { SAMPLE_CATALOG } from './audio/sample-catalog.js';
 import { VoiceBus } from './audio/voice.js';
@@ -67,6 +68,7 @@ class App {
     this.sequencer = new Sequencer(this.engine);
     this.buildLayout();
     setupStems(this);
+    if (!platform.local) startPerfWatch(this); // page stalls / audio dropouts into the app log, with what was going on
     this.recording = setupRecording(this); this.engine.attachRecorder(this.recording.recorder);
     setupRemoteControl(this, api).then((r) => { this.remote = r; }).catch(() => {}); // AI assistant (MCP) actions, when on
     this.wireEvents(); // subscribe to server events before loading the library so no change is missed
@@ -440,9 +442,17 @@ class App {
   /** Queue a live dedication (UI, MCP). */
   queueDedication(text, opts = {}) { return this.dedications.add(text, opts); }
 
-  /** Deck MIX NOW: start the queued transition now (waits for the next deck's preload if needed). */
-  mixNow() {
-    if (!this.automix.enabled) return;
+  /**
+   * Deck MIX NOW. In an Automix set: start the queued transition now (waits for the next deck's preload if needed).
+   * With Automix off: mix from this deck into the track loaded on the other one (AutoMix.mixOnce).
+   */
+  async mixNow(i = this.automix.current?.index) {
+    if (!this.automix.enabled) {
+      const deck = this.engine.decks[i];
+      const r = await this.automix.mixOnce(deck);
+      this.toast(r === 'started' ? `Mixing deck ${deck.index + 1} into deck ${this.automix.other(deck).index + 1}` : r);
+      return;
+    }
     const result = this.automix.skip();
     if (result === 'started') this.toast('Transition started');
     else if (result === 'preparing') this.toast('Preparing the next track; transition will start as soon as it is ready');
@@ -537,6 +547,16 @@ class App {
     this.toast(next ? `${tracks.length} track(s) will play next in automix` : `${tracks.length} track(s) queued for automix`);
     this.updateAutomixUi();
   }
+  /** MIX NOW on deck i: { available, title } (in an Automix set, or with Automix off: AutoMix.mixOnceBlocked). */
+  mixNowState(i) {
+    const a = this.automix, next = a.nextTrack?.();
+    if (!a.enabled) {
+      const deck = this.engine.decks[i], why = a.mixOnceBlocked?.(deck);
+      return why ? { available: false, title: `MIX NOW: ${why}` } : { available: true, title: `Mix into "${a.other(deck).track.title}" on deck ${a.other(deck).index + 1} now` };
+    }
+    const available = a.current?.index === i && !a.transition && !!next;
+    return { available, title: available ? 'Start transition to ' + next.title + ' now' : a.transition ? 'A transition is already in progress' : !next ? 'No upcoming track queued' : 'Available on the active Automix deck' };
+  }
   updateAutomixUi() {
     const a = this.automix;
     this.amBtn.classList.toggle('active', a.enabled);
@@ -545,9 +565,8 @@ class App {
     for (const [i, deck] of (this.deckEls || []).entries()) {
       const mixButton = deck.querySelector('.deck-mix-now');
       if (!mixButton) continue;
-      const available = a.enabled && a.current?.index === i && !a.transition && !!next;
-      mixButton.disabled = !available;
-      mixButton.title = available ? 'Start transition to ' + next.title + ' now' : a.transition ? 'A transition is already in progress' : !a.enabled ? 'Start Automix to enable manual transitions' : !next ? 'No upcoming track queued' : 'Available on the active Automix deck';
+      const { available, title } = this.mixNowState(i);
+      mixButton.disabled = !available; mixButton.title = title;
     }
     let info = '';
     if (a.enabled) {

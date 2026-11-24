@@ -76,6 +76,14 @@ export function setupStems(app) {
     }, 800);
   });
   for (const d of app.engine?.decks || []) d.on('load', () => { if (d.track?.id && !d.track.stems?.ready) stems.prefetch([d.track.id], { front: true }); });
+  // background separation in this window waits (between chunks) while a mix transition runs or a deck loads, and for
+  // 4 s after, so it never competes with playback right then
+  let quietAt = 0;
+  setInterval(() => {
+    const busy = !!app.automix?.transition || (app.engine?.decks || []).some((d) => d.loading);
+    if (busy) quietAt = Date.now() + 4000;
+    stems.setHold(Date.now() < quietAt);
+  }, 400);
   return stems;
 }
 
