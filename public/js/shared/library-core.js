@@ -5,6 +5,20 @@
 import { sanitizeSetting } from './settings-schema.js';
 import { sha1Hex, randomHex } from './hash.js';
 
+/**
+ * One-time settings changes for existing installs, applied after loading (desktop/server and phone storage alike).
+ * `clean` is the saved settings as read; `settings` the merged result, changed in place.
+ */
+export function onceMigrations(settings, clean) {
+  // 0.5.18: Soft RGB is the default waveform colour scheme; installs still on the old default ('rgb') move to it
+  // once. A scheme picked afterwards (3-band RGB included) is kept.
+  if (!(clean?.waveformDefaults >= 1)) {
+    if (!clean?.waveformColors || clean.waveformColors === 'rgb') settings.waveformColors = 'soft';
+    settings.waveformDefaults = 1;
+  }
+  return settings;
+}
+
 export const DEFAULT_SETTINGS = {
   deckCount: 2,
   theme: 'midnight',
@@ -23,7 +37,8 @@ export const DEFAULT_SETTINGS = {
   quantize: true,
   syncMode: 'beat',           // 'beat' | 'tempo'
   autoGain: true,
-  waveformColors: 'rgb',      // see WAVEFORM_STYLES in ui/waveform.js
+  waveformColors: 'soft',     // see WAVEFORM_STYLES in ui/waveform.js
+  waveformDefaults: 1,        // 0.5.18: Soft RGB became the default (one-time switch, see onceMigrations)
   waveformShape: 'bars',      // 'bars' | 'half' | 'smooth' | 'outline'
   downloadDir: '',
   // Automix defaults (0.5.7): Auto style and length (the planner picks per transition), varied styles, beat-matched;

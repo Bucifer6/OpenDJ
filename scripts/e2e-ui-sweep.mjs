@@ -269,7 +269,7 @@ try {
     }, [style, shape]);
     check(r.lit > 20 && r.olit > 5, `waveform ${style} / ${shape}: detail and overview render (${r.lit} / ${r.olit} lit samples)`);
   }
-  await ev(() => { window.opendj.settings.waveformColors = 'rgb'; window.opendj.settings.waveformShape = 'bars'; });
+  await ev(() => { window.opendj.settings.waveformColors = 'soft'; window.opendj.settings.waveformShape = 'bars'; });
 
   // ---------- 2. click sweep per layout ----------
   await page.setViewportSize({ width: 1920, height: 1080 });

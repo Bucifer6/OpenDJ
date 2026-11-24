@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readJsonSafe, writeJsonAtomic, chmodQuiet } from './jsonstore.js';
 import { sanitizeSettings } from './settings-schema.js';
-import { LibraryCore, DEFAULT_SETTINGS, hashId } from '../public/js/shared/library-core.js';
+import { LibraryCore, DEFAULT_SETTINGS, hashId, onceMigrations } from '../public/js/shared/library-core.js';
 
 export { DEFAULT_SETTINGS, normTags, sanitizeField, newId, okId } from '../public/js/shared/library-core.js';
 
@@ -38,6 +38,7 @@ export class Library extends LibraryCore {
     this.settings = { ...this.settings, ...clean, automix: { ...this.settings.automix, ...(clean.automix || {}) } };
     // 0.5.10: Automix's added effects (tricks, teases, AI-stem transitions) were reported as odd beeps in mixes; they
     // are switched off once for everyone (effectsOff marks it done), and stay opt-in in Settings → Automix
+    onceMigrations(this.settings, clean);
     if (!(clean.automix?.effectsOff >= 1)) Object.assign(this.settings.automix, { tricks: 'off', tease: false, stemTransitions: false, effectsOff: 1 });
     for (const e of this.loadErrors) console.error('[opendj]', e);
   }
