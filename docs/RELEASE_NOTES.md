@@ -23,7 +23,7 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
-### Unreleased
+### New in 0.5.12
 - **A new air horn.** The Air Horn pad now plays a dancehall air horn recorded by the_mred on Freesound (CC0): a full 1.5-second blast with its natural fade, instead of the short pneumatic horn. *Air Horn ×3* is now made from the same recording (two short stabs, then the full blast) instead of a synthesised horn.
 
 ### New in 0.5.11
