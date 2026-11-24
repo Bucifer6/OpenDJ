@@ -46,7 +46,7 @@ Used to run the AI stem-separation model in the app. MIT License, © Microsoft C
 Stem separation model from Meta's Demucs (https://github.com/facebookresearch/demucs). The Demucs **code** is MIT-licensed; the pretrained **weights are not covered by the MIT licence**: their author says their licence is unclear (trained partly on research-only data), and the ONNX export OpenDJ downloads (npm package `demucs@1.0.0`, only after you agree in the app) says personal and research use only. Use them for personal, research or other non-commercial use only, or point *stemsModelUrl* at a model whose licence suits you. See `docs/RESOURCES_AND_LICENSING.md` §0.1.
 
 ## Sampler sounds
-- **Air horn** (`public/samples/air-horn.mp3`, bundled): "Pneumatic horn, simple #1", recorded by Joseph SARDIN, BigSoundBank, CC0 1.0 (https://bigsoundbank.com/pneumatic-horn-simple-1-s1827.html). Credits in `public/samples/CREDITS.txt`.
+- **Air horn** (`public/samples/air-horn.mp3`, bundled): "air horn" by the_mred on Freesound, CC0 1.0 (https://freesound.org/s/741817/), with its trailing silence removed. It plays on the Air Horn pad and, cut into three blasts, on Air Horn ×3. Credits in `public/samples/CREDITS.txt`.
 - **CC0 sound library** (downloaded only when you pick a sound, not bundled): 111 one-shots from Sonic Pi's sample collection, pinned to commit `ed4b23ccb77f0845cbad2b8d911cd36a455ec597`. The collection's README places them under CC0 1.0 and lists the original Freesound creator of each file; OpenDJ keeps the creator and source with each pad (`public/js/audio/sample-catalog.js`, `docs/SOUND_EFFECTS.md`). Loops (including the Amen break recordings) are left out.
 
 ## Review pack and store media (release asset and docs, not bundled in the app)

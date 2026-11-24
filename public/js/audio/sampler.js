@@ -1,5 +1,5 @@
-// Sample pads: a bank of built-in DJ FX one-shots plus user-loaded samples. Pad 1 (Air Horn) plays a bundled CC0
-// recording (public/samples/air-horn.mp3, mastered like the rest: recordedHorn below); the others are synthesised.
+// Sample pads: a bank of built-in DJ FX one-shots plus user-loaded samples. Air Horn and Air Horn ×3 play a bundled CC0
+// recording (public/samples/air-horn.mp3, mastered like the rest: bankSound below); the others are synthesised.
 //
 // Every built-in sound is synthesised with real Web Audio nodes (oscillators, filters, wave shapers, a convolver
 // with a generated room / hall impulse, parameter envelopes) in an OfflineAudioContext, then mastered the same way:
@@ -299,9 +299,15 @@ function noiseSweep(ctx, out, T = 2.5) {
   n.connect(hp); hp.connect(g); g.connect(r.input); n.start(0);
 }
 
-/** The built-in bank. `seconds` is the render length (tails included). */
+/** Air Horn ×3: two stabs, then the long blast. [start s, length s]; for the recording, null = all of it. */
+const HORN_TRIPLE = [[0.0, 0.11], [0.19, 0.11], [0.38, null]];
+
+/**
+ * The built-in bank. `seconds` is the render length (tails included). `file` names a bundled recording (public/samples)
+ * the pad plays instead, cut into `cuts` when given; the synthesised `render` is its fallback.
+ */
 export const SOUND_BANK = [
-  { id: 'airhorn', name: 'Air Horn', seconds: 1.9, render: (c, o) => airHorn(c, o, [[0.0, 1.25]]) },
+  { id: 'airhorn', name: 'Air Horn', seconds: 1.9, file: 'air-horn.mp3', render: (c, o) => airHorn(c, o, [[0.0, 1.25]]) },
   { id: 'siren', name: 'Siren', seconds: 3.4, render: siren },
   { id: 'laser', name: 'Laser', seconds: 1.2, render: laser },
   { id: 'kick', name: 'Kick', seconds: 0.7, render: kick },
@@ -309,7 +315,8 @@ export const SOUND_BANK = [
   { id: 'rewind', name: 'Rewind', seconds: 1.3, render: rewind },
   { id: 'riser', name: 'Riser', seconds: 5.2, render: (c, o) => riser(c, o, 4) },
   { id: 'impact', name: 'Impact', seconds: 3.6, render: impact },
-  { id: 'airhorn3', name: 'Air Horn ×3', seconds: 2.0, render: (c, o) => airHorn(c, o, [[0.0, 0.11], [0.19, 0.11], [0.38, 1.0]]) },
+  { id: 'airhorn3', name: 'Air Horn ×3', seconds: 2.0, file: 'air-horn.mp3', cuts: HORN_TRIPLE,
+    render: (c, o) => airHorn(c, o, HORN_TRIPLE.map(([at, len]) => [at, len ?? 1.0])) },
   { id: 'downlifter', name: 'Downlifter', seconds: 4.4, render: (c, o) => downlifter(c, o, 3) },
   { id: 'noisesweep', name: 'Noise Sweep', seconds: 3.3, render: (c, o) => noiseSweep(c, o, 2.5) },
   { id: 'vinylstop', name: 'Vinyl Stop', seconds: 1.7, render: vinylStop },
@@ -373,24 +380,45 @@ export function master(channels, sampleRate) {
 const cache = new Map(); // `${id}@${sampleRate}` -> Promise<AudioBuffer>
 
 /**
- * The bundled recorded air horn (public/samples/air-horn.mp3, CC0, see CREDITS.txt), decoded once per sample rate
- * and mastered like the synthesised bank (loudness target, -1 dBFS ceiling: the file itself peaks at 0 dBFS).
- * Falls back to the synthesised horn when the file can't be loaded.
+ * A built-in sound as its pad plays it: the bundled recording when the bank names one (`file`, cut into `cuts`),
+ * mastered like the synthesised sounds, else the synthesised render, which is also the fallback when the file can't
+ * be loaded. Cached per sound and sample rate; the decoded file itself is not kept.
  */
-export function recordedHorn(ctx) {
-  const key = `airhorn-rec@${ctx.sampleRate}`;
+export function bankSound(id, ctx) {
+  const def = SOUND_BANK.find((s) => s.id === id);
+  if (!def?.file) return renderSound(id, ctx.sampleRate);
+  const key = `${id}-rec@${ctx.sampleRate}`;
   if (cache.has(key)) return cache.get(key);
   const p = (async () => {
     try {
-      const r = await fetch(new URL('../../samples/air-horn.mp3', import.meta.url));
+      const r = await fetch(new URL(`../../samples/${def.file}`, import.meta.url));
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const b = await ctx.decodeAudioData(await r.arrayBuffer());
+      const b = cutBuffer(ctx, await ctx.decodeAudioData(await r.arrayBuffer()), def.cuts);
       b.stats = master(Array.from({ length: b.numberOfChannels }, (_, c) => b.getChannelData(c)), b.sampleRate);
       return b;
-    } catch (e) { console.warn('sampler: recorded air horn unavailable, using the synthesised one', e); return renderSound('airhorn', ctx.sampleRate); }
+    } catch (e) { console.warn(`sampler: ${def.file} unavailable, using the synthesised ${def.name}`, e); return renderSound(id, ctx.sampleRate); }
   })();
   cache.set(key, p);
   return p;
+}
+
+/**
+ * Pieces of `src` laid out in a new buffer: cuts = [[start s, length s or null for all of it]], which must not
+ * overlap; a piece shorter than the source ends in a 15 ms fade (no click). Without cuts, `src` itself.
+ */
+function cutBuffer(ctx, src, cuts) {
+  if (!cuts) return src;
+  const sr = src.sampleRate, fade = Math.round(0.015 * sr);
+  const parts = cuts.map(([at, len]) => ({ o: Math.round(at * sr), n: len == null ? src.length : Math.min(src.length, Math.round(len * sr)) }));
+  const out = ctx.createBuffer(src.numberOfChannels, Math.max(...parts.map((q) => q.o + q.n)), sr);
+  for (let c = 0; c < src.numberOfChannels; c++) {
+    const from = src.getChannelData(c), to = out.getChannelData(c);
+    for (const { o, n } of parts) {
+      to.set(from.subarray(0, n), o);
+      if (n < src.length) for (let i = Math.max(0, n - fade); i < n; i++) to[o + i] *= (n - i) / fade;
+    }
+  }
+  return out;
 }
 
 /** Render (once, cached) a built-in sound at a sample rate. Resolves a stereo AudioBuffer with `.stats`. */
@@ -476,7 +504,7 @@ export class Sampler {
   }
   async _fill(i, slot) {
     try {
-      const b = slot.sound === 'airhorn' ? await recordedHorn(this.ctx) : await renderSound(slot.sound, this.ctx.sampleRate);
+      const b = await bankSound(slot.sound, this.ctx);
       if (this.slots[i] === slot) { slot.buffer = b; this.onChange?.(); }
     } catch (e) { console.warn('sampler: could not render', slot.sound, e); }
   }
