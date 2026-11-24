@@ -134,16 +134,23 @@ try {
     await s.ready;
     const names = s.slots.map((x) => x.name), loaded = s.slots.every((x) => x.buffer);
     await s.setSound(0, 'airhorn3'); s.setPadVolume(0, 0.5); s.setPadSync(0, true);
+    // Air Horn ×3 is cut from the recorded horn: two stabs, then the whole horn
+    const tb = s.slots[0].buffer, td = tb.getChannelData(0), fr = Math.round(0.01 * tb.sampleRate), tenv = [];
+    for (let i = 0; i + fr <= td.length; i += fr) { let e = 0; for (let j = i; j < i + fr; j++) e += td[j] * td[j]; tenv.push(Math.sqrt(e / fr)); }
+    const tmax = Math.max(...tenv); let tOn = 0, tLow = true;
+    for (const v of tenv) { if (tLow && v > tmax * 0.6) { tOn++; tLow = false; } else if (v < tmax * 0.25) tLow = true; }
+    const triple = { dur: tb.duration, onsets: tOn, recorded: !!tb.stats && Math.abs(tb.duration - 3.0) < 0.2 };
     await a.setSetting('sampler', s.config());
     const saved = (await (await fetch('/api/settings')).json()).sampler;
     s.nextBeat = () => a.engine.ctx.currentTime + 0.25;
     const quant = s.startTime(0) - a.engine.ctx.currentTime, free = s.startTime(1);
     const padText = [...document.querySelectorAll('.sampler-bar .spad')].map((b) => b.textContent);
-    return { names, loaded, saved, quant, free, padText };
+    return { names, loaded, saved, quant, free, padText, triple };
   });
   check(ui.loaded && ui.names.join(',') === 'Air Horn,Siren,Laser,Kick,Clap,Rewind,Riser,Impact', `app pads keep their order and names (${ui.names.join(', ')})`);
   check(ui.saved?.pads?.[0]?.sound === 'airhorn3' && ui.saved.pads[0].volume === 0.5 && ui.saved.pads[0].sync === true, 'pad sound / volume / sync saved in settings');
   check(ui.padText[0] === 'Air Horn ×3', `pad label follows the chosen sound (${ui.padText[0]})`);
+  check(ui.triple.recorded && ui.triple.onsets === 3, `Air Horn ×3 pad: three blasts cut from the recorded horn (${ui.triple.onsets} onsets, ${ui.triple.dur.toFixed(2)} s)`);
   check(ui.quant > 0.2 && ui.quant < 0.3 && ui.free === 0, `sync-to-beat pads start on the next beat (${ui.quant.toFixed(3)} s), others at once`);
   check(errors.length === 0, `no page errors ${errors.join(' | ')}`);
 
@@ -191,8 +198,8 @@ try {
     document.querySelector('.sample-catalog-modal .modal-x, .overlay .modal-x')?.click();
     return { hornDur: horn.duration, hornPeakDb: 20 * Math.log10(pk), hornName: s.slots[0].name, saved: r.saved, name: s.slots[1].name, creator: s.slots[1].creator, refused, refused2, all, vinyl, title: document.querySelectorAll('.sampler-bar .spad')[1]?.title };
   }));
-  check(first.hornName === 'Air Horn' && first.hornDur > 0.4 && first.hornDur < 1, `pad 1 plays the recorded air horn (${first.hornDur.toFixed(2)} s)`);
-  check(first.hornPeakDb <= -0.9, `recorded air horn mastered to the bank's -1 dBFS ceiling (peak ${first.hornPeakDb.toFixed(2)} dBFS; the file peaks at 0 dBFS)`);
+  check(first.hornName === 'Air Horn' && first.hornDur > 2.4 && first.hornDur < 2.9, `pad 1 plays the recorded air horn (${first.hornDur.toFixed(2)} s)`);
+  check(first.hornPeakDb <= -0.9, `recorded air horn mastered to the bank's -1 dBFS ceiling (peak ${first.hornPeakDb.toFixed(2)} dBFS)`);
   check(first.saved && first.name === 'Bd 808' && first.creator, `CC0 sample downloaded to pad 2 and stored (${first.name} by ${first.creator})`);
   check(/^Bd 808 — .+ · CC0 1\.0 · https:\/\/freesound\.org\//.test(first.title || ''), `pad tooltip credits the creator and source (${first.title})`);
   check(/Invalid sample selection/.test(first.refused) && /Invalid sample selection/.test(first.refused2) && !fetched.some((u) => u.includes('evil.example')), 'only catalogue entries are downloaded, from their pinned URL (other URLs never fetched)');
@@ -203,7 +210,7 @@ try {
     for (let k = 0; k < 50 && !s.slots[1].creator; k++) await new Promise((r) => setTimeout(r, 100));
     return { hornDur: s.slots[0].buffer?.duration, horn: s.slots[0].builtin && s.slots[0].sound === 'airhorn', name: s.slots[1].name, creator: s.slots[1].creator, license: s.slots[1].license, buf: s.slots[1].buffer?.duration, builtin: s.slots[1].builtin };
   }));
-  check(second.horn && second.hornDur > 0.4 && second.hornDur < 1, 'after a restart: pad 1 is still the recorded air horn');
+  check(second.horn && second.hornDur > 2.4 && second.hornDur < 2.9, 'after a restart: pad 1 is still the recorded air horn');
   check(second.name === 'Bd 808' && second.creator === first.creator && second.license === 'CC0 1.0' && second.buf > 0.3 && !second.builtin, `after a restart: the downloaded sample is still on pad 2 with its credits (${JSON.stringify(second)})`);
   check(fetched.length === 1, 'after a restart: restored from browser storage, not downloaded again');
   fs.rmSync(profile, { recursive: true, force: true });

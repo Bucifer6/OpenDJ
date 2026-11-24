@@ -1,5 +1,6 @@
-// Sample pads: a bank of built-in DJ FX one-shots plus user-loaded samples. Pad 1 (Air Horn) plays a bundled CC0
-// recording (public/samples/air-horn.mp3, mastered like the rest: recordedHorn below); the others are synthesised.
+// Sample pads: a bank of built-in DJ FX one-shots plus user-loaded samples. Air Horn and Air Horn ×3 play a bundled CC0
+// recording (public/samples/air-horn.mp3, mastered like the rest: recordedHorn / recordedHornTriple below); the others
+// are synthesised.
 //
 // Every built-in sound is synthesised with real Web Audio nodes (oscillators, filters, wave shapers, a convolver
 // with a generated room / hall impulse, parameter envelopes) in an OfflineAudioContext, then mastered the same way:
@@ -372,22 +373,64 @@ export function master(channels, sampleRate) {
 
 const cache = new Map(); // `${id}@${sampleRate}` -> Promise<AudioBuffer>
 
+/** The bundled air horn recording (public/samples/air-horn.mp3, CC0, see CREDITS.txt), decoded once per sample rate. */
+function hornFile(ctx) {
+  const key = `airhorn-file@${ctx.sampleRate}`;
+  if (!cache.has(key)) {
+    const p = (async () => {
+      const r = await fetch(new URL('../../samples/air-horn.mp3', import.meta.url));
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return ctx.decodeAudioData(await r.arrayBuffer());
+    })();
+    p.catch(() => cache.delete(key)); // a failed load is tried again next time
+    cache.set(key, p);
+  }
+  return cache.get(key);
+}
+
 /**
- * The bundled recorded air horn (public/samples/air-horn.mp3, CC0, see CREDITS.txt), decoded once per sample rate
- * and mastered like the synthesised bank (loudness target, -1 dBFS ceiling: the file itself peaks at 0 dBFS).
- * Falls back to the synthesised horn when the file can't be loaded.
+ * The recorded air horn, mastered like the synthesised bank (loudness target, -1 dBFS ceiling). Falls back to the
+ * synthesised horn when the file can't be loaded.
  */
 export function recordedHorn(ctx) {
   const key = `airhorn-rec@${ctx.sampleRate}`;
   if (cache.has(key)) return cache.get(key);
   const p = (async () => {
     try {
-      const r = await fetch(new URL('../../samples/air-horn.mp3', import.meta.url));
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const b = await ctx.decodeAudioData(await r.arrayBuffer());
+      const f = await hornFile(ctx);
+      const b = ctx.createBuffer(f.numberOfChannels, f.length, f.sampleRate);
+      for (let c = 0; c < f.numberOfChannels; c++) b.copyToChannel(f.getChannelData(c), c);
       b.stats = master(Array.from({ length: b.numberOfChannels }, (_, c) => b.getChannelData(c)), b.sampleRate);
       return b;
     } catch (e) { console.warn('sampler: recorded air horn unavailable, using the synthesised one', e); return renderSound('airhorn', ctx.sampleRate); }
+  })();
+  cache.set(key, p);
+  return p;
+}
+
+/** Air Horn ×3 from the recording: two short stabs of its attack, then the whole horn ("ba-ba-baaah"). */
+export const HORN_TRIPLE = [[0.0, 0.11], [0.19, 0.11], [0.38, null]]; // [start s, length s (null = the whole recording)]
+export function recordedHornTriple(ctx) {
+  const key = `airhorn3-rec@${ctx.sampleRate}`;
+  if (cache.has(key)) return cache.get(key);
+  const p = (async () => {
+    try {
+      const f = await hornFile(ctx), sr = f.sampleRate, chs = f.numberOfChannels;
+      const total = Math.ceil(HORN_TRIPLE[2][0] * sr) + f.length;
+      const b = ctx.createBuffer(chs, total, sr), fade = Math.round(0.015 * sr);
+      for (let c = 0; c < chs; c++) {
+        const src = f.getChannelData(c), dst = b.getChannelData(c);
+        for (const [at, len] of HORN_TRIPLE) {
+          const n = len == null ? src.length : Math.min(src.length, Math.round(len * sr)), o = Math.round(at * sr);
+          for (let i = 0; i < n && o + i < total; i++) {
+            const g = len == null ? 1 : Math.min(1, (n - i) / fade); // the stabs end with a short fade, no click
+            dst[o + i] += src[i] * g;
+          }
+        }
+      }
+      b.stats = master(Array.from({ length: chs }, (_, c) => b.getChannelData(c)), sr);
+      return b;
+    } catch (e) { console.warn('sampler: recorded air horn unavailable, using the synthesised ×3', e); return renderSound('airhorn3', ctx.sampleRate); }
   })();
   cache.set(key, p);
   return p;
@@ -476,7 +519,7 @@ export class Sampler {
   }
   async _fill(i, slot) {
     try {
-      const b = slot.sound === 'airhorn' ? await recordedHorn(this.ctx) : await renderSound(slot.sound, this.ctx.sampleRate);
+      const b = slot.sound === 'airhorn' ? await recordedHorn(this.ctx) : slot.sound === 'airhorn3' ? await recordedHornTriple(this.ctx) : await renderSound(slot.sound, this.ctx.sampleRate);
       if (this.slots[i] === slot) { slot.buffer = b; this.onChange?.(); }
     } catch (e) { console.warn('sampler: could not render', slot.sound, e); }
   }

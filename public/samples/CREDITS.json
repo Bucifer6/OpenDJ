@@ -1,7 +1,7 @@
 {
   "about": "Every sound file bundled with OpenDJ under public/samples, with its creator, source and SPDX licence (checked by test/deck-physics.test.js). Sounds that OpenDJ synthesises at run time are listed under \"generated\". Downloadable sounds (Settings → Sampler, scratch sample slots) are credited in public/js/audio/sample-catalog.js.",
   "files": [
-    { "file": "air-horn.mp3", "title": "Pneumatic horn, simple #1", "creator": "Joseph SARDIN", "source": "https://bigsoundbank.com/pneumatic-horn-simple-1-s1827.html", "license": "CC0-1.0" }
+    { "file": "air-horn.mp3", "title": "air horn", "creator": "the_mred", "source": "https://freesound.org/s/741817/", "license": "CC0-1.0", "edit": "trailing silence removed, mono, 48 kHz, peak -1 dBFS" }
   ],
   "generated": [
     { "id": "ahh", "title": "Ahh (vowel)", "creator": "OpenDJ contributors", "how": "formant-filtered sawtooth voice synthesised in public/js/audio/scratch-samples.js", "license": "MIT" },

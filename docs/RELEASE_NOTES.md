@@ -23,6 +23,9 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### Unreleased
+- **A new air horn.** The Air Horn pad now plays a dancehall air horn recorded by the_mred on Freesound (CC0): a full 1.5-second blast with its natural fade, instead of the short pneumatic horn. *Air Horn ×3* is now made from the same recording (two short stabs, then the full blast) instead of a synthesised horn.
+
 ### New in 0.5.11
 - **Automix blends like real DJ mixes.** Measured over about 20,000 transitions in real mixes, the typical blend is 16 bars (half are 8–26), and a track plays about 4 minutes before the next comes in (see `docs/automix-research/04-real-mixes.md`). House, techno and trance now prefer 16-bar blends and go to 32 at most; only a long outro over a long intro runs longer. A long club track now hands over after about 4–5 minutes instead of playing for 6 or more.
 - **The bass changes hands as the next groove arrives**, on the incoming track's drop or main part when it starts inside the blend, else a little past the middle. The incoming hi-hats stay down until then and come in with its bass.
@@ -89,12 +92,3 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **Release downloads:** the checksum manifest now includes the Android APK uploaded after the desktop builds.
 - **Server:** oversized requests reliably receive HTTP 413 instead of an intermittent connection reset; request-size limits remain enforced.
 - No new production dependencies or models. Research sources, performance considerations, licensing and known limitations are documented in `docs/ADAPTIVE_DJ.md`.
-
-### New in 0.5.2
-- **Smarter Automix transitions.** The *Auto* style now plans every transition: it tries each style at 4 to 32 bars and keeps the one that fits the two tracks best: tempo gap, key, energy, genre, the outro and intro phrases, and where the vocals are. Two voices no longer clash: the incoming vocals wait until the bass swap. The queue shows why each transition was chosen. It runs on any device, with no graphics card needed.
-- **Stem swap** transition style: with AI stems on both decks, the incoming drums come in first, then the bass, and the vocals last.
-- **Automix learns your taste:** when you change a planned transition in the queue, Auto leans your way next time (Settings → Automix can forget it).
-- **AI stems for your whole library, in the background** (Settings → AI stems, off by default): OpenDJ separates the tracks you play most first, once per track, up to a disk limit you set. Tracks you load or Automix needs always go first. A new *Faster* quality option separates about 15 % quicker.
-- **Remote control (MCP) for AI assistants:** many new tools, so an assistant you connect can pick tracks by genre, BPM, key and energy, read a track's sections and vocals, plan transitions, mix (EQ, filter, FX, tempo, key, loops), build mashups with AI stems, and speak over the mix like an MC. OpenDJ itself contains no AI: it only offers the tools, with the same token, scopes and audit log as before.
-- **4 decks:** the MASTER section is no longer hidden under decks 2 and 4.
-- **Mixer:** the MC button is gone, giving MIC / TALK more room; the SMART row is no longer cut off. FX assign buttons show the right state.
