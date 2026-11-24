@@ -23,6 +23,10 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.5.13
+- **Smaller desktop downloads.** Since 0.5.5 every desktop app also carried files only the project itself needs (documentation images, the phone app projects, tests and scripts), about 40 MB per app. They are no longer packaged.
+- **The top bar fits a 1440 px laptop screen again.** The Automix ▾ menu had pushed it 10 px past the window edge; the buttons now sit a little closer together up to 1500 px.
+
 ### New in 0.5.12
 - **A new air horn.** The Air Horn pad now plays a dancehall air horn recorded by the_mred on Freesound (CC0): a full 1.5-second blast with its natural fade, instead of the short pneumatic horn. *Air Horn ×3* is now made from the same recording (two short stabs, then the full blast) instead of a synthesised horn.
 - **Ableton Link joins faster on a shaky network.** When lost packets cut a clock measurement short, OpenDJ now keeps the readings it already has, or tries again within half a second, instead of waiting 5 seconds before joining the session.
@@ -81,15 +85,3 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - Stabilise absolute DVS position when audio capture begins partway through a carrier cycle, and reset bit thresholds on needle-lift reacquisition. A 48-case regression covers both timecode families, both directions and varying capture phases.
 - Refresh the README, feature screenshots and demo animation from the working application using the fictional demo library.
 - Includes the adaptive DJ improvements below and the stem-output validation fix. The 0.5.3 release candidate was stopped before publication after combined-branch QA detected the startup error.
-
-### Adaptive DJ improvements (0.5.3 candidate)
-- **Adaptive Auto DJ:** Auto style compares section handovers throughout both tracks, including interior entry points, using tempo, harmony, local energy and vocal overlap. Live selection also compares how well candidate tracks can actually transition.
-- **Playback follows the plan:** selected cue points reach the real decks, late ticks catch up, and transition progress follows the audio clock. Uncertain beat grids avoid long synchronized overlaps; manually corrected grids are trusted.
-- **More reliable beat analysis:** a bounded whole-track consistency search corrects tempo estimates when sustained tones overpower drum onsets, including 48 kHz playback devices.
-- **Assistant tools:** transition planning reports adaptive cue positions; all 28 advertised tools have an authenticated real-app QA test using synthetic audio and a local broadcast fixture.
-- **QA fixes:** refreshed library analysis takes priority over stale deck metadata, selected-window vocal protection is recalculated, queue lengths follow the active plan, and the tablet mixer keeps its master controls within the available width.
-- **Deck transport:** sequence acknowledgements prevent old audio-thread feedback from undoing a newer cue or jog-search position.
-- **Timecode vinyl:** switching modes preserves the acquired position when the timecode definition is unchanged.
-- **Release downloads:** the checksum manifest now includes the Android APK uploaded after the desktop builds.
-- **Server:** oversized requests reliably receive HTTP 413 instead of an intermittent connection reset; request-size limits remain enforced.
-- No new production dependencies or models. Research sources, performance considerations, licensing and known limitations are documented in `docs/ADAPTIVE_DJ.md`.
