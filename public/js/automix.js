@@ -696,7 +696,7 @@ export class AutoMix extends Emitter {
     }
     if (add.length) this.queue.push(...add);
   }
-  stop() { this._oneShot = false; this.endTease(true); this.endTrick(true); this.trickPlan = null; this._finale = null; if (this.engine.prefetched) this.engine.prefetched.clear(); this.enabled = false; this.forceTransitionRequested = false; this.watchdog?.reset(); if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
+  stop() { this._oneShot = false; clearTimeout(this._preloadTimer); this._preloadTimer = null; this.endTease(true); this.endTrick(true); this.trickPlan = null; this._finale = null; if (this.engine.prefetched) this.engine.prefetched.clear(); this.enabled = false; this.forceTransitionRequested = false; this.watchdog?.reset(); if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
   /** Start the next transition immediately, waiting for its deck preload if necessary. */
   /**
    * Why MIX NOW can't mix from `deck` with Automix off (null: it can): it needs Automix stopped, deck 1 or 2 playing,
@@ -1029,6 +1029,23 @@ export class AutoMix extends Emitter {
     if (this.opts.levelMatch !== false && typeof ch.setAutoGain === 'function' && !deck.playing) ch.setAutoGain(Number(this.fresh(deck.track)?.gain ?? deck.track?.gain) || 0);
   }
 
+  /**
+   * Load the next track a little after a transition rather than straight away: decoding and preparing a track is the
+   * heaviest work the page does, and right after a mix both decks are still on screen and moving. Waits ~3 s (less on a
+   * short track: an eighth of what is left), then for an idle moment (at most 1.5 s more).
+   */
+  schedulePreload(deck) {
+    clearTimeout(this._preloadTimer);
+    const left = deck?.duration ? Math.max(0, deck.duration - deck.position) : Infinity;
+    const wait = Math.max(500, Math.min(3000, (left * 1000) / 8));
+    // _preloadTimer stays set until the load starts: tick() doesn't load the next track while one is scheduled
+    const go = () => { this._preloadTimer = null; if (this.enabled) this.preloadNext(); };
+    this._preloadTimer = setTimeout(() => {
+      const idle = globalThis.requestIdleCallback;
+      if (typeof idle === 'function') this._preloadTimer = idle(go, { timeout: 1500 }) && 'idle'; else go();
+    }, wait);
+  }
+
   async preloadNext() {
     this.fillLive();
     this.fillMore();
@@ -1187,7 +1204,7 @@ export class AutoMix extends Emitter {
     if (!next && cur.playing && cur.track) { this.stepFinale(cur); return; }
     if (!cur.track || !cur.playing || !next) return;
     const nxt = this.other(cur);
-    if (nxt.track?.id !== next.id) { if (!this._loading && !nxt.loading) this.preloadNext(); return; }
+    if (nxt.track?.id !== next.id) { if (!this._loading && !nxt.loading && !this._preloadTimer) this.preloadNext(); return; }
     if (nxt.loading) return;
     const nt = this.nextTransition();
     if (nt && cur.position >= nt.begin) this.beginTransition();
@@ -1744,7 +1761,7 @@ export class AutoMix extends Emitter {
     this.startTempoRamp(inn);
     this.fillLive();
     this.fillMore();
-    if (this.nextTrack()) setTimeout(() => this.preloadNext(), 500);
+    if (this.nextTrack()) this.schedulePreload(inn);
     else this.emit('ending');
     this.emit('state');
   }

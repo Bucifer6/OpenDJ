@@ -10,15 +10,25 @@ import { smoothTime } from './clock.js';
 import { NEEDLE_HOLD_MS } from '../audio/vinyl.js';
 
 // 3-band colours: low (kick/bass), mid (vocals, synths), high (hats, cymbals). 'rgb' follows the theme tokens.
+// `body` is how strongly the soft full-band envelope behind the bands shows (default 0.35); the softer palettes keep
+// their colours below full saturation and let the bands blend instead of stacking into solid blocks of colour.
 const PALETTES = {
   blue: { low: [24, 92, 214], mid: [70, 160, 255], high: [205, 236, 255] },
   mono: { low: [96, 106, 122], mid: [160, 170, 186], high: [232, 236, 242] },
   // "Player Blue" (a blue body with white / cyan peaks) and "Player RGB" (3-band: low dark blue, mid amber, high white)
   'player-blue': { low: [18, 84, 230], mid: [60, 150, 255], high: [236, 250, 255], solo: true },
   'player-rgb': { low: [16, 70, 220], mid: [255, 168, 38], high: [252, 252, 255] },
+  // softer presets
+  soft: { low: [78, 128, 212], mid: [226, 160, 92], high: [206, 222, 240], alpha: 0.85, body: 0.3 },
+  pastel: { low: [150, 132, 230], mid: [118, 208, 168], high: [250, 206, 184], alpha: 0.85, body: 0.3 },
+  amber: { low: [138, 82, 34], mid: [212, 146, 72], high: [250, 222, 170], alpha: 0.9, body: 0.3 },
+  ocean: { low: [26, 92, 118], mid: [70, 166, 176], high: [204, 236, 236], alpha: 0.88, body: 0.3 },
+  sunset: { low: [150, 62, 92], mid: [222, 128, 96], high: [250, 214, 170], alpha: 0.85, body: 0.3 },
 };
-/** Waveform styles offered in Settings → Appearance (the first is the default). */
-export const WAVEFORM_STYLES = [['rgb', '3-band RGB'], ['blue', 'Blue'], ['mono', 'Monochrome'], ['player-blue', 'Player Blue'], ['player-rgb', 'Player RGB']];
+/** Waveform colour schemes offered in Settings → Appearance (the first is the default). */
+export const WAVEFORM_STYLES = [['rgb', '3-band RGB (theme)'], ['soft', 'Soft RGB'], ['pastel', 'Pastel'], ['amber', 'Amber'], ['ocean', 'Ocean'], ['sunset', 'Sunset'], ['blue', 'Blue'], ['mono', 'Monochrome'], ['player-blue', 'Player Blue'], ['player-rgb', 'Player RGB']];
+/** Waveform shapes: mirrored bars (default), one-sided bars from the bottom, a smooth filled envelope, outlines. */
+export const WAVEFORM_SHAPES = [['bars', 'Bars'], ['half', 'Half (from the bottom)'], ['smooth', 'Smooth'], ['outline', 'Outline']];
 const proStyle = (name) => name === 'player-blue' || name === 'player-rgb';
 const hex = (s, d) => { const m = /^#?([0-9a-f]{6})$/i.exec(String(s).trim()); if (!m) return d; const n = parseInt(m[1], 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
 function palette(name) {
@@ -41,39 +51,64 @@ function binBlend(arr, a, b) { let m = 0, s = 0; for (let i = a; i < b; i++) { c
  * Layers (back to front): soft full-band envelope, low, mid, high — each centred, like a 3-band club display.
  */
 function paintBands(g, w, pal, x0, x1, H, binAt, opts = {}) {
-  const mid = H / 2, amp = mid - (opts.pad ?? 1);
+  const shape = opts.shape || 'bars', pad = opts.pad ?? 1;
+  const half = shape === 'half', smooth = shape === 'smooth' || shape === 'outline';
+  // half: bars grow up from the bottom edge, over the full height; otherwise mirrored around the centre line
+  const base = half ? H - pad : H / 2, amp = half ? H - 2 * pad : H / 2 - pad;
   const n = w.peak.length;
-  const cols = x1 - x0;
+  // one extra column on each side, so the smooth shapes join up across tile edges
+  const cols = x1 - x0 + 2;
   const P = new Float32Array(cols), L = new Float32Array(cols), M = new Float32Array(cols), Hh = new Float32Array(cols);
-  for (let x = x0; x < x1; x++) {
+  for (let x = x0 - 1; x <= x1; x++) {
     const a = binAt(x);
     if (a < 0 || a >= n) continue;
     const b = Math.min(Math.max(binAt(x + 1), a + 1), n);
-    const k = x - x0, p = binMax(w.peak, a, b) / 255;
+    const k = x - x0 + 1, p = binMax(w.peak, a, b) / 255;
     // bands: max when a column covers a couple of bins, else a max/mean blend so a zoomed-out view (overview) keeps
     // its 3-band character instead of saturating to the top layer
     const band = b - a <= 2 ? binMax : binBlend;
     P[k] = p; L[k] = p * band(w.low, a, b) / 255; M[k] = p * band(w.mid, a, b) / 255; Hh[k] = p * band(w.high, a, b) / 255;
   }
-  const layer = (arr, scale, style) => {
-    g.fillStyle = style; g.beginPath();
-    for (let k = 0; k < cols; k++) {
-      const h = arr[k] * scale * amp;
-      if (h >= 0.5) g.rect(x0 + k, mid - h, 1, h * 2);
+  const A = pal.alpha ?? 1, lw = opts.lw || 1;
+  const layer = (arr, scale, c, alpha, edge = false) => {
+    const style = rgba(c, alpha * A);
+    if (!smooth) {
+      g.fillStyle = style; g.beginPath();
+      for (let k = 1; k < cols - 1; k++) {
+        const h = arr[k] * scale * amp;
+        if (h >= 0.5) { if (half) g.rect(x0 + k - 1, base - h, 1, h); else g.rect(x0 + k - 1, base - h, 1, h * 2); }
+      }
+      g.fill();
+      return;
     }
-    g.fill();
+    // smooth / outline: one filled envelope per layer, lightly smoothed over neighbouring columns
+    const hs = (k) => (arr[k - 1] + 2 * arr[k] + arr[k + 1]) / 4 * scale * amp;
+    if (shape === 'outline' && !edge) { g.fillStyle = rgba(c, alpha * A * 0.55); } // inner bands: soft fills
+    g.beginPath(); g.moveTo(x0, base);
+    for (let k = 1; k < cols - 1; k++) g.lineTo(x0 + k - 0.5, base - hs(k));
+    g.lineTo(x1, base);
+    for (let k = cols - 2; k >= 1; k--) g.lineTo(x0 + k - 0.5, base + hs(k));
+    g.closePath();
+    if (shape === 'outline' && edge) { // the full-band envelope: a faint fill and a crisp line
+      g.fillStyle = rgba(c, 0.12 * A); g.fill();
+      g.strokeStyle = rgba(c, A); g.lineWidth = lw; g.lineJoin = 'round'; g.stroke();
+    } else { if (shape !== 'outline') g.fillStyle = style; g.fill(); }
   };
   if (pal.solo) { // Player Blue: a solid blue body (full band), a lighter core and white / cyan peaks from the highs
-    layer(P, 1, rgba(pal.low));
-    layer(M, 0.85, rgba(pal.mid, 0.85));
+    layer(P, 1, pal.low, 1, true);
+    layer(M, 0.85, pal.mid, 0.85);
     const W2 = new Float32Array(cols); for (let k = 0; k < cols; k++) W2[k] = Math.min(P[k], Hh[k] * 1.6 + 0.35 * P[k] * (P[k] > 0.8 ? 1 : 0));
-    layer(W2, 0.6, rgba(pal.high, 0.9));
+    layer(W2, 0.6, pal.high, 0.9);
     return;
   }
-  layer(P, 1, rgba(pal.low, 0.35));
-  layer(L, 1, rgba(pal.low));
-  layer(M, 0.78, rgba(pal.mid));
-  layer(Hh, 0.5, rgba(pal.high));
+  if (shape === 'outline') { // envelope line in the high colour, the bands as soft fills inside it
+    layer(L, 1, pal.low, 1); layer(M, 0.78, pal.mid, 1); layer(Hh, 0.5, pal.high, 1); layer(P, 1, pal.high, 1, true);
+    return;
+  }
+  layer(P, 1, pal.low, pal.body ?? 0.35);
+  layer(L, 1, pal.low, 1);
+  layer(M, 0.78, pal.mid, 1);
+  layer(Hh, 0.5, pal.high, 1);
 }
 
 const newCanvas = (w, h) => (typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h }));
@@ -126,6 +161,7 @@ export class DetailWaveform {
   }
 
   wfStyle() { return this.getSettings().waveformColors || 'rgb'; }
+  wfShape() { return this.getSettings().waveformShape || 'bars'; }
   resize() {
     const dpr = waveDpr();
     if (!this.cw) { const r = this.canvas.getBoundingClientRect(); this.cw = r.width || 1; this.ch = r.height || 1; }
@@ -159,7 +195,7 @@ export class DetailWaveform {
         const dpr = waveDpr(), TW = Math.round(TILE * dpr);
         const tile = newCanvas(TW, job.H), x0 = job.i * TW, binsPerPx = job.w.rate / job.pps;
         paintBands(tile.getContext('2d'), job.w, job.pal, 0, TW, job.H,
-          (x) => Math.floor((x0 + x) * binsPerPx), { pad: 2 * dpr });
+          (x) => Math.floor((x0 + x) * binsPerPx), { pad: 2 * dpr, shape: this.wfShape(), lw: dpr });
         if (job.cacheKey !== this.tileKey) continue;
         this.tiles.set(job.i, tile);
         while (this.tiles.size > MAX_TILES) this.tiles.delete(this.tiles.keys().next().value);
@@ -184,7 +220,7 @@ export class DetailWaveform {
     const cues = deck.track?.cues || [];
     const loop = deck.loop;
     // nothing moved and nothing changed: keep the last frame
-    const sig = `${pos.toFixed(5)}|${rate}|${W}x${H}|${this.viewZoom}|${themeRev}|${this.wfStyle()}|${deck.track?.id}|${!!w}|${deck.loading}|${deck.playing}|${loop ? `${loop.start},${loop.end},${loop.active}` : ''}|${cues.length}:${cues.reduce((a, c) => a + c.position + (c.index + 1) * 7, 0)}|${deck.cuePoint}|${deck.bpm}|${deck.gridOffset}|${(deck.track?.phrases || []).length}`;
+    const sig = `${pos.toFixed(5)}|${rate}|${W}x${H}|${this.viewZoom}|${themeRev}|${this.wfStyle()}/${this.wfShape()}|${deck.track?.id}|${!!w}|${deck.loading}|${deck.playing}|${loop ? `${loop.start},${loop.end},${loop.active}` : ''}|${cues.length}:${cues.reduce((a, c) => a + c.position + (c.index + 1) * 7, 0)}|${deck.cuePoint}|${deck.bpm}|${deck.gridOffset}|${(deck.track?.phrases || []).length}`;
     if (sig === this.sig) return;
     this.sig = sig;
 
@@ -195,7 +231,7 @@ export class DetailWaveform {
     const pxPerSec = W / this.viewZoom / rate; // displayed: keep beat spacing stable when tempo changes
     const t0 = pos - (W / 2) / pxPerSec;
     const X = (t) => (t - t0) * pxPerSec;
-    g.fillStyle = cssVar('--wf-axis'); g.fillRect(0, Math.round(mid), W, Math.max(1, Math.round(dpr / 2)));
+    if (this.wfShape() !== 'half') { g.fillStyle = cssVar('--wf-axis'); g.fillRect(0, Math.round(mid), W, Math.max(1, Math.round(dpr / 2))); }
     if (deck.loading && !w) { g.fillStyle = cssVar('--text-3'); g.font = `500 ${11 * dpr}px ${font}`; g.textBaseline = 'middle'; g.fillText('Loading & analysing…', 12 * dpr, mid); }
     // loop region (under the waveform)
     if (loop) {
@@ -203,7 +239,7 @@ export class DetailWaveform {
       g.fillStyle = loop.active ? 'rgba(46, 212, 122, 0.20)' : 'rgba(46, 212, 122, 0.08)'; g.fillRect(x1, 0, x2 - x1, H);
     }
     if (w) {
-      const key = `${deck.track?.id}|${H}|${base.toFixed(3)}|${this.wfStyle()}|${themeRev}|${w.peak.length}`;
+      const key = `${deck.track?.id}|${H}|${base.toFixed(3)}|${this.wfStyle()}/${this.wfShape()}|${themeRev}|${w.peak.length}`;
       if (key !== this.tileKey) { this.tiles.clear(); this.pendingTiles.clear(); this.tileQueue.length = 0; this.tileKey = key; }
       const pal = palette(this.wfStyle());
       const TW = Math.round(TILE * dpr), tileSecs = TW / base, scale = pxPerSec / base, dur = w.peak.length / w.rate;
@@ -302,13 +338,14 @@ export class OverviewWaveform {
     this.ro.observe(this.canvas);
   }
   wfStyle() { return this.getSettings().waveformColors || 'rgb'; }
+  wfShape() { return this.getSettings().waveformShape || 'bars'; }
   renderCache(W, H, played) {
     const w = this.deck.waveform; const s = this.getSettings();
     const off = newCanvas(W, H);
     const g = off.getContext('2d');
     g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, W, H);
     const n = w.peak.length;
-    paintBands(g, w, palette(this.wfStyle()), 0, W, H, (x) => Math.floor(x / W * n), { pad: 1 });
+    paintBands(g, w, palette(this.wfStyle()), 0, W, H, (x) => Math.floor(x / W * n), { pad: 1, shape: this.wfShape(), lw: waveDpr() });
     if (played) { g.globalAlpha = 0.6; g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, W, H); g.globalAlpha = 1; }
     return off;
   }
@@ -323,12 +360,12 @@ export class OverviewWaveform {
     const cues = deck.track?.cues || [];
     const loop = deck.loop;
     const warn = deck.duration > 0 && deck.playing && deck.duration * (1 - k) < 30;
-    const sig = `${px}|${W}x${H}|${themeRev}|${this.wfStyle()}|${deck.track?.id}|${!!deck.waveform}|${loop ? `${loop.start},${loop.end},${loop.active}` : ''}|${cues.length}:${cues.reduce((a, c) => a + c.position, 0)}|${(deck.track?.phrases || []).length}|${deck.bpm}|${warn}`;
+    const sig = `${px}|${W}x${H}|${themeRev}|${this.wfStyle()}/${this.wfShape()}|${deck.track?.id}|${!!deck.waveform}|${loop ? `${loop.start},${loop.end},${loop.active}` : ''}|${cues.length}:${cues.reduce((a, c) => a + c.position, 0)}|${(deck.track?.phrases || []).length}|${deck.bpm}|${warn}`;
     if (sig === this.sig) return;
     this.sig = sig;
     g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, W, H);
     if (!deck.waveform || !deck.duration) return;
-    const key = `${deck.track?.id}:${W}:${H}:${this.wfStyle()}:${themeRev}`;
+    const key = `${deck.track?.id}:${W}:${H}:${this.wfStyle()}/${this.wfShape()}:${themeRev}`;
     if (key !== this.cacheKey) { this.cache = this.renderCache(W, H, false); this.cachePlayed = this.renderCache(W, H, true); this.cacheKey = key; }
     // played part from the dimmed copy, the rest at full colour
     if (px > 0) g.drawImage(this.cachePlayed, 0, 0, px, H, 0, 0, px, H);

@@ -68,30 +68,33 @@ export function audibleOffset(out, inn, { window = 2, maxLag = 0.06, step = 0.00
   // to 0.018 (loud) per point, a sustained pad's leftover ripple ~0.0016.
   if (sx / n < MIN_ONSET) return null;
   const tau = (j) => j * dt / out.rate;
-  const lags = [];
-  let best = -Infinity, bestI = -1;
-  for (let L = -maxLag, i = 0; L <= maxLag + 1e-12; L += step, i++) {
-    // incoming lagging by L: its sound at audio time T was written for track time (T - L)
+  // incoming lagging by L: its sound at audio time T was written for track time (T - L)
+  const corr = (L) => {
     let c = 0, syy = 0;
     for (let j = 0; j < n; j++) { const y = at(inn.curve, inn.pos - (tau(j) + L) * inn.rate); c += xs[j] * y; syy += y * y; }
-    const v = syy > 1e-9 ? c / Math.sqrt(sxx * syy) : 0;
-    lags.push(v);
-    if (v > best) { best = v; bestI = i; }
-  }
+    return syy > 1e-9 ? c / Math.sqrt(sxx * syy) : 0;
+  };
+  // coarse to fine (a kick's onset peak is several ms wide): every 4 steps over the whole range, then every step around
+  // the best coarse lag; about a third of the work of a full search, same answer (it runs during every blend)
+  const lagAt = (i) => -maxLag + i * step, nFine = Math.round((2 * maxLag) / step);
+  let best = -Infinity, bestI = -1, sum = 0, count = 0;
+  for (let i = 0; i <= nFine; i += 4) { const v = corr(lagAt(i)); sum += v; count++; if (v > best) { best = v; bestI = i; } }
   if (bestI < 0 || best <= 0) return null;
+  const fine = new Map();
+  for (let i = Math.max(0, bestI - 4); i <= Math.min(nFine, bestI + 4); i++) { const v = corr(lagAt(i)); fine.set(i, v); if (v > best) { best = v; bestI = i; } }
   let sy = 0; // the incoming side needs onsets too, where it matched
-  for (let j = 0; j < n; j++) sy += at(inn.curve, inn.pos - (tau(j) + (-maxLag + bestI * step)) * inn.rate);
+  for (let j = 0; j < n; j++) sy += at(inn.curve, inn.pos - (tau(j) + lagAt(bestI)) * inn.rate);
   if (sy / n < MIN_ONSET) return null;
   // parabolic interpolation around the peak
   let frac = 0;
-  if (bestI > 0 && bestI < lags.length - 1) {
-    const a = lags[bestI - 1], b = lags[bestI], c = lags[bestI + 1], d = a - 2 * b + c;
+  if (bestI > 0 && bestI < nFine) {
+    const a = fine.get(bestI - 1) ?? corr(lagAt(bestI - 1)), b = best, c = fine.get(bestI + 1) ?? corr(lagAt(bestI + 1)), d = a - 2 * b + c;
     if (d < 0) frac = 0.5 * (a - c) / d;
   }
   // the best lag L matched the incoming deck's sound at T - L with the outgoing deck's at T: a lag of d seconds
   // behind shows up as L = -d
   const offset = -(-maxLag + (bestI + frac) * step);
-  const mean = lags.reduce((s, v) => s + v, 0) / lags.length;
+  const mean = sum / count;
   // confidence: how far the peak stands above the average lag (a clean kick pattern: ~0.5+; pads / no drums: ~0)
   return { offset, confidence: Math.max(0, best - mean), peak: best };
 }

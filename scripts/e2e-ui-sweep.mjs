@@ -258,17 +258,18 @@ try {
     check(!summary(a) && painted, `platter skin ${skin}: platters painted, controls in bounds${summary(a) ? ' — ' + summary(a) : ''}`);
   }
   await ev(() => { window.opendj.settings.deckOptions = { ...window.opendj.settings.deckOptions, platterSkin: 'minimal' }; });
-  for (const style of ['rgb', 'blue', 'mono', 'player-blue', 'player-rgb']) {
-    const r = await ev(async (style) => {
-      window.opendj.settings.waveformColors = style; await new Promise((r) => setTimeout(r, 600));
+  const { styles, shapes } = await ev(async () => { const m = await import('/js/ui/waveform.js'); return { styles: m.WAVEFORM_STYLES.map((x) => x[0]), shapes: m.WAVEFORM_SHAPES.map((x) => x[0]) }; });
+  for (const [style, shape] of [...styles.map((c) => [c, 'bars']), ...shapes.slice(1).flatMap((sh) => [['rgb', sh], ['player-blue', sh]])]) {
+    const r = await ev(async ([style, shape]) => {
+      window.opendj.settings.waveformColors = style; window.opendj.settings.waveformShape = shape; await new Promise((r) => setTimeout(r, 600));
       const c = document.querySelector('.wf-detail'), g = c.getContext('2d'), d = g.getImageData(0, 0, c.width, c.height).data;
       let lit = 0; for (let i = 0; i < d.length; i += 64) if (d[i] + d[i + 1] + d[i + 2] > 200) lit++;
       const o = document.querySelector('.wf-overview'), od = o.getContext('2d').getImageData(0, 0, o.width, o.height).data; let olit = 0; for (let i = 0; i < od.length; i += 64) if (od[i] + od[i + 1] + od[i + 2] > 200) olit++;
       return { lit, olit };
-    }, style);
-    check(r.lit > 20 && r.olit > 5, `waveform style ${style}: detail and overview render (${r.lit} / ${r.olit} lit samples)`);
+    }, [style, shape]);
+    check(r.lit > 20 && r.olit > 5, `waveform ${style} / ${shape}: detail and overview render (${r.lit} / ${r.olit} lit samples)`);
   }
-  await ev(() => { window.opendj.settings.waveformColors = 'rgb'; });
+  await ev(() => { window.opendj.settings.waveformColors = 'rgb'; window.opendj.settings.waveformShape = 'bars'; });
 
   // ---------- 2. click sweep per layout ----------
   await page.setViewportSize({ width: 1920, height: 1080 });
