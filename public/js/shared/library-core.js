@@ -27,7 +27,7 @@ export const DEFAULT_SETTINGS = {
   downloadDir: '',
   // Automix defaults (0.5.7): Auto style and length (the planner picks per transition), varied styles, beat-matched;
   // (0.5.10) no added effects: tricks, teases of the next track and AI-stem transitions are opt-in
-  automix: { transitionBeats: 32, lengthMode: 'auto', style: 'auto', keepSync: true, skipSilence: true, shuffle: false, keySync: false, order: 'harmonic', restoreTempo: true, varyStyles: true, smartStart: true, tricks: 'off', tease: false, stemTransitions: false, bassPreview: false, effectsOff: 1, onAirLoad: 'ask', shape: 'warmup', preset: 'balanced', sliders: { harmonic: 0.5, energy: 0.5, variety: 0.5 } },
+  automix: { transitionBeats: 32, lengthMode: 'auto', style: 'auto', keepSync: true, skipSilence: true, shuffle: false, keySync: false, order: 'harmonic', restoreTempo: true, varyStyles: true, smartStart: true, tricks: 'off', tease: false, stemTransitions: false, effectsOff: 1, onAirLoad: 'ask', shape: 'warmup', preset: 'balanced', sliders: { harmonic: 0.5, energy: 0.5, variety: 0.5 } },
   midiMappings: {},           // deviceName -> mapping object
   recordFormat: 'wav',
   limiter: true,
@@ -61,7 +61,7 @@ export const DEFAULT_SETTINGS = {
   // turntables (docs/MIXER_AND_TURNTABLES_PLAN.md §6): defaults live in public/js/audio/vinyl.js; {} = all defaults
   vinyl: {},                  // vinyl model for every deck: start, stop, inertia, slipmat, jogWeight, rpm, brakeTime, spinTime, spinSpeed, quartz
   vinylDecks: [],             // per-deck changes to `vinyl` (index = deck), made in each deck's Vinyl panel
-  deckOptions: {},            // platterSkin, haptics, needleLock, needleSnap, flickSpinback, bendMode, fineStep, hardLock, scratchHand
+  deckOptions: {},            // platterSkin, haptics, needleLock, needleSnap, flickSpinback, bendMode, fineStep, hardLock, scratchHand, tempoResetBeats
 };
 // Object-valued settings that are replaced on update instead of shallow-merged.
 export const REPLACE_SETTINGS = new Set(['midiMappings', 'sequencer', 'lighting', 'sampler', 'updateSnooze']);

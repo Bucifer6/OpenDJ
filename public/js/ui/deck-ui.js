@@ -82,9 +82,9 @@ export function buildDeck(app, deck) {
   const playBtn = R(button(el('span', { class: 'play-glyph' }, icon('play'), icon('pause')), { cls: 'btn-play big', title: 'Play / pause', down: () => { app.engine.resume(); deck.togglePlay(); }, active: () => deck.playing }));
   const mixNowBtn = R(button('MIX NOW', {
     cls: 'sm deck-mix-now',
-    title: 'Start the queued Automix transition from this deck',
-    click: () => app.mixNow(),
-    disabled: () => !app.automix?.enabled || !!app.automix?.transition || app.automix?.current?.index !== i || !app.automix?.nextTrack?.(),
+    title: 'Mix from this deck into the next track now (the queued Automix transition, or the track loaded on the other deck)',
+    click: () => app.mixNow(i),
+    disabled: () => !app.mixNowState?.(i)?.available,
   }));
   const syncBtn = R(button('SYNC', { cls: 'btn-sync', click: () => deck.sync(), active: () => deck.syncOn }));
   const masterBtn = R(button('MASTER', { cls: 'btn-master', click: () => deck.setMaster(), active: () => deck.isMaster }));
@@ -124,7 +124,7 @@ export function buildDeck(app, deck) {
     button('−', { cls: 'sm', down: () => deck.bendStart(-1), up: () => deck.bendStop(), title: 'Pitch bend down (nudge; hold to bend more)' }),
     button('+', { cls: 'sm', down: () => deck.bendStart(1), up: () => deck.bendStop(), title: 'Pitch bend up (nudge; hold to bend more)' }),
   );
-  const resetBtn = R(button('RESET', { cls: 'sm', click: () => { deck.resetTempo(); tempoFader.render(); }, active: () => deck.gliding, title: 'Tempo reset (hold: glide to 0 % or to the master tempo over 1-64 beats)' }));
+  const resetBtn = R(button('RESET', { cls: 'sm', click: () => { deck.resetTempoGlide(); tempoFader.render(); }, active: () => deck.gliding, title: 'Tempo reset: a playing track glides back to 0 % (Settings → Decks sets how fast; press again to jump there). Hold: glide to 0 % or to the master tempo over 1-64 beats' }));
   longPress(resetBtn, () => popupMenu(resetBtn, [
     ...GLIDE_BEATS.map((b) => [`→ 0 % in ${b}`, () => deck.tempoGlide(0, b)]),
     ...GLIDE_BEATS.map((b) => [`→ MASTER in ${b}`, () => deck.glideToMaster(b) || app.toast('No master tempo to glide to')]),
@@ -435,6 +435,9 @@ export function buildDeck(app, deck) {
   deck.on('vinyl', () => { renderState(); tempoFader.render(); });
   deck.on('glide', () => renderState());
   const renderState = () => { for (const r of renderers) r.render(); if (masterBadge.hidden === !!deck.isMaster) masterBadge.hidden = !deck.isMaster; };
+  // MIX NOW with Automix off depends on the other deck too (loaded, playing)
+  const refreshMixNow = () => { mixNowBtn.render(); const st = app.mixNowState?.(i); if (st) mixNowBtn.title = st.title; };
+  for (const d of app.engine.decks) for (const ev of ['state', 'load', 'loaded']) d.on(ev, refreshMixNow);
   deck.on('state', renderState); deck.on('loop', () => { loopSize._t = loopSize.textContent = deck.loop?.active ? fmtBeats(deck.loopBeats) : fmtBeats(autoLoopBeats); });
   deck.on('tempo', () => tempoFader.render());
   deck.on('tempo-range', () => { rangeSel.value = String(deck.tempoRange); tempoFader.render(); });

@@ -6,7 +6,7 @@ import { effectiveGains, LOADED_STEMS } from '../stems/stem-mix.js';
 import { floatToInt16 } from '../stems/stem-dsp.js';
 import { onsetCurve } from './beat-phase.js';
 import { StemEcho } from '../stems/stem-fx.js';
-import { VINYL_DEFAULTS, secPerRev, snapTo, nextQuantizeDiv, glideDuration, bendAt, needleTarget, jumpSizeStep, semitoneRate } from './vinyl.js';
+import { VINYL_DEFAULTS, secPerRev, snapTo, nextQuantizeDiv, glideDuration, bendAt, needleTarget, jumpSizeStep, semitoneRate, TEMPO_RESET_BEATS } from './vinyl.js';
 
 /** Tempo fader ranges (±%), as offered in the deck and Settings. */
 export const TEMPO_RANGES = [6, 8, 10, 16, 25, 50, 100];
@@ -478,7 +478,20 @@ export class Deck extends Emitter {
   }
   /** Step the tempo by `pct` (MIDI tempo +/- buttons), staying inside the tempo range. */
   stepTempo(pct) { this.setTempo(clamp(this.tempo + pct, -this.tempoRange, this.tempoRange)); }
+  /** Tempo to 0 % at once (programmatic resets, the fader's double-click). */
   resetTempo() { this.setTempo(0); }
+  /**
+   * The RESET button (and a controller's tempo reset): a playing deck glides back to 0 % over
+   * settings.deckOptions.tempoResetBeats beats (TEMPO_RESET_BEATS by default, 0 = at once), so a track on air changes
+   * tempo smoothly instead of jumping; pressed again while that glide runs, it goes to 0 % at once. A stopped deck
+   * resets at once (nothing is heard).
+   */
+  resetTempoGlide() {
+    const beats = Number(this.engine.settings?.deckOptions?.tempoResetBeats ?? TEMPO_RESET_BEATS);
+    if (this._glide?.target === 0) return this.resetTempo();
+    if (!(beats > 0) || !this.playing || !this.bpm) return this.resetTempo();
+    this.tempoGlide(0, beats);
+  }
   setBend(b) { if (this._glide) this.cancelGlide(); this.bend = b; this.post('rate', { value: this.rate }); }
   /** Hold-to-bend (T5): the bend grows from 1 % to 8 % over a second (or a fixed ±4 % with bendMode 'fixed'). */
   bendStart(dir) {

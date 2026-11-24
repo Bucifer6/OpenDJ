@@ -34,6 +34,7 @@ export const DECK_OPTION_DEFAULTS = Object.freeze({
   fineStep: 0.5,          // tempo +/- step (%)
   hardLock: false,        // a playing deck refuses loads (instead of asking)
   scratchHand: 'right',   // scratch view: crossfader strip on the right (right-handed) or left
+  tempoResetBeats: 16,    // RESET on a playing deck glides back to 0 % over this many beats (0 = at once; TEMPO_RESET_BEATS)
 });
 
 const clampNum = (v, [lo, hi], d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
@@ -71,6 +72,9 @@ export const jumpSizeStep = (b, dir) => JUMP_SIZES[Math.max(0, Math.min(JUMP_SIZ
  */
 export const glideDuration = (beats, beatLen, r0, r1) => (2 * beats * beatLen) / Math.max(1e-6, r0 + r1);
 export const GLIDE_BEATS = [1, 4, 16, 64];
+/** Beats the RESET button takes to glide a playing deck back to 0 % (Settings → Decks; 0 = at once). */
+export const TEMPO_RESET_BEATS = 16;
+export const TEMPO_RESET_CHOICES = [0, 4, 8, 16, 32];
 /** Ramped bend: holding a bend button for `held` seconds bends this much (1 % growing to 8 % over 1 s). */
 export const bendAt = (held) => 0.01 + 0.07 * Math.min(1, Math.max(0, held));
 

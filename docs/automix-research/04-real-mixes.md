@@ -181,10 +181,7 @@ the proposal:
   target, so a 9-minute club record hands over after about 4–5 minutes, not 6.
 - **Item 3:** the swap goes to the incoming main part when it starts 40–85 % into the blend, else to the phrase
   line nearest 58 % (`SWAP_AT`).
-- **Item 4** (bass preview) is implemented as an option, off by default (Settings → Automix → *Bass preview*).
-  - **What it does:** in a club EQ blend, the incoming bass plays at −8 dB for the 8 bars before the swap (`BASS_PREVIEW_DB`, `BASS_PREVIEW_BARS` in `automix.js`).
-  - **When it applies:** only when `checkBassPreview` (`transition-check.js`) finds the simulated mix within the 2 LU bump limit, with at most 1 LU added by the preview. In practice that means under a quieter intro, not under two equally loud sections, whose kicks add up in phase.
-  - **When it never applies:** double drops, and when fewer than 2 bars fit before the swap.
+- **Item 4** (bass preview) was added in 0.5.14 as an option and removed in 0.5.16: it did not sound right in use.
 - **Item 7** is still open.
 
 1. **Shorter club blends.**

@@ -43,7 +43,7 @@ export function buildTargets(app) {
     add(`${P}.reverse`, `Deck ${n} Reverse (hold)`, 'button', (down) => deck.setReverse(down), () => deck.reverse);
     add(`${P}.eject`, `Deck ${n} Eject`, 'button', (down) => down && deck.eject());
     add(`${P}.tempo`, `Deck ${n} Tempo fader`, 'abs', (v) => deck.setTempoFader(v * 2 - 1), null, () => (deck.tempo / deck.tempoRange + 1) / 2);
-    add(`${P}.tempoReset`, `Deck ${n} Tempo reset`, 'button', (down) => down && deck.resetTempo());
+    add(`${P}.tempoReset`, `Deck ${n} Tempo reset`, 'button', (down) => down && deck.resetTempoGlide());
     const fine = () => app.settings.deckOptions?.fineStep || 0.5; // Settings → Decks: tempo step 0.02 / 0.05 / 0.5 %
     add(`${P}.tempoUp`, `Deck ${n} Tempo + (fine step)`, 'button', (down) => down && deck.stepTempo(fine()));
     add(`${P}.tempoDown`, `Deck ${n} Tempo − (fine step)`, 'button', (down) => down && deck.stepTempo(-fine()));

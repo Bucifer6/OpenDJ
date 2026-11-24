@@ -1,7 +1,7 @@
 // Settings → Decks: platter skin, haptics, needle drop, flick spin-back, bend, tempo step, deck lock and the default
 // vinyl model for every deck (each deck's Vinyl panel can change its own copy).
 import { el } from '../util.js';
-import { deckOptions, vinylFor, VINYL_DEFAULTS } from '../audio/vinyl.js';
+import { deckOptions, vinylFor, VINYL_DEFAULTS, TEMPO_RESET_BEATS, TEMPO_RESET_CHOICES } from '../audio/vinyl.js';
 import { PLATTER_SKINS } from './platter-skins.js';
 import { setHapticsLevel } from './haptics.js';
 import { platform } from '../platform.js';
@@ -25,6 +25,8 @@ export function deckSettingsFields(app, { field, sel, chk }) {
     field('Needle lock while playing', sel(o.needleLock, [['auto', 'On for phones'], ['on', 'On'], ['off', 'Off']], (x) => setOpt({ needleLock: x })), 'With the lock on, a playing deck needs a short press-and-hold on the overview waveform before the needle drops.'),
     field('Needle drop snaps to', sel(o.needleSnap, [['off', 'Nowhere (exact)'], ['beat', 'The nearest beat'], ['bar', 'The nearest bar']], (x) => setOpt({ needleSnap: x })), 'While playing the drop keeps the beat phase, so the mix stays in time.'),
     field('Pitch bend buttons', sel(o.bendMode, [['ramp', 'Ramp: 1 % growing to 8 % while held'], ['fixed', 'Fixed ±4 %']], (x) => setOpt({ bendMode: x }))),
+    field('Tempo RESET on a playing deck', sel(o.tempoResetBeats ?? TEMPO_RESET_BEATS, TEMPO_RESET_CHOICES.map((b) => [b, b ? `Glide back to 0 % over ${b} beats` : 'Jump to 0 % at once']), (x) => setOpt({ tempoResetBeats: Number(x) })),
+      'A glide lets a track on air change tempo smoothly. Pressing RESET again during the glide jumps to 0 %.'),
     field('Tempo +/− step (MIDI and keys)', sel(o.fineStep, [[0.02, '0.02 %'], [0.05, '0.05 %'], [0.5, '0.5 %']], (x) => setOpt({ fineStep: Number(x) }))),
     el('label', { class: 'check' }, chk(o.hardLock, (x) => setOpt({ hardLock: x })), ' Deck lock: refuse loads onto a playing deck (instead of asking)'),
     field('Scratch view crossfader', sel(o.scratchHand, [['right', 'On the right (right-handed)'], ['left', 'On the left (left-handed)']], (x) => setOpt({ scratchHand: x }))),
