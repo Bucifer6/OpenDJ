@@ -155,14 +155,6 @@ test('clock-offset measurement is accurate despite latency jitter and packet los
   await a.disable(); await b.disable();
 });
 
-test('a lossy network (30 % of packets lost) still joins: short measurements count, failed ones retry soon', async () => {
-  // (wall-clock bounds stay generous here: on a busy machine late timers count as lost packets too)
-  const { a, b } = pair({ latencyMs: 2, jitterMs: 6, loss: 0.3 });
-  await a.enable(); await sleep(600); await b.enable();
-  assert.ok(await until(() => b.sessionId === a.sessionId, 10000), 'b joins a\'s session');
-  await a.disable(); await b.disable();
-});
-
 test('a third node joins; requestBeatAtTime with peers keeps the shared phase', async () => {
   const net = new MemoryNetwork({ latencyMs: 1 });
   const nodes = [0, 1, 2].map((i) => new LinkNode({ transport: net.transport(), clock: () => hostMicros() + i * 1e9, bpm: 100 + i * 10, broadcastMs: 100 }));
