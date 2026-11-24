@@ -23,7 +23,7 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
-### Unreleased
+### New in 0.5.14
 - **Bass preview (optional).** *Settings → Automix → Bass preview*: in a long blend, the next track's bass comes in quietly (8 dB down) for the 8 bars before the bass swap, as in real DJ mixes, instead of staying cut. It is used only where it adds no noticeable low-end bump (under a quieter intro), never in a double drop, and is off by default.
 
 ### New in 0.5.13
