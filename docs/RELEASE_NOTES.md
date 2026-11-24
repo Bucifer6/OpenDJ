@@ -23,6 +23,9 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.5.14
+- **Bass preview (optional).** *Settings → Automix → Bass preview*: in a long blend, the next track's bass comes in quietly (8 dB down) for the 8 bars before the bass swap, as in real DJ mixes, instead of staying cut. It is used only where it adds no noticeable low-end bump (under a quieter intro), never in a double drop, and is off by default.
+
 ### New in 0.5.13
 - **Smaller desktop downloads.** Since 0.5.5 every desktop app also carried files only the project itself needs (documentation images, the phone app projects, tests and scripts), about 40 MB per app. They are no longer packaged.
 - **The top bar fits a 1440 px laptop screen again.** The Automix ▾ menu had pushed it 10 px past the window edge; the buttons now sit a little closer together up to 1500 px.
@@ -78,10 +81,3 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **Automix starts with your decks.** Tracks you have loaded on deck 1 and/or deck 2 now play first when you press AUTOMIX: deck 1 starts (from your cue point if you set one), deck 2 plays next, then the rest of the mix. A deck that is already playing keeps playing.
 - **Choose what Automix plays and for how long.** The new ▾ menu next to AUTOMIX mixes the whole library (shuffled or smart, endless), this view for an hour or endlessly, one playlist, or the genres you pick. The Automix dialog has the same *Mix* (view, whole library, a playlist, genres) and *Set length* (whole list, 30 minutes, 1 to 3 hours, endless) choices, and the ▾ menu sets what the one-click AUTOMIX button plays. Endless sets keep adding tracks, playing the whole pool before any track comes back; a playlist in *Play in this order* loops in order.
 - **Fix AI stems that came out as noise on the graphics card.** The previous check only tested that the four stems add up to the track, but the GPU (DirectML) was returning noise spread across the stems that still added up exactly, so it passed. A GPU is now compared once with the CPU on real audio. If its stems differ, the track is redone on the CPU and the GPU is not used for stems again. Noisy GPU stems saved by 0.5.3–0.5.4 are deleted at start-up and prepared again. The browser engine checks WebGPU against WASM the same way.
-
-### New in 0.5.4
-- Ten additional audio-reactive visualisers: Aurora Ribbons, Cosmic Vortex, Fractal Mandala, Neon Terrain, Liquid Plasma, Warp Drive, Spectrum Skyline, Neon Waveform, Particle Orbit and Prism Tunnel. Choose and save a style per deck in VIDEO → Mix; works with the preview, projector output and Canvas2D fallback. No new dependencies or downloaded assets.
-- Fix a browser startup syntax error in the stem backend fallback handler. CI now parses every browser JavaScript module and worker, including files not imported by unit tests.
-- Stabilise absolute DVS position when audio capture begins partway through a carrier cycle, and reset bit thresholds on needle-lift reacquisition. A 48-case regression covers both timecode families, both directions and varying capture phases.
-- Refresh the README, feature screenshots and demo animation from the working application using the fictional demo library.
-- Includes the adaptive DJ improvements below and the stem-output validation fix. The 0.5.3 release candidate was stopped before publication after combined-branch QA detected the startup error.
