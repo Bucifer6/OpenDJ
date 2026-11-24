@@ -23,6 +23,10 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.5.17
+- **Smoother waveforms and platters during mixes.** Under load, such as the next track loading during Automix, the audio clock runs in bursts, and the scrolling waveforms and spinning platters followed it with jumps of up to 60 ms. They now glide back into step instead, so the motion stays smooth. Track loading and Automix's beat-phase checks also do their work in smaller pieces, and Automix loads the next track a few seconds after a mix instead of straight away.
+- **Waveform colour schemes and shapes.** *Settings → Appearance*: five gentler colour schemes (Soft RGB, Pastel, Amber, Ocean, Sunset) next to the existing ones, and a new *Waveform shape* setting: Bars (as before), Half (bars growing up from the bottom), Smooth (a filled outline) or Outline.
+
 ### New in 0.5.16
 - **Tempo RESET glides.** On a playing deck, RESET (on screen or from a controller) now takes the tempo smoothly back to 0 % over 16 beats instead of jumping, so a track on air changes tempo without a bump; pressing it again during the glide jumps to 0 %. *Settings → Decks → Tempo RESET on a playing deck* sets 4, 8, 16 or 32 beats, or jumps at once as before. A stopped deck resets at once.
 - **MIX NOW without Automix.** On deck 1 or 2, MIX NOW now also works with Automix off: it mixes the playing track into the one loaded on the other deck right away, then leaves the new track playing on its own. Its tooltip says what is missing when it can't (nothing playing, nothing loaded, the other deck already playing).
@@ -71,8 +75,3 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - The log now shows stems prepared in the app window, with the time each took.
 - Automix research and design notes: `docs/PRO_DJ_AUTOMIX_RESEARCH.md`.
 
-### New in 0.5.7
-- **Faster AI stems on graphics cards where DirectML gets it wrong.** OpenDJ now tries DirectML at simpler model optimisation levels too, and checks each against the CPU. If none is right (seen on an RTX 3070), the tracks you ask for are separated in the app window on the graphics card through WebGPU, which is checked against the CPU first. The server's CPU keeps preparing the background tracks. Anything that does not match the CPU is never used, so stems stay correct. *Settings → AI stems → Where* can force the server.
-- **Prepare stems ahead:** the Automix dialog can prepare AI stems for the whole set when it starts (in play order), and OpenDJ tells you once when stems run on the CPU, with the time per track and how to prepare playlists ahead.
-- **Beat sync by ear:** during transitions OpenDJ now listens to where both tracks' kicks actually land and keeps them together (to about a millisecond), instead of trusting the beat grids alone, which can be slightly off. Grids are still used when there are no clear kicks.
-- **Recommended Automix settings are the default for new installs:** Auto transition style and length, varied styles.

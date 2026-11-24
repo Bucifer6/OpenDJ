@@ -52,7 +52,8 @@ const SCHEMA = {
   tempoRange: oneOf(6, 8, 10, 16, 25, 50, 100),
   keyLockDefault: bool(), quantize: bool(), autoGain: bool(), limiter: bool(), fxPostFader: bool(), autoCues: bool(), stemsAutoLoad: bool(), highPrecisionAudio: bool(),
   syncMode: oneOf('beat', 'tempo'),
-  waveformColors: oneOf('rgb', 'blue', 'mono', 'player-blue', 'player-rgb'),
+  waveformColors: oneOf('rgb', 'soft', 'pastel', 'amber', 'ocean', 'sunset', 'blue', 'mono', 'player-blue', 'player-rgb'),
+  waveformShape: oneOf('bars', 'half', 'smooth', 'outline'),
   downloadDir: str(), uploadDir: str(),
   automix: shape({
     transitionBeats: num(1, 256), lengthMode: oneOf('fixed', 'auto'), smartStart: bool(), profile: oneOf('club', 'harmonic', 'peak', 'open', 'quick', 'custom'),

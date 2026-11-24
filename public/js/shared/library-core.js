@@ -23,7 +23,8 @@ export const DEFAULT_SETTINGS = {
   quantize: true,
   syncMode: 'beat',           // 'beat' | 'tempo'
   autoGain: true,
-  waveformColors: 'rgb',      // 'rgb' | 'blue' | 'mono'
+  waveformColors: 'rgb',      // see WAVEFORM_STYLES in ui/waveform.js
+  waveformShape: 'bars',      // 'bars' | 'half' | 'smooth' | 'outline'
   downloadDir: '',
   // Automix defaults (0.5.7): Auto style and length (the planner picks per transition), varied styles, beat-matched;
   // (0.5.10) no added effects: tricks, teases of the next track and AI-stem transitions are opt-in

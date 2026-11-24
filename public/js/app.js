@@ -773,7 +773,11 @@ class App {
     this.engine.on('warning', (m) => this.toast(`⚠ ${m}`));
     this.engine.on('recording', (on) => this.recBtn.classList.toggle('active', on));
     this.engine.on('master-deck', () => this.library.renderRows(true));
-    this.automix.on('state', () => { this.updateAutomixUi(); this.library.renderRows(true); });
+    this.automix.on('state', () => {
+      this.updateAutomixUi();
+      // the library's "now playing / queued" marks: one re-render per burst of state changes (a transition emits several)
+      if (!this._amRows) this._amRows = setTimeout(() => { this._amRows = null; this.library.renderRows(true); }, 200);
+    });
     this.automix.on('ending', () => this.toast('Automix: last track playing'));
     for (const d of this.engine.decks) d.on('ended', () => { if (!this.automix.enabled) d.emit('state'); });
 

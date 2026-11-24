@@ -925,34 +925,39 @@ export function deckChannel(src, highPrecision = false, scale = 1) {
   return out;
 }
 
-// ---- time-sliced versions for the UI thread: same results, but they hand control back every ~6 ms ----
-const SLICE = 1 << 17;
+// ---- time-sliced versions for the UI thread: same results, but they hand control back after ~4 ms of work, so the
+// waveform and platters keep drawing at full frame rate while a track loads ----
+const CHUNK = 1 << 14, BUDGET_MS = 4;
 const yieldTask = () => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => { c.port1.close(); r(); }; c.port2.postMessage(0); });
+const now = () => globalThis.performance?.now?.() ?? Date.now();
+/** Runs work(a, b) over [0, n) in chunks, yielding to the event loop whenever ~BUDGET_MS has been used. */
+async function sliced(n, work) {
+  let t0 = now();
+  for (let a = 0; a < n; a += CHUNK) {
+    const b = Math.min(n, a + CHUNK);
+    work(a, b);
+    if (b < n && now() - t0 >= BUDGET_MS) { await yieldTask(); t0 = now(); }
+  }
+}
 /** deckChannel() in slices (identical output, including the dither sequence). */
 export async function deckChannelSliced(src, highPrecision = false, scale = 1) {
   if (highPrecision) return new Float32Array(src);
   const out = new Int16Array(src.length);
   const g = 32767 / (scale > 1 ? scale : 1);
   let seed = 22222;
-  for (let a = 0; a < src.length; a += SLICE) {
-    const b = Math.min(src.length, a + SLICE);
+  await sliced(src.length, (a, b) => {
     for (let i = a; i < b; i++) {
       seed = (seed * 1664525 + 1013904223) >>> 0; const r1 = seed / 4294967296;
       seed = (seed * 1664525 + 1013904223) >>> 0; const r2 = seed / 4294967296;
       const v = Math.round(src[i] * g + (r1 - r2));
       out[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
     }
-    if (b < src.length) await yieldTask();
-  }
+  });
   return out;
 }
 export async function peakAbsSliced(src) {
   let p = 0;
-  for (let a = 0; a < src.length; a += SLICE * 4) {
-    const b = Math.min(src.length, a + SLICE * 4);
-    for (let i = a; i < b; i++) { const x = src[i] < 0 ? -src[i] : src[i]; if (x > p) p = x; }
-    if (b < src.length) await yieldTask();
-  }
+  await sliced(src.length, (a, b) => { for (let i = a; i < b; i++) { const x = src[i] < 0 ? -src[i] : src[i]; if (x > p) p = x; } });
   return p;
 }
 
