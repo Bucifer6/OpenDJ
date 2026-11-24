@@ -194,3 +194,24 @@ test('AutoMix.styleFor: overrides, auto per pair, vary', () => {
   app.settings.automix.style = 'phrase';
   assert.equal(am.styleFor(2).style, 'blend');
 });
+
+test('automix: the next track is never loaded during a transition, and a scheduled load waits for one', async () => {
+  const loads = [];
+  const decks = [{ index: 0, track: { id: 'a' } }, { index: 1, track: { id: 'b' }, playing: true }];
+  const am = Object.create(AutoMix.prototype);
+  Object.assign(am, {
+    enabled: true, queue: [T('a'), T('b'), T('c')], idx: 2, current: decks[0], _loading: false,
+    app: { loadTrack: async (i, id) => { loads.push([i, id]); } }, engine: { channels: [{ set() {} }, { set() {} }] },
+    fillLive() {}, fillMore() {}, prefetchAhead() {}, emit() {}, other: (d) => decks[1 - d.index], nextTrack() { return this.queue[this.idx]; },
+  });
+  am.transition = { out: decks[0], inn: decks[1] }; // mid-transition: the "other" deck is the incoming one, on air
+  await am.preloadNext();
+  assert.deepEqual(loads, [], 'nothing loaded onto the deck on air');
+  am.transition = null; am.current = decks[1];
+  await am.preloadNext();
+  assert.deepEqual(loads, [[0, 'c']], 'loads onto the free deck once the transition is over');
+  am.schedulePreload({ duration: 100, position: 10 });
+  assert.ok(am._preloadTimer, 'a scheduled load is pending');
+  am.cancelPreload();
+  assert.equal(am._preloadTimer, null);
+});

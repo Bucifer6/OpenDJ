@@ -696,7 +696,7 @@ export class AutoMix extends Emitter {
     }
     if (add.length) this.queue.push(...add);
   }
-  stop() { this._oneShot = false; clearTimeout(this._preloadTimer); this._preloadTimer = null; this.endTease(true); this.endTrick(true); this.trickPlan = null; this._finale = null; if (this.engine.prefetched) this.engine.prefetched.clear(); this.enabled = false; this.forceTransitionRequested = false; this.watchdog?.reset(); if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
+  stop() { this._oneShot = false; this.cancelPreload(); this.endTease(true); this.endTrick(true); this.trickPlan = null; this._finale = null; if (this.engine.prefetched) this.engine.prefetched.clear(); this.enabled = false; this.forceTransitionRequested = false; this.watchdog?.reset(); if (this.transition) this.finishTransition(true); this.upcoming = null; this.emit('state'); }
   /** Start the next transition immediately, waiting for its deck preload if necessary. */
   /**
    * Why MIX NOW can't mix from `deck` with Automix off (null: it can): it needs Automix stopped, deck 1 or 2 playing,
@@ -1035,18 +1035,28 @@ export class AutoMix extends Emitter {
    * short track: an eighth of what is left), then for an idle moment (at most 1.5 s more).
    */
   schedulePreload(deck) {
-    clearTimeout(this._preloadTimer);
+    this.cancelPreload();
     const left = deck?.duration ? Math.max(0, deck.duration - deck.position) : Infinity;
     const wait = Math.max(500, Math.min(3000, (left * 1000) / 8));
     // _preloadTimer stays set until the load starts: tick() doesn't load the next track while one is scheduled
     const go = () => { this._preloadTimer = null; if (this.enabled) this.preloadNext(); };
-    this._preloadTimer = setTimeout(() => {
+    this._preloadTimer = { t: setTimeout(() => {
       const idle = globalThis.requestIdleCallback;
-      if (typeof idle === 'function') this._preloadTimer = idle(go, { timeout: 1500 }) && 'idle'; else go();
-    }, wait);
+      if (typeof idle === 'function') this._preloadTimer = { idle: idle(go, { timeout: 1500 }) }; else go();
+    }, wait) };
+  }
+
+  cancelPreload() {
+    const p = this._preloadTimer; this._preloadTimer = null;
+    if (p?.t) clearTimeout(p.t);
+    if (p?.idle != null) globalThis.cancelIdleCallback?.(p.idle);
   }
 
   async preloadNext() {
+    // never during a transition: the queue has already moved on (idx points past the incoming track) and the "other"
+    // deck is the incoming one, on air. tick() loads the next track once the transition is over.
+    if (this.transition) return;
+    this.cancelPreload(); // loading now: a scheduled load is no longer needed
     this.fillLive();
     this.fillMore();
     const t = this.nextTrack(); if (!t) return;
