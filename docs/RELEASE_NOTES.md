@@ -24,7 +24,7 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
-### Unreleased
+### New in 0.5.18
 - **Fixed: the Windows installer could install nothing but the uninstaller.** The ARM64 installer (for Windows on ARM) run on an ordinary Intel or AMD PC installed only the uninstaller to *C:\Program Files (x86)\OpenDJ*, with a desktop shortcut to a program that wasn't there. Each installer now checks the PC first: on the wrong one it says which file to download and installs nothing. If that happened to you: uninstall OpenDJ in *Settings → Apps*, then install `OpenDJ-Setup-<version>-x64.exe` (or `OpenDJ-Setup-<version>.exe`, which works on every PC).
 - **Soft RGB is the default waveform colour scheme.** Installs still on the old default switch to it once; the old look is *3-band RGB (theme)* in *Settings → Appearance*.
 
