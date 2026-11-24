@@ -23,6 +23,9 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.5.15
+- **Fixed: synced decks could seem a few milliseconds out of phase when they weren't.** Each deck's position was read up to several audio blocks (2.9 ms each) early, by a different amount per deck, so the beat-phase keeper sometimes saw phantom offsets of 3 to 13 ms and nudged the incoming track's pitch for nothing. Positions are now exact; in tests the measured offset between two synced decks holds steady instead of jumping.
+
 ### New in 0.5.14
 - **Bass preview (optional).** *Settings → Automix → Bass preview*: in a long blend, the next track's bass comes in quietly (8 dB down) for the 8 bars before the bass swap, as in real DJ mixes, instead of staying cut. It is used only where it adds no noticeable low-end bump (under a quieter intro), never in a double drop, and is off by default.
 
@@ -76,8 +79,3 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **Logs for troubleshooting.** OpenDJ now keeps a log of what it did: server messages, the AI stems engine, and errors from the app window, with times. *Settings → About → Logs* has **Download log** and, in the desktop app, **Open logs folder**. Attach the log when you report a problem. Passwords and media-server tokens are removed from it. The file is kept small (5 MB, 3 older copies).
 - **Clearer errors:** Windows crash codes are shown in hex (for example `0xC0000005`), and Electron's crash-reporter messages no longer hide the real cause.
 - **Security:** fixed four code-scanning findings in the translation code (none could be exploited in practice).
-
-### New in 0.5.5
-- **Automix starts with your decks.** Tracks you have loaded on deck 1 and/or deck 2 now play first when you press AUTOMIX: deck 1 starts (from your cue point if you set one), deck 2 plays next, then the rest of the mix. A deck that is already playing keeps playing.
-- **Choose what Automix plays and for how long.** The new ▾ menu next to AUTOMIX mixes the whole library (shuffled or smart, endless), this view for an hour or endlessly, one playlist, or the genres you pick. The Automix dialog has the same *Mix* (view, whole library, a playlist, genres) and *Set length* (whole list, 30 minutes, 1 to 3 hours, endless) choices, and the ▾ menu sets what the one-click AUTOMIX button plays. Endless sets keep adding tracks, playing the whole pool before any track comes back; a playlist in *Play in this order* loops in order.
-- **Fix AI stems that came out as noise on the graphics card.** The previous check only tested that the four stems add up to the track, but the GPU (DirectML) was returning noise spread across the stems that still added up exactly, so it passed. A GPU is now compared once with the CPU on real audio. If its stems differ, the track is redone on the CPU and the GPU is not used for stems again. Noisy GPU stems saved by 0.5.3–0.5.4 are deleted at start-up and prepared again. The browser engine checks WebGPU against WASM the same way.

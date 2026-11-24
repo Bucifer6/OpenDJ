@@ -78,7 +78,11 @@ export class Deck extends Emitter {
       // AudioContext time can be shared by a seek and an already queued worklet report.
       // Sequence acknowledgements keep that old report from undoing the user's new position.
       if (m.seekSeq != null ? m.seekSeq !== (this._seekSeq || 0) : m.time < this._seekGuard) return;
-      this._pos = m.frame / this.sr; this._t = Math.min(m.time, this.ctx.currentTime); this._rate = m.rate; this._shadow = m.shadow / this.sr;
+      // m.time is the audio-clock time m.frame was reached (the end of the worklet's block), often still ahead of the
+      // main thread's currentTime when the report arrives: keep it as is (positionAt extrapolates back as exactly as
+      // forward). Clamping it to currentTime read the position up to several blocks (2.9 ms each) early, differently
+      // per deck, so two synced decks seemed to jump in and out of phase.
+      this._pos = m.frame / this.sr; this._t = m.time; this._rate = m.rate; this._shadow = m.shadow / this.sr;
       if (this._glide && m.tempo > 0) { this.tempo = (m.tempo / ((1 + this.bend) * this.rateMul) - 1) * 100; this.emit('tempo'); }
       if (this.playing !== m.playing && !this._pendingPlay) { this.playing = m.playing; this.emit('state'); }
     } else if (m.type === 'ended') { this.playing = false; this.emit('state'); if (!this.scratchSample) this.emit('ended'); }
