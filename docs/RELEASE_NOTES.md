@@ -23,7 +23,7 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
-### Unreleased
+### New in 0.5.16
 - **Tempo RESET glides.** On a playing deck, RESET (on screen or from a controller) now takes the tempo smoothly back to 0 % over 16 beats instead of jumping, so a track on air changes tempo without a bump; pressing it again during the glide jumps to 0 %. *Settings → Decks → Tempo RESET on a playing deck* sets 4, 8, 16 or 32 beats, or jumps at once as before. A stopped deck resets at once.
 - **MIX NOW without Automix.** On deck 1 or 2, MIX NOW now also works with Automix off: it mixes the playing track into the one loaded on the other deck right away, then leaves the new track playing on its own. Its tooltip says what is missing when it can't (nothing playing, nothing loaded, the other deck already playing).
 - **Smoother playback during mixes.** AI stems that OpenDJ prepares in the background in this window now pause while an Automix transition runs or a deck loads (and for 4 seconds after), then carry on; stems you ask for are never paused. Page stalls and, where the browser reports them, audio dropouts are written to the app log with what was going on, so a stutter can be traced (*Settings → About → Logs*).
