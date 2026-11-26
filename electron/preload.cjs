@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('opendjNative', {
   pickFiles: (filters) => ipcRenderer.invoke('pick-files', filters),
   reveal: (p) => ipcRenderer.invoke('reveal', p),
   openLogs: () => ipcRenderer.invoke('open-logs'),
+  setPowerLock: (on) => ipcRenderer.invoke('gig-power-lock', !!on),
   pathForFile: (file) => { try { return webUtils.getPathForFile(file); } catch { return null; } },
   // "Update now": the main process picks, downloads, verifies and runs the installer; the page can only ask
   update: {

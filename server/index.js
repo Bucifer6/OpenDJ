@@ -38,6 +38,8 @@ import { findIdenticalTrack } from './upload-dedupe.js';
 import { registerStemRoutes } from './stems.js';
 import { installAppLog, appLog, readAppLog, logLine } from './applog.js';
 import { registerUpdateRoutes } from './update.js';
+import { writeTrackTagsToFile } from './tag-writer.js';
+import { spawn } from 'node:child_process';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const MIME = {
@@ -417,6 +419,40 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     transcoder.prune(cached).catch(() => {});
     return sendFileRange(req, res, cached, 'audio/wav');
   };
+
+  route('GET', '/api/tracks/search', ({ query }) => {
+    const q = String(query.get('q') || '').trim();
+    const limit = Math.max(1, Math.min(2000, Number(query.get('limit')) || 500));
+    return library.searchTracks(q, limit);
+  });
+
+  // Opt-in tag write-back: write OpenDJ's BPM, Key and Serato-compatible GEOB hot cues into a local MP3 file
+  route('POST', '/api/tracks/:id/write-tags', async ({ params }) => {
+    const t = track(params.id);
+    const local = await servableFile(t);
+    if (!local) throw new HttpError(404, 'Local file not found');
+    try {
+      return await writeTrackTagsToFile(local.file, t);
+    } catch (e) {
+      throw new HttpError(400, e.message || 'Could not write tags');
+    }
+  });
+
+  // Chunked PCM window stream (Int16 interleaved stereo) for ultra-long tracks (>20 min) without 1 GB RAM spikes
+  route('GET', '/api/tracks/:id/pcm', async ({ params, query, req, res }) => {
+    const t = track(params.id);
+    const local = await servableFile(t);
+    if (!local) throw new HttpError(404, 'Chunked PCM is only available for local files');
+    await ffReady;
+    if (!ff) throw needsFfmpeg('Chunked PCM streaming');
+    const start = Math.max(0, Number(query.get('start')) || 0);
+    const dur = Math.max(1, Math.min(120, Number(query.get('dur')) || 30));
+    const sr = Math.max(8000, Math.min(96000, Math.round(Number(query.get('sr')) || 44100)));
+    res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store', 'X-PCM-Sample-Rate': String(sr), 'X-PCM-Channels': '2' });
+    const child = spawn(ff.path, ['-v', 'error', '-ss', String(start), '-t', String(dur), '-i', local.file, '-f', 's16le', '-acodec', 'pcm_s16le', '-ac', '2', '-ar', String(sr), 'pipe:1'], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+    req.on('close', () => { try { child.kill(); } catch { /* */ } });
+    await pipeQuiet(child.stdout, res);
+  });
 
   const srcName = (t) => { try { return library.getSource(t.sourceId)?.name || ''; } catch { return ''; } };
   route('GET', '/api/tracks/:id/stream', async ({ params, req, res }) => {
@@ -962,7 +998,15 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       if (rel === 'sw.js') headers['Service-Worker-Allowed'] = '/';
       // HTML pages: the page's own <meta> CSP is also sent as a header (one source of truth: the meta tag, read once
       // per file version), plus frame-ancestors, which only works as a header
-      if (path.extname(file) === '.html') headers['Content-Security-Policy'] = await htmlCsp(file, st.mtimeMs);
+      if (path.extname(file) === '.html') {
+        headers['Content-Security-Policy'] = await htmlCsp(file, st.mtimeMs);
+        // Enable cross-origin isolation (credentialless keeps YouTube/media embeds working while unlocking
+        // SharedArrayBuffer / multi-threaded WASM for faster AI stems).
+        if (process.env.OPENDJ_COI !== '0') {
+          headers['Cross-Origin-Opener-Policy'] = 'same-origin';
+          headers['Cross-Origin-Embedder-Policy'] = 'credentialless';
+        }
+      }
       // the Controller Mapper is shown inside Settings: only this app may frame it
       if (rel === 'controller-mapper.html') headers['Content-Security-Policy'] = headers['Content-Security-Policy'].replace("frame-ancestors 'none'", "frame-ancestors 'self'");
       res.writeHead(200, headers);
@@ -979,7 +1023,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   server.on('listening', () => { const a = server.address(); if (a && typeof a === 'object') boundPort = a.port; });
 
   const shutdown = () => {
-    try { library.flush(); } catch (e) { log.error?.('[opendj] final save failed:', e.message); }
+    try { library.close(); } catch (e) { log.error?.('[opendj] final save failed:', e.message); }
     try { history.flush(); } catch { /* reported above */ }
     for (const r of sse) r.end();
     try { lighting?.close?.(); } catch { /* already closed */ }

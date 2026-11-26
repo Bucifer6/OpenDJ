@@ -4,9 +4,35 @@
 // styles; playPreview() plays the result on the headphone cue bus (or the master when nothing is playing there).
 // Approximations: no key lock (pitch follows the tempo change of at most a few percent), no AI stems, no tricks.
 import { api } from './api.js';
-import { mixLevels, DROP_STYLES } from './automix.js';
+import { mixLevels, dynamicMixLevels, DROP_STYLES } from './automix.js';
 import { createEq } from './audio/eq.js';
 import { faderGain, dbToGain } from './audio/curves.js';
+import { StereoPhaseVocoder } from './audio/phase-vocoder.js';
+
+/**
+ * Time-stretch a slice of an AudioBuffer with key lock (StereoPhaseVocoder) so offline previews & exports
+ * match the live deck's exact pitch and transient alignment.
+ */
+export function stretchSlice(ctx, buf, startSec, outSeconds, rate, pitch = 1) {
+  const sr = buf.sampleRate;
+  const outFrames = Math.max(1, Math.ceil(outSeconds * sr));
+  const outBuf = ctx.createBuffer(2, outFrames, sr);
+  const srcL = buf.getChannelData(0), srcR = buf.numberOfChannels > 1 ? buf.getChannelData(1) : srcL;
+  const dstL = outBuf.getChannelData(0), dstR = outBuf.getChannelData(1);
+  const startFrame = Math.max(0, startSec * sr), len = srcL.length;
+  const read = (x, o2) => {
+    const i = Math.floor(x), f = x - i;
+    if (i < 0 || i + 1 >= len) { o2[0] = o2[1] = 0; return; }
+    o2[0] = srcL[i] + (srcL[i + 1] - srcL[i]) * f;
+    o2[1] = srcR[i] + (srcR[i + 1] - srcR[i]) * f;
+  };
+  const pv = new StereoPhaseVocoder(), pair = new Float32Array(2);
+  for (let n = 0; n < outFrames; n++) {
+    pv.nextSample(read, startFrame + n * rate, rate, pitch, pitch, pair);
+    dstL[n] = pair[0]; dstR[n] = pair[1];
+  }
+  return outBuf;
+}
 
 const FULL = faderGain(0.8, 'log');
 
@@ -41,7 +67,7 @@ async function decode(ctx, track) {
  * `postBars` of the incoming track after it. ctx: the live AudioContext (for decoding and the sample rate).
  * @returns {Promise<AudioBuffer>}
  */
-export async function renderTransition(ctx, plan, { preBars = 4, postBars = 4, gains = {} } = {}) {
+export async function renderTransition(ctx, plan, { preBars = 4, postBars = 4, gains = {}, keyLock = true } = {}) {
   const [outBuf, inBuf] = await Promise.all([decode(ctx, plan.outTrack), decode(ctx, plan.inTrack)]);
   const bar = plan.beatLen * 4, outRate = plan.outRate || 1, innRate = plan.innRate || 1;
   const drop = plan.drop != null;
@@ -55,8 +81,16 @@ export async function renderTransition(ctx, plan, { preBars = 4, postBars = 4, g
   const ceiling = oc.createGain(); ceiling.gain.value = 0.89;
   limiter.connect(ceiling); ceiling.connect(oc.destination);
   const dest = limiter;
-  const deckChain = (buf, rate, gainDb) => {
-    const src = oc.createBufferSource(); src.buffer = buf; src.playbackRate.value = rate;
+  const deckChain = (buf, rate, gainDb, startOffsetSec = 0, playDurSec = 0) => {
+    const src = oc.createBufferSource();
+    // Apply phase-vocoder key-lock when rate deviates >0.2% from unity so preview/export preserves pitch
+    if (keyLock && Math.abs(rate - 1) > 0.002 && playDurSec > 0 && typeof oc.createBuffer === 'function') {
+      src.buffer = stretchSlice(oc, buf, startOffsetSec, playDurSec + 0.1, rate, 1);
+      src.playbackRate.value = 1;
+      src._preStretched = true;
+    } else {
+      src.buffer = buf; src.playbackRate.value = rate;
+    }
     const eq = createEq(oc, 'isolator');
     const lp = oc.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 20000; lp.Q.value = 0.9;
     const hp = oc.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 10; hp.Q.value = 0.9;
@@ -65,7 +99,10 @@ export async function renderTransition(ctx, plan, { preBars = 4, postBars = 4, g
     src.connect(trim); trim.connect(eq.input); eq.output.connect(lp); lp.connect(hp); hp.connect(fader); fader.connect(dest);
     return { src, eq, lp, hp, fader, hpOut: hp };
   };
-  const o = deckChain(outBuf, outRate, gains.out), n = deckChain(inBuf, drop ? 1 : innRate, gains.inn);
+  const outStart = Math.max(0, plan.begin - pre * outRate);
+  const inStart = Math.max(0, plan.inStart);
+  const o = deckChain(outBuf, outRate, gains.out, outStart, pre + span + 0.1);
+  const n = deckChain(inBuf, drop ? 1 : innRate, gains.inn, inStart, (drop ? 0 : span) + post + 0.1);
   const set = (d, t, L, side) => {
     const vol = L[side + 'Vol'];
     if (vol != null) d.fader.gain.setTargetAtTime(faderGain(vol, 'log') / FULL, t, 0.01);
@@ -73,13 +110,18 @@ export async function renderTransition(ctx, plan, { preBars = 4, postBars = 4, g
     const f = L[side + 'Filter'];
     if (f != null) { const [l, h] = filterHz(f); d.lp.frequency.setTargetAtTime(l, t, 0.02); d.hp.frequency.setTargetAtTime(h, t, 0.02); }
   };
-  const outStart = Math.max(0, plan.begin - pre * outRate);
-  o.src.start(0, outStart);
+  o.src.start(0, o.src._preStretched ? 0 : outStart);
   o.fader.gain.setValueAtTime(1, 0);
   if (!drop) {
     const lanes = plan.lanes || planLanes(plan.style, plan.kSwap);
-    n.src.start(pre, Math.max(0, plan.inStart));
-    for (const L of lanes) { const t = pre + L.k * span; set(o, t, L, 'out'); set(n, t, L, 'in'); }
+    n.src.start(pre, n.src._preStretched ? 0 : inStart);
+    for (const L of lanes) {
+      const t = pre + L.k * span;
+      const eff = plan.outTrack?.barFeatures && plan.inTrack?.barFeatures
+        ? dynamicMixLevels(plan.style, L.k, plan.kSwap != null && L.k >= plan.kSwap ? plan.kSwap : null, { out: plan.outTrack, inn: plan.inTrack, outPos: plan.begin + L.k * span * outRate, inPos: inStart + L.k * span * innRate })
+        : L;
+      set(o, t, eff, 'out'); set(n, t, eff, 'in');
+    }
     o.src.stop(pre + span + 0.05);
     n.fader.gain.setTargetAtTime(1, pre + span, 0.01);
   } else {
@@ -95,7 +137,7 @@ export async function renderTransition(ctx, plan, { preBars = 4, postBars = 4, g
     }
     o.fader.gain.setValueAtTime(1, tDrop - 0.005); o.fader.gain.linearRampToValueAtTime(0, tDrop);
     o.src.stop(tDrop + 0.05);
-    n.src.start(tDrop, Math.max(0, plan.inStart));
+    n.src.start(tDrop, n.src._preStretched ? 0 : inStart);
     n.fader.gain.setValueAtTime(1, tDrop);
   }
   return oc.startRendering();

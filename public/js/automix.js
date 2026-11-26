@@ -19,6 +19,8 @@ import { planAdaptiveTransition } from './adaptive-dj.js';
 import { Watchdog, quietAt } from './automix-watchdog.js';
 import { echoBeatsFor, styleFamily } from './dj-styles.js';
 import { audibleOffset, MIN_CONFIDENCE } from './audio/beat-phase.js';
+import { barProfileAt } from './audio/features.js';
+import { isVocalSolo } from './stems/stem-fx.js';
 
 export const LOG_BPM_JUMP = Math.log(1.08); // > 8 % tempo change (after half/double matching) is a "big jump"
 
@@ -337,6 +339,44 @@ export function mixLevels(style, k, kSwap = null) {
 }
 
 /**
+ * Content-aware dynamic mixer curves (refines mixLevels using measured per-bar 4-band features when available):
+ *  - Preserves one-bassline invariant (`inLow` / `outLow` unchanged) while adding gentle ~110 Hz HPF kick-punch
+ *    preview when the incoming intro is percussive and before the swap.
+ *  - Dynamically carves outgoing mids (-2..-4 dB) when both tracks are mid-dense, and opens incoming mids/highs
+ *    faster when the incoming intro is sparse.
+ */
+export function dynamicMixLevels(style, k, kSwap = null, { out = null, inn = null, outPos = 0, inPos = 0 } = {}) {
+  const L = { ...mixLevels(style, k, kSwap) };
+  const s = STYLE_ALIASES[style] || style;
+  if (s !== 'blend' && s !== 'phrase' && s !== 'bassswap' && s !== 'eqswap') return L;
+  const pOut = barProfileAt(out, outPos, outPos + 0.5);
+  const pIn = barProfileAt(inn, inPos, inPos + 0.5);
+  if (!pOut || !pIn) return L;
+  const preSwap = kSwap == null || k < kSwap;
+  // Sub-vs-punch HPF kick preview: subtle ~110 Hz HPF on incoming percussive intros before the swap, released smoothly after
+  if (s === 'blend' || s === 'phrase') {
+    if (preSwap && pIn.punch > 0.25 && k > 0.15) {
+      L.inFilter = 0.24 * ease(clamp01((k - 0.15) / 0.2));
+    } else if (!preSwap) {
+      const p = clamp01((k - kSwap) / Math.max(1e-3, 1 - kSwap));
+      L.inFilter = 0.24 * (1 - ease(clamp01(p / 0.12)));
+    }
+  }
+  // Dynamic mid carving (cross-channel spectral clash avoidance)
+  const midClash = Math.max(0, Math.min(pOut.mid, pIn.mid) - 0.35);
+  if (midClash > 0) {
+    const carve = -Math.min(0.18, midClash * 0.45) * (preSwap ? ease(clamp01(k / 0.5)) : 1);
+    L.outMid = Math.max(-1, (L.outMid ?? 0) + carve);
+  } else if (preSwap && pIn.mid < 0.22 && L.inMid != null) {
+    // Sparse incoming intro: open incoming mids cleaner instead of holding them down
+    L.inMid = L.inMid * 0.4;
+  }
+  // Sparse incoming highs: no need to hold incoming hi-hats -6 dB down
+  if (preSwap && pIn.high < 0.18 && L.inHigh != null) L.inHigh = L.inHigh * 0.35;
+  return L;
+}
+
+/**
  * Double drops (P2.3): both tracks play their drop together, so both channels come down about 3 dB after the swap
  * (fader position factor, gain = vol²), easing back as the outgoing track leaves. 1 outside a double drop's overlap.
  */
@@ -551,7 +591,13 @@ export class AutoMix extends Emitter {
     /** Planner results per queue track (track object -> plan), for learning from overrides. */
     this.plans = new WeakMap(); this._recent = [];
     this.mode = 'order'; this.live = null; this.upcoming = null; this.forceTransitionRequested = false;
+    /** Mix Point Link (rekordbox-style): cue-triggered one-shot handoff even when full Automix is off. */
+    this.mixLink = null;
     this.engine.on('tick', () => this.tick());
+    // Per-lane manual takeover: if the DJ touches a channel knob/fader mid-transition, release ONLY that lane.
+    this.engine.on?.('user-control', (chIdx, key) => {
+      if (this.transition) (this.transition.released ||= new Set()).add(`${chIdx}:${key}`);
+    });
   }
   get opts() { return this.app.settings.automix; }
   // Transition progress follows the audio clock, including suspension/resume.
@@ -1185,8 +1231,41 @@ export class AutoMix extends Emitter {
     return { style: u.style, why: u.why, override: u.override, begin: u.plan.begin, drop: u.plan.drop, length: u.length, beginsIn: Math.max(0, (u.plan.begin - cur.position) / (cur.rate || 1)) };
   }
 
+  /**
+   * Mix Point Link: arm a cue-triggered one-shot handoff from `outIdx` (playing) to `inIdx` (loaded/paused),
+   * even when full Automix is off. When the playing deck reaches `outCue`, OpenDJ executes a single phrase-aligned
+   * transition into `inDeck` at `inCue`, then hands full manual control back to the DJ.
+   */
+  linkMixPoints(outIdx, inIdx, { outCue = null, inCue = null, style = 'auto', bars = null } = {}) {
+    const out = this.engine.decks?.[outIdx], inn = this.engine.decks?.[inIdx];
+    if (!out?.track || !inn?.track || out === inn) return null;
+    const oi = this.info(out), ii = this.info(inn);
+    const outAt = Number.isFinite(outCue) ? outCue : (oi.mixOut ?? Math.max(0, (out.duration || 0) - 16 * (out.beatLen || 0.5)));
+    const inAt = Number.isFinite(inCue) ? inCue : (ii.mixIn ?? incomingStart(ii));
+    this.mixLink = { outIdx, inIdx, outCue: outAt, inCue: inAt, style, bars, armedAt: Date.now() };
+    this.emit('state');
+    return this.mixLink;
+  }
+  clearMixPointLink() { if (this.mixLink) { this.mixLink = null; this.emit('state'); } }
+  stepMixPointLink() {
+    const ml = this.mixLink;
+    if (!ml || this.enabled || this.transition) return;
+    const out = this.engine.decks?.[ml.outIdx], inn = this.engine.decks?.[ml.inIdx];
+    if (!out?.track || !inn?.track || !out.playing) return;
+    if (out.position >= ml.outCue - 0.05) {
+      this.mixLink = null;
+      this.current = out;
+      this.queue = [out.track, inn.track]; this.idx = 1;
+      if (ml.style && ml.style !== 'auto') this.overrides.set(inn.track, ml.style);
+      this._oneShot = true; this.enabled = true;
+      this.upcoming = null;
+      if (Number.isFinite(ml.inCue)) inn.seek?.(ml.inCue);
+      this.beginTransition(false);
+    }
+  }
+
   tick() {
-    if (!this.enabled) return;
+    if (!this.enabled) { this.stepMixPointLink(); return; }
     const cur = this.current;
     if (!cur) return;
     if (this.opts.watchdog !== false && this.watch()) return;
@@ -1412,8 +1491,16 @@ export class AutoMix extends Emitter {
    * Plan (once per pair) and play the tease: a bit of the next record under the on-air one, a phrase or two before
    * the real mix, then out again; the next deck goes back to its cue, untouched for the transition.
    */
+  /** Deck used for teases: prefer free Deck 3 in 4-deck setups so Deck 2's preload/cue stays untouched. */
+  teaseDeck(cur, inn) {
+    const d3 = this.engine.decks?.[2];
+    if (d3 && d3 !== cur && d3 !== inn && !d3.playing && !d3.loading && d3.track?.id === inn?.track?.id) return d3;
+    return inn;
+  }
+
   stepTease() {
-    const cur = this.current, inn = cur && this.other(cur), next = this.nextTrack();
+    const cur = this.current, baseInn = cur && this.other(cur), next = this.nextTrack();
+    const inn = this.teaseDeck(cur, baseInn);
     if (this.tease?.on) return this.stepTeaseOn();
     if (!cur?.playing || !cur.bpm || !inn?.track || inn.loading || inn.playing || inn.track.id !== next?.id || this.transition) return;
     const pairKey = `${cur.track.id}>${next.id}`;
@@ -1535,7 +1622,7 @@ export class AutoMix extends Emitter {
       if (keysClash(outKey, inn.camelot || inn.track?.key)) { try { inn.keySyncTo(out); } catch (e) { console.warn('keySyncTo failed', e); } }
     }
     const fx = { ...chO.state }; // FX / EQ settings to restore on the outgoing channel afterwards
-    const tr = { doubleDrop: !!upcoming?.adaptive?.doubleDrop, skipped: !!this._skipNext, morph, out, inn, style, why, vocals: DROP_STYLES.has(style) ? null : vocals, length: immediate || !out.playing ? null : length, t0: this.now(), fxSaved: { fxType: fx.fxType, fxMix: fx.fxMix, fxParam: fx.fxParam, fxBeats: fx.fxBeats, fxOn: fx.fxOn } };
+    const tr = { doubleDrop: !!upcoming?.adaptive?.doubleDrop, skipped: !!this._skipNext, morph, out, inn, style, why, vocals: DROP_STYLES.has(style) ? null : vocals, length: immediate || !out.playing ? null : length, t0: this.now(), released: new Set(), outFresh: this.fresh(out.track), inFresh: this.fresh(inn.track), fxSaved: { fxType: fx.fxType, fxMix: fx.fxMix, fxParam: fx.fxParam, fxBeats: fx.fxBeats, fxOn: fx.fxOn } };
     if (DROP_STYLES.has(style)) {
       // the incoming track waits at its first downbeat and drops in on the outgoing track's bar line
       inn.seek(cue); inn._autoMixEntry = cue;
@@ -1567,8 +1654,19 @@ export class AutoMix extends Emitter {
       inn.play({ at: posAt, instant: true }); // on the beat even if the message reaches the audio thread late
       const lenIn = upcoming?.adaptive ? len * (inn.rate || 1) / (out.rate || 1) : inn.bpm && out.bpm ? (len / out.beatLen) * inn.beatLen : len;
       Object.assign(tr, { dur: durWall * 1000, inStart, swapAt: upcoming?.adaptive?.swapIn ?? (SWAP_STYLES.has(style) ? phraseSwapPoint(ii, inStart, lenIn) : null), kSwap: null });
+      // Unified audio-clock tempo morph: ramp both decks sample-accurately together so tempo glides without fighting keepPhase()
+      if (tr.morph && Number.isFinite(posAt) && typeof out.post === 'function' && typeof inn.post === 'function') {
+        const rampDur = durWall * 0.9;
+        const rOut0 = 1 + tr.morph.from / 100, rOut1 = 1 + tr.morph.to / 100;
+        const ratioM = rOut1 / (rOut0 || 1);
+        const rIn0 = inn.rate || 1, rIn1 = rIn0 * ratioM;
+        out.post('rateRamp', { at: posAt, dur: rampDur, from: rOut0, to: rOut1, id: 'automix-morph-out' });
+        inn.post('rateRamp', { at: posAt, dur: rampDur, from: rIn0, to: rIn1, id: 'automix-morph-in' });
+        tr.morph.worklet = true;
+      }
       if (tr.vocals === 'hold-in') chI.set('vocal', 0);
       if (STEM_STYLES.has(style)) this.applyStemSwap(tr, 0);
+      else if (style !== 'pingpong') this.scheduleTransitionCurves(tr, posAt);
     }
     this.transition = tr; this._skipNext = false;
     this._lastStyle = style;
@@ -1588,7 +1686,40 @@ export class AutoMix extends Emitter {
     else if (tr.style === 'reverb') { chO.set('fxType', 'reverb'); chO.set('fxParam', 0.8); chO.set('fxMix', 0.2); chO.set('fxOn', true); }
     else if (tr.style === 'backspin') d.backspin(Math.max(0.4, tr.plan.pre * bw));
     else if (tr.style === 'brake') d.brake(Math.max(0.5, tr.plan.pre * bw));
-    else if (tr.style === 'loop' && d.bpm) { const s = d.floorBeat ? d.floorBeat(d.position) : d.position; tr.loopStart = s; tr.loopBeats = 4; d.setLoop(s, s + 4 * d.beatLen); }
+    else if (tr.style === 'loop' && d.bpm) {
+      const s = d.floorBeat ? d.floorBeat(d.position) : tr.loopStart ?? d.position;
+      tr.loopStart = s; tr.loopBeats = 4; d.setLoop(s, s + 4 * d.beatLen);
+      // Schedule sample-accurate loop-roll step-downs directly on the DeckProcessor audio thread
+      const ctxT = this.engine.ctx?.currentTime;
+      if (Number.isFinite(ctxT) && typeof d.post === 'function' && d.sr > 0) {
+        const sr = d.sr, bl = d.beatLen, steps = [];
+        const planSteps = [[0, 4], [8, 2], [12, 1], [14, 0.5], [15, 0.25]];
+        for (const [bAt, beats] of planSteps) {
+          steps.push({ at: ctxT + bAt * bw, start: s * sr, end: (s + beats * bl) * sr });
+        }
+        d.post('rollSchedule', { steps });
+        tr.rollScheduled = true;
+      }
+    }
+  }
+
+  /** Pre-schedule smooth fader curves directly on the Web Audio clock so UI stalls cannot stutter blends. */
+  scheduleTransitionCurves(tr, startAt) {
+    if (!Number.isFinite(startAt) || !(tr.dur > 100)) return;
+    const chO = this.engine.channels[tr.out.index], chI = this.engine.channels[tr.inn.index];
+    if (typeof chO?.scheduleCurve !== 'function' || typeof chI?.scheduleCurve !== 'function') return;
+    const N = 65, vO = new Float32Array(N), vI = new Float32Array(N);
+    const durSec = tr.dur / 1000;
+    const kSwapEst = tr.swapAt != null && tr.inn.bpm ? clamp01((tr.swapAt - tr.inStart) / Math.max(0.1, durSec * (tr.inn.rate || 1))) : 0.5;
+    for (let i = 0; i < N; i++) {
+      const k = i / (N - 1);
+      const L = mixLevels(tr.style, k, k >= kSwapEst ? kSwapEst : null);
+      const dd = tr.doubleDrop ? doubleDropTrim(k, k >= kSwapEst ? kSwapEst : null) : 1;
+      vO[i] = (L.outVol ?? 0.8) * dd;
+      vI[i] = (L.inVol ?? 0) * dd;
+    }
+    chO.scheduleCurve('volume', vO, startAt, durSec);
+    chI.scheduleCurve('volume', vI, startAt, durSec);
   }
 
   stepTransition() {
@@ -1607,20 +1738,23 @@ export class AutoMix extends Emitter {
         tr.kSwap = Math.min(1, k + Math.max(0, ahead) * 1000 / tr.dur); tr.swapScheduledAt = at;
       } else if (ahead <= 0 || k >= 0.9) tr.kSwap = k;
     }
-    if (tr.morph && tr.out.isMaster !== false) { const v = tr.morph.from + (tr.morph.to - tr.morph.from) * ease(clamp01(k / 0.9)); if (Math.abs(v - (tr.out.tempo || 0)) > 0.01) tr.out.setTempo(v); }
+    if (tr.morph && !tr.morph.worklet && tr.out.isMaster !== false) { const v = tr.morph.from + (tr.morph.to - tr.morph.from) * ease(clamp01(k / 0.9)); if (Math.abs(v - (tr.out.tempo || 0)) > 0.01) tr.out.setTempo(v); }
     if (STEM_STYLES.has(tr.style)) { this.applyStemSwap(tr, k); if (k >= 1) this.finishTransition(); return; }
     if (tr.style === 'pingpong') return this.stepPingPong(tr, k, chO, chI);
     this.keepPhase(tr, k);
-    const L = mixLevels(tr.style, k, tr.kSwap);
+    const L = dynamicMixLevels(tr.style, k, tr.kSwap, { out: tr.outFresh, inn: tr.inFresh, outPos: tr.out.position || 0, inPos: tr.inn.position || 0 });
     if (tr.doubleDrop) { const f = doubleDropTrim(k, tr.kSwap); if (L.inVol != null) L.inVol *= f; if (L.outVol != null) L.outVol *= f; }
     if (tr.vocals === 'hold-in') {
       // incoming vocals wait for the swap (blend: the bass swap; other styles: 60 %), then trade places with the outgoing ones
       const at = tr.kSwap ?? (tr.style === 'blend' ? null : 0.6);
       const p = at == null || k < at ? 0 : clamp01((k - at) / Math.max(0.05, Math.min(0.3, 1 - at)));
-      chI.set('vocal', ease(p)); chO.set('vocal', 1 - ease(p));
+      if (!tr.released?.has(`${chI.index}:vocal`)) chI.set('vocal', ease(p));
+      if (!tr.released?.has(`${chO.index}:vocal`)) chO.set('vocal', 1 - ease(p));
     }
     const map = { inVol: [chI, 'volume'], outVol: [chO, 'volume'], inLow: [chI, 'eqLow'], inMid: [chI, 'eqMid'], inHigh: [chI, 'eqHigh'], outLow: [chO, 'eqLow'], outMid: [chO, 'eqMid'], outHigh: [chO, 'eqHigh'], inFilter: [chI, 'filter'], outFilter: [chO, 'filter'] };
-    for (const [k2, [ch, key]] of Object.entries(map)) if (L[k2] != null) ch.set(key, L[k2]);
+    for (const [k2, [ch, key]] of Object.entries(map)) {
+      if (L[k2] != null && !tr.released?.has(`${ch.index}:${key}`)) ch.set(key, L[k2]);
+    }
     if (L.echo && !chO.state.fxOn) { chO.set('fxType', 'echo'); chO.set('fxBeats', tr.echoBeats || 0.75); chO.set('fxMix', 0.6); chO.set('fxOn', true); }
     if (k >= 1) this.finishTransition();
   }
@@ -1679,13 +1813,25 @@ export class AutoMix extends Emitter {
     if (k >= 1) { chO.set('volume', 0); this.finishTransition(); }
   }
 
-  /** Stem transitions: per-stem levels on both decks (AI stems), see stemLevels in mix-planner.js. */
+  /** Stem transitions: per-stem levels on both decks (AI stems) with bleed-masking HPF & Mute FX polish. */
   applyStemSwap(tr, k) {
     const L = stemLevels(tr.style, k);
     const chO = this.engine.channels[tr.out.index], chI = this.engine.channels[tr.inn.index];
-    chI.set('volume', L.inVol); chO.set('volume', L.outVol);
-    const put = (deck, lv) => lv.forEach((v, i) => { const was = deck.stemLevels?.[i] ?? 1; if (was !== v && (Math.abs(was - v) > 0.004 || v === 0 || v === 1)) deck.setStemLevel?.(i, v); });
-    put(tr.inn, L.inn); put(tr.out, L.out);
+    if (!tr.released?.has(`${chI.index}:volume`)) chI.set('volume', L.inVol);
+    if (!tr.released?.has(`${chO.index}:volume`)) chO.set('volume', L.outVol);
+    const put = (deck, ch, lv) => {
+      lv.forEach((v, i) => {
+        const was = deck.stemLevels?.[i] ?? 1;
+        if (was !== v && (Math.abs(was - v) > 0.004 || v === 0 || v === 1)) {
+          // Subtle Mute FX echo tail as a vocal stem fades fully out
+          if (i === 0 && was > 0.15 && v <= 0.02 && typeof deck.triggerStemMuteFx === 'function') deck.triggerStemMuteFx(0);
+          deck.setStemLevel?.(i, v);
+        }
+      });
+      // Bleed-masking ~145 Hz HPF when vocals play isolated (prevents low-end bleed rumble)
+      if (!tr.released?.has(`${ch.index}:filter`)) ch.set('filter', isVocalSolo(lv) ? 0.3 : 0);
+    };
+    put(tr.inn, chI, L.inn); put(tr.out, chO, L.out);
   }
 
   /** Drop styles: effect build-up, the drop on the bar line, then the tail. Wall-clock driven (loops / spins stop the position). */
@@ -1697,10 +1843,12 @@ export class AutoMix extends Emitter {
       else if (tr.style === 'reverb') { chO.set('fxMix', 0.2 + 0.75 * e); chO.set('filter', 0.45 * e); chO.set('eqLow', -0.7 * e); }
       else if (tr.style === 'backspin' || tr.style === 'brake') chO.set('volume', 0.8 * Math.sqrt(1 - ease(clamp01((e - 0.55) / 0.45))));
       else if (tr.style === 'loop' && tr.loopStart != null) {
-        // roll the loop shorter: 1 bar for 2 bars, then 2 beats, 1, 1/2, 1/4; the high-pass rises with it
-        const b = (now - tr.t0) / tr.beatWall;
-        const want = b < 8 ? 4 : b < 12 ? 2 : b < 14 ? 1 : b < 15 ? 0.5 : 0.25;
-        if (want !== tr.loopBeats) { tr.loopBeats = want; const d = tr.out, s = d.floorBeat ? d.floorBeat(d.position) : tr.loopStart; tr.loopStart = s; d.setLoop(s, s + want * d.beatLen); }
+        // roll the loop shorter (audio-thread rollSchedule when available, tick fallback otherwise)
+        if (!tr.rollScheduled) {
+          const b = (now - tr.t0) / tr.beatWall;
+          const want = b < 8 ? 4 : b < 12 ? 2 : b < 14 ? 1 : b < 15 ? 0.5 : 0.25;
+          if (want !== tr.loopBeats) { tr.loopBeats = want; const d = tr.out, s = d.floorBeat ? d.floorBeat(d.position) : tr.loopStart; tr.loopStart = s; d.setLoop(s, s + want * d.beatLen); }
+        }
         chO.set('filter', 0.55 * e);
       }
       if (now >= tr.dropWall - 10) this.dropIn(tr, chO, chI);
@@ -1737,6 +1885,8 @@ export class AutoMix extends Emitter {
     const { out, inn } = tr;
     this.transition = null;
     const chO = this.engine.channels[out.index], chI = this.engine.channels[inn.index];
+    for (const ch of [chO, chI]) for (const key of ['volume', 'eqLow', 'eqMid', 'eqHigh']) ch.cancelAutomation?.(key);
+    out.post?.('rollSchedule', { steps: null });
     if (tr.phaseBend && inn.bend) inn.setBend(0); // the phase keeper's pitch bend ends with the blend
     out.pause();
     if (out.loop?.active) out.exitLoop();

@@ -93,10 +93,39 @@ class App {
     requestAnimationFrame(frame);
     document.getElementById('boot')?.remove();
     this.updates = setupUpdates(this); // "a new version is available" (checks after a short delay, never during a set)
+    // Gig Safe Mode: prevent OS sleep while decks play / gigMode is on, and snapshot deck/queue state for crash recovery
+    const syncPower = () => {
+      const busy = !!this.settings.gigMode || this.engine.decks.some((d) => d.playing) || !!this.recording?.recorder?.recording || !!this.automix?.enabled;
+      if (busy !== this._powerLocked) { this._powerLocked = busy; window.opendjNative?.setPowerLock?.(busy).catch?.(() => {}); }
+    };
+    setInterval(() => {
+      syncPower();
+      try {
+        const snap = {
+          at: Date.now(),
+          decks: this.engine.decks.map((d) => (d.track && !d.track.scratchSample ? { id: d.track.id, pos: Math.round((d.position || 0) * 10) / 10, playing: !!d.playing } : null)),
+          queue: this.automix?.enabled ? (this.automix.queue || []).slice(this.automix.idx).map((x) => x.id).slice(0, 50) : [],
+        };
+        if (snap.decks.some(Boolean)) localStorage.setItem('opendj-session-recovery', JSON.stringify(snap));
+      } catch { /* storage unavailable */ }
+    }, 5000);
+    syncPower();
     this.ready = true;
   }
 
-  async setSetting(k, v) { this.settings[k] = v; try { this.settings = { ...this.settings, ...(await api.saveSettings({ [k]: v })) }; this.engine.settings = this.settings; } catch (e) { this.toast(e.message); } }
+  async setSetting(k, v) {
+    this.settings[k] = v;
+    try {
+      this.settings = { ...this.settings, ...(await api.saveSettings({ [k]: v })) };
+      this.engine.settings = this.settings;
+      if (k === 'gigMode') {
+        this.engine.decks.forEach((d) => { d.hardLock = !!this.settings.gigMode || !!this.settings.deckOptions?.hardLock; });
+        if (this.settings.gigMode) { this.analyser?.stop?.(); this.stems?.setHold?.(true); }
+        else this.stems?.setHold?.(false);
+        window.opendjNative?.setPowerLock?.(!!this.settings.gigMode).catch?.(() => {});
+      }
+    } catch (e) { this.toast(e.message); }
+  }
 
   /** Hosted mode (password login): Sign out in the top bar. */
   updateHostedUi() { if (this.signOutBtn) this.signOutBtn.hidden = !this.auth; }

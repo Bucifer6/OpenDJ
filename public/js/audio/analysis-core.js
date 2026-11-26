@@ -3,6 +3,7 @@
 // Pure functions: used by the Web Worker in the app and by Node unit tests.
 
 import { LOUDNESS_TARGET, loudnessProfile, integratedLoudness, sectionLoudness, loudestWindow } from './loudness.js';
+import { detectVocalActivity, computeBarFeatures, computeGrooveAndEmbedding, detectElasticGrid } from './features.js';
 
 export const WAVE_RATE = 150; // waveform points per second
 
@@ -428,7 +429,17 @@ export function detectPhrases(mono, sr, bpm, gridOffset = 0, waveform = null, op
   }
   const PF = F.map(prefix);
 
-  // ---- 3) novelty between bars (multi-scale before/after contrast ≈ checkerboard kernel on the SSM) ----
+  // ---- 3) novelty between bars (multi-scale before/after contrast: 3-band energy + optional 12-bin chroma) ----
+  const barChroma = Array.isArray(opts.barFeatures) ? opts.barFeatures.map((b) => b.chroma) : null;
+  const chromaDist = (a0, a1, b0, b1) => {
+    if (!barChroma || barChroma.length < b1) return 0;
+    const ca = new Float64Array(12), cb = new Float64Array(12);
+    for (let i = a0; i < a1; i++) { const c = barChroma[i]; if (c) for (let j = 0; j < 12; j++) ca[j] += c[j]; }
+    for (let i = b0; i < b1; i++) { const c = barChroma[i]; if (c) for (let j = 0; j < 12; j++) cb[j] += c[j]; }
+    let dot = 0, na = 0, nb = 0;
+    for (let j = 0; j < 12; j++) { dot += ca[j] * cb[j]; na += ca[j] * ca[j]; nb += cb[j] * cb[j]; }
+    return na > 0 && nb > 0 ? Math.max(0, 1 - dot / Math.sqrt(na * nb)) : 0;
+  };
   const nov = new Float32Array(K + 1);
   let maxNov = 0;
   for (let k = 1; k < K; k++) {
@@ -436,7 +447,7 @@ export function detectPhrases(mono, sr, bpm, gridOffset = 0, waveform = null, op
     for (const [W, wt] of [[2, 0.5], [4, 1], [8, 1]]) {
       const w = Math.min(W, k, K - k);
       if (w < Math.min(2, W)) continue;
-      v += wt * (w / W) * segDist(PF, k - w, k, k, k + w);
+      v += wt * (w / W) * (segDist(PF, k - w, k, k, k + w) + 0.45 * chromaDist(k - w, k, k, k + w));
     }
     nov[k] = v; if (v > maxNov) maxNov = v;
   }
@@ -758,7 +769,7 @@ export function analysisPatch(track, r, { duration, autoCues = true } = {}) {
     energy: r.energy, duration: duration ?? r.duration, analyzed: true, unreadable: false,
     bpmConfidence: locked ? 1 : r.bpmConfidence,
   };
-  for (const k of ['phrases', 'mixIn', 'mixOut', 'downbeat', 'lufs', 'mainLufs', 'phraseAnchor', 'phraseConfidence']) if (r[k] !== undefined) patch[k] = r[k];
+  for (const k of ['phrases', 'mixIn', 'mixOut', 'downbeat', 'lufs', 'mainLufs', 'phraseAnchor', 'phraseConfidence', 'barFeatures', 'vocalMapAuto', 'groove', 'embedding', 'tempoMap']) if (r[k] !== undefined) patch[k] = r[k];
   if (locked && track.downbeat != null) patch.downbeat = track.downbeat;
   if (locked && Number.isFinite(patch.phraseAnchor) && track.bpm > 0 && Number.isFinite(patch.gridOffset)) {
     const beat = 60 / track.bpm;
@@ -774,10 +785,10 @@ export function analysisPatch(track, r, { duration, autoCues = true } = {}) {
 }
 
 /** Everything structure-related from an existing waveform: phrases, downbeat, mixIn, mixOut, autoCues. */
-export function analyzeStructure(waveform, bpm, gridOffset, { startTime = 0, endTime, duration } = {}) {
+export function analyzeStructure(waveform, bpm, gridOffset, { startTime = 0, endTime, duration, barFeatures } = {}) {
   duration = duration ?? (waveform ? waveform.peak.length / waveform.rate : 0);
   endTime = endTime ?? duration;
-  const { phrases, downbeat, phraseAnchor, phraseConfidence } = detectPhrases(null, 0, bpm, gridOffset, waveform, { startTime, endTime, duration });
+  const { phrases, downbeat, phraseAnchor, phraseConfidence } = detectPhrases(null, 0, bpm, gridOffset, waveform, { startTime, endTime, duration, barFeatures });
   const { mixIn, mixOut } = mixPoints(phrases, downbeat, bpm, { startTime, endTime, phraseAnchor: phraseConfidence >= 0.3 ? phraseAnchor : undefined });
   const autoCues = autoCuesFor(phrases, { mixIn, mixOut, downbeat: bpm ? downbeat : undefined });
   return { phrases, downbeat, phraseAnchor, phraseConfidence, mixIn, mixOut, autoCues };
@@ -792,14 +803,20 @@ export function analyzeTrack(mono, sr) {
   for (let i = 0; i < waveform.peak.length; i++) energy += waveform.low[i] + waveform.mid[i];
   energy = Math.round(Math.min(10, Math.max(1, energy / waveform.peak.length / 25)));
   const duration = mono.length / sr;
-  const structure = analyzeStructure(waveform, beat.bpm, beat.offset, { ...trim, duration });
+  const firstPass = analyzeStructure(waveform, beat.bpm, beat.offset, { ...trim, duration });
+  // Per-bar 4-band + 12-bin chroma, DSP vocal activity map, groove fingerprint / audio embedding, elastic tempoMap
+  const barFeatures = beat.bpm ? computeBarFeatures(mono, sr, beat.bpm, firstPass.downbeat) : [];
+  const structure = barFeatures.length ? analyzeStructure(waveform, beat.bpm, beat.offset, { ...trim, duration, barFeatures }) : firstPass;
+  const vad = detectVocalActivity(mono, sr);
+  const { groove, embedding } = computeGrooveAndEmbedding(mono, sr, beat.bpm, structure.downbeat, barFeatures, vad.map);
+  const tempoMap = beat.bpm ? detectElasticGrid(mono, sr, beat.bpm, beat.offset) : null;
   // loudness: one K-weighted pass over the mono mix (measured as dual mono = as played on both speakers)
   const loud = trackLoudness(loudnessProfile(mono, sr), sr, structure.phrases, beat.bpm);
   structure.phrases = structure.phrases.map((p, i) => ({ ...p, lufs: loud.phraseLufs[i] }));
   return {
     waveform, bpm: beat.bpm, gridOffset: beat.offset, bpmConfidence: beat.confidence, key: key.key, camelot: key.camelot,
     keyConfidence: key.keyConfidence, lufs: loud.lufs, mainLufs: loud.mainLufs, gain: gainForLoudness(loud.mainLufs),
-    ...trim, energy, duration, ...structure,
+    ...trim, energy, duration, ...structure, barFeatures, vocalMapAuto: vad.encoded || undefined, groove, embedding, tempoMap,
   };
 }
 

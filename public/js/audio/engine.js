@@ -179,8 +179,63 @@ export class Channel extends Emitter {
     for (const key of Object.keys(changes)) if (next[key] !== this.state[key]) { this.state[key] = next[key]; this.emit('change', key, next[key]); this.engine.emit('mixer', this.index, key, next[key]); }
     if (next.eqMid !== undefined) { this.state.eqMidHigh = next.eqMidHigh; this.state.eqMidLow = next.eqMidLow; }
   }
-  /** Logical control as set from the UI or a controller: Center Lock applies to the filter knob there (not automix). */
-  controlSet(key, value, lock) { if (lock && key === 'filter' && mixerOf(this.engine).centerLock) value = lock.filter(value); this.set(key, value); }
+  /**
+   * Schedule an AudioParam value curve directly on the Web Audio clock (P0.5 full audio-clock automation).
+   * Supports 'volume' (fader + postFader), 'eqLow' / 'eqMid' / 'eqHigh' (isolator band gains), and 'filter'.
+   * values: array/Float32Array of logical knob/fader values; startAt: audio time (s); dur: seconds (> 0).
+   */
+  scheduleCurve(key, values, startAt, dur) {
+    if (!values?.length || !(dur > 0.005)) return false;
+    const t = Math.max(this.ctx.currentTime, Number(startAt) || this.ctx.currentTime);
+    const n = values.length;
+    if (key === 'volume') {
+      const curve = new Float32Array(n);
+      for (let i = 0; i < n; i++) curve[i] = faderGain(clamp(values[i], 0, 1), 'log');
+      for (const [param, st] of [[this.fader.gain, this.pst.fader], [this.postFader.gain, this.pst.postFader]]) {
+        if (typeof param?.setValueCurveAtTime !== 'function') return false;
+        param.cancelScheduledValues(t);
+        param.setValueCurveAtTime(curve, t, dur);
+        st.kind = 'curve'; st.t0 = t; st.t1 = t + dur; st.v1 = curve[n - 1];
+      }
+      this._autoHold = this._autoHold || {};
+      this._autoHold[key] = t + dur;
+      return true;
+    }
+    if ((key === 'eqLow' || key === 'eqMid' || key === 'eqHigh') && this.eq?.bands) {
+      const band = this.eq.bands[key === 'eqLow' ? 'low' : key === 'eqMid' ? 'mid' : 'high'];
+      if (!band || typeof band.gain?.setValueCurveAtTime !== 'function') return false;
+      const curve = new Float32Array(n);
+      for (let i = 0; i < n; i++) curve[i] = isoKnobGain(clamp(values[i], -1, 1));
+      band.gain.cancelScheduledValues(t);
+      band.gain.setValueCurveAtTime(curve, t, dur);
+      this._autoHold = this._autoHold || {};
+      this._autoHold[key] = t + dur;
+      return true;
+    }
+    return false;
+  }
+  /** Cancel any scheduled audio-clock automation on `key` (called on manual takeover or transition abort). */
+  cancelAutomation(key) {
+    const t = this.ctx.currentTime;
+    if (this._autoHold) delete this._autoHold[key];
+    if (key === 'volume') {
+      for (const param of [this.fader?.gain, this.postFader?.gain]) {
+        if (param?.cancelScheduledValues) { const v = param.value; param.cancelScheduledValues(t); param.setValueAtTime(v, t); }
+      }
+    } else if ((key === 'eqLow' || key === 'eqMid' || key === 'eqHigh') && this.eq?.bands) {
+      const band = this.eq.bands[key === 'eqLow' ? 'low' : key === 'eqMid' ? 'mid' : 'high'];
+      if (band?.gain?.cancelScheduledValues) { const v = band.gain.value; band.gain.cancelScheduledValues(t); band.gain.setValueAtTime(v, t); }
+    }
+  }
+  /** Logical control as set from the UI or a controller: Center Lock applies to the filter knob there (not automix).
+   *  Also emits 'user-control' so Automix can release just this lane for manual takeover mid-transition. */
+  controlSet(key, value, lock) {
+    if (lock && key === 'filter' && mixerOf(this.engine).centerLock) value = lock.filter(value);
+    this.cancelAutomation(key);
+    this.emit('user-control', key, value);
+    this.engine.emit('user-control', this.index, key, value);
+    this.set(key, value);
+  }
 
   /** EQ type: builds the new chain, cross-fades 20 ms (equal gain), frees the old one. */
   setEqType(type, fade = true) {
@@ -281,7 +336,7 @@ export class Channel extends Emitter {
   apply() {
     const s = this.state, t = this.ctx.currentTime, k = 0.012, mx = mixerOf(this.engine);
     this.trimNode.gain.setTargetAtTime(dbToGain(s.trim * 12 + s.autoGain), t, k);
-    if (!(this._eqHoldUntil > t)) this.eq?.set(s, t, k); // (a scheduled swap is pending: see scheduleEq)
+    if (!(this._eqHoldUntil > t) && !(this._autoHold && (this._autoHold.eqLow > t || this._autoHold.eqMid > t || this._autoHold.eqHigh > t))) this.eq?.set(s, t, k); // (a scheduled swap/curve is pending)
     const db = (v) => 20 * Math.log10(Math.max(0.01, v));
     // AI stems (deck worklet) when the track has them, else the DSP "quick stems" approximation (fallback)
     const ai = !!this.aiStems, vocal = ai ? 1 : s.vocal, inst = ai ? 1 : s.inst;
@@ -305,7 +360,7 @@ export class Channel extends Emitter {
     else this.applyFilter(dry, side, t, s.colorParam ?? 0.5);
     // channel fader: today's 5 ms smoothing; the cut curve uses the fast-cut ramp, the rotary knob a heavy 30 ms
     const g = this.faderTarget();
-    if (g !== this._fg && !this.engine._holdFader) { // (a personality switch glides instead: glideFader)
+    if (g !== this._fg && !this.engine._holdFader && !(this._autoHold?.volume > t)) { // (a personality switch glides / audio-clock curve owns it)
       this._fg = g;
       const auto = this.engine.automixDriving, curve = auto ? 'log' : mx.faderCurve;
       if (curve === 'cut' && !mx.rotary) { const d = (mx.xfCutTime ?? 5) / 1000; rampParam(this.fader.gain, g, this.ctx, this.pst.fader, d); rampParam(this.postFader.gain, g, this.ctx, this.pst.postFader, d); }
@@ -919,6 +974,26 @@ export class Engine extends Emitter {
     const b = (this._mBuf ||= new Float32Array(512)), out = { peak: [0, 0], rms: [0, 0] };
     [this.masterMeterL, this.masterMeterR].forEach((an, i) => { an.getFloatTimeDomainData(b); let p = 0, s = 0; for (const v of b) { const a = v < 0 ? -v : v; if (a > p) p = a; s += v * v; } out.peak[i] = p; out.rms[i] = Math.sqrt(s / b.length); });
     return out;
+  }
+
+  /** Live Audio Health telemetry for the club/gig HUD (latency, sample rate, channels, underrun dropouts). */
+  audioHealth() {
+    const c = this.ctx;
+    if (!c) return null;
+    const baseMs = Number.isFinite(c.baseLatency) ? Math.round(c.baseLatency * 10000) / 10 : null;
+    const outMs = Number.isFinite(c.outputLatency) ? Math.round(c.outputLatency * 10000) / 10 : null;
+    const dropouts = c.playbackStats?.underrunEvents ?? c.playoutStats?.toJSON?.()?.fallbackFramesEvents ?? null;
+    return {
+      state: c.state,
+      sampleRate: c.sampleRate,
+      maxChannels: c.destination?.maxChannelCount || 2,
+      activeChannels: c.destination?.channelCount || 2,
+      baseLatencyMs: baseMs,
+      outputLatencyMs: outMs,
+      totalLatencyMs: baseMs != null || outMs != null ? Math.round(((baseMs || 0) + (outMs || 0)) * 10) / 10 : null,
+      dropouts,
+      gigMode: !!this.settings?.gigMode,
+    };
   }
 
   // ---------- recording (streamed to disk by public/js/recording) ----------

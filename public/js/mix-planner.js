@@ -45,13 +45,14 @@ const SECTION_VOCALS = { intro: 0.15, outro: 0.2, buildup: 0.35, breakdown: 0.45
  * t: { stems: { vocals } | vocalMap, phrases }
  */
 export function vocalsBetween(t, a, b) {
-  if (!(b > a)) return { v: 0, known: !!t?.stems?.vocals };
-  const map = t?.vocalMap || decodeVocalMap(t?.stems?.vocals);
+  if (!(b > a)) return { v: 0, known: !!(t?.stems?.vocals || t?.vocalMapAuto) };
+  const map = t?.vocalMap || decodeVocalMap(t?.stems?.vocals) || decodeVocalMap(t?.vocalMapAuto);
+  const fromStems = !!(t?.vocalMap || t?.stems?.vocals);
   if (map?.length) {
     const i0 = Math.max(0, Math.floor(a)), i1 = Math.min(map.length, Math.ceil(b));
-    if (i1 <= i0) return { v: 0, known: true };
+    if (i1 <= i0) return { v: 0, known: true, source: fromStems ? 'stems' : 'dsp' };
     let s = 0; for (let i = i0; i < i1; i++) s += map[i];
-    return { v: s / (i1 - i0), known: true };
+    return { v: s / (i1 - i0), known: true, source: fromStems ? 'stems' : 'dsp' };
   }
   const ph = Array.isArray(t?.phrases) ? t.phrases : [];
   if (!ph.length) return { v: 0.4, known: false };

@@ -65,6 +65,7 @@ export const DEFAULT_SETTINGS = {
   lyrics: { online: false, writeLrc: false },
   stemsModelUrl: '', stemsModelSha256: '', stemsBackend: 'auto', stemsEngine: 'auto', stemsAutoPrepare: true, stemsAutoLoad: true, stemsOverlap: 0.25, stemsBackground: false, stemsCacheGB: 40, mixLearning: { n: 0, bias: {} },
   highPrecisionAudio: false,  // decks keep 32-bit float audio (2x RAM) instead of 16-bit
+  gigMode: false,             // Gig Safe Mode: prevents sleep, pauses background analysis/stems/updates, locks playing decks
   recording: null,
   broadcast: null,
   lighting: null,             // lighting rig + outputs (server/lighting); replaced wholesale on update
@@ -100,7 +101,9 @@ export function sanitizeField(k, v) {
   if (NUM_FIELDS.has(k)) { if (v === null || v === undefined || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
   if (Object.hasOwn(STR_FIELDS, k)) return v === null || v === undefined ? (k === 'key' || k === 'color' ? null : '') : String(v).slice(0, STR_FIELDS[k]);
   if (k === 'analyzed' || k === 'bpmLocked' || k === 'gridLocked' || k === 'unreadable') return !!v;
-  if (['cues', 'loops', 'phrases', 'hotLoops'].includes(k)) return Array.isArray(v) ? v.slice(0, 1000) : [];
+  if (['cues', 'loops', 'phrases', 'hotLoops', 'barFeatures', 'tempoMap', 'embedding'].includes(k)) return Array.isArray(v) ? v.slice(0, 1000) : (k === 'tempoMap' ? null : []);
+  if (k === 'vocalMapAuto') return typeof v === 'string' ? v.slice(0, 10000) : null;
+  if (k === 'groove') return v && typeof v === 'object' && Array.isArray(v.steps) ? { steps: v.steps.slice(0, 16).map(Number), swing: Number(v.swing) || 0 } : null;
   return v;
 }
 export const newId = () => randomHex(8);
@@ -112,7 +115,7 @@ export const okId = (id) => typeof id === 'string' && id.length > 0 && !BAD_IDS.
 export const EDITABLE_TRACK_FIELDS = ['title', 'artist', 'album', 'genre', 'year', 'bpm', 'key', 'rating', 'comment', 'cues', 'loops',
   'gridOffset', 'analyzed', 'gain', 'color', 'playCount', 'lastPlayed', 'duration', 'endTime', 'startTime', 'energy', 'bpmLocked', 'gridLocked',
   'phrases', 'tags', 'hotLoops', 'keyShift', 'mixIn', 'mixOut', 'downbeat', 'unreadable', 'bpmConfidence',
-  'keyConfidence', 'lufs', 'mainLufs', 'phraseAnchor', 'phraseConfidence'];
+  'keyConfidence', 'lufs', 'mainLufs', 'phraseAnchor', 'phraseConfidence', 'barFeatures', 'vocalMapAuto', 'groove', 'embedding', 'tempoMap'];
 
 export class LibraryCore {
   constructor() {
@@ -164,6 +167,7 @@ export class LibraryCore {
       rating: prev.rating, playCount: prev.playCount, lastPlayed: prev.lastPlayed, addedAt: prev.addedAt,
       localPath: prev.localPath, gain: prev.gain, color: prev.color, comment: prev.comment || t.comment,
       keyConfidence: prev.keyConfidence, lufs: prev.lufs, mainLufs: prev.mainLufs, phraseAnchor: prev.phraseAnchor, phraseConfidence: prev.phraseConfidence,
+      barFeatures: prev.barFeatures, vocalMapAuto: prev.vocalMapAuto, groove: prev.groove, embedding: prev.embedding, tempoMap: prev.tempoMap,
       tags: prev.tags, phrases: prev.phrases, mixIn: prev.mixIn, mixOut: prev.mixOut, downbeat: prev.downbeat, hotLoops: prev.hotLoops, keyShift: prev.keyShift, bpmLocked: prev.bpmLocked, gridLocked: prev.gridLocked,
       ...(prev.userEdited ? { title: prev.title, artist: prev.artist, album: prev.album, genre: prev.genre, year: prev.year } : {}),
       bpm: prev.analyzed ? prev.bpm : (t.bpm || prev.bpm), key: prev.key || t.key,

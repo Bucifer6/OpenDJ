@@ -1,5 +1,5 @@
 // Electron shell: starts the local library/stream server and opens the UI.
-import { app, BrowserWindow, dialog, ipcMain, session, shell, Menu } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, session, shell, Menu, powerSaveBlocker } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -222,3 +222,13 @@ ipcMain.handle('local-dj-plan', async (event, request) => {
   return handlePlanRequest(request);
 });
 ipcMain.handle('local-dj-models', async (event) => (trusted(event) ? listModels() : { running: false, models: [] }));
+
+// Gig Safe Mode: prevent OS sleep / display dim while playing, recording, or in Gig Mode
+let powerLockId = null;
+ipcMain.handle('gig-power-lock', (event, on) => {
+  if (!trusted(event)) return false;
+  if (on && powerLockId == null) powerLockId = powerSaveBlocker.start('prevent-display-sleep');
+  else if (!on && powerLockId != null) { try { powerSaveBlocker.stop(powerLockId); } catch { /* */ } powerLockId = null; }
+  return powerLockId != null && powerSaveBlocker.isStarted(powerLockId);
+});
+app.on('will-quit', () => { if (powerLockId != null) { try { powerSaveBlocker.stop(powerLockId); } catch { /* */ } powerLockId = null; } });

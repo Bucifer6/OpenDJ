@@ -225,11 +225,11 @@ const VOCAL_TYPES = { chorus: 1, hook: 1, vocal: 1, rap: 1, verse: 0.6 };
  */
 export function vocalDensity(t) {
   if (!t || typeof t !== 'object') return null;
-  const sig = `${t.stems?.vocals?.length || 0}|${t.vocalMap?.length || 0}|${t.phrases?.length || 0}`;
+  const sig = `${t.stems?.vocals?.length || 0}|${t.vocalMap?.length || 0}|${t.vocalMapAuto?.length || 0}|${t.phrases?.length || 0}`;
   const c = vocalCache.get(t);
   if (c && c.sig === sig) return c.v;
   let v = null;
-  const map = t.vocalMap || decodeVocalMap(t.stems?.vocals);
+  const map = t.vocalMap || decodeVocalMap(t.stems?.vocals) || decodeVocalMap(t.vocalMapAuto);
   if (map && map.length) { let s = 0; for (const x of map) s += x; v = s / map.length; }
   else if (Array.isArray(t.phrases) && t.phrases.length) {
     let tot = 0, voc = 0, typed = 0;
