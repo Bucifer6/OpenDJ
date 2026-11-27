@@ -582,18 +582,62 @@ function energyRange(list) {
  *         trackMinutes=3.5 (minutes per track, advances the party clock), setMinutes (party; default limit × trackMinutes) }
  * @returns {{ tracks: object[], steps: { track, reason, score }[] }}
  */
+/**
+ * Bound huge libraries (e.g. 50k+ tracks) before O(L*B*N) beam search or full-pool scoring.
+ * Small/medium pools (<= maxSize) pass through untouched. Larger pools prefer analysed tracks when
+ * enough exist, prioritize tempo-compatible candidates around `ref`, and fill the rest with an
+ * evenly-strided sample across the pool so the full energy/genre range remains represented.
+ */
+function capPool(list, maxSize, ref = null) {
+  if (list.length <= maxSize) return list;
+  const analysed = [];
+  for (let i = 0; i < list.length; i++) if (Number(list[i].bpm) > 0) analysed.push(list[i]);
+  const base = analysed.length >= Math.min(maxSize, 200) ? analysed : list;
+  if (base.length <= maxSize) return base;
+  const out = [];
+  const picked = new Set();
+  const add = (t) => { if (picked.has(t.id)) return false; picked.add(t.id); out.push(t); return true; };
+  // If we have fewer analysed tracks than the threshold, include all analysed tracks first.
+  if (base === list && analysed.length) {
+    for (let i = 0; i < analysed.length && out.length < maxSize; i++) add(analysed[i]);
+  }
+  const refBpm = Number(ref?.bpm) || 0;
+  if (refBpm > 0 && out.length < maxSize) {
+    const compatCap = Math.floor(maxSize * 0.6);
+    const compat = [];
+    for (let i = 0; i < base.length; i++) {
+      const t = base[i];
+      if (!picked.has(t.id) && Number(t.bpm) > 0 && tempoDistance(refBpm, Number(t.bpm)) <= 0.14) compat.push(t);
+    }
+    const step = compat.length > compatCap ? compat.length / compatCap : 1;
+    for (let k = 0; k < Math.min(compat.length, compatCap) && out.length < maxSize; k++) add(compat[Math.floor(k * step)]);
+  }
+  const need = maxSize - out.length;
+  if (need > 0) {
+    const step = base.length / need;
+    for (let k = 0; k < need && out.length < maxSize; k++) add(base[Math.floor(k * step)]);
+    for (let i = 0; i < base.length && out.length < maxSize; i++) add(base[i]);
+  }
+  return out;
+}
+
 export function smartMix(pool, opts = {}) {
   const seen = new Set();
   const banned = opts.banned ? asSet(opts.banned) : null;
-  const list = pool.filter((t) => t && !seen.has(t.id) && seen.add(t.id) && !banned?.has(t.id)).map(prep);
+  const raw = [];
+  for (let i = 0; i < pool.length; i++) {
+    const t = pool[i];
+    if (t && !seen.has(t.id) && !banned?.has(t.id)) { seen.add(t.id); raw.push(t); }
+  }
   const W = opts.weights || weightsFrom(opts.sliders);
   const shape = opts.shape || 'warmup';
-  const L = Math.min(list.length, Math.max(1, opts.limit ?? (list.length <= 200 ? list.length : 40)));
+  const L = Math.min(raw.length, Math.max(1, opts.limit ?? (raw.length <= 200 ? raw.length : 40)));
   if (!L) return { tracks: [], steps: [] };
+  const start = opts.start ? prep(opts.start) : null;
+  const list = capPool(raw, Math.max(400, L * 4), start).map(prep);
   const [lo, hi] = energyRange(list);
   const history = (opts.history || []).map(prep);
   const playedIds = new Set(history.map((t) => t.id));
-  const start = opts.start ? prep(opts.start) : null;
   if (start) playedIds.add(start.id);
   const baseSeq = [...history, ...(start ? [start] : [])];
   const songKeys = new Set(baseSeq.map(songKey).filter(Boolean));
@@ -665,11 +709,16 @@ export function liveNext(cur, pool, opts = {}) {
   const tm = opts.trackMinutes ?? 3.5, now = opts.now ?? Date.now();
   const playedIds = new Set([...history.map((t) => t?.id), cur?.id].filter(Boolean));
   const bannedSet = banned ? asSet(banned) : null;
-  const list = pool.filter((t) => t && !playedIds.has(t.id) && !bannedSet?.has(t.id)).map(prep);
-  if (!list.length) return null;
+  const raw = [];
+  for (let i = 0; i < pool.length; i++) {
+    const t = pool[i];
+    if (t && !playedIds.has(t.id) && !bannedSet?.has(t.id)) raw.push(t);
+  }
+  if (!raw.length) return null;
+  if (cur) prep(cur);
+  const list = capPool(raw, 1500, cur).map(prep);
   // a plan that has to use up the whole pool says nothing about dead ends: keep at least one track out of it
   const depth = Math.min(depthOpt, list.length - 1);
-  if (cur) prep(cur);
   const [lo, hi] = energyRange([...list, ...(cur ? [cur] : [])]);
   const familiarity = opts.familiarity || familiarityInfo(list);
   const songKeys = new Set(history.map(songKey).filter(Boolean));

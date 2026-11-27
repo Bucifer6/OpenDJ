@@ -23,10 +23,12 @@ const UPSERT_SQL = `
     bpm=excluded.bpm, key_code=excluded.key_code, energy=excluded.energy, rating=excluded.rating,
     play_count=excluded.play_count, json=excluded.json
 `;
+const GET_ROWID_SQL = 'SELECT rowid FROM tracks WHERE id = ?';
 const DELETE_SQL = 'DELETE FROM tracks WHERE id = ?';
 const META_SQL = 'INSERT INTO meta (k, json) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET json=excluded.json';
-const FTS_DEL_SQL = 'DELETE FROM tracks_fts WHERE id = ?';
-const FTS_INS_SQL = 'INSERT INTO tracks_fts (id, title, artist, album, genre, tags) VALUES (?, ?, ?, ?, ?, ?)';
+// Key tracks_fts.rowid to tracks.rowid so single-track FTS deletes are O(log N) instead of O(N) full scans.
+const FTS_DEL_SQL = 'DELETE FROM tracks_fts WHERE rowid = ?';
+const FTS_INS_SQL = 'INSERT INTO tracks_fts (rowid, id, title, artist, album, genre, tags) VALUES (?, ?, ?, ?, ?, ?, ?)';
 
 export class SqliteStore {
   constructor(dbPath) {
@@ -65,6 +67,30 @@ export class SqliteStore {
           );
         `);
         this.hasFts = true;
+        // One-time migration for older DBs where tracks_fts.rowid was not aligned to tracks.rowid.
+        const uv = Number(db.prepare('PRAGMA user_version').get()?.user_version) || 0;
+        if (uv < 2) {
+          db.exec('BEGIN IMMEDIATE');
+          try {
+            db.exec('DELETE FROM tracks_fts');
+            const ftsIns = db.prepare(FTS_INS_SQL);
+            for (const row of db.prepare("SELECT rowid, id, title, artist, album, genre, json_extract(json, '$.tags') AS tags_json FROM tracks").iterate()) {
+              let tags = '';
+              if (row.tags_json) {
+                try {
+                  const parsed = JSON.parse(row.tags_json);
+                  if (Array.isArray(parsed)) tags = parsed.join(' ');
+                } catch { /* ignore */ }
+              }
+              ftsIns.run(row.rowid, row.id, row.title || '', row.artist || '', row.album || '', row.genre || '', tags);
+            }
+            db.exec('PRAGMA user_version = 2');
+            db.exec('COMMIT');
+          } catch (e) {
+            try { db.exec('ROLLBACK'); } catch { /* */ }
+            throw e;
+          }
+        }
       } catch {
         this.hasFts = false;
       }
@@ -94,6 +120,7 @@ export class SqliteStore {
   _prepareWriters(db) {
     return {
       upsert: db.prepare(UPSERT_SQL),
+      getRowid: db.prepare(GET_ROWID_SQL),
       del: db.prepare(DELETE_SQL),
       meta: db.prepare(META_SQL),
       ftsDel: this.hasFts ? db.prepare(FTS_DEL_SQL) : null,
@@ -101,9 +128,11 @@ export class SqliteStore {
     };
   }
 
-  _writeOneTrack(st, t) {
+  _writeOneTrack(st, t, { isReplaceAll = false } = {}) {
     if (!t?.id) return;
-    st.upsert.run(
+    const prev = !isReplaceAll && st.ftsDel ? st.getRowid.get(t.id) : null;
+    if (prev) st.ftsDel.run(prev.rowid);
+    const info = st.upsert.run(
       t.id, t.title || '', t.artist || '', t.album || '', t.genre || '',
       Number.isFinite(Number(t.bpm)) ? Number(t.bpm) : null,
       t.key || null,
@@ -111,9 +140,11 @@ export class SqliteStore {
       Number(t.rating) || 0, Number(t.playCount) || 0,
       JSON.stringify(t),
     );
-    if (st.ftsDel && st.ftsIns) {
-      st.ftsDel.run(t.id);
-      st.ftsIns.run(t.id, t.title || '', t.artist || '', t.album || '', t.genre || '', Array.isArray(t.tags) ? t.tags.join(' ') : '');
+    if (st.ftsIns) {
+      const rowid = prev ? prev.rowid : (info?.lastInsertRowid ?? st.getRowid.get(t.id)?.rowid);
+      if (rowid != null) {
+        st.ftsIns.run(rowid, t.id, t.title || '', t.artist || '', t.album || '', t.genre || '', Array.isArray(t.tags) ? t.tags.join(' ') : '');
+      }
     }
   }
 
@@ -125,8 +156,11 @@ export class SqliteStore {
       try {
         for (const t of upserts) this._writeOneTrack(st, t);
         for (const id of removes) {
+          if (st.ftsDel) {
+            const prev = st.getRowid.get(id);
+            if (prev) st.ftsDel.run(prev.rowid);
+          }
           st.del.run(id);
-          if (st.ftsDel) st.ftsDel.run(id);
         }
         if (meta) {
           for (const [k, v] of Object.entries(meta)) st.meta.run(k, JSON.stringify(v));
@@ -147,10 +181,11 @@ export class SqliteStore {
       try {
         db.exec('DELETE FROM tracks');
         if (this.hasFts) db.exec('DELETE FROM tracks_fts');
-        for (const t of Object.values(data.tracks || {})) this._writeOneTrack(st, t);
+        for (const t of Object.values(data.tracks || {})) this._writeOneTrack(st, t, { isReplaceAll: true });
         for (const k of ['version', 'playlists', 'folders', 'sources', 'pathAlias']) {
           if (data[k] !== undefined) st.meta.run(k, JSON.stringify(data[k]));
         }
+        if (this.hasFts) db.exec('PRAGMA user_version = 2');
         db.exec('COMMIT');
       } catch (e) {
         try { db.exec('ROLLBACK'); } catch { /* */ }

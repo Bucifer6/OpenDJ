@@ -5,7 +5,7 @@
 // below (shown in Settings → Mobile and wherever a hidden feature would have been).
 import { localMode, native, os } from './local/mode.js';
 
-export const APP_VERSION = '0.6.2';
+export const APP_VERSION = '0.6.3';
 export const platform = { local: localMode, native, os };
 
 export const MOBILE_UNAVAILABLE = {

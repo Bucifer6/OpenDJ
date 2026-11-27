@@ -83,6 +83,7 @@ export async function syncSource(library, sourceId, { onProgress } = {}) {
   }
   cfg.lastSync = Date.now();
   cfg.trackCount = tracks.length;
+  library.markMetaDirty?.();
   library.changed('tracks');
   onProgress?.({ source: sourceId, done: tracks.length, total: tracks.length, finished: true });
   return { tracks: tracks.length, playlists: playlists.length, pruned, keptMissing: kept, skippedPrune: !!suspicious };
@@ -179,6 +180,7 @@ export async function openSourcePlaylist(library, sourceId, remoteId, { name } =
     pl = { id: Library.remoteId(sourceId, 'pl:' + remoteId), name: String(name || 'Playlist').slice(0, 200), trackIds, sourceId, remoteId, folder: cfg.name, createdAt: Date.now() };
     library.data.playlists.push(pl);
   } else pl.trackIds = trackIds;
+  library.markMetaDirty?.();
   library.changed('tracks');
   return { playlist: pl, tracks: trackIds.map((t) => library.getTrack(t)) };
 }
@@ -291,7 +293,8 @@ export class DownloadManager {
       if (!t.key && tags.key) t.key = tags.key;
       if (!t.duration && tags.duration) t.duration = tags.duration;
     } catch { /* ignore */ }
-    this.library.changed('tracks');
+    this.library.markTrackDirty?.(t.id);
+    this.library.changed('tracks', { track: t });
     return file;
   }
 }

@@ -1,7 +1,7 @@
 {
   "name": "opendj",
   "productName": "OpenDJ",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Free, open-source DJ software: decks, mixer, effects, auto-mix, MIDI controllers, and a library that pulls from local/USB/NAS folders, Plex, Jellyfin, Emby and Subsonic.",
   "license": "MIT",
   "type": "module",

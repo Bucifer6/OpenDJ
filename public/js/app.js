@@ -664,12 +664,13 @@ class App {
     if (opts.mode === 'smart' || opts.mode === 'live') {
       const todo = list.filter((t) => !t.analyzed && !t.unreadable);
       if (todo.length && this.analyser) {
-        const n = this.analyser.request(todo.slice(0, 60));
+        const batch = todo.slice(0, 60);
+        const n = this.analyser.request(batch);
         if (n) {
           this.toast(`Analysing ${n} track(s) before smart mix (BPM, key, energy)…`);
           const t0 = performance.now(), maxMs = Math.min(45000, 4000 + n * 3000);
-          while (!run.cancelled && performance.now() - t0 < maxMs && todo.some((t) => { const f = this.library.track(t.id); return f && !f.analyzed && !f.unreadable; }) && this.analyser.running) await new Promise((r) => setTimeout(r, 300));
-          const left = todo.filter((t) => !this.library.track(t.id)?.analyzed).length;
+          while (!run.cancelled && performance.now() - t0 < maxMs && batch.some((t) => { const f = this.library.track(t.id); return f && !f.analyzed && !f.unreadable; }) && this.analyser.running) await new Promise((r) => setTimeout(r, 300));
+          const left = batch.filter((t) => !this.library.track(t.id)?.analyzed).length;
           if (left) this.toast(`${left} track(s) not analysed yet: smart mix uses the data it has for them`);
         }
       }
@@ -812,7 +813,9 @@ class App {
   wireEvents() {
     let refreshT, scanDone = false;
     api.events({
-      library: () => {
+      library: (ev) => {
+        // Single-track updates (analysis, play counts, tags, cues, stems, downloads) patch in O(1) without reloading the full library.
+        if (ev?.track?.id) { this.library.updateTrack(ev.track); return; }
         // While tracks are being analysed every one of them changes the library: refresh at most every 4 s then (8 s while playing).
         if (this.analyser.running && refreshT) return;
         clearTimeout(refreshT);

@@ -24,6 +24,11 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.6.3
+- **Fixed desktop freezes (`Not Responding`) and Automix stalls on very large libraries (50,000+ tracks).** Fixed an ordering bug in `Library.updateTrack()` that triggered a full SQLite `replaceAll` instead of an incremental write on every analysed track, and keyed `tracks_fts` by `tracks.rowid` to replace O(N²) FTS5 table scans with O(log N) updates (a single track flush on 73k tracks drops from ~15 minutes to ~19 ms; existing `library.db` files migrate automatically on launch).
+- **Incremental single-track sync instead of full-library reloads.** Track analysis, play-count updates, stem readiness, and downloads now push targeted single-track SSE updates merged in-place in O(1) rather than reloading the entire `/api/tracks` collection over HTTP.
+- **Fast Smart Mix, Live Automix, and Suggestions at 70k+ scale.** Bounded candidate pools in `smartMix()` and `liveNext()`, added bounded top-K pre-selection to `suggestNext()`, throttled analysis-driven suggestion refreshes, cached banned-track lookups, and fixed `_startAutomix` to poll only the queued 60-track analysis batch.
+
 ### New in 0.6.2
 - **Fixed audio-thread and long-session CPU spikes.** Replaced `MeterProcessor`'s unbounded loudness history with an O(1) LUFS histogram, added an exact Hölder-bound bypass for the 4× true-peak FIR filter and silent idle bypass, cached per-block effect worklet coefficients (`Reverb`, `Pitch`, `Comp`, `Ducker`, `ModDelay`, `Crush`, `Warmth`, `LFO`), and halved deck worklet IPC while stopping idle position traffic.
 - **2× faster track analysis and zero idle polling.** Sparse onset folding (`detectBpm` 4.9× faster, `detectElasticGrid` 1.8× faster), 2-for-1 real-FFT packing across vocal/bar/key analysis, and a 3× faster main-thread `onsetCurve` cut full track analysis time in half; Ableton Link timers, server SSE ticks, `Engine` rAF loops, drive scans (now non-blocking on Windows), and drawer/deck DOM updates now stay idle when unused.
@@ -62,8 +67,4 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 ### New in 0.5.13
 - **Smaller desktop downloads.** Since 0.5.5 every desktop app also carried files only the project itself needs (documentation images, the phone app projects, tests and scripts), about 40 MB per app. They are no longer packaged.
 - **The top bar fits a 1440 px laptop screen again.** The Automix ▾ menu had pushed it 10 px past the window edge; the buttons now sit a little closer together up to 1500 px.
-
-### New in 0.5.12
-- **A new air horn.** The Air Horn pad now plays a dancehall air horn recorded by the_mred on Freesound (CC0): a full 1.5-second blast with its natural fade, instead of the short pneumatic horn. *Air Horn ×3* is now made from the same recording (two short stabs, then the full blast) instead of a synthesised horn.
-- **Ableton Link joins faster on a shaky network.** When lost packets cut a clock measurement short, OpenDJ now keeps the readings it already has, or tries again within half a second, instead of waiting 5 seconds before joining the session.
 

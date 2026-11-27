@@ -150,7 +150,7 @@ export class LibraryCore {
   }
 
   emit(type, payload) { for (const l of this.listeners) l(type, payload); }
-  changed(what = 'tracks') { this.save(); this.emit('library', { what }); }
+  changed(what = 'tracks', extra = null) { this.save(); this.emit('library', extra ? { what, ...extra } : { what }); }
 
   // ---------- tracks ----------
   static remoteId(sourceId, remoteId) { return hashId(`remote:${sourceId}:${remoteId}`); }
@@ -188,7 +188,7 @@ export class LibraryCore {
     if ('tags' in patch) t.tags = normTags(patch.tags);
     // Tag edits made in OpenDJ survive a rescan of the file.
     if (['title', 'artist', 'album', 'genre', 'year'].some((k) => k in patch)) t.userEdited = true;
-    this.changed('tracks');
+    this.changed('tracks', { track: t });
     return t;
   }
 
