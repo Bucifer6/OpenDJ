@@ -218,9 +218,10 @@ async function proxy(req, res, { url, headers = {}, name }, { connectTimeout = 1
     throw new HttpError(502, mediaServerError(url, { status: up.status, name }));
   }
   const out = { 'content-type': safeMediaType(up.headers.get('content-type'), kind) };
-  for (const k of ['content-length', 'content-range', 'accept-ranges']) {
+  for (const k of ['content-length', 'content-range', 'accept-ranges', 'etag', 'last-modified', 'cache-control']) {
     const v = up.headers.get(k); if (v) out[k] = v;
   }
+  if (kind === 'image' && !out['cache-control']) out['cache-control'] = 'private, max-age=86400';
   res.writeHead(up.status, out);
   if (!up.body || req.method === 'HEAD') { ctrl.abort(); return res.end(); }
   await pipeline(Readable.fromWeb(up.body), res).catch(() => { ctrl.abort(); if (!res.destroyed) res.destroy(); });

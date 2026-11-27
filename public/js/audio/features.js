@@ -75,7 +75,7 @@ export function detectVocalActivity(mono, sr) {
   const dec = Math.max(1, Math.floor(sr / 11025));
   const fs = sr / dec;
   const N = 512; // ~21.5 Hz bins (ideal for 300-3400 Hz vocal formants) and ~3.5x faster than N=1024
-  const hop = 256; // ~23 ms frames (~43 fps, ideal for 3-8 Hz syllabic modulation)
+  const hop = 512; // ~46 ms frames (~21.5 fps, 2.7x Nyquist for 3-8 Hz syllabic modulation, 2x fewer FFTs)
   const { win } = fftTable(N);
   const re = new Float32Array(N), im = new Float32Array(N);
   const bLo = Math.max(1, Math.floor((300 * N) / fs));
@@ -87,7 +87,8 @@ export function detectVocalActivity(mono, sr) {
   const raw = new Float32Array(secs);
   const invVocBins = 1 / Math.max(1, bHi - bLo + 1);
   const halfN = N >> 1;
-  for (let s = 0; s < secs; s++) {
+  const secStep = secs > 480 ? 2 : 1; // ultra-long tracks (>8 min): sample every 2 s and interpolate
+  for (let s = 0; s < secs; s += secStep) {
     const base = s * sr;
     let ratioSum = 0, tonalSum = 0, vEnergySum = 0;
     // Pack two consecutive real frames into one complex FFT (z = frA + i*frB): exact power spectra at 2x speed
@@ -162,6 +163,9 @@ export function detectVocalActivity(mono, sr) {
     const p = loudGate * clamp01((meanRatio - 0.12) * 2.1) * (0.45 + 0.55 * meanTonal) * (0.45 + 0.55 * modScore);
     raw[s] = clamp01(p * 1.35);
   }
+  if (secStep > 1) {
+    for (let s = 1; s < secs; s += 2) raw[s] = s + 1 < secs ? 0.5 * (raw[s - 1] + raw[s + 1]) : raw[s - 1];
+  }
   // 3-second median + slight smoothing (removes single-second false triggers)
   const map = new Float32Array(secs);
   for (let s = 0; s < secs; s++) {
@@ -183,10 +187,10 @@ export function computeBarFeatures(mono, sr, bpm, downbeat = 0) {
   const dur = mono.length / sr;
   const rawBars = Math.floor((dur - downbeat) / rawBarSec);
   if (rawBars < 1) return [];
-  // Keep RAM/JSON compact on ultra-long mixes (>180 bars -> group into 2-bar or 4-bar blocks)
-  const group = rawBars > 360 ? 4 : rawBars > 180 ? 2 : 1;
+  // Keep RAM/JSON compact (bounded to <=96 entries; long tracks group into 2/4/8-bar blocks)
+  const group = rawBars > 384 ? 8 : rawBars > 192 ? 4 : rawBars > 96 ? 2 : 1;
   const barSec = rawBarSec * group;
-  const nBars = Math.min(180, Math.floor((dur - downbeat) / barSec));
+  const nBars = Math.min(96, Math.floor((dur - downbeat) / barSec));
   if (nBars < 1) return [];
 
   // 4-band 2-pole filter bank over the track in a single linear pass
@@ -403,22 +407,27 @@ export function computeGrooveAndEmbedding(mono, sr, bpm, downbeat = 0, barFeatur
  * Tracks local beat-onset drift across 8-second windows; returns null for steady electronic grids (drift < 1.2%),
  * or an ordered array of warp anchors [{ time, bpm, beat }] when real tempo drift is detected.
  */
-export function detectElasticGrid(mono, sr, globalBpm, gridOffset = 0) {
+export function detectElasticGrid(mono, sr, globalBpm, gridOffset = 0, precomputedEnv = null) {
   if (!(globalBpm > 0) || !mono?.length) return null;
   const dur = mono.length / sr;
   if (dur < 20) return null;
   const hop = 256;
   const fps = sr / hop;
   const n = Math.floor(mono.length / hop);
-  const env = new Float32Array(n);
-  const a = onePole(150, sr);
-  let lp = 0, prev = 0;
-  for (let k = 0; k < n; k++) {
-    let e = 0;
-    for (let i = k * hop, end = i + hop; i < end; i++) { const x = mono[i]; lp += a * (x - lp); e += lp * lp; }
-    const l = Math.log1p(e * 1000);
-    env[k] = Math.max(0, l - prev);
-    prev = l;
+  let env;
+  if (precomputedEnv && precomputedEnv.length === n) {
+    env = precomputedEnv;
+  } else {
+    env = new Float32Array(n);
+    const a = onePole(150, sr);
+    let lp = 0, prev = 0;
+    for (let k = 0; k < n; k++) {
+      let e = 0;
+      for (let i = k * hop, end = i + hop; i < end; i++) { const x = mono[i]; lp += a * (x - lp); e += lp * lp; }
+      const l = Math.log1p(e * 1000);
+      env[k] = Math.max(0, l - prev);
+      prev = l;
+    }
   }
 
   const winSec = 8, stepSec = 4;
@@ -451,15 +460,16 @@ export function detectElasticGrid(mono, sr, globalBpm, gridOffset = 0) {
       const sc = mx * invMean;
       if (sc > bestS) { bestS = sc; bestB = b; }
     }
-    if (bestS > 2.2) localBpms.push({ time: t0 + winSec / 2, bpm: Math.round(bestB * 100) / 100, score: bestS });
+    if (bestS > 3.0) localBpms.push({ time: t0 + winSec / 2, bpm: Math.round(bestB * 100) / 100, score: bestS });
   }
   if (localBpms.length < 3) return null;
 
-  // Check coefficient of variation / max excursion: steady electronic tracks stay null
+  // Check coefficient of variation / sustained excursion: steady electronic tracks (even with a breakdown) stay null
   const mean = localBpms.reduce((s, x) => s + x.bpm, 0) / localBpms.length;
   const sd = Math.sqrt(localBpms.reduce((s, x) => s + (x.bpm - mean) ** 2, 0) / localBpms.length);
   const maxDiff = Math.max(...localBpms.map((x) => Math.abs(x.bpm - globalBpm) / globalBpm));
-  if (sd / mean < 0.012 && maxDiff < 0.018) return null;
+  const drifted = localBpms.filter((x) => Math.abs(x.bpm - globalBpm) / globalBpm >= 0.015).length;
+  if (sd / mean < 0.012 && (maxDiff < 0.02 || drifted < 2)) return null;
 
   // Build piecewise-linear warp anchors (merge consecutive windows within 0.6 BPM)
   const anchors = [{ time: r3(gridOffset), bpm: localBpms[0].bpm, beat: 0 }];

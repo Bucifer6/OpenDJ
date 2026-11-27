@@ -9,6 +9,7 @@ import { dvsModeIndicator } from '../dvs/dvs-ui.js';
 import { buildStemControls } from '../stems/stems-ui.js';
 import { HOTCUE_COLORS, TEMPO_RANGES } from '../audio/deck.js';
 import { camelotCompatible, toCamelot } from '../audio/analysis-core.js';
+import { syncBeatRatio, beatPhaseDelta } from '../audio/beat-phase.js';
 import { smoothTime } from './clock.js';
 import { t as tr } from '../i18n.js';
 import { vinylFor, deckOptions, VINYL_RANGES, fmtDiv, JUMP_SIZES, SCALES, GLIDE_BEATS } from '../audio/vinyl.js';
@@ -283,27 +284,35 @@ export function buildDeck(app, deck) {
   let phaseW = 0, phaseSig = '';
   new ResizeObserver((es) => { phaseW = es.at(-1).contentRect.width * uiZoom(); }).observe(phase);
   window.addEventListener('opendj-theme', () => { phaseSig = ''; });
-  const drawPhase = () => {
+  const drawPhase = (now) => {
     const dpr = devicePixelRatio || 1;
     if (!phaseW) phaseW = phase.getBoundingClientRect().width || 1;
     const W = Math.round(phaseW * dpr) || 1, H = Math.round(12 * dpr);
     if (phase.width !== W || phase.height !== H) { phase.width = W; phase.height = H; phaseSig = ''; }
     const m0 = app.engine.masterDeck(deck);
-    const beat0 = deck.bpm && deck.track ? ((deck.beatIndex() % 4) + 4) % 4 : -1;
-    let d0 = 0; if (m0 && m0.bpm && m0.playing && deck.playing && beat0 >= 0) { d0 = deck.beatPhase() - m0.beatPhase(); if (d0 > 0.5) d0 -= 1; if (d0 < -0.5) d0 += 1; }
-    const sigNow = `${W}|${beat0}|${deck.playing}|${m0 && m0.playing && deck.playing ? Math.round(d0 * 200) : 'x'}`;
+    const t = now != null ? smoothTime(deck.ctx, now) : deck.ctx?.currentTime;
+    const pos = Number.isFinite(t) ? deck.positionAt(t) : deck.position;
+    const beat0 = deck.bpm && deck.track ? ((deck.beatIndex(pos) % 4) + 4) % 4 : -1;
+    let d0 = 0, showDiff = false;
+    if (m0 && m0.bpm && m0.playing && deck.playing && beat0 >= 0) {
+      const mult = syncBeatRatio(m0.effectiveBpm || m0.bpm, deck.effectiveBpm || deck.bpm);
+      if (mult) {
+        const mPos = Number.isFinite(t) ? m0.positionAt(t) : m0.position;
+        d0 = -beatPhaseDelta(m0.beatPhase(mPos), deck.beatPhase(pos), mult);
+        showDiff = true;
+      }
+    }
+    const sigNow = `${W}|${beat0}|${deck.playing}|${showDiff ? Math.round(d0 * 200) : 'x'}`;
     if (sigNow === phaseSig) return;
     phaseSig = sigNow;
     const g = phase.getContext('2d'); g.clearRect(0, 0, W, H);
     if (!deck.bpm || !deck.track) return;
     const beat = beat0, seg = W / 4;
     for (let k = 0; k < 4; k++) { g.fillStyle = k === beat && deck.playing ? cssVar(`--deck${i + 1}`) : k === beat ? cssVar('--line-2') : cssVar('--panel-3'); g.fillRect(Math.round(k * seg + dpr), 0, Math.round(seg - 2 * dpr), Math.round(H * 0.42)); }
-    const m = app.engine.masterDeck(deck);
-    if (m && m.bpm && m.playing && deck.playing) {
-      let d = deck.beatPhase() - m.beatPhase(); if (d > 0.5) d -= 1; if (d < -0.5) d += 1;
-      const x = W / 2 + d * W / 2; const ok = Math.abs(d) < 0.03;
+    if (showDiff) {
+      const x = W / 2 + d0 * W / 2; const ok = Math.abs(d0) < 0.03;
       g.fillStyle = cssVar('--line-2'); g.fillRect(Math.round(W / 2 - dpr / 2), H * 0.55, Math.max(1, Math.round(dpr)), H * 0.45);
-      g.fillStyle = ok ? cssVar('--green') : Math.abs(d) < 0.1 ? cssVar('--amber') : cssVar('--red');
+      g.fillStyle = ok ? cssVar('--green') : Math.abs(d0) < 0.1 ? cssVar('--amber') : cssVar('--red');
       g.fillRect(Math.min(x, W / 2), H * 0.6, Math.max(2 * dpr, Math.abs(x - W / 2)), H * 0.35);
     }
   };
@@ -448,7 +457,7 @@ export function buildDeck(app, deck) {
   const setText = (node, txt) => { if (node._t !== txt) { node._t = txt; node.textContent = txt; } };
   const setClass = (node, cls, on) => { on = !!on; if (node['_c' + cls] !== on) { node['_c' + cls] = on; node.classList.toggle(cls, on); } };
   root.frame = (now) => {
-    jog.draw(now); overview.draw(now); drawPhase();
+    jog.draw(now); overview.draw(now); drawPhase(now);
     if (now - lastFrame < 50) return; lastFrame = now;
     const pos = deck.positionAt(smoothTime(deck.ctx, now));
     const m = app.engine.masterDeck(deck);

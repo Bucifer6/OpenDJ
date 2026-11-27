@@ -5,7 +5,7 @@ import { decodeWaveform, toCamelot, camelotCompatible, analyzeStructure, analysi
 import { beatAtTime, localBpmAt } from './features.js';
 import { effectiveGains, LOADED_STEMS } from '../stems/stem-mix.js';
 import { floatToInt16 } from '../stems/stem-dsp.js';
-import { onsetCurve } from './beat-phase.js';
+import { onsetCurve, syncBeatRatio, beatPhaseDelta } from './beat-phase.js';
 import { StemEcho, stemMakeupGain } from '../stems/stem-fx.js';
 import { VINYL_DEFAULTS, secPerRev, snapTo, nextQuantizeDiv, glideDuration, bendAt, needleTarget, jumpSizeStep, semitoneRate, TEMPO_RESET_BEATS } from './vinyl.js';
 
@@ -229,9 +229,10 @@ export class Deck extends Emitter {
       if (stale()) return false;
       this.frames = left.length;
       this.node.port.postMessage({ type: 'load', left, right, sampleRate: buf.sampleRate, scale }, right ? [left.buffer, right.buffer] : [left.buffer]);
-      // kick onset curve for automix's audible phase check (audio/beat-phase.js), built in the background in slices
+      // kick onset curve for automix's audible phase check (audio/beat-phase.js), built in the background in slices;
+      // aborts immediately if the deck is reloaded/ejected so the decoded AudioBuffer is never retained
       this.onsets = null;
-      onsetCurve(ch0, ch1, buf.sampleRate).then((c) => { if (!stale()) this.onsets = c; }, () => {});
+      onsetCurve(ch0, ch1, buf.sampleRate, { shouldAbort: stale }).then((c) => { if (c && !stale()) this.onsets = c; }, () => {});
       this.resetStemControls(); this.postStemGains();
       this.rateMul = 1; this.post('rate', { value: this.rate }); this.post('keylock', { value: this.keyLock });
       this.keyShift = 0; this.post('pitch', { value: 1 });
@@ -287,14 +288,22 @@ export class Deck extends Emitter {
   play({ at, instant = false } = {}) {
     if (!this.track || this.loading) return;
     this.cuePreview = false; this.hotPreview = null;
-    if (this.syncOn) this.alignPhase();
-    this.playing = true; this.post('play', { value: true, ...(Number.isFinite(at) ? { at } : {}), ...(instant ? { instant: true } : {}) });
+    let startAt = Number.isFinite(at) ? at : null;
+    if (this.syncOn) {
+      this.matchTempo();
+      const alignedAt = this.alignPhase(startAt);
+      if (alignedAt != null && startAt == null) startAt = alignedAt;
+    }
+    this.playing = true; this.post('play', { value: true, ...(startAt != null ? { at: startAt } : {}), ...(instant ? { instant: true } : {}) });
     this._pendingPlay = true; setTimeout(() => { this._pendingPlay = false; }, 60);
     if (!this._countedPlay) { this._countedPlay = true; api.played(this.track.id).catch(() => {}); }
     this.engine.onDeckPlay(this);
     this.emit('state');
   }
-  pause() { this.playing = false; this.post('play', { value: false }); this._pendingPlay = true; setTimeout(() => { this._pendingPlay = false; }, 60); this.emit('state'); }
+  pause() {
+    if (this._syncBend) { this._syncBend = false; this.setBend(0); }
+    this.playing = false; this.post('play', { value: false }); this._pendingPlay = true; setTimeout(() => { this._pendingPlay = false; }, 60); this.emit('state');
+  }
   /**
    * Turntable START/STOP (T1, MIDI deckN.startStop): always with motor ramps, even when the deck's start / stop times
    * are 0 (then 0.7 s / 0.8 s, like a Technics at its defaults).
@@ -312,12 +321,13 @@ export class Deck extends Emitter {
   }
   togglePlay() { this.playing ? this.pause() : this.play(); }
 
-  seek(t) {
+  seek(t, at = null) {
     if (!this.track) return;
+    const refT = Number.isFinite(at) ? at : this.ctx.currentTime;
     t = clamp(t, 0, Math.max(0, this.duration - 0.001));
-    this._pos = t; this._t = this.ctx.currentTime; this._seekGuard = this.ctx.currentTime;
+    this._pos = t; this._t = refT; this._seekGuard = this.ctx.currentTime;
     this._seekSeq = (this._seekSeq || 0) + 1;
-    this.post('seek', { frame: t * this.sr, at: this.ctx.currentTime, seq: this._seekSeq });
+    this.post('seek', { frame: t * this.sr, at: refT, seq: this._seekSeq });
     this.emit('seek', t);
     this.armActiveLoop(t);
   }
@@ -520,12 +530,12 @@ export class Deck extends Emitter {
     this.tempo = pct; this.post('rate', { value: this.rate }); this.emit('tempo'); this.engine.onTempoChange(this);
     if (this.stemFxOn && this.effectiveBpm) this.stemFx?.setBeat(60 / this.effectiveBpm);
   }
-  setTempoFader(v) { if (this.vinyl.quartz) return; this.setTempo(clamp(Number(v) || 0, -1, 1) * this.tempoRange); if (this.syncOn && !this.isMaster) { this.syncOn = false; this.emit('state'); } } // -1..1
+  setTempoFader(v) { if (this.vinyl.quartz) return; this.setTempo(clamp(Number(v) || 0, -1, 1) * this.tempoRange); if (this.syncOn && !this.isMaster) { this.syncOn = false; if (this._syncBend) { this._syncBend = false; this.setBend(0); } this.emit('state'); } } // -1..1
   /** Pick the tempo range. The tempo keeps its value when it fits the new range, otherwise it is clamped to the range. */
   setTempoRange(r) {
     r = TEMPO_RANGES.includes(Number(r)) ? Number(r) : clamp(Number(r) || 8, 1, 100);
     this.tempoRange = r; this.emit('tempo-range', r);
-    if (Math.abs(this.tempo) > r) { this.setTempo(Math.sign(this.tempo) * r); if (this.syncOn && !this.isMaster) { this.syncOn = false; this.emit('state'); } } else this.emit('tempo');
+    if (Math.abs(this.tempo) > r) { this.setTempo(Math.sign(this.tempo) * r); if (this.syncOn && !this.isMaster) { this.syncOn = false; if (this._syncBend) { this._syncBend = false; this.setBend(0); } this.emit('state'); } } else this.emit('tempo');
     return this.tempo / r;
   }
   /** Step the tempo by `pct` (MIDI tempo +/- buttons), staying inside the tempo range. */
@@ -548,12 +558,14 @@ export class Deck extends Emitter {
   /** Hold-to-bend (T5): the bend grows from 1 % to 8 % over a second (or a fixed ±4 % with bendMode 'fixed'). */
   bendStart(dir) {
     clearInterval(this._bendRamp);
+    this._syncBend = false;
+    this._manualBendUntil = (globalThis.performance?.now?.() ?? Date.now()) + 1500;
     if ((this.engine.settings.deckOptions?.bendMode || 'ramp') === 'fixed') return this.setBend(0.04 * dir);
     const t0 = performance.now();
     this.setBend(bendAt(0) * dir);
-    this._bendRamp = setInterval(() => { const h = (performance.now() - t0) / 1000; this.setBend(bendAt(h) * dir); if (h >= 1) clearInterval(this._bendRamp); }, 25);
+    this._bendRamp = setInterval(() => { const h = (performance.now() - t0) / 1000; this._manualBendUntil = performance.now() + 1500; this.setBend(bendAt(h) * dir); if (h >= 1) clearInterval(this._bendRamp); }, 25);
   }
-  bendStop() { clearInterval(this._bendRamp); this.setBend(0); }
+  bendStop() { clearInterval(this._bendRamp); this._manualBendUntil = (globalThis.performance?.now?.() ?? Date.now()) + 1500; this.setBend(0); }
 
   // ---------- tempo glide (T5) ----------
   /**
@@ -595,8 +607,9 @@ export class Deck extends Emitter {
   }
 
   syncTargetRatio(master) {
-    // allow half / double time matching (e.g. 87 vs 174)
-    const r = master.effectiveBpm / this.bpm;
+    // allow half / double time matching (e.g. 88 vs 176) and honour elastic tempoMap local BPM
+    const myBpm = this.localBpmAt(this.position) || this.bpm;
+    const r = master.effectiveBpm / myBpm;
     const cands = [r, r * 2, r / 2];
     return cands.reduce((a, b) => (Math.abs(Math.log(b)) < Math.abs(Math.log(a)) ? b : a));
   }
@@ -606,18 +619,27 @@ export class Deck extends Emitter {
     this.setTempo((this.syncTargetRatio(m) - 1) * 100);
     return true;
   }
-  alignPhase() {
+  alignPhase(at = null) {
     const m = this.engine.masterDeck(this);
-    if (!m || !m.playing || !m.bpm || !this.bpm || this.engine.settings.syncMode === 'tempo') return;
-    let d = m.beatPhase() - this.beatPhase();
-    if (d > 0.5) d -= 1; if (d < -0.5) d += 1;
-    let t = this.position + d * this.beatLen;
+    if (!m || !m.playing || !m.bpm || !this.bpm || this.engine.settings.syncMode === 'tempo') return null;
+    const refT = Number.isFinite(at) ? at : (this.ctx?.currentTime ?? 0);
+    const mPos = typeof m.positionAt === 'function' ? m.positionAt(refT) : m.position;
+    const myPos = this.playing && typeof this.positionAt === 'function' ? this.positionAt(refT) : this.position;
+    const ob = m.effectiveBpm || m.bpm, ib = this.effectiveBpm || this.bpm;
+    const mult = syncBeatRatio(ob, ib) || 1;
+    const d = beatPhaseDelta(m.beatPhase(mPos), this.beatPhase(myPos), mult);
+    let t = myPos + d * this.beatLen;
     if (t < 0) t += this.beatLen; // can't go before the start: align to the next beat instead
-    this.seek(t);
+    this.seek(t, refT);
+    return refT;
   }
   sync() {
     if (!this.track || this.loading) return;
-    if (this.syncOn) { this.syncOn = false; this.emit('state'); return; }
+    if (this.syncOn) {
+      this.syncOn = false;
+      if (this._syncBend) { this._syncBend = false; this.setBend(0); }
+      this.emit('state'); return;
+    }
     this.syncOn = true;
     if (this.matchTempo() && this.playing) this.alignPhase();
     this.emit('state');
@@ -691,6 +713,8 @@ export class Deck extends Emitter {
     if (!this.track) return;
     if (this.loopAdjust) return this.adjustLoop(deltaRot * this.secPerRev * 0.25);
     if (!this.playing) { this.seek(this.position + deltaRot * this.secPerRev * 0.25); return; }
+    this._syncBend = false;
+    this._manualBendUntil = (globalThis.performance?.now?.() ?? Date.now()) + 1500;
     this.setBend(clamp(deltaRot * 4, -0.25, 0.25));
     clearTimeout(this._bendT); this._bendT = setTimeout(() => this.setBend(0), 70);
   }

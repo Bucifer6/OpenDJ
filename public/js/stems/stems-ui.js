@@ -64,18 +64,23 @@ export function setupStems(app) {
   render();
   stems.status().catch(() => {}); // which engine, and the server's queue (another device may be preparing already)
 
-  // Prepare ahead on the server: Automix's next two tracks, and any track loaded on a deck (first in line)
+  // Prepare ahead on the server: Automix's next two tracks only when stem transitions are enabled,
+  // and any track loaded on a deck (skipped in Gig Mode to protect live CPU/RAM)
   let aheadT = null;
   app.automix?.on('state', () => {
     clearTimeout(aheadT);
     aheadT = setTimeout(() => {
       const a = app.automix;
-      if (!a?.enabled) return;
+      if (!a?.enabled || a.opts?.stemTransitions !== true || app.settings?.gigMode) return;
       const next = a.queue.slice(a.idx, a.idx + 2).map((t) => t?.id).filter(Boolean);
       if (next.length) stems.prefetch(next);
     }, 800);
   });
-  for (const d of app.engine?.decks || []) d.on('load', () => { if (d.track?.id && !d.track.stems?.ready) stems.prefetch([d.track.id], { front: true }); });
+  for (const d of app.engine?.decks || []) d.on('load', () => {
+    if (app.settings?.gigMode) return;
+    if (app.automix?.enabled && app.automix?.opts?.stemTransitions !== true) return;
+    if (d.track?.id && !d.track.stems?.ready) stems.prefetch([d.track.id], { front: true });
+  });
   // background separation in this window waits (between chunks) while a mix transition runs or a deck loads, and for
   // 4 s after, so it never competes with playback right then
   let quietAt = 0;

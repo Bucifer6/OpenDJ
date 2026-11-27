@@ -35,10 +35,11 @@ export function computeWaveform(mono, sr, rate = WAVE_RATE) {
   return { rate, low: norm(low), mid: norm(mid), high: norm(high), peak: norm(peak) };
 }
 
-/** Onset-strength envelope (log energy flux of low and full band). */
-function onsetEnvelope(mono, sr, hop) {
+/** Onset-strength envelope (log energy flux of low and full band). Optionally outputs raw low-band flux for elastic grid reuse. */
+function onsetEnvelope(mono, sr, hop, lowEnvOut = null) {
   const n = Math.floor(mono.length / hop);
   const env = new Float32Array(n);
+  const lowEnv = lowEnvOut ? new Float32Array(n) : null;
   const a = onePoleCoef(150, sr);
   let lp = 0, prevLo = 0, prevAll = 0;
   for (let k = 0; k < n; k++) {
@@ -48,9 +49,12 @@ function onsetEnvelope(mono, sr, hop) {
       eLo += lp * lp; eAll += x * x;
     }
     const lLo = Math.log1p(eLo * 1000), lAll = Math.log1p(eAll * 100);
-    env[k] = Math.max(0, lLo - prevLo) * 1.5 + Math.max(0, lAll - prevAll);
+    const dLo = Math.max(0, lLo - prevLo);
+    if (lowEnv) lowEnv[k] = dLo;
+    env[k] = dLo * 1.5 + Math.max(0, lAll - prevAll);
     prevLo = lLo; prevAll = lAll;
   }
+  if (lowEnvOut) lowEnvOut.lowEnv = lowEnv;
   // remove local mean (adaptive threshold)
   const w = 16, out = new Float32Array(n); let s = 0;
   for (let k = 0; k < n; k++) {
@@ -62,7 +66,7 @@ function onsetEnvelope(mono, sr, hop) {
 }
 
 /** Sharpness of the beat when folding a sparse onset envelope with period P (in hops). */
-function foldScoreSparse(nzIdx, nzVal, nNz, sum, P, bins, h) {
+function foldScoreSparse(nzIdx, nzVal, nNz, sum, P, bins, h, refine = false) {
   h.fill(0);
   const invP = 1 / P;
   for (let i = 0; i < nNz; i++) {
@@ -71,13 +75,27 @@ function foldScoreSparse(nzIdx, nzVal, nNz, sum, P, bins, h) {
   }
   let mx = 0, mi = 0;
   for (let i = 0; i < bins; i++) { if (h[i] > mx) { mx = h[i]; mi = i; } }
-  return { score: mx / (sum / bins + 1e-9), phase: (mi + 0.5) / bins };
+  let phase = (mi + 0.5) / bins;
+  if (refine && bins >= 16) {
+    // 3-bin circular smoothing + parabolic peak interpolation for sub-bin (<1.5 ms) beat phase accuracy
+    let bestS = -1, bestI = mi;
+    for (let i = 0; i < bins; i++) {
+      const s = 0.25 * h[(i - 1 + bins) % bins] + 0.5 * h[i] + 0.25 * h[(i + 1) % bins];
+      if (s > bestS) { bestS = s; bestI = i; }
+    }
+    const sL = 0.25 * h[(bestI - 2 + bins) % bins] + 0.5 * h[(bestI - 1 + bins) % bins] + 0.25 * h[bestI];
+    const sR = 0.25 * h[bestI] + 0.5 * h[(bestI + 1) % bins] + 0.25 * h[(bestI + 2) % bins];
+    const denom = sL - 2 * bestS + sR;
+    const delta = Math.abs(denom) > 1e-9 ? Math.max(-0.5, Math.min(0.5, 0.5 * (sL - sR) / denom)) : 0;
+    phase = (((bestI + 0.5 + delta) % bins) + bins) % bins / bins;
+  }
+  return { score: mx / (sum / bins + 1e-9), phase };
 }
 
 const MIN_ONSET = 0.03; // mean onset strength below which a signal has no beat (see test/qa-regressions)
-export function detectBpm(mono, sr, { min = 70, max = 180 } = {}) {
+export function detectBpm(mono, sr, { min = 70, max = 180, _envOut = null } = {}) {
   const hop = 256;
-  const env = onsetEnvelope(mono, sr, hop);
+  const env = onsetEnvelope(mono, sr, hop, _envOut);
   const fps = sr / hop;
   if (env.length < fps * 4) return { bpm: null, offset: 0, confidence: 0 };
   // no onsets at all (digital silence, a steady tone): there is no tempo to find, don't invent one
@@ -113,7 +131,7 @@ export function detectBpm(mono, sr, { min = 70, max = 180 } = {}) {
   if (!best.lag) return { bpm: null, offset: 0, confidence: 0 };
   const h48 = new Float32Array(48), h96 = new Float32Array(96);
   const fold48 = (P) => foldScoreSparse(nzIdx, nzVal, nNz, envSum, P, 48, h48);
-  const fold96 = (P) => foldScoreSparse(nzIdx, nzVal, nNz, envSum, P, 96, h96);
+  const fold96 = (P, refine = false) => foldScoreSparse(nzIdx, nzVal, nNz, envSum, P, 96, h96, refine);
   // 1b) 3:2 check: off-beat bass (kick + bass on the "and") makes the ACF favour 1.5 beats (2/3 of the tempo).
   // Folding the onsets at the true beat period is much sharper than at 1.5 beats, so switch when it clearly is.
   let coarseLag = best.lag;
@@ -147,16 +165,17 @@ export function detectBpm(mono, sr, { min = 70, max = 180 } = {}) {
     const r = fold48(fps * 60 / b);
     if (r.score > top.score) top = { bpm: b, ...r };
   }
+  let fine = { bpm: top.bpm, score: -1, phase: top.phase };
   for (let b = top.bpm - 0.03; b <= top.bpm + 0.03; b += 0.002) {
     const r = fold96(fps * 60 / b);
-    if (r.score > top.score * 0.999) top = { bpm: b, ...r };
+    if (r.score > fine.score) fine = { bpm: b, ...r };
   }
-  let bpm = top.bpm;
+  let bpm = fine.bpm;
   const rounded = Math.round(bpm);
   if (Math.abs(bpm - rounded) < 0.06) bpm = rounded; else bpm = Math.round(bpm * 100) / 100;
-  // recompute phase with the final bpm
+  // recompute phase with the final bpm (parabolic sub-bin interpolation)
   const P = fps * 60 / bpm;
-  const fin = fold96(P);
+  const fin = fold96(P, true);
   const beat = 60 / bpm;
   let offset = (fin.phase * P) / fps;
   offset = ((offset % beat) + beat) % beat;
@@ -810,7 +829,8 @@ export function analyzeStructure(waveform, bpm, gridOffset, { startTime = 0, end
 
 export function analyzeTrack(mono, sr) {
   const waveform = computeWaveform(mono, sr);
-  const beat = detectBpm(mono, sr);
+  const envOut = { lowEnv: null };
+  const beat = detectBpm(mono, sr, { _envOut: envOut });
   const key = detectKey(mono, sr);
   const trim = trimPoints(mono, sr);
   let energy = 0;
@@ -823,7 +843,7 @@ export function analyzeTrack(mono, sr) {
   const structure = barFeatures.length ? analyzeStructure(waveform, beat.bpm, beat.offset, { ...trim, duration, barFeatures }) : firstPass;
   const vad = detectVocalActivity(mono, sr);
   const { groove, embedding } = computeGrooveAndEmbedding(mono, sr, beat.bpm, structure.downbeat, barFeatures, vad.map);
-  const tempoMap = beat.bpm ? detectElasticGrid(mono, sr, beat.bpm, beat.offset) : null;
+  const tempoMap = beat.bpm ? detectElasticGrid(mono, sr, beat.bpm, beat.offset, envOut.lowEnv) : null;
   // loudness: one K-weighted pass over the mono mix (measured as dual mono = as played on both speakers)
   const loud = trackLoudness(loudnessProfile(mono, sr), sr, structure.phrases, beat.bpm);
   structure.phrases = structure.phrases.map((p, i) => ({ ...p, lufs: loud.phraseLufs[i] }));

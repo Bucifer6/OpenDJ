@@ -25,9 +25,12 @@ import { analysisPatch } from './analysis-core.js';
 import { AnalysisQueue, needsAnalysis, isUndecodable } from './analysis-queue.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const GAP_IDLE = 150, GAP_PLAYING = 2500; // ms between tracks
+const GAP_IDLE = 400, GAP_PLAYING = 4000; // ms between tracks
 const LAG_BUSY = 60; // ms of timer lag that counts as "the page is busy"
 const SLICE_MS = 5; // main-thread budget per mix-down slice (one slice per frame)
+const MAX_AUTO_DURATION = 20 * 60; // skip automatic background decode of >20 min mixes (would spike ~400+ MB PCM)
+const MAX_AUTO_BYTES = 100 * 1024 * 1024; // 100 MB safety cap for automatic background fetch
+const WORKER_RECYCLE_EVERY = 8; // periodically recycle analysis worker to keep heap bounded during long batches
 
 export class BackgroundAnalyser extends Emitter {
   constructor(app) {
@@ -38,6 +41,8 @@ export class BackgroundAnalyser extends Emitter {
     this.userStopped = false; // cancelled by the user: don't restart by itself until the next scan / explicit request
     this._failed = new Set(); // failed this session (network etc.): not retried automatically
     this._forced = new Set(); // "Analyse again": re-analysed even though the library (re-synced from the server) says analysed
+    this._explicit = new Set(); // explicitly user-requested tracks (bypass automatic duration/size cap)
+    this._workerRuns = 0;
     this._abort = null;
   }
 
@@ -55,13 +60,17 @@ export class BackgroundAnalyser extends Emitter {
   }
 
   /** "Analyse selected" / "Analyse all": explicit, so it also re-tries unreadable and includes streaming tracks. */
-  request(tracks, { force = false } = {}) {
+  request(tracks, { force = false, auto = false } = {}) {
     this.userStopped = false;
     const ids = [];
     for (const t of tracks) {
       if (!t) continue;
       if (force && t.analyzed && !t.bpmLocked && !t.gridLocked) { t.analyzed = false; this._forced.add(t.id); }
-      if (needsAnalysis(t, { explicit: true })) { this._failed.delete(t.id); ids.push(t.id); }
+      if (needsAnalysis(t, { explicit: true })) {
+        this._failed.delete(t.id);
+        if (!auto) this._explicit.add(t.id);
+        ids.push(t.id);
+      }
     }
     this.queue.add(ids, { front: true });
     if (this.queue.size) this.start();
@@ -70,7 +79,7 @@ export class BackgroundAnalyser extends Emitter {
 
   cancel() {
     this.userStopped = true;
-    this.queue.clear(); this._forced.clear();
+    this.queue.clear(); this._forced.clear(); this._explicit.clear();
     this._abort?.abort();
     this.emit('progress', this.status());
   }
@@ -109,8 +118,13 @@ export class BackgroundAnalyser extends Emitter {
       let ok = false;
       try { ok = await this.analyseTrack(t); } catch (e) { console.warn('analysis failed', t.title, e); }
       this._forced.delete(id);
+      this._explicit.delete(id);
       this.queue.finished(ok);
       if (!ok) this._failed.add(id);
+      if (ok && ++this._workerRuns >= WORKER_RECYCLE_EVERY && this._worker) {
+        try { this._worker.terminate(); } catch { /* */ }
+        this._worker = null; this._workerRuns = 0;
+      }
       this.current = null;
       this.emit('progress', this.status());
       if (this.userStopped) return;
@@ -184,6 +198,8 @@ export class BackgroundAnalyser extends Emitter {
 
   /** Analyse one track like Deck.load does and save the result. Resolves true on success. */
   async analyseTrack(track) {
+    const manual = this._explicit.has(track.id) || this._forced.has(track.id);
+    if (!manual && Number(track.duration) > MAX_AUTO_DURATION) return false;
     const ac = new AbortController(); this._abort = ac;
     try {
       const res = await fetch(api.streamUrl(track.id), { signal: ac.signal, credentials: 'same-origin' });
@@ -192,12 +208,16 @@ export class BackgroundAnalyser extends Emitter {
         // 415: the server can't play this format at all (e.g. no FFmpeg): treat like an undecodable file
         throw Object.assign(new Error(msg), { undecodable: res.status === 415 || res.status === 422 });
       }
+      const len = Number(res.headers?.get?.('content-length') || 0);
+      if (!manual && len > MAX_AUTO_BYTES) { ac.abort(); return false; }
       let ab = await res.arrayBuffer();
       if (!ab.byteLength) throw Object.assign(new Error('Empty file'), { undecodable: true });
       await this._holdWhileLoading(ac.signal); // the decode hand-over below is the one long task: not while a deck loads
       if (ac.signal.aborted) return false;
       let buf;
-      try { buf = await this.engine.ctx.decodeAudioData(ab); } catch (e) { throw Object.assign(e instanceof Error ? e : new Error(String(e)), { undecodable: true }); } finally { ab = null; }
+      // Decode on an isolated short-lived OfflineAudioContext when available so background decodes don't grow the live AudioContext heap
+      const decCtx = typeof OfflineAudioContext === 'function' ? new OfflineAudioContext(1, 1, this.engine.ctx.sampleRate || 44100) : this.engine.ctx;
+      try { buf = await decCtx.decodeAudioData(ab); } catch (e) { throw Object.assign(e instanceof Error ? e : new Error(String(e)), { undecodable: true }); } finally { ab = null; }
       await yieldTask(); // don't add work to the decode hand-over task
       if (ac.signal.aborted) return false;
       const duration = buf.duration, sampleRate = buf.sampleRate;

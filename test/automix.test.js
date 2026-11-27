@@ -422,7 +422,11 @@ test('phase keeper: measures the beat offset and bends the incoming deck back, s
   assert.ok(Math.abs(phaseErrorSeconds(out, inn, 0) - -0.01) < 1e-9, 'incoming 10 ms ahead');
   inn._pos = 19.99; assert.ok(Math.abs(phaseErrorSeconds(out, inn, 0) - 0.01) < 1e-9, 'incoming 10 ms behind');
   inn._pos = 20.26; assert.ok(Math.abs(phaseErrorSeconds(out, inn, 0) - 0.24) < 1e-9 || Math.abs(phaseErrorSeconds(out, inn, 0) + 0.24) < 1e-9);
-  assert.equal(phaseErrorSeconds(out, phaseDeck(1, { bpm: 60 }), 0), null, 'half time: not compared');
+  const halfAligned = phaseDeck(1, { pos: 20, bpm: 60 });
+  assert.ok(Math.abs(phaseErrorSeconds(out, halfAligned, 0)) < 1e-9, 'half time: aligned beats have 0 phase error');
+  halfAligned._pos = 19.99;
+  assert.ok(Math.abs(phaseErrorSeconds(out, halfAligned, 0) - 0.01) < 1e-9, 'half time: measures 10 ms lag');
+  assert.equal(phaseErrorSeconds(out, phaseDeck(1, { bpm: 95 }), 0), null, 'non-harmonic tempo: not compared');
 
   const app = fakeApp(); let now = 1;
   app.engine.ctx = { get currentTime() { return now; } };
