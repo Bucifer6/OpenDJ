@@ -70,8 +70,8 @@ class DeckProcessor extends AudioWorkletProcessor {
     this.ghost2 = { n: 0, p: 0, v: 0, w: 0 }; // second grain when leaving key-lock granular playback
     this.fin = 1;             // fade-in of the main play head after a jump / start
     this.grains = [{ p: 0, age: 0 }, { p: 0, age: GRAIN / 2 }];
-    this.pv = new StereoPhaseVocoder();
-    this.pvSend = new StereoPhaseVocoder();
+    this.pv = null;      // lazily allocated on first key-lock/pitch frame
+    this.pvSend = null;  // lazily allocated on first stem FX send under key lock
     this.pvOut = new Float32Array(2);
     this.pvSendOut = new Float32Array(2);
     this.pvFade = 0; this.pvFadePos = 0; this.pvFadeSpeed = 0; this.pvFadeRead = 0; this.pvFadePitch = 1;
@@ -79,6 +79,14 @@ class DeckProcessor extends AudioWorkletProcessor {
     this.rollSchedule = null; // sample-accurate loop-roll step-down schedule [{ at, start, end }]
     this.counter = 0;
     this.seekSeq = 0;
+    this._idleReported = false;
+    // Reusable closures (zero per-sample allocations on the real-time audio thread)
+    this._useMix = false;
+    this._readMain = (x, out2) => {
+      if (this._useMix && this.stems) readStemMix(this.L, this.R, this.stems, this.stemCoef, x, this.len, out2);
+      else { out2[0] = this.sample(this.L, x); out2[1] = this.sample(this.R, x); }
+    };
+    this._readFx = (x, out2) => readStemMix(this.L, this.R, this.stems, this.sendCoef, x, this.len, out2);
     // AI stems: original + vocals/drums/bass (Int16), "other" = residual (see stems/stem-mix.js)
     this.stems = null;
     this.stemTarget = new Float32Array([1, 1, 1, 1]); this.stemCur = new Float32Array([1, 1, 1, 1]); this.stemCoef = stemCoefficients(this.stemCur);
@@ -102,10 +110,10 @@ class DeckProcessor extends AudioWorkletProcessor {
         this.pos = this.shadow = 0; this.playing = false; this.curRate = 0; this.loop = null; this.brake = 0; this.spin = null;
         this.scratch = null; this.dir = 1; this.slip = false; this.endedSent = false; this.stems = null; this.ghost.n = 0; this.ghost2.n = 0; this.fin = 1;
         this.hand = null; this.coast = null; this.rateRamp = null; this.armed = null; this.alt = null; this.swap = null; this.fout = 0; this.slipStop = false; this.motorRamp = this.releaseRamp = false;
-        this.rollSchedule = null; this.pvFade = 0; this.pv.reset(); this.pvSend.reset();
+        this.rollSchedule = null; this.pvFade = 0; this.pv?.reset(); this.pvSend?.reset(); this._idleReported = false;
         break;
       case 'unload': this.L = this.R = null; this.len = 0; this.playing = false; this.scratch = null; this.dir = 1; this.slip = false; this.stems = null; this.spin = null; this.ghost.n = 0; this.ghost2.n = 0;
-        this.hand = null; this.coast = null; this.rateRamp = null; this.armed = null; this.alt = null; this.swap = null; this.fout = 0; this.rollSchedule = null; this.pvFade = 0; this.pv.reset(); this.pvSend.reset(); break;
+        this.hand = null; this.coast = null; this.rateRamp = null; this.armed = null; this.alt = null; this.swap = null; this.fout = 0; this.rollSchedule = null; this.pvFade = 0; this.pv = null; this.pvSend = null; this._idleReported = false; break;
       case 'ping': this.port.postMessage({ type: 'pong', id: m.id }); break; // sync point for tests
       case 'stems': // [{ L, R }] Int16 vocals, drums, bass with exactly the original's length (else ignored: stale load)
         this.stems = Array.isArray(m.value) && m.value.length && m.value.every((x) => x.L.length === this.len && x.R.length === this.len) ? m.value : null;
@@ -145,7 +153,7 @@ class DeckProcessor extends AudioWorkletProcessor {
         f = Math.max(0, Math.min(Math.max(0, this.len - 1), f));
         if (Math.abs(f - this.pos) > 1) this.startGhost();
         if (this.hand) this.hand.anchor += f - this.pos; // a jump under the hand: the hand keeps its place on the record
-        this.pos = f; if (!this.slip) this.shadow = this.pos; this.resetGrains(); break;
+        this.pos = f; if (!this.slip) this.shadow = this.pos; this.resetGrains(); this._idleReported = false; break;
       }
       // (no grain reset: jumping the grains to the play head mid-grain clicked; a mode change is cross-faded in process())
       case 'keylock': this.keyLock = m.value; break;
@@ -336,7 +344,7 @@ class DeckProcessor extends AudioWorkletProcessor {
     return target + best;
   }
 
-  resetGrains() { this.grains[0].p = this.pos; this.grains[0].age = 0; this.grains[1].p = this.pos; this.grains[1].age = GRAIN / 2; this.pvFade = 0; this.pv.reset(); this.pvSend.reset(); }
+  resetGrains() { this.grains[0].p = this.pos; this.grains[0].age = 0; this.grains[1].p = this.pos; this.grains[1].age = GRAIN / 2; this.pvFade = 0; this.pv?.reset(); this.pvSend?.reset(); }
 
   // 4-point Hermite interpolation
   sample(buf, x) {
@@ -356,6 +364,17 @@ class DeckProcessor extends AudioWorkletProcessor {
     if (fL) { fL.fill(0); if (fR !== fL) fR.fill(0); }
     if (this.swap && this.fout <= 0) this.doSwap();
     if (!this.L) { oL.fill(0); if (oR !== oL) oR.fill(0); return true; }
+    // Fast idle path: stopped deck with no active fades/scratches/coasting/ramps skips the 128-sample loop and IPC spam
+    if (!this.playing && this.curRate === 0 && !this.scratch && this.brake === 0 && !this.spin && !this.coast && this.ghost.n === 0 && this.ghost2.n === 0 && this.pvFade === 0 && !this.swap && this.startAt == null && !this.rateRamp && !this.rollSchedule) {
+      oL.fill(0); if (oR !== oL) oR.fill(0);
+      if (!this._idleReported) {
+        this._idleReported = true;
+        this.counter = 0;
+        this.port.postMessage({ type: 'pos', frame: this.pos, shadow: this.shadow, rate: 0, playing: false, time: currentTime + frames / sampleRate, alt: !!this.alt, tempo: this.rate, seekSeq: this.seekSeq });
+      }
+      return true;
+    }
+    this._idleReported = false;
     let stems = this.stems; const mo = this.mo, so = this.so;
 
     for (let n = 0; n < frames; n++) {
@@ -440,22 +459,20 @@ class DeckProcessor extends AudioWorkletProcessor {
           } else {
             this.pvFade = 0;
             this.startGhost(this.curRate * this.step);
-            this.pv.reset(); this.pvSend.reset();
+            this.pv?.reset(); this.pvSend?.reset();
           }
           this.wasGranular = granular;
         }
-        const readMain = (x, out2) => {
-          if (useMix) readStemMix(this.L, this.R, stems, this.stemCoef, x, this.len, out2);
-          else { out2[0] = this.sample(this.L, x); out2[1] = this.sample(this.R, x); }
-        };
+        this._useMix = useMix;
         if (granular) {
           this.lastRead = readSpeed; this.lastSpeed = speed; this.lastPitch = this.pitch;
           const readStep = this.step * this.dir * readSpeed;
-          this.pv.nextSample(readMain, this.pos, speed, readStep, this.pitch, this.pvOut);
+          const pv = (this.pv ||= new StereoPhaseVocoder());
+          pv.nextSample(this._readMain, this.pos, speed, readStep, this.pitch, this.pvOut);
           l = this.pvOut[0]; r = this.pvOut[1];
           if (useSend) {
-            const readFx = (x, out2) => readStemMix(this.L, this.R, stems, this.sendCoef, x, this.len, out2);
-            this.pvSend.nextSample(readFx, this.pos, speed, readStep, this.pitch, this.pvSendOut);
+            const pvSend = (this.pvSend ||= new StereoPhaseVocoder());
+            pvSend.nextSample(this._readFx, this.pos, speed, readStep, this.pitch, this.pvSendOut);
             sl = this.pvSendOut[0]; sr = this.pvSendOut[1];
           }
         } else {
@@ -471,32 +488,43 @@ class DeckProcessor extends AudioWorkletProcessor {
       if (av < VEL_KNEE && !(this.keyLock && !this.scratch && this.brake === 0 && !this.spin && !this.coast && !this.motorRamp && this.curRate > 0)) { const g = av / VEL_KNEE; l *= g; r *= g; sl *= g; sr *= g; }
       if (this.fin < 1) { const g = 0.5 - 0.5 * Math.cos(Math.PI * this.fin); l *= g; r *= g; sl *= g; sr *= g; this.fin = Math.min(1, this.fin + 1 / this.FADE); }
       if (this.pvFade > 0) {
-        if (this.swap) { this.pvFade = 0; this.pv.reset(); this.pvSend.reset(); }
+        if (this.swap || !this.pv) { this.pvFade = 0; this.pv?.reset(); this.pvSend?.reset(); }
         else {
           const g = 0.5 - 0.5 * Math.cos(Math.PI * this.pvFade / this.FADE);
-          const readMainFade = (x, out2) => {
-            if (useMix) readStemMix(this.L, this.R, stems, this.stemCoef, x, this.len, out2);
-            else { out2[0] = this.sample(this.L, x); out2[1] = this.sample(this.R, x); }
-          };
-          this.pv.nextSample(readMainFade, this.pvFadePos, this.pvFadeSpeed, this.pvFadeRead, this.pvFadePitch, this.pvOut);
+          this._useMix = useMix;
+          this.pv.nextSample(this._readMain, this.pvFadePos, this.pvFadeSpeed, this.pvFadeRead, this.pvFadePitch, this.pvOut);
           l += this.pvOut[0] * g; r += this.pvOut[1] * g;
           this.pvFadePos += this.pvFadeSpeed;
-          if (--this.pvFade === 0) { this.pv.reset(); this.pvSend.reset(); }
+          if (--this.pvFade === 0) { this.pv.reset(); this.pvSend?.reset(); }
         }
       }
       if (this.swap) { // fading out before a buffer swap (scratch sample in / out): silent once the fade is done
         const g = this.fout > 0 ? 0.5 - 0.5 * Math.cos(Math.PI * this.fout / this.FADE) : 0; l *= g; r *= g; sl *= g; sr *= g;
         if (this.fout > 0) this.fout--;
       }
-      for (const gh of [this.ghost, this.ghost2]) {
-        if (gh.n <= 0) continue;
-        if (this.swap) { gh.n = 0; continue; }
-        const g = (0.5 - 0.5 * Math.cos(Math.PI * gh.n / this.FADE)) * gh.w; // raised-cosine fade-out
-        if (gh.p >= 0 && gh.p < this.len) {
-          if (useMix) { readStemMix(this.L, this.R, stems, this.stemCoef, gh.p, this.len, mo); l += mo[0] * g; r += mo[1] * g; }
-          else { l += this.sample(this.L, gh.p) * g; r += this.sample(this.R, gh.p) * g; }
+      if (this.ghost.n > 0) {
+        const gh = this.ghost;
+        if (this.swap) gh.n = 0;
+        else {
+          const g = (0.5 - 0.5 * Math.cos(Math.PI * gh.n / this.FADE)) * gh.w;
+          if (gh.p >= 0 && gh.p < this.len) {
+            if (useMix) { readStemMix(this.L, this.R, stems, this.stemCoef, gh.p, this.len, mo); l += mo[0] * g; r += mo[1] * g; }
+            else { l += this.sample(this.L, gh.p) * g; r += this.sample(this.R, gh.p) * g; }
+          }
+          gh.p += gh.v; gh.n--;
         }
-        gh.p += gh.v; gh.n--;
+      }
+      if (this.ghost2.n > 0) {
+        const gh = this.ghost2;
+        if (this.swap) gh.n = 0;
+        else {
+          const g = (0.5 - 0.5 * Math.cos(Math.PI * gh.n / this.FADE)) * gh.w;
+          if (gh.p >= 0 && gh.p < this.len) {
+            if (useMix) { readStemMix(this.L, this.R, stems, this.stemCoef, gh.p, this.len, mo); l += mo[0] * g; r += mo[1] * g; }
+            else { l += this.sample(this.L, gh.p) * g; r += this.sample(this.R, gh.p) * g; }
+          }
+          gh.p += gh.v; gh.n--;
+        }
       }
       oL[n] = l; if (oR !== oL) oR[n] = r;
       if (useSend) { fL[n] = sl; if (fR !== fL) fR[n] = sr; }

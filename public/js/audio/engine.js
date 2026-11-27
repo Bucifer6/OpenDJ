@@ -99,29 +99,13 @@ export class Channel extends Emitter {
     this.cueSend = ctx.createGain(); this.cueSend.gain.value = 0; this.cueSend2 = null; this.sendG = null;
     this.meter = ctx.createAnalyser(); this.meter.fftSize = 512;
     this.meterBuf = new Float32Array(this.meter.fftSize);
-    // Quick stems (DSP): split into mid (L+R) and side (L-R). Centred vocals live in the mid signal's voice band.
-    // VOCAL scales that band with a wide peaking EQ; INST scales the side signal and the mid's lows/highs.
-    // All filters are minimum-phase EQs, so with both knobs at 1 the signal passes unchanged.
+    // Quick stems (DSP): lazily built only when VOCAL or INST is turned down (<1) without AI stems.
+    // At default unity (1, 1) the channel bypasses M/S split & 3 biquads completely (zero idle DSP cost, bit-exact).
     this.stemIn = ctx.createGain();
-    const split = ctx.createChannelSplitter(2);
-    const mid = ctx.createGain(), side = ctx.createGain();
-    for (const n of [mid, side]) { n.channelCount = 1; n.channelCountMode = 'explicit'; }
-    const lM = ctx.createGain(), rM = ctx.createGain(), lS = ctx.createGain(), rS = ctx.createGain();
-    lM.gain.value = 0.5; rM.gain.value = 0.5; lS.gain.value = 0.5; rS.gain.value = -0.5;
-    this.stemIn.connect(split);
-    split.connect(lM, 0); split.connect(rM, 1); split.connect(lS, 0); split.connect(rS, 1);
-    lM.connect(mid); rM.connect(mid); lS.connect(side); rS.connect(side);
-    this.instLow = ctx.createBiquadFilter(); this.instLow.type = 'lowshelf'; this.instLow.frequency.value = 220;
-    this.instHigh = ctx.createBiquadFilter(); this.instHigh.type = 'highshelf'; this.instHigh.frequency.value = 5000;
-    this.vocBand = ctx.createBiquadFilter(); this.vocBand.type = 'peaking'; this.vocBand.frequency.value = 1100; this.vocBand.Q.value = 0.45;
-    this.sideGain = ctx.createGain();
-    const sideNeg = ctx.createGain(); sideNeg.gain.value = -1;
-    mid.connect(this.instLow); this.instLow.connect(this.instHigh); this.instHigh.connect(this.vocBand);
-    side.connect(this.sideGain); this.sideGain.connect(sideNeg);
-    const merge = ctx.createChannelMerger(2);
-    this.vocBand.connect(merge, 0, 0); this.vocBand.connect(merge, 0, 1);
-    this.sideGain.connect(merge, 0, 0); sideNeg.connect(merge, 0, 1);
-    this.stemOut = ctx.createGain(); merge.connect(this.stemOut);
+    this.stemOut = ctx.createGain();
+    this.stemIn.connect(this.stemOut);
+    this._quickStemsBuilt = false;
+    this._quickStemsEngaged = false;
     // Color FX: a sound-colour effect whose amount follows the filter knob (rekordbox-style)
     this.colorIn = ctx.createGain(); this.colorDry = ctx.createGain(); this.colorSend = ctx.createGain(); this.colorWet = ctx.createGain();
     this.colorSend.gain.value = 0; this.colorWet.gain.value = 0;
@@ -133,6 +117,7 @@ export class Channel extends Emitter {
     chain(this.eqOut, this.hpf[0], this.hpf[1], this.lpf[0], this.lpf[1], this.colorIn);
     this.fx.output.connect(this.fader); this.fx.output.connect(this.cuePre); this.fx.output.connect(this.meter);
     this.fader.connect(this.xf); this.xf.connect(this.busOut); this.busOut.connect(engine.musicBus);
+    this._busConnected = true;
     this.fader.connect(this.cuePostG);
     this.cuePre.connect(this.cueSrc); this.cuePostG.connect(this.cueSrc); this.cueSrc.connect(this.cueSend); this.cueSend.connect(engine.cueBus);
     // post-fader FX tails: the wet signal is summed after the faders (silent in pre-fader mode)
@@ -356,13 +341,17 @@ export class Channel extends Emitter {
     this.trimNode.gain.setTargetAtTime(dbToGain(s.trim * 12 + s.autoGain), t, k);
     if (!(this._eqHoldUntil > t) && !(this._autoHold && (this._autoHold.eqLow > t || this._autoHold.eqMid > t || this._autoHold.eqHigh > t))) this.eq?.set(s, t, k); // (a scheduled swap/curve is pending)
     const db = (v) => 20 * Math.log10(Math.max(0.01, v));
-    // AI stems (deck worklet) when the track has them, else the DSP "quick stems" approximation (fallback)
+    // AI stems (deck worklet) when the track has them, else lazy DSP "quick stems" (built only when VOC/INST < 1)
     const ai = !!this.aiStems, vocal = ai ? 1 : s.vocal, inst = ai ? 1 : s.inst;
     this.engine.decks?.[this.index]?.applyStemMacro?.(ai ? s.vocal : 1, ai ? s.inst : 1);
-    this.vocBand.gain.setTargetAtTime(db(vocal) - (inst < 1 ? db(inst) * 0.6 : 0), t, k); // keep vocals up when inst is cut
-    this.instLow.gain.setTargetAtTime(db(inst), t, k);
-    this.instHigh.gain.setTargetAtTime(db(inst), t, k);
-    this.sideGain.gain.setTargetAtTime(inst, t, k);
+    const wantQuick = vocal < 0.999 || inst < 0.999;
+    if (wantQuick && !this._quickStemsBuilt) this._ensureQuickStems();
+    if (this._quickStemsBuilt) {
+      this.vocBand.gain.setTargetAtTime(db(vocal) - (inst < 1 ? db(inst) * 0.6 : 0), t, k);
+      this.instLow.gain.setTargetAtTime(db(inst), t, k);
+      this.instHigh.gain.setTargetAtTime(db(inst), t, k);
+      this.sideGain.gain.setTargetAtTime(inst, t, k);
+    }
     // Color FX amount follows the filter knob (dead zone at 12 o'clock); the channel filter is gentler in colour modes
     const side = s.filter < 0 ? -1 : 1, x = Math.max(0, (Math.abs(s.filter) - FILTER_DEAD) / (1 - FILTER_DEAD));
     const cfx = this.colorFx;
@@ -389,6 +378,42 @@ export class Channel extends Emitter {
     this.cuePre.gain.setTargetAtTime(post ? 0 : 1, t, 0.005); this.cuePostG.gain.setTargetAtTime(post ? 1 : 0, t, 0.005);
     if (s.cue2 && !this.cueSend2 && this.engine.cueBus2) { this.cueSend2 = this.ctx.createGain(); this.cueSend2.gain.value = 0; this.cueSrc.connect(this.cueSend2); this.cueSend2.connect(this.engine.cueBus2); }
     this.cueSend2?.gain.setTargetAtTime(s.cue2 ? 1 : 0, t, 0.005);
+  }
+  /** Build the M/S quick-stems biquad graph on first use (saves 3 biquads + splitter/merger per channel when unused). */
+  _ensureQuickStems() {
+    if (this._quickStemsBuilt) return;
+    this._quickStemsBuilt = true;
+    const ctx = this.ctx;
+    try { this.stemIn.disconnect(this.stemOut); } catch { /* */ }
+    const split = ctx.createChannelSplitter(2);
+    const mid = ctx.createGain(), side = ctx.createGain();
+    for (const n of [mid, side]) { n.channelCount = 1; n.channelCountMode = 'explicit'; }
+    const lM = ctx.createGain(), rM = ctx.createGain(), lS = ctx.createGain(), rS = ctx.createGain();
+    lM.gain.value = 0.5; rM.gain.value = 0.5; lS.gain.value = 0.5; rS.gain.value = -0.5;
+    this.stemIn.connect(split);
+    split.connect(lM, 0); split.connect(rM, 1); split.connect(lS, 0); split.connect(rS, 1);
+    lM.connect(mid); rM.connect(mid); lS.connect(side); rS.connect(side);
+    this.instLow = ctx.createBiquadFilter(); this.instLow.type = 'lowshelf'; this.instLow.frequency.value = 220;
+    this.instHigh = ctx.createBiquadFilter(); this.instHigh.type = 'highshelf'; this.instHigh.frequency.value = 5000;
+    this.vocBand = ctx.createBiquadFilter(); this.vocBand.type = 'peaking'; this.vocBand.frequency.value = 1100; this.vocBand.Q.value = 0.45;
+    this.sideGain = ctx.createGain();
+    const sideNeg = ctx.createGain(); sideNeg.gain.value = -1;
+    mid.connect(this.instLow); this.instLow.connect(this.instHigh); this.instHigh.connect(this.vocBand);
+    side.connect(this.sideGain); this.sideGain.connect(sideNeg);
+    const merge = ctx.createChannelMerger(2);
+    this.vocBand.connect(merge, 0, 0); this.vocBand.connect(merge, 0, 1);
+    this.sideGain.connect(merge, 0, 0); sideNeg.connect(merge, 0, 1);
+    merge.connect(this.stemOut);
+  }
+  /** Connect or disconnect this channel's output from the music bus so unloaded hidden decks (3/4 in 2-deck mode) cost 0 DSP. */
+  setActive(on) {
+    on = !!on;
+    if (this._busConnected === on) return;
+    this._busConnected = on;
+    try {
+      if (on) { this.busOut.connect(this.engine.musicBus); this.fx.wetOut.connect(this.engine.musicBus); }
+      else { this.busOut.disconnect(this.engine.musicBus); this.fx.wetOut.disconnect(this.engine.musicBus); }
+    } catch { /* already connected/disconnected */ }
   }
   /** One-knob filter: amount x (0..1, dead zone removed), side -1 = low-pass, +1 = high-pass. */
   applyFilter(x, side, t, param = 0.5) {
@@ -481,12 +506,21 @@ export class Engine extends Emitter {
     // phones / small tablets: lighter EQ fallbacks (4-band as LR4)
     this.lowEnd = typeof navigator !== 'undefined' && ((navigator.hardwareConcurrency || 8) <= 4 || /Android|iPhone|iPad/i.test(navigator.userAgent || ''));
     this.buildGraph();
-    this.worker = new Worker(new URL('./analysis-worker.js', import.meta.url), { type: 'module' });
-    this.worker.onmessage = (e) => { const cb = this._analysisCb.get(e.data.id); this._analysisCb.delete(e.data.id); cb?.(e.data); };
+    this.worker = null; // lazily spawned on first analyze() and terminated when idle (saves ~25-35 MB RAM)
+    this._workerIdleT = null;
     await this.applyOutputs();
-    const tick = () => { this.tick(); this._raf = requestAnimationFrame(tick); };
+    let lastTick = 0;
+    const tick = (now = performance.now()) => {
+      this._raf = requestAnimationFrame(tick);
+      if (document.hidden) return;
+      const busy = this.automixDriving || this.decks.some((d) => d.playing || d.scratching);
+      const minMs = busy ? 32 : 200; // ~30 Hz when active, 5 Hz when idle (beats/FX still updated accurately)
+      if (now - lastTick < minMs) return;
+      lastTick = now;
+      this.tick();
+    };
     tick();
-    setInterval(() => { if (document.hidden) this.tick(); }, 50); // keep automix/sync alive when hidden
+    setInterval(() => { if (document.hidden && (this.automixDriving || this.decks.some((d) => d.playing))) this.tick(); }, 50); // keep automix/sync alive when hidden, sleep when idle
   }
 
   /** Build the mixer graph on this.ctx (also used offline by the tests with { decks: false }). */
@@ -666,6 +700,17 @@ export class Engine extends Emitter {
   resume() { if (this.ctx.state !== 'running') return this.ctx.resume(); }
 
   analyze(mono, sampleRate) {
+    clearTimeout(this._workerIdleT);
+    if (!this.worker) {
+      this.worker = new Worker(new URL('./analysis-worker.js', import.meta.url), { type: 'module' });
+      this.worker.onmessage = (e) => {
+        const cb = this._analysisCb.get(e.data.id); this._analysisCb.delete(e.data.id); cb?.(e.data);
+        if (this._analysisCb.size === 0) {
+          clearTimeout(this._workerIdleT);
+          this._workerIdleT = setTimeout(() => { if (this._analysisCb.size === 0 && this.worker) { this.worker.terminate(); this.worker = null; } }, 30_000);
+        }
+      };
+    }
     return new Promise((resolve, reject) => {
       const id = ++this._analysisId;
       this._analysisCb.set(id, (d) => (d.error ? reject(new Error(d.error)) : resolve(d)));

@@ -3,6 +3,8 @@
 //
 // Design:
 //   - N = 2048 FFT, 75 % overlap (hop Hs = 512), dual-Hann window (COLA sum = 1.5 -> scale = 2/3).
+//   - Packs real stereo L + i*R into a SINGLE complex FFT forward and a SINGLE complex IFFT inverse (2x faster than
+//     separate L/R FFTs with bit-exact mathematical equivalence).
 //   - Because DJ decks hold random-access audio buffers, each frame reads ahead so the window center (k = N/2)
 //     lines up with the exact deck playhead -> zero group delay relative to `DeckProcessor.pos` and beat grids.
 //   - Peak-locking (Laroche & Dolson identity phase locking) on the shared stereo power spectrum eliminates
@@ -36,7 +38,7 @@ for (let i = 0; i < HALF; i++) {
   SIN[i] = Math.sin(a);
 }
 
-/** In-place radix-2 Cooley-Tukey FFT (sign = -1 forward, +1 inverse without 1/N scaling). */
+/** In-place radix-2 Cooley-Tukey FFT (sign = -1 forward, +1 inverse with 1/N scaling). */
 export function fft2048(re, im, inverse = false) {
   for (let i = 0; i < PV_SIZE; i++) {
     const j = BITREV[i];
@@ -73,10 +75,12 @@ function wrapPhase(p) {
 
 export class StereoPhaseVocoder {
   constructor() {
-    this.reL = new Float32Array(PV_SIZE);
-    this.imL = new Float32Array(PV_SIZE);
-    this.reR = new Float32Array(PV_SIZE);
-    this.imR = new Float32Array(PV_SIZE);
+    this.zRe = new Float32Array(PV_SIZE);
+    this.zIm = new Float32Array(PV_SIZE);
+    this.reL = new Float32Array(BINS);
+    this.imL = new Float32Array(BINS);
+    this.reR = new Float32Array(BINS);
+    this.imR = new Float32Array(BINS);
     this.mag = new Float32Array(BINS);
     this.prevMag = new Float32Array(BINS);
     this.inPhase = new Float32Array(BINS);
@@ -110,41 +114,47 @@ export class StereoPhaseVocoder {
   }
 
   /**
-   * Synthesize one hop (PV_HOP samples) into the OLA ring starting at `writePos`.
+   * Synthesize one hop (PV_HOP samples) into the OLA ring starting at `this.olaPos`.
    * readStereo(srcFrame, out2): writes stereo sample at fractional source frame into out2[0..1].
-   * pos: playhead (source frames) at the START of this hop.
-   * tempoStep: source frames advanced per output sample (curRate * step * dir).
-   * readStep: source frames per analysis sample (readSpeed * step * dir).
-   * pitch: pitch shift ratio (2^(semitones/12)); != 1 enables formant preservation.
    */
   synthesizeFrame(readStereo, pos, tempoStep, readStep, pitch, resetPhase = false) {
-    const { reL, imL, reR, imR, mag, prevMag, inPhase, prevInPhase, synthPhase, prevSynthPhase, tmp } = this;
+    const { zRe, zIm, reL, imL, reR, imR, mag, prevMag, inPhase, prevInPhase, synthPhase, prevSynthPhase, tmp } = this;
     // Align window center (k = HALF) to the deck playhead at t + HALF output samples: zero latency!
     const srcStart = pos + HALF * (tempoStep - readStep);
     for (let i = 0; i < PV_SIZE; i++) {
       readStereo(srcStart + i * readStep, tmp);
       const w = HANN[i];
-      reL[i] = tmp[0] * w; imL[i] = 0;
-      reR[i] = tmp[1] * w; imR[i] = 0;
+      zRe[i] = tmp[0] * w;
+      zIm[i] = tmp[1] * w;
     }
 
-    fft2048(reL, imL, false);
-    fft2048(reR, imR, false);
+    // Single complex FFT for both real stereo channels (Z = L + i*R)
+    fft2048(zRe, zIm, false);
 
-    // 1) Shared stereo power spectrum + dominant phase + spectral flux for transient detection
+    // Unpack L(k) and R(k) via conjugate symmetry + compute shared stereo magnitude & spectral flux
+    reL[0] = zRe[0]; imL[0] = 0; reR[0] = zIm[0]; imR[0] = 0;
+    reL[HALF] = zRe[HALF]; imL[HALF] = 0; reR[HALF] = zIm[HALF]; imR[HALF] = 0;
+    for (let k = 1; k < HALF; k++) {
+      const nk = PV_SIZE - k;
+      const zr = zRe[k], zi = zIm[k], nr = zRe[nk], ni = zIm[nk];
+      reL[k] = 0.5 * (zr + nr);
+      imL[k] = 0.5 * (zi - ni);
+      reR[k] = 0.5 * (zi + ni);
+      imR[k] = 0.5 * (nr - zr);
+    }
+
     let flux = 0, magSum = 1e-6;
     for (let k = 0; k < BINS; k++) {
-      const mL = Math.hypot(reL[k], imL[k]);
-      const mR = Math.hypot(reR[k], imR[k]);
-      const m = Math.hypot(mL, mR);
+      const rl = reL[k], il = imL[k], rr = reR[k], ir = imR[k];
+      const p2 = rl * rl + il * il + rr * rr + ir * ir;
+      const m = Math.sqrt(p2);
       mag[k] = m;
       magSum += m;
       const d = m - prevMag[k];
       if (d > 0) flux += d;
-      // Sum channel phase (falls back to L if L and R cancel)
-      const sRe = reL[k] + reR[k], sIm = imL[k] + imR[k];
-      if (sRe * sRe + sIm * sIm > 0.06 * m * m) inPhase[k] = Math.atan2(sIm, sRe);
-      else inPhase[k] = Math.atan2(imL[k], reL[k]);
+      const sRe = rl + rr, sIm = il + ir;
+      if (sRe * sRe + sIm * sIm > 0.06 * p2) inPhase[k] = Math.atan2(sIm, sRe);
+      else inPhase[k] = Math.atan2(il, rl);
     }
     const normFlux = flux / magSum;
     const isTransient = resetPhase || (this.fluxAvg > 0 && normFlux > Math.max(0.28, this.fluxAvg * 2.35));
@@ -155,25 +165,22 @@ export class StereoPhaseVocoder {
     if (doFormant) {
       const { logEnv, smoothEnv } = this;
       for (let k = 0; k < BINS; k++) logEnv[k] = Math.log(mag[k] + 1e-5);
-      // Smooth log spectral envelope over ±10 bins (~230 Hz half-width) via prefix-free running sum
       const R = 10;
       let sum = 0;
-      for (let k = 0; k <= R && k < BINS; k++) sum += logEnv[k];
+      for (let k = 0; k <= R; k++) sum += logEnv[k];
       for (let k = 0; k < BINS; k++) {
-        const hi = k + R, lo = k - R - 1;
-        if (hi < BINS && k > 0) sum += logEnv[hi];
-        if (lo >= 0) sum -= logEnv[lo];
-        const cnt = Math.min(BINS - 1, k + R) - Math.max(0, k - R) + 1;
-        smoothEnv[k] = sum / cnt;
+        if (k + R < BINS && k > 0) sum += logEnv[k + R];
+        if (k - R - 1 >= 0) sum -= logEnv[k - R - 1];
+        const count = Math.min(BINS - 1, k + R) - Math.max(0, k - R) + 1;
+        smoothEnv[k] = sum / count;
       }
-      // Blend formant compensation smoothly by pitch shift magnitude (full above ~0.5 semitone)
       const amt = Math.min(1, Math.abs(Math.log2(pitch)) * 18);
       for (let k = 2; k < BINS - 1; k++) {
         const kp = k * pitch;
         if (kp >= BINS - 1) continue;
         const ki = Math.floor(kp), frac = kp - ki;
         const target = smoothEnv[ki] * (1 - frac) + smoothEnv[ki + 1] * frac;
-        const diff = Math.max(-1.6, Math.min(1.6, (target - smoothEnv[k]) * amt)); // clamped ±14 dB
+        const diff = Math.max(-1.6, Math.min(1.6, (target - smoothEnv[k]) * amt));
         const g = Math.exp(diff);
         reL[k] *= g; imL[k] *= g;
         reR[k] *= g; imR[k] *= g;
@@ -185,7 +192,6 @@ export class StereoPhaseVocoder {
     if (isTransient) {
       for (let k = 0; k < BINS; k++) synthPhase[k] = inPhase[k];
     } else {
-      // Find local spectral peaks
       const peaks = this.peaks;
       let nPeaks = 0;
       for (let k = 1; k < BINS - 1; k++) {
@@ -195,7 +201,6 @@ export class StereoPhaseVocoder {
 
       const invHa = Math.abs(ha) > 1e-6 ? 1 / ha : 1 / PV_HOP;
       const freqStep = TAU / PV_SIZE;
-      let pIdx = 0;
       for (let p = 0; p < nPeaks; p++) {
         const pk = peaks[p];
         const expected = freqStep * pk * ha;
@@ -204,7 +209,6 @@ export class StereoPhaseVocoder {
         const sPh = wrapPhase(prevSynthPhase[pk] + omega * PV_HOP);
         const rot = sPh - inPhase[pk];
         const c = Math.cos(rot), s = Math.sin(rot);
-        // Region of influence: midpoint between previous peak and next peak
         const lo = p === 0 ? 0 : (peaks[p - 1] + pk + 1) >> 1;
         const hi = p === nPeaks - 1 ? BINS - 1 : (pk + peaks[p + 1]) >> 1;
         for (let k = lo; k <= hi; k++) {
@@ -216,20 +220,22 @@ export class StereoPhaseVocoder {
             reR[k] = rr * c - ir * s; imR[k] = rr * s + ir * c;
           }
         }
-        pIdx = hi;
       }
-      void pIdx;
     }
 
-    // Mirror conjugate symmetry for real-valued IFFT
-    imL[0] = 0; imL[HALF] = 0; imR[0] = 0; imR[HALF] = 0;
+    // Repack Z(k) = L(k) + i*R(k) and Z(N-k) = L*(k) + i*R*(k) for single complex IFFT
+    zRe[0] = reL[0]; zIm[0] = reR[0];
+    zRe[HALF] = reL[HALF]; zIm[HALF] = reR[HALF];
     for (let k = 1; k < HALF; k++) {
-      reL[PV_SIZE - k] = reL[k]; imL[PV_SIZE - k] = -imL[k];
-      reR[PV_SIZE - k] = reR[k]; imR[PV_SIZE - k] = -imR[k];
+      const nk = PV_SIZE - k;
+      const rl = reL[k], il = imL[k], rr = reR[k], ir = imR[k];
+      zRe[k] = rl - ir;
+      zIm[k] = il + rr;
+      zRe[nk] = rl + ir;
+      zIm[nk] = rr - il;
     }
 
-    fft2048(reL, imL, true);
-    fft2048(reR, imR, true);
+    fft2048(zRe, zIm, true);
 
     // Overlap-add into circular output buffer with synthesis Hann window + COLA scale
     const { olaL, olaR } = this;
@@ -238,11 +244,10 @@ export class StereoPhaseVocoder {
     for (let i = 0; i < PV_SIZE; i++) {
       const idx = (base + i) & mask;
       const w = HANN[i] * COLA;
-      olaL[idx] += reL[i] * w;
-      olaR[idx] += reR[i] * w;
+      olaL[idx] += zRe[i] * w;
+      olaR[idx] += zIm[i] * w;
     }
 
-    // Save state for next hop
     prevMag.set(mag);
     prevInPhase.set(inPhase);
     prevSynthPhase.set(synthPhase);
@@ -253,12 +258,10 @@ export class StereoPhaseVocoder {
   prime(readStereo, pos, tempoStep, readStep, pitch) {
     this.reset();
     const mask = PV_SIZE - 1;
-    // Synthesize frames starting at -3*hop, -2*hop, -1*hop, and 0*hop so all 4 windows overlap at olaPos = 0
     for (let f = -3; f <= 0; f++) {
       const framePos = pos + f * PV_HOP * tempoStep;
       this.olaPos = (f * PV_HOP) & mask;
       this.synthesizeFrame(readStereo, framePos, tempoStep, readStep, pitch, f === -3);
-      // Clear samples strictly before the final read start (0) that wrapped around
       if (f < 0) {
         for (let i = 0; i < PV_HOP; i++) {
           const idx = (this.olaPos + i) & mask;

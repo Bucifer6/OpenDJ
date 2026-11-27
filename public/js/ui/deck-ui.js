@@ -442,13 +442,21 @@ export function buildDeck(app, deck) {
   deck.on('tempo', () => tempoFader.render());
   deck.on('tempo-range', () => { rangeSel.value = String(deck.tempoRange); tempoFader.render(); });
 
-  let lastFrame = 0;
+  let lastFrame = 0, lastIdleSig = '';
   const setText = (node, txt) => { if (node._t !== txt) { node._t = txt; node.textContent = txt; } };
   const setClass = (node, cls, on) => { on = !!on; if (node['_c' + cls] !== on) { node['_c' + cls] = on; node.classList.toggle(cls, on); } };
   root.frame = (now) => {
     jog.draw(now); overview.draw(now); drawPhase();
     if (now - lastFrame < 50) return; lastFrame = now;
     const pos = deck.positionAt(smoothTime(deck.ctx, now));
+    const m = app.engine.masterDeck(deck);
+    if (!deck.playing && !deck.loading && !deck.scratching) {
+      const idleSig = `${pos.toFixed(2)}|${deck.tempo}|${deck.bpm}|${deck.track?.id || ''}|${deck.loop?.active ? 1 : 0}|${deck.jumpSize}|${deck.quantizeDiv}|${deck.vinyl.quartz ? 1 : 0}|${deck.loopAdjust || ''}|${m?.playingCamelot || ''}`;
+      if (idleSig === lastIdleSig) return;
+      lastIdleSig = idleSig;
+    } else {
+      lastIdleSig = '';
+    }
     setText(elapsed, fmtTime(pos));
     setText(remain, deck.track && deck.duration > 0 ? fmtTime(deck.duration - pos, true) : '00:00.0'); // no "-00:00.0" on empty decks
     setClass(remain, 'warn', deck.duration > 0 && deck.duration - pos < 30 && deck.playing);
@@ -459,7 +467,6 @@ export function buildDeck(app, deck) {
     setText(jumpLabel, fmtBeats(deck.jumpSize)); setText(qDivLabel, fmtDiv(deck.quantizeDiv));
     setClass(root, 'quartz', deck.vinyl.quartz); setClass(root, 'loop-adjust', !!deck.loopAdjust);
     // harmonic hint vs. master deck
-    const m = app.engine.masterDeck(deck);
     setClass(keyBadge, 'compatible', m && deck.playingCamelot && m.playingCamelot && camelotCompatible(deck.playingCamelot, m.playingCamelot));
     if (!deck.keyLock && deck.tempo !== deck._lastKeyTempo) { deck._lastKeyTempo = deck.tempo; updateMeta(); }
     renderState();

@@ -115,7 +115,7 @@ function paintBands(g, w, pal, x0, x1, H, binAt, opts = {}) {
 
 const newCanvas = (w, h) => (typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h }));
 const TILE = 256; // css px per tile (times render DPR)
-const MAX_TILES = 48;
+const MAX_TILES = 20; // >2.5x viewport width; cuts offscreen canvas/GPU memory by ~60% per deck
 const waveDpr = () => Math.min(2, devicePixelRatio || 1); // keep dense displays crisp without multiplying raster cost
 
 export class DetailWaveform {
@@ -240,7 +240,9 @@ export class DetailWaveform {
       const x1 = X(loop.start), x2 = X(loop.end);
       g.fillStyle = loop.active ? 'rgba(46, 212, 122, 0.20)' : 'rgba(46, 212, 122, 0.08)'; g.fillRect(x1, 0, x2 - x1, H);
     }
-    if (w) {
+    if (!w) {
+      if (this.tiles.size || this.tileKey) { this.tiles.clear(); this.pendingTiles.clear(); this.tileQueue.length = 0; this.tileKey = ''; }
+    } else {
       const key = `${deck.track?.id}|${H}|${base.toFixed(3)}|${this.wfStyle()}/${this.wfShape()}|${themeRev}|${w.peak.length}`;
       if (key !== this.tileKey) { this.tiles.clear(); this.pendingTiles.clear(); this.tileQueue.length = 0; this.tileKey = key; }
       const pal = palette(this.wfStyle());
@@ -402,7 +404,10 @@ export class OverviewWaveform {
     if (sig === this.sig) return;
     this.sig = sig;
     g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, W, H);
-    if (!deck.waveform || !deck.duration) return;
+    if (!deck.waveform || !deck.duration) {
+      if (this.cache || this.cachePlayed) { this.cache = null; this.cachePlayed = null; this.cacheKey = ''; }
+      return;
+    }
     const key = `${deck.track?.id}:${W}:${H}:${this.wfStyle()}/${this.wfShape()}:${themeRev}`;
     if (key !== this.cacheKey) { this.cache = this.renderCache(W, H, false); this.cachePlayed = this.renderCache(W, H, true); this.cacheKey = key; }
     // played part from the dimmed copy, the rest at full colour

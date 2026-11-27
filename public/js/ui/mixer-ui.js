@@ -279,9 +279,25 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   };
   new ResizeObserver((ents) => { const e = ents[0], b = e.contentBoxSize?.[0]; fit(b?.blockSize ?? e.contentRect.height, b?.inlineSize ?? e.contentRect.width); }).observe(root);
   root.setDeckCount = (n) => { for (const s of strips) s.style.display = s.idx < n ? '' : 'none'; requestAnimationFrame(() => fit(lastH, lastW, true)); };
+  let masterQuiet = 0;
   root.frame = () => {
-    for (const s of strips) if (s.style.display !== 'none') s.vu.draw(s.ch.level());
-    const m = eng.masterMeter(); mvuL.draw(m.peak[0], undefined, m.rms[0]); mvuR.draw(m.peak[1], undefined, m.rms[1]); mpkL.draw(m.peak[0]); mpkR.draw(m.peak[1]);
+    let anyActive = eng.micOn || !!eng.sampler?.playing || eng.decks.some((d) => d.playing || d.scratching);
+    for (const s of strips) {
+      if (s.style.display === 'none') continue;
+      const d = eng.decks[s.idx];
+      const chBusy = d?.playing || d?.scratching || s.ch.state.fxOn;
+      if (!chBusy && s._vuQuiet > 30) continue; // VU already decayed to 0 on a stopped channel: skip AnalyserNode read & canvas draw
+      const lvl = s.ch.level();
+      s._vuQuiet = (!chBusy && lvl < 1e-4) ? (s._vuQuiet || 0) + 1 : 0;
+      if (lvl >= 1e-4) anyActive = true;
+      s.vu.draw(lvl);
+    }
+    if (anyActive || masterQuiet <= 30) {
+      const m = eng.masterMeter();
+      const silent = !anyActive && m.peak[0] < 1e-4 && m.peak[1] < 1e-4;
+      masterQuiet = silent ? masterQuiet + 1 : 0;
+      mvuL.draw(m.peak[0], undefined, m.rms[0]); mvuR.draw(m.peak[1], undefined, m.rms[1]); mpkL.draw(m.peak[0]); mpkR.draw(m.peak[1]);
+    }
     const gr = eng.limiterGr() < 0.98; if (gr !== grLed._on) { grLed._on = gr; grLed.classList.toggle('on', gr); }
   };
   root.renderAll = () => { for (const r of renderers) r.render(); };
