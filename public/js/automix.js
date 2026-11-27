@@ -900,7 +900,16 @@ export class AutoMix extends Emitter {
   }
   /** May this track be played (not banned, and clean when only clean versions are wanted)? */
   allowed(t) {
-    if (!t || (this.opts?.banned || []).map(String).includes(String(t.id))) return false;
+    if (!t) return false;
+    const banned = this.opts?.banned;
+    if (banned?.length) {
+      if (this._bannedSrc !== banned || this._bannedLen !== banned.length) {
+        this._bannedSrc = banned;
+        this._bannedLen = banned.length;
+        this._bannedSet = new Set(banned.map(String));
+      }
+      if (this._bannedSet.has(String(t.id))) return false;
+    }
     // clean only: the library has no parental-advisory flag, so explicit versions are recognised by their tags /
     // title ("Explicit", "Dirty"); "Clean" / "Radio Edit" versions are fine
     if (this.opts?.cleanOnly && /\b(explicit|dirty)\b/i.test([t.title, t.genre, t.comment, ...(Array.isArray(t.tags) ? t.tags : [])].filter(Boolean).join(' '))) return false;

@@ -392,7 +392,8 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     const t = library.getTrack(id);
     if (!t) return;
     if (value) t.stems = value; else delete t.stems;
-    library.changed('tracks');
+    library.markTrackDirty?.(id);
+    library.changed('tracks', { track: t });
   };
   const dropUpload = async (id) => { const u = uploads.get(id); if (!u) return; uploads.delete(id); await fs.promises.rm(u.dir, { recursive: true, force: true }).catch(() => {}); };
   const upload = (id, token) => { const u = uploads.get(id); if (!u || u.token !== token) throw bad('No such stems upload (cancelled or expired)', 409); u.at = Date.now(); return u; };

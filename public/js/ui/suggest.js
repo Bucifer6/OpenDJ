@@ -36,14 +36,44 @@ export function suggestNext(ref, tracks, { limit = 10, exclude = new Set() } = {
   if (!ref) return [];
   // smart mix compares the playing key / tempo: a pitched or tempo-shifted deck is scored as heard
   const cur = ref.track ? words({ ...ref.track, key: ref.cam || ref.track.key, bpm: ref.bpm || ref.track.bpm }) : null;
-  const out = [];
+  // Pass 1: fast bounded top-K pre-filter using scoreTrack() so 70k+ libraries never run scoreTransition/explain on every track.
+  // Keep analysed tracks (known BPM or key) separate from unanalysed fallbacks so thousands of unanalysed remote tracks don't drown out matches.
+  const cap = Math.max(limit * 8, 80);
+  const topAnalysed = [];
+  const topFallback = [];
+  const pushTop = (arr, item) => {
+    if (arr.length < cap) {
+      arr.push(item);
+      if (arr.length === cap) arr.sort((a, b) => b.local - a.local);
+    } else if (item.local > arr[arr.length - 1].local) {
+      let i = arr.length - 1;
+      while (i > 0 && item.local > arr[i - 1].local) { arr[i] = arr[i - 1]; i--; }
+      arr[i] = item;
+    }
+  };
   for (const t of tracks) {
-    if (exclude.has(t.id)) continue;
+    if (!t || exclude.has(t.id)) continue;
     const local = scoreTrack(ref, t);
     if (local <= 0.3) continue; // not beatmatchable / missing / same track
-    let score = local, reason = '';
-    if (cur) { try { score = scoreTransition(cur, words(t)).score; reason = explain(cur, t); } catch { score = local; } }
-    out.push({ track: t, score, reason, keyMatch: !!(ref.cam && camelotCompatible(ref.cam, toCamelot(t.key))), bpmDelta: ref.bpm && t.bpm ? (t.bpm / ref.bpm - 1) * 100 : null });
+    const hasMeta = (Number(t.bpm) > 0) || !!t.key;
+    if (hasMeta) pushTop(topAnalysed, { track: t, local });
+    else if (topAnalysed.length < limit) pushTop(topFallback, { track: t, local });
   }
-  return out.sort((a, b) => b.score - a.score).slice(0, limit);
+  const shortlist = topAnalysed.length >= limit ? topAnalysed : [...topAnalysed, ...topFallback];
+  // Pass 2: rank the bounded shortlist with smart mix's transition scorer (without generating explanations yet).
+  const out = [];
+  for (const { track: t, local } of shortlist) {
+    let score = local;
+    if (cur) { try { score = scoreTransition(cur, words(t)).score; } catch { score = local; } }
+    out.push({ track: t, score, reason: '', keyMatch: !!(ref.cam && camelotCompatible(ref.cam, toCamelot(t.key))), bpmDelta: ref.bpm && t.bpm ? (t.bpm / ref.bpm - 1) * 100 : null });
+  }
+  out.sort((a, b) => b.score - a.score);
+  const winners = out.slice(0, limit);
+  // Pass 3: build human-readable explanations only for the final top `limit` winners.
+  if (cur) {
+    for (const w of winners) {
+      try { w.reason = explain(cur, w.track); } catch { w.reason = ''; }
+    }
+  }
+  return winners;
 }

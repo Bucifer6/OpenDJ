@@ -35,7 +35,7 @@ const SOURCE_ICONS = { plex: 'Plex', jellyfin: 'Jellyfin', emby: 'Emby', subsoni
 export class LibraryUI {
   constructor(app) {
     this.app = app;
-    this.tracks = new Map(); this.playlists = []; this.folders = []; this.sources = []; this.drives = []; this.rev = 0; this._drivesSig = null;
+    this.tracks = new Map(); this.playlists = []; this.folders = []; this.sources = []; this.drives = []; this.rev = 0; this.genreRev = 0; this.suggestRev = 0; this._drivesSig = null;
     this.view = { kind: 'all' }; this.sort = { col: 'addedAt', dir: -1 }; this.query = '';
     this.rows = []; this.selected = new Set(); this.cursor = -1; this.downloads = { queued: [], active: [], done: [] };
     this._viewWorker = null; this._viewSeq = 0; this._viewPending = null;
@@ -48,7 +48,7 @@ export class LibraryUI {
   // ---------------- data ----------------
   async refresh() {
     const [tracks, playlists, folders, sources, sessions] = await Promise.all([api.tracks(), api.playlists(), api.folders(), api.sources(), api.history().catch(() => [])]);
-    this.tracks = new Map(tracks.map((t) => [t.id, t])); this.rev++;
+    this.tracks = new Map(tracks.map((t) => [t.id, t])); this.rev++; this.genreRev++; this.suggestRev++;
     this.playlists = playlists; this.folders = folders; this.sources = sources; this.sessions = sessions;
     await this.loadViewData();
     this.renderTree(); this.applyView();
@@ -118,8 +118,27 @@ export class LibraryUI {
     this.renderTree();
   }
   track(id) { return this.tracks.get(id); }
-  // background analysis updates tracks one after another, also during playback: coalesce the row redraws to one per frame
-  updateTrack(t) { if (t?.id) { this.tracks.set(t.id, { ...this.tracks.get(t.id), ...t }); this.rev++; this._rowsRaf ||= requestAnimationFrame(() => { this._rowsRaf = 0; this.renderRows(true); }); } }
+  // background analysis updates tracks one after another, also during playback: merge in-place so this.rows stays current and coalesce row redraws to one per frame
+  updateTrack(t) {
+    if (!t?.id) return;
+    const prev = this.tracks.get(t.id);
+    if (prev) {
+      const genreChanged = 'genre' in t && (t.genre || '') !== (prev.genre || '');
+      const suggestChanged = ('bpm' in t && t.bpm !== prev.bpm) || ('key' in t && t.key !== prev.key)
+        || ('energy' in t && t.energy !== prev.energy) || ('analyzed' in t && t.analyzed !== prev.analyzed)
+        || ('missing' in t && t.missing !== prev.missing) || ('unreadable' in t && t.unreadable !== prev.unreadable);
+      Object.assign(prev, t);
+      if (prev._words && ('title' in t || 'artist' in t || 'genre' in t || 'tags' in t)) delete prev._words;
+      if (genreChanged) this.genreRev++;
+      if (suggestChanged) this.suggestRev++;
+    } else {
+      this.tracks.set(t.id, { ...t });
+      this.genreRev++;
+      this.suggestRev++;
+    }
+    this.rev++;
+    this._rowsRaf ||= requestAnimationFrame(() => { this._rowsRaf = 0; this.renderRows(true); });
+  }
 
   viewTracks() {
     const all = [...this.tracks.values()]; const v = this.view;
@@ -622,7 +641,8 @@ export class LibraryUI {
     const head = (label, ...btns) => el('div', { class: 'tree-head' }, el('span', {}, label), ...btns);
     const userPl = this.playlists.filter((p) => !p.sourceId && !p.smart);
     const smartPl = this.playlists.filter((p) => p.smart);
-    const nMissing = [...this.tracks.values()].reduce((n, t) => n + (t.missing ? 1 : 0), 0);
+    let nMissing = 0;
+    for (const t of this.tracks.values()) if (t.missing) nMissing++;
     const sessions = this.showAllSessions ? this.sessions : this.sessions.slice(0, 8);
     const groups = new Map();
     for (const p of userPl) { const f = p.folder || ''; if (!groups.has(f)) groups.set(f, []); groups.get(f).push(p); }

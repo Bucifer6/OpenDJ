@@ -32,9 +32,12 @@ export function setupLibraryExtras(app) {
   const genreSel = el('select', { class: 'chip chip-sel', title: 'Filter by genre', 'aria-label': 'Genre' });
   genreSel.addEventListener('change', () => setTok(/(^|\s)genre:\S+/g, genreSel.value ? `genre:${genreSel.value}` : ''));
   const fillGenres = () => {
-    if (genreSel._rev === L.rev && genreSel._size === L.tracks.size) return;
-    genreSel._rev = L.rev; genreSel._size = L.tracks.size;
-    const genres = [...new Set([...L.tracks.values()].map((t) => (t.genre || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    const grev = L.genreRev ?? L.rev ?? 0;
+    if (genreSel._rev === grev && genreSel._size === L.tracks.size) return;
+    genreSel._rev = grev; genreSel._size = L.tracks.size;
+    const set = new Set();
+    for (const t of L.tracks.values()) { const g = (t.genre || '').trim(); if (g) set.add(g); }
+    const genres = [...set].sort((a, b) => a.localeCompare(b));
     const key = genres.join('|');
     if (genreSel._key === key) return;
     genreSel._key = key;
@@ -68,14 +71,18 @@ export function setupLibraryExtras(app) {
     const ref = app.engine.masterDeck() || decks.find((d) => d.playing && d.track) || decks.find((d) => d.track);
     return { ref, free: decks.find((d) => d !== ref && !d.playing) };
   };
-  let sig = '';
+  let sig = '', deckSig = '', lastRefreshAt = 0;
   function refresh(force) {
     if (strip.hidden) return;
     const { ref } = target();
     const r = refFromDeck(ref);
-    const s = `${r?.id}|${Math.round(r?.bpm || 0)}|${r?.cam}|${L.tracks.size}|${L.rev || 0}|${app.engine.decks.map((d) => d.track?.id).join(',')}`;
+    const dSig = `${r?.id}|${Math.round(r?.bpm || 0)}|${r?.cam}|${app.engine.decks.map((d) => d.track?.id).join(',')}`;
+    const s = `${dSig}|${L.tracks.size}|${L.suggestRev ?? L.rev ?? 0}`;
     if (!force && s === sig) return;
-    sig = s;
+    const now = performance.now();
+    // During active background analysis, avoid re-scanning huge libraries on every single analysed track unless the deck changed.
+    if (!force && dSig === deckSig && app.analyser?.running && now - lastRefreshAt < 5000) return;
+    sig = s; deckSig = dSig; lastRefreshAt = now;
     if (!r) {
       stripTitle.replaceChildren(icon('sparkles'), el('span', {}, 'Next'));
       cards.replaceChildren(el('div', { class: 'sg-empty' }, 'Load a track to see what mixes well with it.'));

@@ -385,7 +385,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     const t = track(body.id); t.playCount = (t.playCount || 0) + 1; t.lastPlayed = Date.now();
     history.record(t, t.lastPlayed);
     library.markTrackDirty?.(t.id);
-    library.changed('tracks'); return t;
+    library.changed('tracks', { track: t }); return t;
   });
 
   /** Local file of a track, checked: exists, is a regular media file, may be served. */

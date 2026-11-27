@@ -119,6 +119,9 @@ export class Library extends LibraryCore {
     this._dirtyTracks.add(tid);
     this._removedTracks.delete(tid);
   }
+  markMetaDirty() {
+    this._dirtyMeta = true;
+  }
 
   upsertTrack(t) {
     const res = super.upsertTrack(t);
@@ -127,8 +130,11 @@ export class Library extends LibraryCore {
     return res;
   }
   updateTrack(tid, patch) {
+    // Mark dirty BEFORE super.updateTrack() invokes this.changed('tracks') so we stay on O(1) incremental SQLite writes.
+    const existed = !!this.getTrack(tid);
+    if (existed) { this._dirtyTracks.add(tid); this._removedTracks.delete(tid); }
     const res = super.updateTrack(tid, patch);
-    if (res) { this._dirtyTracks.add(res.id); this._removedTracks.delete(res.id); }
+    if (!res && existed) this._dirtyTracks.delete(tid);
     return res;
   }
   removeTracks(ids) {
@@ -144,11 +150,11 @@ export class Library extends LibraryCore {
     this._dirtyMeta = true;
     return super.removeTracks(existing);
   }
-  changed(what = 'tracks') {
+  changed(what = 'tracks', extra = null) {
     if (what === 'all') this._needsFullSync = true;
     else if (what !== 'tracks') this._dirtyMeta = true;
     else if (!this._dirtyTracks.size && !this._removedTracks.size) this._needsFullSync = true;
-    return super.changed(what);
+    return super.changed(what, extra);
   }
 
   /** Fast FTS5 full-text search across the library (falls back to in-memory filter if FTS unavailable or DB busy). */
