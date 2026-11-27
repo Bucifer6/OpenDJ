@@ -18,7 +18,7 @@ import { planBestTransition, stemLevels, learnChoice, STEM_STYLES } from './mix-
 import { planAdaptiveTransition } from './adaptive-dj.js';
 import { Watchdog, quietAt } from './automix-watchdog.js';
 import { echoBeatsFor, styleFamily } from './dj-styles.js';
-import { audibleOffset, MIN_CONFIDENCE } from './audio/beat-phase.js';
+import { audibleOffset, MIN_CONFIDENCE, phaseErrorSec } from './audio/beat-phase.js';
 import { barProfileAt } from './audio/features.js';
 import { isVocalSolo } from './stems/stem-fx.js';
 
@@ -539,14 +539,10 @@ export const MAX_PHASE_BEND = 0.02;
 export const PHASE_SNAP = 0.03;
 /**
  * How far the incoming deck's beats are behind the outgoing deck's (seconds of audio time; negative = ahead) at
- * audio time t, from both beat grids. null when the tempos differ by more than 5 % (half / double time sync).
+ * audio time t, from both beat grids (half / double time aware). null when the tempos aren't within 5 % (1x/0.5x/2x).
  */
 export function phaseErrorSeconds(out, inn, t) {
-  const ob = out.effectiveBpm || out.bpm, ib = inn.effectiveBpm || inn.bpm;
-  if (!ob || !ib || Math.abs(Math.log(ob / ib)) > 0.05) return null;
-  let d = out.beatPhase(out.positionAt(t)) - inn.beatPhase(inn.positionAt(t));
-  if (d > 0.5) d -= 1; if (d < -0.5) d += 1;
-  return d * 60 / ob;
+  return phaseErrorSec(out, inn, t);
 }
 
 /** Endless live sets: length of one energy-curve cycle (tracks). */
@@ -1208,22 +1204,40 @@ export class AutoMix extends Emitter {
     if (!this.enabled || !cur?.track || !next) return null;
     const nd = this.other(cur), innReady = nd?.track?.id === next.id && !nd.loading;
     const oi = this.info(cur), ii = innReady ? this.info(nd) : this.trackInfo(next);
-    const signature = (t) => ['bpm', 'bpmConfidence', 'gridOffset', 'downbeat', 'duration', 'startTime', 'endTime', 'mixIn', 'mixOut', 'phrases', 'key', 'energy', 'genre', 'vocalMap', 'stems'].map((k) => t[k]);
+    const override = this.overrides.get(next);
     const nudge = this.nudges?.get(next) || null;
-    const key = JSON.stringify([cur.track.id, next.id, this.opts, this.overrides.get(next), nudge, signature(oi), signature(ii), cur.rate, cur.stemsReady, nd?.stemsReady, this.app.settings.mixLearning]);
-    if (this.upcoming && (cur.position < (this.upcoming.observed || 0) - (cur.beatLen || 0.5) * 4 || cur.position > (this.upcoming.plan.drop ?? this.upcoming.plan.end ?? Infinity))) this.upcoming = null;
+    const uPrev = this.upcoming;
+    if (uPrev && (cur.position < (uPrev.observed || 0) - (cur.beatLen || 0.5) * 4 || cur.position > (uPrev.plan.drop ?? uPrev.plan.end ?? Infinity))) {
+      this.upcoming = null;
+    }
+    // Fast-path cache check: avoid 30 Hz JSON.stringify over phrases/opts/mixLearning when nothing changed
+    const opts = this.opts || {};
+    const fastKey = `${cur.track.id}|${next.id}|${innReady ? 1 : 0}|${override || ''}|${nudge?.bars || ''}|${nudge?.shift || ''}|${cur.rate}|${cur.stemsReady ? 1 : 0}|${nd?.stemsReady ? 1 : 0}|${oi.bpm}|${oi.gridOffset}|${oi.downbeat}|${oi.duration}|${oi.startTime}|${oi.endTime}|${oi.mixIn}|${oi.mixOut}|${oi.key}|${oi.energy}|${oi.genre}|${oi.bpmConfidence}|${ii.bpm}|${ii.gridOffset}|${ii.downbeat}|${ii.duration}|${ii.startTime}|${ii.endTime}|${ii.mixIn}|${ii.mixOut}|${ii.key}|${ii.energy}|${ii.genre}|${ii.bpmConfidence}`;
+    const uFast = this.upcoming;
+    if (uFast && uFast.fastKey === fastKey
+      && uFast.oPhrases === oi.phrases && uFast.iPhrases === ii.phrases
+      && uFast.oVocal === oi.vocalMap && uFast.iVocal === ii.vocalMap
+      && uFast.oStems === oi.stems && uFast.iStems === ii.stems
+      && uFast.learningRef === this.app.settings.mixLearning
+      && uFast.optsSnap && Object.keys(opts).length === uFast.optsSnapLen
+      && Object.keys(opts).every((k) => opts[k] === uFast.optsSnap[k])) {
+      uFast.observed = cur.position;
+      return { style: uFast.style, why: uFast.why, override: uFast.override, begin: uFast.plan.begin, drop: uFast.plan.drop, length: uFast.length, beginsIn: Math.max(0, (uFast.plan.begin - cur.position) / (cur.rate || 1)) };
+    }
+    const signature = (t) => ['bpm', 'bpmConfidence', 'gridOffset', 'downbeat', 'duration', 'startTime', 'endTime', 'mixIn', 'mixOut', 'phrases', 'key', 'energy', 'genre', 'vocalMap', 'stems'].map((k) => t[k]);
+    const key = JSON.stringify([cur.track.id, next.id, opts, override, nudge, signature(oi), signature(ii), cur.rate, cur.stemsReady, nd?.stemsReady, this.app.settings.mixLearning]);
     // rehearse, then commit (P6.4): two bars before it begins the plan is locked; analysis or stem updates arriving
     // now re-plan only the transition after this one (a DJ's own override or nudge still applies)
     const u0 = this.upcoming, bar0 = 4 * (cur.beatLen || 0.5);
-    const locked = u0 && u0.nextId === next.id && u0.userKey === JSON.stringify([this.overrides.get(next), nudge])
+    const locked = u0 && u0.nextId === next.id && u0.userKey === JSON.stringify([override, nudge])
       && cur.position >= u0.plan.begin - 2 * bar0 && cur.position < u0.plan.begin + bar0;
     if (locked) u0.key = key;
     if (!this.upcoming || this.upcoming.key !== key) {
       const s = this.styleFor(this.idx, this.app.library?.track?.(cur.track.id) || cur.track);
       const length = s.plan && this.opts.lengthMode === 'auto' ? { beats: s.plan.beats, bars: s.plan.bars, auto: true, why: s.plan.lengthWhy }
         : this.lengthFor(oi, innReady ? this.info(nd) : this.trackInfo(next), s.style, cur.track, next);
-      this.upcoming = { key, nextId: next.id, userKey: JSON.stringify([this.overrides.get(next), nudge]), ...s, length, plan: planTransition(oi, s.style, { ...this.opts, transitionBeats: length.beats }) };
-      if (s.plan && (!s.override || this.overrides.get(next) === 'auto')) {
+      this.upcoming = { key, nextId: next.id, userKey: JSON.stringify([override, nudge]), ...s, length, plan: planTransition(oi, s.style, { ...this.opts, transitionBeats: length.beats }) };
+      if (s.plan && (!s.override || override === 'auto')) {
         const adaptive = planAdaptiveTransition(oi, ii, {
           position: cur.position, entry: cur._autoMixEntry || 0, rate: cur.rate, keepSync: this.opts.keepSync,
           stemsOut: this.opts.stemTransitions === true && !!cur.stemsReady, stemsIn: this.opts.stemTransitions === true && !!nd?.stemsReady,
@@ -1236,6 +1250,12 @@ export class AutoMix extends Emitter {
       }
     }
     const u = this.upcoming;
+    u.fastKey = fastKey;
+    u.oPhrases = oi.phrases; u.iPhrases = ii.phrases;
+    u.oVocal = oi.vocalMap; u.iVocal = ii.vocalMap;
+    u.oStems = oi.stems; u.iStems = ii.stems;
+    u.learningRef = this.app.settings.mixLearning;
+    u.optsSnap = { ...opts }; u.optsSnapLen = Object.keys(u.optsSnap).length;
     u.observed = cur.position;
     return { style: u.style, why: u.why, override: u.override, begin: u.plan.begin, drop: u.plan.drop, length: u.length, beginsIn: Math.max(0, (u.plan.begin - cur.position) / (cur.rate || 1)) };
   }
@@ -1538,10 +1558,12 @@ export class AutoMix extends Emitter {
     if (t.plan.kind !== 'beat' && inn.stemsReady) [0, 1, 2, 3].forEach((i) => inn.setStemLevel?.(i, t.plan.kind === 'vocal' ? (i === 0 ? 1 : 0) : (i === 1 ? 1 : 0)));
     ch.set('xfAssign', 'THRU'); ch.set('volume', 0);
     if (t.plan.kind === 'beat') ch.set('eqLow', -1); // its beat with the bass cut: one bassline at a time
-    inn.seek(t.plan.cue + offBeats * inn.beatLen);
+    const offSec = inn.bpm && cur.bpm ? (offBeats * (cur.beatLen / (cur.rate || 1))) * (inn.rate || 1) : 0;
+    inn.seek(t.plan.cue + offSec);
     inn.play({ at: posAt, instant: true });
     // at least 6 dB under the on-air deck (its fader sits at 0.8; channel gain is the fader squared)
     Object.assign(t, { on: true, inn, cur, ch, peak: t.plan.kind === 'vocal' ? 0.55 : t.plan.kind === 'drums' ? 0.5 : 0.45, phase: {} });
+    this.engine.automixDriving = true;
     this._teasedInto = inn.track?.id ?? null;
     this.emit('trick', { id: 'tease', label: 'tease of the next record', why: t.plan.why });
     this.emit('state');
@@ -1560,6 +1582,7 @@ export class AutoMix extends Emitter {
     const t = this.tease;
     if (!t?.on) { if (abort && t) t.done = true; return; }
     t.on = false; t.done = true;
+    this.engine.automixDriving = !!this.transition;
     const { inn, ch } = t;
     try {
       inn.pause();
@@ -1655,13 +1678,14 @@ export class AutoMix extends Emitter {
       }
       len = Math.max(2, len);
       const durWall = Math.max(2, len / (out.rate || 1));
-      const inStart = cue + (upcoming?.adaptive ? Math.max(0, pos - plan.start) * (inn.rate || 1) / (out.rate || 1) : inn.bpm && out.bpm ? offBeats * inn.beatLen : 0);
+      const inStart = cue + (upcoming?.adaptive ? Math.max(0, pos - plan.start) * (inn.rate || 1) / (out.rate || 1)
+        : inn.bpm && out.bpm ? (offBeats * out.beatLen / (out.rate || 1)) * (inn.rate || 1) : 0);
       inn.seek(inStart); inn._autoMixEntry = inStart;
       // loop-extend (P2.2): the outgoing track's last clean phrase loops so the blend fits; released when it ends
       const lo = upcoming?.adaptive?.loopOut;
       if (lo && out.bpm && typeof out.setLoop === 'function') out.setLoop(lo.start, lo.end, true);
       inn.play({ at: posAt, instant: true }); // on the beat even if the message reaches the audio thread late
-      const lenIn = upcoming?.adaptive ? len * (inn.rate || 1) / (out.rate || 1) : inn.bpm && out.bpm ? (len / out.beatLen) * inn.beatLen : len;
+      const lenIn = inn.bpm && out.bpm ? len * (inn.rate || 1) / (out.rate || 1) : len;
       Object.assign(tr, { dur: durWall * 1000, inStart, swapAt: upcoming?.adaptive?.swapIn ?? (SWAP_STYLES.has(style) ? phraseSwapPoint(ii, inStart, lenIn) : null), kSwap: null });
       // Unified audio-clock tempo morph: ramp both decks sample-accurately together so tempo glides without fighting keepPhase()
       if (tr.morph && Number.isFinite(posAt) && typeof out.post === 'function' && typeof inn.post === 'function') {
@@ -1678,6 +1702,7 @@ export class AutoMix extends Emitter {
       else if (style !== 'pingpong') this.scheduleTransitionCurves(tr, posAt);
     }
     this.transition = tr; this._skipNext = false;
+    this.engine.automixDriving = true;
     this._lastStyle = style;
     this._recent = [...this._recent.slice(-5), upcoming?.adaptive?.doubleDrop ? 'doubledrop' : style];
     tr.echoBeats = echoBeatsFor(this.fresh(out.track), this.fresh(inn.track));
@@ -1795,7 +1820,7 @@ export class AutoMix extends Emitter {
     tr.phaseErr = err; tr.phaseSource = audible ? 'audio' : 'grid';
     if (Math.abs(err) > PHASE_SNAP && k < 0.2 && !tr.phaseSnapped) {
       tr.phaseSnapped = true; inn.setBend(0);
-      if (audible) inn.seek(inn.positionAt(t) + err * inn.rate); else inn.alignPhase(); // behind: jump forward by the lag
+      if (audible) inn.seek(inn.positionAt(t) + err * inn.rate, t); else inn.alignPhase(t); // behind: jump forward by the lag
       return;
     }
     const bend = Math.abs(err) < PHASE_TOLERANCE ? 0 : Math.max(-MAX_PHASE_BEND, Math.min(MAX_PHASE_BEND, err / 0.5)); // fix it over ~0.5 s
@@ -1893,6 +1918,7 @@ export class AutoMix extends Emitter {
     const tr = this.transition;
     const { out, inn } = tr;
     this.transition = null;
+    this.engine.automixDriving = !!this.tease?.on;
     const chO = this.engine.channels[out.index], chI = this.engine.channels[inn.index];
     for (const ch of [chO, chI]) for (const key of ['volume', 'eqLow', 'eqMid', 'eqHigh']) ch.cancelAutomation?.(key);
     out.post?.('rollSchedule', { steps: null });

@@ -197,7 +197,8 @@ export class LibraryUI {
   get showOrder() { return ORDERED_VIEWS.has(this.view.kind); }
   applyView() {
     const base = this.viewTracks();
-    this.orderOf = new Map(); base.forEach((t, i) => { if (!this.orderOf.has(t)) this.orderOf.set(t, i); });
+    this.orderOf = new Map();
+    if (this.showOrder) base.forEach((t, i) => { if (!this.orderOf.has(t)) this.orderOf.set(t, i); });
     const seq = ++this._viewSeq;
     if (base.length >= 1200 && typeof Worker !== 'undefined') {
       this._viewPending = { seq, base };
@@ -239,18 +240,24 @@ export class LibraryUI {
     try {
       clearTimeout(this._viewWorkerIdleT);
       if (!this._viewWorker) {
+        this._workerDatasetKey = '';
         this._viewWorker = new Worker(new URL('./library-view-worker.js', import.meta.url), { type: 'module' });
         this._viewWorker.addEventListener('message', (e) => {
           const pending = this._viewPending;
           if (!pending || e.data.seq !== pending.seq) return;
-          this._finishView(e.data.indices.map((i) => pending.base[i]), pending.seq);
-          // Reclaim ~25 MB worker RAM when library search/sort is idle for 60 s
+          const idx = e.data.indices;
+          const out = new Array(idx.length);
+          for (let k = 0; k < idx.length; k++) out[k] = pending.base[idx[k]];
+          this._finishView(out, pending.seq);
+          // Reclaim worker RAM promptly once library search/sort is idle
           clearTimeout(this._viewWorkerIdleT);
-          this._viewWorkerIdleT = setTimeout(() => { this._viewWorker?.terminate(); this._viewWorker = null; }, 60_000);
+          this._viewWorkerIdleT = setTimeout(() => {
+            this._viewWorker?.terminate(); this._viewWorker = null; this._workerDatasetKey = '';
+          }, 20_000);
         });
         this._viewWorker.addEventListener('error', () => {
           const pending = this._viewPending;
-          this._viewWorker?.terminate(); this._viewWorker = null;
+          this._viewWorker?.terminate(); this._viewWorker = null; this._workerDatasetKey = '';
           if (pending) this._applyViewSync(pending.base);
         });
       }
@@ -258,15 +265,21 @@ export class LibraryUI {
       const masterBpm = master?.effectiveBpm || 0, masterKey = toCamelot(master?.track?.key) || '';
       const query = this.query.trim().toLowerCase();
       const sort = { col: this.sort.col, dir: this.sort.dir, kind: this.view.kind };
-      const items = base.map((t, i) => ({
-        i, title: t.title || '', artist: t.artist || '', album: t.album || '', genre: t.genre || '',
-        key: t.key || '', keyCamelot: toCamelot(t.key) || '', comment: t.comment || '',
-        tags: (t.tags || []).map((x) => String(x).toLowerCase()), colorText: colorName(t.color) || '',
-        bpm: Number(t.bpm) || 0, energy: Number(t.energy) || 0, rating: Number(t.rating) || 0,
-        duration: Number(t.duration) || 0, playCount: Number(t.playCount) || 0, lastPlayed: Number(t.lastPlayed) || 0,
-        sourceKind: t.sourceKind || 'local', addedAt: t.addedAt || 0, playedAt: t._playedAt || 0,
-      }));
-      this._viewWorker.postMessage({ seq, items, query, sort, masterBpm, masterKey });
+      const datasetKey = `${this.rev}|${this.view.kind}|${this.view.id || ''}|${base.length}`;
+      if (datasetKey !== this._workerDatasetKey) {
+        this._workerDatasetKey = datasetKey;
+        const items = base.map((t, i) => ({
+          i, title: t.title || '', artist: t.artist || '', album: t.album || '', genre: t.genre || '',
+          key: t.key || '', keyCamelot: toCamelot(t.key) || '', comment: t.comment || '',
+          tags: (t.tags || []).map((x) => String(x).toLowerCase()), colorText: colorName(t.color) || '',
+          bpm: Number(t.bpm) || 0, energy: Number(t.energy) || 0, rating: Number(t.rating) || 0,
+          duration: Number(t.duration) || 0, playCount: Number(t.playCount) || 0, lastPlayed: Number(t.lastPlayed) || 0,
+          sourceKind: t.sourceKind || 'local', addedAt: t.addedAt || 0, playedAt: t._playedAt || 0,
+        }));
+        this._viewWorker.postMessage({ seq, datasetKey, items, query, sort, masterBpm, masterKey });
+      } else {
+        this._viewWorker.postMessage({ seq, datasetKey, query, sort, masterBpm, masterKey });
+      }
     } catch {
       this._applyViewSync(base);
     }

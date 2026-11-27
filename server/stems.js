@@ -484,7 +484,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
       : native?.stub ? { version: 'stub' }
         : restricted && process.env.OPENDJ_STEMS_NATIVE !== '1' ? { reason: 'Server stems are off on hosted servers (OPENDJ_STEMS_NATIVE=1 turns them on)' }
           : nativeRuntime();
-    const idleMs = native?.idleMs ?? (Number(process.env.OPENDJ_STEMS_IDLE_MS) || 10 * 60e3); // model stays loaded between tracks
+    const idleMs = native?.idleMs ?? (Number(process.env.OPENDJ_STEMS_IDLE_MS) || 90e3); // unload ONNX model promptly after 90 s idle (~1.5-2.5 GB RAM)
     const childPath = native?.child || fileURLToPath(new URL('./stems-child.js', import.meta.url));
     const queue = [];          // track ids
     let cur = null;            // { id, title, phase, done, total, started, backend, cancelled }

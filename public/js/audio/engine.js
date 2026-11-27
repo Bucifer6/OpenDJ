@@ -19,6 +19,7 @@ import { isoKnobGain, xfGain, faderGain, rotaryGain, masterIsoGain } from './cur
 import { MicStrip } from './mic.js';
 import { FxBus } from './fx-bus.js';
 import { normalizeMixer } from './mixer-config.js';
+import { phaseErrorSec } from './beat-phase.js';
 
 const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 /** EQ knob -1..1 -> band gain: +6 dB at the right, 0 dB at 12 o'clock, -26 dB at 8 o'clock fading to a full kill. */
@@ -1063,6 +1064,31 @@ export class Engine extends Emitter {
     if (this.master && !this.master.playing) {
       const other = this.decks.find((d) => d.playing && d.track && d !== this.master);
       if (other) this.setMaster(other);
+    }
+    // Continuous beat-phase & elastic-tempo lock for manually synced decks (Automix drives phase during its own blends/teases)
+    if (!this.automixDriving && m && m.playing && m.bpm > 0 && !m.scratching) {
+      const keepPhase = this.settings?.syncMode !== 'tempo';
+      const wallNow = globalThis.performance?.now?.() ?? Date.now();
+      for (let i = 0; i < 4; i++) {
+        const d = this.decks[i];
+        if (!d || d === m || !d.syncOn || !d.playing || !d.bpm || d.loading || d.scratching || d._pendingPlay || d.gliding) continue;
+        if ((m.track?.tempoMap?.length >= 2 || d.track?.tempoMap?.length >= 2) && now - (d._syncTempoAt || 0) >= 0.25) {
+          d._syncTempoAt = now;
+          d.matchTempo();
+        }
+        if (!keepPhase || wallNow < (d._manualBendUntil || 0)) continue;
+        if (now - (d._syncPhaseAt || 0) < 0.25) continue;
+        d._syncPhaseAt = now;
+        const err = phaseErrorSec(m, d, now);
+        if (err == null) { if (d._syncBend) { d._syncBend = false; d.setBend(0); } continue; }
+        const bend = Math.abs(err) < 0.003 ? 0 : clamp(err / 0.4, -0.02, 0.02);
+        if (bend === 0) {
+          if (d._syncBend) { d._syncBend = false; d.setBend(0); }
+        } else if (Math.abs(bend - (d.bend || 0)) > 1e-4 || !d._syncBend) {
+          d._syncBend = true;
+          d.setBend(bend);
+        }
+      }
     }
     this.emit('tick');
   }

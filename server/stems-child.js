@@ -90,7 +90,8 @@ async function load(m, { cpuOnly = false } = {}) {
     return;
   }
   ort ||= createRequire(import.meta.url)('onnxruntime-node');
-  const threads = Math.max(1, Math.floor(m.threads) || Math.max(1, (os.availableParallelism?.() || os.cpus().length) - 2));
+  const cores = os.availableParallelism?.() || os.cpus().length;
+  const threads = Math.max(1, Math.floor(m.threads) || Math.min(4, Math.max(1, Math.floor(cores / 2))));
   const opts = { graphOptimizationLevel: 'all', intraOpNumThreads: threads, interOpNumThreads: 1 };
   const makeCpu = async () => {
     const s = await ort.InferenceSession.create(m.model, { ...opts, executionProviders: ['cpu'] });
@@ -188,6 +189,7 @@ function decode(ffmpeg, input, maxFrames) {
       if (tooLong) return reject(new Error(`The track is too long for stems (max. ${Math.round(maxFrames / MODEL_RATE / 60)} minutes)`));
       if (code !== 0) return reject(new Error(`Could not decode the track: ${err.trim().split('\n').pop() || `ffmpeg exited with ${code}`}`));
       const buf = Buffer.concat(chunks);
+      chunks.length = 0;
       const length = Math.floor(buf.length / 8);
       if (!length) return reject(new Error('The track has no audio'));
       const f = new Float32Array(buf.buffer, buf.byteOffset, length * 2);
@@ -230,7 +232,10 @@ async function job(m) {
       r = await run();
     }
     send({ type: 'done', id: m.id, frames: audio.length, ms: Date.now() - t0, chunks: r.chunks, backend: info.backend, threads: info.threads, ...(gpuFailed ? { gpuFailed } : {}) });
-  } finally { for (const fd of fds) fs.closeSync(fd); }
+  } finally {
+    audio.left = null; audio.right = null;
+    for (const fd of fds) fs.closeSync(fd);
+  }
 }
 
 // one message at a time: a job never starts before the model is loaded

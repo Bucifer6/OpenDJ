@@ -4,7 +4,7 @@ import {
   detectVocalActivity, computeBarFeatures, localChromaSimilarity, barProfileAt,
   computeGrooveAndEmbedding, detectElasticGrid, beatAtTime, timeAtBeat, localBpmAt,
 } from '../public/js/audio/features.js';
-import { analyzeTrack } from '../public/js/audio/analysis-core.js';
+import { analyzeTrack, detectBpm } from '../public/js/audio/analysis-core.js';
 import { soundSimilarity } from '../public/js/smartmix.js';
 
 const SR = 44100;
@@ -83,4 +83,31 @@ test('elastic beatgrid detects tempo drift and interpolates beat <-> time accura
   const b = beatAtTime({ tempoMap: map }, 15);
   const tBack = timeAtBeat({ tempoMap: map }, b);
   assert.ok(Math.abs(tBack - 15) < 0.01, `round-trip time ${tBack}`);
+});
+
+test('elastic beatgrid stays null on a steady track with a quiet breakdown (no false-positive drift)', () => {
+  const x = makeBeatTrack(124, 36);
+  // Mute kicks during a 6-second breakdown in the middle (14s..20s), leaving only quiet chord pad
+  for (let i = Math.floor(14 * SR); i < Math.floor(20 * SR); i++) {
+    const t = i / SR;
+    x[i] = 0.08 * Math.sin(2 * Math.PI * 220 * t) + 0.05 * Math.sin(2 * Math.PI * 330 * t);
+  }
+  assert.equal(detectElasticGrid(x, SR, 124, 0), null);
+});
+
+test('detectBpm finds fractional BPM without rightward bias and sub-5 ms grid offset', () => {
+  const bpmTrue = 124.5, offsetTrue = 0.173, beat = 60 / bpmTrue;
+  const x = new Float32Array(SR * 28);
+  for (let i = 0; i < x.length; i++) {
+    const t = i / SR - offsetTrue;
+    if (t >= 0) {
+      const tb = t % beat;
+      if (tb < 0.12) x[i] = 0.8 * Math.sin(2 * Math.PI * (52 + 90 * Math.exp(-tb * 35)) * tb) * Math.exp(-tb * 20);
+    }
+  }
+  const r = detectBpm(x, SR);
+  assert.ok(Math.abs(r.bpm - bpmTrue) <= 0.02, `expected ~${bpmTrue}, got ${r.bpm}`);
+  let err = ((r.offset - offsetTrue) % beat + beat) % beat;
+  if (err > beat / 2) err -= beat;
+  assert.ok(Math.abs(err) < 0.008, `grid offset error ${(err * 1000).toFixed(2)} ms`);
 });

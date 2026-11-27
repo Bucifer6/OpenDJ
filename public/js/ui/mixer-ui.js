@@ -20,10 +20,10 @@ function vuMeter(segPx = 0) { // segPx: one segment per ~segPx CSS px of height 
   const g = c.getContext('2d');
   let SEGS = 20;
   let level = 0, held = 0, heldT = 0, lastT = 0, sig = '', dirty = true;
-  let box = null;
+  let box = null, colClip = '', colHot = '', colOk = '';
   const ro = new ResizeObserver((es) => { const r = es.at(-1).contentRect, z = uiZoom(); box = { width: r.width * z, height: r.height * z }; dirty = true; });
   ro.observe(c);
-  window.addEventListener('opendj-theme', () => { sig = ''; });
+  window.addEventListener('opendj-theme', () => { sig = ''; colClip = ''; });
   c.draw = (peak, now = performance.now(), rms) => { // rms given: the bar shows RMS, the hold dot follows the peak
     if (dirty) {
       dirty = false;
@@ -41,11 +41,12 @@ function vuMeter(segPx = 0) { // segPx: one segment per ~segPx CSS px of height 
     const s = `${lit}|${pk}|${c.width}x${c.height}`;
     if (s === sig) return;
     sig = s;
+    if (!colClip) { colClip = cssVar('--meter-clip'); colHot = cssVar('--meter-hot'); colOk = cssVar('--meter-ok'); }
     const W = c.width, H = c.height, gap = Math.max(1, Math.round(H / SEGS * 0.22)), sh = (H - gap * (SEGS - 1)) / SEGS;
     g.clearRect(0, 0, W, H);
     for (let i = 0; i < SEGS; i++) {
       const top = (i + 1) / SEGS * 51 - 48; // the segment's top in dB: red over 0 dB, amber over -10.5 dB
-      const col = top > 0 ? cssVar('--meter-clip') : top > -10.5 ? cssVar('--meter-hot') : cssVar('--meter-ok');
+      const col = top > 0 ? colClip : top > -10.5 ? colHot : colOk;
       const y = Math.round(H - (i + 1) * sh - i * gap);
       g.fillStyle = col;
       g.globalAlpha = i < lit ? 1 : i === pk && held > 0.02 ? 0.95 : 0.12;
@@ -279,8 +280,10 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
   };
   new ResizeObserver((ents) => { const e = ents[0], b = e.contentBoxSize?.[0]; fit(b?.blockSize ?? e.contentRect.height, b?.inlineSize ?? e.contentRect.width); }).observe(root);
   root.setDeckCount = (n) => { for (const s of strips) s.style.display = s.idx < n ? '' : 'none'; requestAnimationFrame(() => fit(lastH, lastW, true)); };
-  let masterQuiet = 0;
-  root.frame = () => {
+  let masterQuiet = 0, lastVuAt = 0;
+  root.frame = (now = performance.now()) => {
+    if (now - lastVuAt < 32) return; // ~30 fps is plenty for LED VU meters (halves AnalyserNode reads & canvas paints)
+    lastVuAt = now;
     let anyActive = eng.micOn || !!eng.sampler?.playing || eng.decks.some((d) => d.playing || d.scratching);
     for (const s of strips) {
       if (s.style.display === 'none') continue;
@@ -290,13 +293,13 @@ const order = [2, 0, 1, 3]; // 4-deck layout: 3 1 2 4
       const lvl = s.ch.level();
       s._vuQuiet = (!chBusy && lvl < 1e-4) ? (s._vuQuiet || 0) + 1 : 0;
       if (lvl >= 1e-4) anyActive = true;
-      s.vu.draw(lvl);
+      s.vu.draw(lvl, now);
     }
     if (anyActive || masterQuiet <= 30) {
       const m = eng.masterMeter();
       const silent = !anyActive && m.peak[0] < 1e-4 && m.peak[1] < 1e-4;
       masterQuiet = silent ? masterQuiet + 1 : 0;
-      mvuL.draw(m.peak[0], undefined, m.rms[0]); mvuR.draw(m.peak[1], undefined, m.rms[1]); mpkL.draw(m.peak[0]); mpkR.draw(m.peak[1]);
+      mvuL.draw(m.peak[0], now, m.rms[0]); mvuR.draw(m.peak[1], now, m.rms[1]); mpkL.draw(m.peak[0], now); mpkR.draw(m.peak[1], now);
     }
     const gr = eng.limiterGr() < 0.98; if (gr !== grLed._on) { grLed._on = gr; grLed.classList.toggle('on', gr); }
   };

@@ -664,8 +664,9 @@ class App {
     if (opts.mode === 'smart' || opts.mode === 'live') {
       const todo = list.filter((t) => !t.analyzed && !t.unreadable);
       if (todo.length && this.analyser) {
-        const batch = todo.slice(0, 60);
-        const n = this.analyser.request(batch);
+        const hasRemote = todo.some((t) => t.sourceType === 'remote' && !t.localPath);
+        const batch = todo.slice(0, hasRemote ? 12 : 24);
+        const n = this.analyser.request(batch, { auto: true });
         if (n) {
           this.toast(`Analysing ${n} track(s) before smart mix (BPM, key, energy)…`);
           const t0 = performance.now(), maxMs = Math.min(45000, 4000 + n * 3000);
@@ -905,8 +906,9 @@ class App {
     const active = this.engine.decks.some((d) => d.playing || d.scratching || d.loading)
       || this.engine.recording || this.engine.micOn || this.automix?.enabled
       || (now - (this._lastInputAt || 0) < 1500);
-    // When completely idle, throttle UI repaints to ~12 fps instead of 60-144 fps (cuts idle CPU/GPU dramatically)
-    if (!active && this._lastFrame && now - this._lastFrame < 80) return;
+    // Cap active repaints to ~60 fps (prevents 144-240 Hz monitors from burning 2-4x GPU/CPU), and idle to ~12 fps
+    const minFrameMs = active ? 15.5 : 80;
+    if (this._lastFrame && now - this._lastFrame < minFrameMs) return;
     this._lastFrame = now;
     for (let i = 0; i < this.deckCount; i++) { this.waves[i].wf.draw(now); this.deckEls[i].frame(now); }
     this.mixer.frame(now);

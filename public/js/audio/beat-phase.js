@@ -17,7 +17,7 @@ const onePole = (fc, sr) => 1 - Math.exp(-2 * Math.PI * fc / sr);
  * samples. Built in slices of `slice` points (128 k samples: a few ms) with `yieldFn` awaited between them, so a long track never blocks the
  * page for more than a few milliseconds. Returns { rate, env } (rate: points per second of track time).
  */
-export async function onsetCurve(left, right, sampleRate, { hop = ONSET_HOP, slice = 2000, yieldFn = () => new Promise((r) => setTimeout(r, 0)) } = {}) {
+export async function onsetCurve(left, right, sampleRate, { hop = ONSET_HOP, slice = 2000, yieldFn = () => new Promise((r) => setTimeout(r, 0)), shouldAbort = null } = {}) {
   const n = Math.floor(left.length / hop);
   const env = new Float32Array(n);
   const a = onePole(150, sampleRate), b = onePole(40, sampleRate);
@@ -25,6 +25,7 @@ export async function onsetCurve(left, right, sampleRate, { hop = ONSET_HOP, sli
   // would otherwise look like tiny onsets at the note's frequency; the same filter on both decks adds no offset
   let lp1 = 0, lp2 = 0, e1 = 0, e2 = 0, prev = 0;
   for (let k0 = 0; k0 < n; k0 += slice) {
+    if (shouldAbort?.()) return null;
     const k1 = Math.min(n, k0 + slice);
     if (right) {
       for (let k = k0; k < k1; k++) {
@@ -48,7 +49,10 @@ export async function onsetCurve(left, right, sampleRate, { hop = ONSET_HOP, sli
         prev = v;
       }
     }
-    if (k1 < n) await yieldFn();
+    if (k1 < n) {
+      await yieldFn();
+      if (shouldAbort?.()) return null;
+    }
   }
   return { rate: sampleRate / hop, env };
 }
@@ -115,3 +119,46 @@ export function audibleOffset(out, inn, { window = 2, maxLag = 0.06, step = 0.00
 export const MIN_ONSET = 0.004;
 /** Below this confidence the audible measurement is not trusted (no clear kicks): the beat grids are used. */
 export const MIN_CONFIDENCE = 0.35; // clean kicks score 0.5 and more; soft or busy ones ~0.2 and jump around
+
+const wrapHalf = (x) => { const w = ((x % 1) + 1) % 1; return w > 0.5 ? w - 1 : w; };
+
+/**
+ * Harmonic beat-count multiplier `mult` in {0.5, 1, 2} such that `slaveBpm ≈ masterBpm * mult` within `tol`
+ * (default ±5 % in log tempo), or null when the two tempos are not beat-matched.
+ * Example: master 88 BPM, slave 176 BPM -> 2 (two slave beats per master beat).
+ */
+export function syncBeatRatio(masterBpm, slaveBpm, tol = 0.05) {
+  if (!(masterBpm > 0) || !(slaveBpm > 0)) return null;
+  let best = null, bestErr = Infinity;
+  for (const mult of [1, 2, 0.5]) {
+    const err = Math.abs(Math.log(slaveBpm / (masterBpm * mult)));
+    if (err < bestErr) { bestErr = err; best = mult; }
+  }
+  return bestErr <= tol ? best : null;
+}
+
+/**
+ * Phase shift in SLAVE beats needed to align the slave beatgrid to the master beatgrid (positive = slave is behind
+ * and must advance forward; negative = slave is ahead). Half/double-time aware (`mult` in {0.5, 1, 2}):
+ *  - mult = 1:   align slave phase directly to master phase, in (-0.5, 0.5] slave beats;
+ *  - mult = 2:   two slave beats per master beat -> align slave phase to (masterPhase * 2) % 1, in (-0.5, 0.5];
+ *  - mult = 0.5: half a slave beat per master beat -> align (slavePhase * 2) % 1 to master phase, in (-0.25, 0.25].
+ */
+export function beatPhaseDelta(masterPhase, slavePhase, mult = 1) {
+  if (mult === 2) return wrapHalf(masterPhase * 2 - slavePhase);
+  if (mult === 0.5) return wrapHalf(masterPhase - slavePhase * 2) * 0.5;
+  return wrapHalf(masterPhase - slavePhase);
+}
+
+/**
+ * How far the slave deck's beatgrid lags behind the master deck's (seconds of audio time; negative = ahead) at
+ * audio time `t`. Supports 1x, 2x, and 0.5x tempo-matched pairs; returns null when tempos differ by more than 5 %.
+ */
+export function phaseErrorSec(master, slave, t) {
+  const ob = master?.effectiveBpm || master?.bpm, ib = slave?.effectiveBpm || slave?.bpm;
+  const mult = syncBeatRatio(ob, ib);
+  if (!mult) return null;
+  const mp = master.beatPhase(typeof master.positionAt === 'function' ? master.positionAt(t) : master.position);
+  const sp = slave.beatPhase(typeof slave.positionAt === 'function' ? slave.positionAt(t) : slave.position);
+  return beatPhaseDelta(mp, sp, mult) * (60 / ib);
+}

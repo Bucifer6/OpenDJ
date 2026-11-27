@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { onsetCurve, audibleOffset, MIN_CONFIDENCE } from '../public/js/audio/beat-phase.js';
+import { onsetCurve, audibleOffset, MIN_CONFIDENCE, syncBeatRatio, beatPhaseDelta, phaseErrorSec } from '../public/js/audio/beat-phase.js';
 
 const SR = 44100;
 /** A 4-on-the-floor kick track at `bpm` whose first kick is at `first` seconds, with hats and a pad on top. */
@@ -57,10 +57,46 @@ test('beat phase: no kicks (a pad only) or no data: not trusted', async () => {
   assert.equal(audibleOffset({ curve: pad, pos: 0.5, rate: 1 }, { curve: pad, pos: 5, rate: 1 }), null, 'not enough played yet');
 });
 
-test('beat phase: the onset curve is built in slices', async () => {
+test('beat phase: the onset curve is built in slices and aborts cleanly via shouldAbort', async () => {
   let yields = 0;
   const c = await onsetCurve(new Float32Array(SR * 4), null, SR, { slice: 500, yieldFn: async () => { yields++; } });
   assert.equal(c.env.length, Math.floor(SR * 4 / 64));
   assert.ok(yields >= 5);
+  let abortYields = 0;
+  const aborted = await onsetCurve(new Float32Array(SR * 10), null, SR, {
+    slice: 500,
+    yieldFn: async () => { abortYields++; },
+    shouldAbort: () => abortYields >= 2,
+  });
+  assert.equal(aborted, null);
+  assert.ok(abortYields <= 3);
   void sync;
+});
+
+test('beat phase: half/double-time syncBeatRatio, beatPhaseDelta, and phaseErrorSec', () => {
+  assert.equal(syncBeatRatio(128, 128), 1);
+  assert.equal(syncBeatRatio(88, 176), 2);
+  assert.equal(syncBeatRatio(176, 88), 0.5);
+  assert.equal(syncBeatRatio(120, 95), null);
+
+  // 88 BPM master at phase 0.25 vs 176 BPM slave at phase 0.50: beats are aligned (0 delta!)
+  assert.ok(Math.abs(beatPhaseDelta(0.25, 0.5, 2)) < 1e-9);
+  assert.ok(Math.abs(beatPhaseDelta(0.75, 0.5, 2)) < 1e-9);
+  // Slave 0.1 beat behind master's double-time grid
+  assert.ok(Math.abs(beatPhaseDelta(0.25, 0.4, 2) - 0.1) < 1e-9);
+  // 176 BPM master vs 88 BPM slave: master phase 0.50 aligns with slave 0.25 or 0.75
+  assert.ok(Math.abs(beatPhaseDelta(0.5, 0.25, 0.5)) < 1e-9);
+  assert.ok(Math.abs(beatPhaseDelta(0.5, 0.75, 0.5)) < 1e-9);
+
+  // phaseErrorSec on 88 BPM master vs 176 BPM slave (lagged 10 ms behind)
+  const mkDeck = (bpm, pos) => ({
+    bpm, effectiveBpm: bpm, gridOffset: 0,
+    positionAt: () => pos,
+    beatPhase: (p) => (((p / (60 / bpm)) % 1) + 1) % 1,
+  });
+  const m = mkDeck(88, 10 * (60 / 88) + (60 / 88) * 0.25); // master at phase 0.25
+  const sAligned = mkDeck(176, 20 * (60 / 176) + (60 / 176) * 0.5); // slave at phase 0.50 -> aligned
+  const sLag = mkDeck(176, 20 * (60 / 176) + (60 / 176) * 0.5 - 0.01); // 10 ms behind
+  assert.ok(Math.abs(phaseErrorSec(m, sAligned, 0)) < 1e-9);
+  assert.ok(Math.abs(phaseErrorSec(m, sLag, 0) - 0.01) < 1e-9);
 });

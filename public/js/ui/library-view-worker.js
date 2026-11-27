@@ -1,7 +1,11 @@
 import { camelotCompatible, toCamelot } from '../audio/analysis-core.js';
 
 const upper = (v) => (v.includes('.') ? +v : +v + 0.999);
+let cachedKey = '';
+let cachedItems = [];
+
 function filterQuery(items, query, masterBpm, masterKey) {
+  if (!query) return items;
   const tests = [];
   let q = query;
   q = q.replace(/bpm:(\d+(?:\.\d+)?)(?:-(\d+(?:\.\d+)?))?/g, (_, a, b) => {
@@ -16,18 +20,32 @@ function filterQuery(items, query, masterBpm, masterKey) {
   q = q.replace(/key:(\S*)/g, (_, k) => {
     const key = toCamelot(k); tests.push(key ? (t) => t.keyCamelot === key : () => false); return '';
   });
-  q = q.replace(/genre:(\S+)/g, (_, g) => { tests.push((t) => t.genre.toLowerCase().includes(g)); return ''; });
+  q = q.replace(/genre:(\S+)/g, (_, g) => { tests.push((t) => t.genreLower.includes(g)); return ''; });
   q = q.replace(/tag:(\S+)/g, (_, g) => { tests.push((t) => t.tags.some((x) => x.includes(g))); return ''; });
   const words = q.split(/\s+/).filter(Boolean);
+  if (!tests.length && !words.length) return items;
   return items.filter((t) => {
-    if (!tests.every((f) => f(t))) return false;
-    const hay = `${t.title} ${t.artist} ${t.album} ${t.genre} ${t.key} ${t.keyCamelot} ${t.comment} ${t.tags.join(' ')} ${t.colorText}`.toLowerCase();
-    return words.every((w) => hay.includes(w));
+    for (let i = 0; i < tests.length; i++) if (!tests[i](t)) return false;
+    if (!words.length) return true;
+    const hay = t.hay;
+    for (let i = 0; i < words.length; i++) if (!hay.includes(words[i])) return false;
+    return true;
   });
 }
 self.addEventListener('message', ({ data }) => {
-  const { seq, items, query, sort, masterBpm, masterKey } = data;
-  let list = filterQuery(items, query, masterBpm, masterKey);
+  const { seq, datasetKey, items, query, sort, masterBpm, masterKey } = data;
+  if (items) {
+    cachedKey = datasetKey || '';
+    for (let i = 0; i < items.length; i++) {
+      const t = items[i];
+      t.genreLower = t.genre.toLowerCase();
+      t.hay = `${t.title} ${t.artist} ${t.album} ${t.genre} ${t.key} ${t.keyCamelot} ${t.comment} ${t.tags.join(' ')} ${t.colorText}`.toLowerCase();
+    }
+    cachedItems = items;
+  } else if (datasetKey && datasetKey !== cachedKey) {
+    return;
+  }
+  let list = filterQuery(cachedItems, query, masterBpm, masterKey);
   const { col, dir, kind } = sort;
   if (col === '#') { if (dir < 0) list = [...list].reverse(); }
   else if (col && kind !== 'duplicates') {
@@ -41,5 +59,7 @@ self.addEventListener('message', ({ data }) => {
       return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true })) * dir;
     });
   }
-  self.postMessage({ seq, indices: list.map((t) => t.i) });
+  const indices = new Int32Array(list.length);
+  for (let i = 0; i < list.length; i++) indices[i] = list[i].i;
+  self.postMessage({ seq, indices }, [indices.buffer]);
 });
