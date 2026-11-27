@@ -24,6 +24,10 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.6.4
+- **Drastically lower RAM, CPU, and network usage during Automix and large-library browsing.** Stopped auto-prefetching AI stems when stem transitions are disabled, lowered the ONNX stems child idle timeout from 10 minutes to 90 seconds, capped default ONNX CPU threads, and released raw decode/PCM buffers immediately. Capped Smart/Live Automix background pre-analysis batches (12 remote / 24 local), isolated background decodes on a short-lived `OfflineAudioContext` with >20 min / >100 MB auto-analysis guards, recycled the analysis worker every 8 tracks, reused `detectBpm()`'s low-band onset envelope in elastic grid detection, halved vocal-VAD FFT work, and bounded bar features to 96 blocks. Cached the projected 73k+ track dataset inside `library-view-worker.js` with zero-copy `Int32Array` index transfers, capped active UI repaints to 60 fps and VU meters to 30 fps, added an O(1) cache fast path to `AutoMix.nextTransition()`, and enabled 24-hour browser caching for proxied Plex/media-server artwork.
+- **Fixed beat sync drift and half/double-time misalignment (e.g. 88 ↔ 176 BPM).** Made `Deck.alignPhase()`, `AutoMix` phase keeping (`phaseErrorSeconds`), Automix beat-offset/length math, and the deck phase meter half/double-time aware (`1×`, `2×`, `0.5×`); eliminated 3–15 ms worklet IPC lag on sync `play()`; added a continuous 4 Hz manual beat-phase & elastic `tempoMap` keeper in `Engine.tick()` that respects manual jog/bend nudges; and fixed `detectBpm()`'s `fold96` rightward BPM bias (+ parabolic sub-bin beatgrid offset interpolation) along with false-positive elastic grids on steady tracks with breakdowns.
+
 ### New in 0.6.3
 - **Fixed desktop freezes (`Not Responding`) and Automix stalls on very large libraries (50,000+ tracks).** Fixed an ordering bug in `Library.updateTrack()` that triggered a full SQLite `replaceAll` instead of an incremental write on every analysed track, and keyed `tracks_fts` by `tracks.rowid` to replace O(N²) FTS5 table scans with O(log N) updates (a single track flush on 73k tracks drops from ~15 minutes to ~19 ms; existing `library.db` files migrate automatically on launch).
 - **Incremental single-track sync instead of full-library reloads.** Track analysis, play-count updates, stem readiness, and downloads now push targeted single-track SSE updates merged in-place in O(1) rather than reloading the entire `/api/tracks` collection over HTTP.
@@ -63,8 +67,4 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 ### New in 0.5.14
 - **Bass preview (optional).** *Settings → Automix → Bass preview*: in a long blend, the next track's bass comes in quietly (8 dB down) for the 8 bars before the bass swap, as in real DJ mixes, instead of staying cut. It is used only where it adds no noticeable low-end bump (under a quieter intro), never in a double drop, and is off by default.
-
-### New in 0.5.13
-- **Smaller desktop downloads.** Since 0.5.5 every desktop app also carried files only the project itself needs (documentation images, the phone app projects, tests and scripts), about 40 MB per app. They are no longer packaged.
-- **The top bar fits a 1440 px laptop screen again.** The Automix ▾ menu had pushed it 10 px past the window edge; the buttons now sit a little closer together up to 1500 px.
 
