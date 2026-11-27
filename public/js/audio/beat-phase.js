@@ -26,15 +26,27 @@ export async function onsetCurve(left, right, sampleRate, { hop = ONSET_HOP, sli
   let lp1 = 0, lp2 = 0, e1 = 0, e2 = 0, prev = 0;
   for (let k0 = 0; k0 < n; k0 += slice) {
     const k1 = Math.min(n, k0 + slice);
-    for (let k = k0; k < k1; k++) {
-      for (let i = k * hop, end = i + hop; i < end; i++) {
-        const x = right ? (left[i] + right[i]) * 0.5 : left[i];
-        lp1 += a * (x - lp1); lp2 += a * (lp1 - lp2); // 2-pole low-pass: the kick and the bass
-        e1 += b * (lp2 * lp2 - e1); e2 += b * (e1 - e2);
+    if (right) {
+      for (let k = k0; k < k1; k++) {
+        for (let i = k * hop, end = i + hop; i < end; i++) {
+          const x = (left[i] + right[i]) * 0.5;
+          lp1 += a * (x - lp1); lp2 += a * (lp1 - lp2); // 2-pole low-pass: the kick and the bass
+          e1 += b * (lp2 * lp2 - e1); e2 += b * (e1 - e2);
+        }
+        const v = Math.log1p(1000 * e2);
+        env[k] = v > prev ? v - prev : 0; // only rises: where a kick starts
+        prev = v;
       }
-      const v = Math.log1p(1000 * e2);
-      env[k] = v > prev ? v - prev : 0; // only rises: where a kick starts
-      prev = v;
+    } else {
+      for (let k = k0; k < k1; k++) {
+        for (let i = k * hop, end = i + hop; i < end; i++) {
+          lp1 += a * (left[i] - lp1); lp2 += a * (lp1 - lp2);
+          e1 += b * (lp2 * lp2 - e1); e2 += b * (e1 - e2);
+        }
+        const v = Math.log1p(1000 * e2);
+        env[k] = v > prev ? v - prev : 0;
+        prev = v;
+      }
     }
     if (k1 < n) await yieldFn();
   }

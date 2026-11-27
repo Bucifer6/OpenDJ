@@ -35,7 +35,7 @@ const SOURCE_ICONS = { plex: 'Plex', jellyfin: 'Jellyfin', emby: 'Emby', subsoni
 export class LibraryUI {
   constructor(app) {
     this.app = app;
-    this.tracks = new Map(); this.playlists = []; this.folders = []; this.sources = []; this.drives = [];
+    this.tracks = new Map(); this.playlists = []; this.folders = []; this.sources = []; this.drives = []; this.rev = 0; this._drivesSig = null;
     this.view = { kind: 'all' }; this.sort = { col: 'addedAt', dir: -1 }; this.query = '';
     this.rows = []; this.selected = new Set(); this.cursor = -1; this.downloads = { queued: [], active: [], done: [] };
     this._viewWorker = null; this._viewSeq = 0; this._viewPending = null;
@@ -48,7 +48,7 @@ export class LibraryUI {
   // ---------------- data ----------------
   async refresh() {
     const [tracks, playlists, folders, sources, sessions] = await Promise.all([api.tracks(), api.playlists(), api.folders(), api.sources(), api.history().catch(() => [])]);
-    this.tracks = new Map(tracks.map((t) => [t.id, t]));
+    this.tracks = new Map(tracks.map((t) => [t.id, t])); this.rev++;
     this.playlists = playlists; this.folders = folders; this.sources = sources; this.sessions = sessions;
     await this.loadViewData();
     this.renderTree(); this.applyView();
@@ -109,10 +109,17 @@ export class LibraryUI {
     const sameYear = d.getFullYear() === new Date().getFullYear();
     return `${d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) })} · ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
   }
-  async refreshDrives() { try { this.drives = await api.drives(); } catch { this.drives = []; } this.renderTree(); }
+  async refreshDrives() {
+    let next;
+    try { next = await api.drives(); } catch { next = []; }
+    const sig = JSON.stringify(next);
+    if (sig === this._drivesSig) return;
+    this._drivesSig = sig; this.drives = next;
+    this.renderTree();
+  }
   track(id) { return this.tracks.get(id); }
   // background analysis updates tracks one after another, also during playback: coalesce the row redraws to one per frame
-  updateTrack(t) { if (t?.id) { this.tracks.set(t.id, { ...this.tracks.get(t.id), ...t }); this._rowsRaf ||= requestAnimationFrame(() => { this._rowsRaf = 0; this.renderRows(true); }); } }
+  updateTrack(t) { if (t?.id) { this.tracks.set(t.id, { ...this.tracks.get(t.id), ...t }); this.rev++; this._rowsRaf ||= requestAnimationFrame(() => { this._rowsRaf = 0; this.renderRows(true); }); } }
 
   viewTracks() {
     const all = [...this.tracks.values()]; const v = this.view;

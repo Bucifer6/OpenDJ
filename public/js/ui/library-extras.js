@@ -32,6 +32,8 @@ export function setupLibraryExtras(app) {
   const genreSel = el('select', { class: 'chip chip-sel', title: 'Filter by genre', 'aria-label': 'Genre' });
   genreSel.addEventListener('change', () => setTok(/(^|\s)genre:\S+/g, genreSel.value ? `genre:${genreSel.value}` : ''));
   const fillGenres = () => {
+    if (genreSel._rev === L.rev && genreSel._size === L.tracks.size) return;
+    genreSel._rev = L.rev; genreSel._size = L.tracks.size;
     const genres = [...new Set([...L.tracks.values()].map((t) => (t.genre || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     const key = genres.join('|');
     if (genreSel._key === key) return;

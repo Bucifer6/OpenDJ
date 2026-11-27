@@ -40,8 +40,11 @@ export function setupRecording(app) {
   const anchor = app.recTime || app.recBtn;
   if (anchor?.parentNode) anchor.after(sizeEl, moreBtn, ...(unavailable('broadcast') ? [] : [liveBtn])); // mobile: no live streaming
   if (app.recBtn) app.recBtn.title = 'Record your mix to disk (WAV / FLAC / MP3 / AAC / Opus). R = start / stop';
-  let lastCastError = null;
+  let lastCastError = null, wasActive = true;
   const topbarTick = setInterval(() => {
+    const active = !!broadcaster.live || !!recorder.recording;
+    if (!active && !wasActive) return;
+    wasActive = active;
     const outs = broadcaster.status?.outputs || [];
     liveBtn.classList.toggle('active', broadcaster.live);
     liveBtn.classList.toggle('warn', broadcaster.live && outs.some((o) => o.state !== 'live'));

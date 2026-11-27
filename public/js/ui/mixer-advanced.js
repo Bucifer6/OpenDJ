@@ -35,19 +35,24 @@ export function buildDrawer(app, mixerRoot) {
   const pane = {};
 
   // ---------- Channel ----------
-  const chRows = eng.channels.map((ch, i) => el('div', { class: 'adv-ch', 'data-ch': i },
-    el('span', { class: 'adv-chn' }, String(i + 1)),
-    kn({ label: 'TRIM', size: 'xs', title: `Channel ${i + 1} trim (±12 dB)`, get: () => ch.state.trim, set: (v) => ch.set('trim', v) }),
-    kn({ label: 'VOC', min: 0, max: 1, def: 1, bipolar: false, size: 'xs', title: `Channel ${i + 1} quick stems: vocal`, get: () => ch.state.vocal, set: (v) => ch.set('vocal', v) }),
-    kn({ label: 'INST', min: 0, max: 1, def: 1, bipolar: false, size: 'xs', title: `Channel ${i + 1} quick stems: instrumental`, get: () => ch.state.inst, set: (v) => ch.set('inst', v) }),
-    select(COLOR_FX, () => ch.state.colorFx, (v) => ch.set('colorFx', v), `Channel ${i + 1} Color FX`),
-    kn({ label: 'COMP', min: 0, max: 1, def: 0, bipolar: false, size: 'xs', title: `Channel ${i + 1} one-knob compressor`, get: () => ch.state.comp, set: (v) => ch.set('comp', v) }),
-    kn({ label: 'SEND', min: 0, max: 1, def: 0, bipolar: false, size: 'xs', title: `Channel ${i + 1} send to the send / return FX`, get: () => ch.state.send, set: (v) => ch.set('send', v) }),
-    toggle('POST', () => ch.state.cuePost, () => ch.set('cuePost', !ch.state.cuePost), 'Post-fader cue'),
-    toggle('CUE B', () => ch.state.cue2, () => { eng.ensureHp2(); ch.set('cue2', !ch.state.cue2); }, 'Headphones B cue'),
-    toggle('REV', () => ch.state.faderReverse, () => ch.set('faderReverse', !ch.state.faderReverse), 'Channel fader reverse'),
-    el('canvas', { class: 'adv-bands', width: 60, height: 24, title: 'Band levels: low / mid / high' }),
-  ));
+  const chCanvases = [];
+  const chRows = eng.channels.map((ch, i) => {
+    const cv = el('canvas', { class: 'adv-bands', width: 60, height: 24, title: 'Band levels: low / mid / high' });
+    chCanvases.push({ cv, ctx: cv.getContext('2d') });
+    return el('div', { class: 'adv-ch', 'data-ch': i },
+      el('span', { class: 'adv-chn' }, String(i + 1)),
+      kn({ label: 'TRIM', size: 'xs', title: `Channel ${i + 1} trim (±12 dB)`, get: () => ch.state.trim, set: (v) => ch.set('trim', v) }),
+      kn({ label: 'VOC', min: 0, max: 1, def: 1, bipolar: false, size: 'xs', title: `Channel ${i + 1} quick stems: vocal`, get: () => ch.state.vocal, set: (v) => ch.set('vocal', v) }),
+      kn({ label: 'INST', min: 0, max: 1, def: 1, bipolar: false, size: 'xs', title: `Channel ${i + 1} quick stems: instrumental`, get: () => ch.state.inst, set: (v) => ch.set('inst', v) }),
+      select(COLOR_FX, () => ch.state.colorFx, (v) => ch.set('colorFx', v), `Channel ${i + 1} Color FX`),
+      kn({ label: 'COMP', min: 0, max: 1, def: 0, bipolar: false, size: 'xs', title: `Channel ${i + 1} one-knob compressor`, get: () => ch.state.comp, set: (v) => ch.set('comp', v) }),
+      kn({ label: 'SEND', min: 0, max: 1, def: 0, bipolar: false, size: 'xs', title: `Channel ${i + 1} send to the send / return FX`, get: () => ch.state.send, set: (v) => ch.set('send', v) }),
+      toggle('POST', () => ch.state.cuePost, () => ch.set('cuePost', !ch.state.cuePost), 'Post-fader cue'),
+      toggle('CUE B', () => ch.state.cue2, () => { eng.ensureHp2(); ch.set('cue2', !ch.state.cue2); }, 'Headphones B cue'),
+      toggle('REV', () => ch.state.faderReverse, () => ch.set('faderReverse', !ch.state.faderReverse), 'Channel fader reverse'),
+      cv,
+    );
+  });
   pane.channel = el('div', { class: 'adv-pane' },
     sec('EQ',
       row('EQ preset', select(EQ_PRESETS.map((p) => [p.id, p.label]), () => mx().eqType, (v) => set({ eqType: v }), 'EQ preset')),
@@ -118,7 +123,8 @@ export function buildDrawer(app, mixerRoot) {
         toggle('MIC', () => mx().micToRecord, () => set({ micToRecord: !mx().micToRecord }), 'Mic (and voice) in the recording'))),
   );
   // ---------- Mic ----------
-  const notchInfo = R(el('div', { class: 'adv-note' })); notchInfo.render = () => { const f = eng.mic?.notchFreqs || []; notchInfo.textContent = mx().feedbackReducer ? (f.length ? `Notches: ${f.map((x) => `${Math.round(x)} Hz`).join(', ')}` : 'Listening for feedback…') : ''; };
+  const setText = (node, txt) => { if (node._t !== txt) { node._t = txt; node.textContent = txt; } };
+  const notchInfo = R(el('div', { class: 'adv-note' })); notchInfo.render = () => { const f = eng.mic?.notchFreqs || []; setText(notchInfo, mx().feedbackReducer ? (f.length ? `Notches: ${f.map((x) => `${Math.round(x)} Hz`).join(', ')}` : 'Listening for feedback…') : ''); };
   pane.mic = el('div', { class: 'adv-pane' },
     sec('Mic EQ',
       el('div', { class: 'adv-knobs' }, ...['high', 'mid', 'low'].map((b) => kn({ label: b.toUpperCase(), title: `Mic EQ ${b} ±12 dB`, get: () => eng.micEq[b], set: (v) => eng.setMicEq(b, v) })))),
@@ -176,8 +182,8 @@ export function buildDrawer(app, mixerRoot) {
     R(button('Reset', { cls: 'xs', click: () => eng.resetLoudness() })));
   const renderLoud = () => {
     const d = eng.loudness;
-    if (d) { L.m.textContent = fmtDb(d.m); L.s.textContent = fmtDb(d.s); L.i.textContent = fmtDb(d.i); L.tp.textContent = fmtDb(d.tpMax); }
-    L.gr.textContent = fmtDb(20 * Math.log10(eng.limiterGr()), 1);
+    if (d) { setText(L.m, fmtDb(d.m)); setText(L.s, fmtDb(d.s)); setText(L.i, fmtDb(d.i)); setText(L.tp, fmtDb(d.tpMax)); }
+    setText(L.gr, fmtDb(20 * Math.log10(eng.limiterGr()), 1));
   };
 
   // ---------- shell ----------
@@ -204,19 +210,29 @@ export function buildDrawer(app, mixerRoot) {
     for (const r of renderers) r.render?.();
     const st = personalityState(mx()); persSel.value = st.id; pState.textContent = st.custom ? st.label : '';
   }
-  const frame = () => {
+  let lastDraw = 0;
+  const BAND_COLORS = ['#ff5964', '#55d98a', '#4da8ff'];
+  const frame = (now = performance.now()) => {
     raf = 0;
     if (drawer.hidden) return;
+    raf = requestAnimationFrame(frame);
+    if (document.hidden) return;
+    const minMs = tab === 'channel' ? 33 : 50; // ~30 fps for channel band bars, ~20 fps for loudness / mic text
+    if (now - lastDraw < minMs) return;
+    lastDraw = now;
     if (tab === 'loudness') renderLoud();
-    if (tab === 'channel') chRows.forEach((r, i) => {
-      if (eng.channels[i] && r.offsetParent) {
-        const lv = eng.channels[i].bandLevels(true), c = r.querySelector('canvas'), g = c.getContext('2d');
+    else if (tab === 'channel') chRows.forEach((r, i) => {
+      if (eng.channels[i] && !r.hidden) {
+        const lv = eng.channels[i].bandLevels(true), { cv: c, ctx: g } = chCanvases[i];
         g.clearRect(0, 0, c.width, c.height);
-        lv.forEach((v, k) => { const h = Math.max(1, Math.min(1, (20 * Math.log10(v + 1e-6) + 60) / 60) * c.height); g.fillStyle = ['#ff5964', '#55d98a', '#4da8ff'][k]; g.fillRect(k * 20 + 2, c.height - h, 16, h); });
+        for (let k = 0; k < lv.length; k++) {
+          const h = Math.max(1, Math.min(1, (20 * Math.log10(lv[k] + 1e-6) + 60) / 60) * c.height);
+          g.fillStyle = BAND_COLORS[k];
+          g.fillRect(k * 20 + 2, c.height - h, 16, h);
+        }
       }
     });
-    if (tab === 'mic') notchInfo.render();
-    raf = requestAnimationFrame(frame);
+    else if (tab === 'mic') notchInfo.render();
   };
   const api = {
     el: drawer, panes: pane,

@@ -36,17 +36,33 @@ export class LinkClient {
 
   savePrefs() { try { localStorage.setItem(STORE, JSON.stringify(this.prefs)); } catch { /* private mode */ } }
   on(fn) { this._listeners.add(fn); return () => this._listeners.delete(fn); }
-  _changed() { for (const fn of this._listeners) { try { fn(this.state); } catch (e) { console.error(e); } } this.render?.(); }
+  _changed() { this._syncTimers(); for (const fn of this._listeners) { try { fn(this.state); } catch (e) { console.error(e); } } this.render?.(); }
+
+  /** Start/stop 20 Hz follow/beat loops and 10 s clock-sync HTTP probes only while Link is enabled. */
+  _syncTimers() {
+    if (this.state.enabled && this.available) {
+      if (!this._clockT) {
+        if (!Number.isFinite(this.offsetRtt)) this.syncClock().catch(() => {});
+        this._clockT = setInterval(() => this.syncClock().catch(() => {}), 10000);
+      }
+      if (!this._loopT) this._loopT = setInterval(() => this.step(), 50);
+      if (this.beatEl && !this._beatT) this._beatT = setInterval(() => this._renderBeat(), 50);
+    } else {
+      if (this._clockT) { clearInterval(this._clockT); this._clockT = null; }
+      if (this._loopT) { clearInterval(this._loopT); this._loopT = null; }
+      if (this._beatT) { clearInterval(this._beatT); this._beatT = null; }
+      this.releaseBend();
+      this._renderBeat();
+    }
+  }
 
   async init({ topbar = true } = {}) {
     try { Object.assign(this.state, await jget('/api/link')); } catch { this.available = false; }
     if (topbar) this.mountButton();
     if (!this.available) return this;
-    await this.syncClock().catch(() => {});
-    this._clockT = setInterval(() => this.syncClock().catch(() => {}), 10000);
     this.openStream();
-    // follow / lead loop (independent of rAF so it keeps running in background tabs)
-    this._loopT = setInterval(() => this.step(), 50);
+    if (this.state.enabled) await this.syncClock().catch(() => {});
+    this._syncTimers();
     for (const d of this.engine.decks) {
       d.on('tempo', () => this.onDeckTempo(d));
       d.on('state', () => this.onDeckState(d));
@@ -195,7 +211,8 @@ export class LinkClient {
     this.render = () => this._render();
     this.renderBeat = () => this._renderBeat();
     this._render();
-    this._beatT = setInterval(() => this._renderBeat(), 50);
+    this._renderBeat();
+    if (this.state.enabled && !this._beatT) this._beatT = setInterval(() => this._renderBeat(), 50);
   }
 
   _render() {

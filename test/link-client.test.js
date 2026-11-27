@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { estimateOffset, tempoRatio, beatScale, phaseError, heardPosition, deckBeats, linkBeatAt, followPlan, audioLagSec } from '../public/js/link/link-core.js';
-import { linkMidiTargets } from '../public/js/link/link.js';
+import { LinkClient, linkMidiTargets } from '../public/js/link/link.js';
 
 const near = (a, b, eps = 1e-9, m = '') => assert.ok(Math.abs(a - b) <= eps, `${m} ${a} ≈ ${b}`);
 
@@ -91,4 +91,13 @@ test('Link MIDI targets call the client', () => {
   t['link.toggle'].handler(true); t['link.toggle'].handler(false); t['link.follow'].handler(true); t['link.lead'].handler(true); t['link.pushPhase'].handler(true);
   assert.deepEqual(calls, ['toggle', ['follow', false], ['lead', true], 'push']);
   assert.equal(t['link.follow'].led(), true);
+});
+
+test('LinkClient does not run background polling timers while Link is disabled', () => {
+  const client = new LinkClient({ engine: { decks: [], on() {} } });
+  client._syncTimers();
+  assert.equal(client._clockT || null, null, 'no 10 s clock-sync timer while disabled');
+  assert.equal(client._loopT || null, null, 'no 20 Hz follow timer while disabled');
+  assert.equal(client._beatT || null, null, 'no 20 Hz beat timer while disabled');
+  client.dispose();
 });

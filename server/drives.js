@@ -43,12 +43,34 @@ function windowsDrives() {
   return out;
 }
 
+async function windowsDrivesAsync() {
+  const letters = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i));
+  const res = await Promise.all(letters.map(async (letter) => {
+    const p = `${letter}:\\`;
+    try { await fs.promises.access(p); return { path: p, name: `${letter}:`, kind: letter === 'C' ? 'system' : 'drive' }; }
+    catch { return null; }
+  }));
+  return res.filter(Boolean);
+}
+
 export function listDrives() {
   const plat = os.platform();
   const drives = plat === 'win32' ? windowsDrives() : plat === 'darwin' ? macDrives() : linuxDrives();
   const home = os.homedir();
   const music = [path.join(home, 'Music'), path.join(home, 'Downloads')].filter((p) => fs.existsSync(p))
     .map((p) => ({ path: p, name: path.basename(p), kind: 'home' }));
+  return [...music, ...drives];
+}
+
+/** Non-blocking drive enumeration (prevents sleeping/disconnected Windows drives from stalling the event loop). */
+export async function listDrivesAsync() {
+  const plat = os.platform();
+  const drives = plat === 'win32' ? await windowsDrivesAsync() : plat === 'darwin' ? macDrives() : linuxDrives();
+  const home = os.homedir();
+  const candidates = [path.join(home, 'Music'), path.join(home, 'Downloads')];
+  const music = (await Promise.all(candidates.map(async (p) => {
+    try { await fs.promises.access(p); return { path: p, name: path.basename(p), kind: 'home' }; } catch { return null; }
+  }))).filter(Boolean);
   return [...music, ...drives];
 }
 

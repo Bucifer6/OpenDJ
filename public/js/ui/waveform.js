@@ -307,8 +307,11 @@ export class DetailWaveform {
         const barsLeft = Math.max(0, Math.ceil((nextP.start - pos) / (deck.beatLen * 4)));
         if (barsLeft > 0 && barsLeft <= 64) {
           const badge = `${barsLeft} BAR${barsLeft === 1 ? '' : 'S'} → ${nextP.type.toUpperCase()}${deck.track?.tempoMap?.length >= 2 ? ' · ELASTIC' : ''}`;
-          g.font = `700 ${9 * dpr}px ${font}`;
-          const tw = g.measureText(badge).width + 10 * dpr, th = 14 * dpr;
+          const bFont = `700 ${9 * dpr}px ${font}`;
+          g.font = bFont;
+          const bKey = `${badge}|${bFont}`;
+          if (this._badgeKey !== bKey) { this._badgeKey = bKey; this._badgeW = g.measureText(badge).width + 10 * dpr; }
+          const tw = this._badgeW, th = 14 * dpr;
           const bx = W - tw - 6 * dpr, by = 4 * dpr;
           g.fillStyle = 'rgba(11, 13, 16, 0.78)';
           g.fillRect(bx, by, tw, th);

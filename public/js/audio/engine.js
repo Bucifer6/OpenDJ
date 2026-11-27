@@ -39,14 +39,39 @@ function heldValue(param, st, t) {
 /** Linear ramp to v over `dur` seconds from now, starting from wherever the param is (no jump, mid-ramp safe). */
 export function rampParam(param, v, ctx, st, dur) {
   const t = ctx.currentTime, cur = heldValue(param, st, t);
-  param.cancelScheduledValues(t); param.setValueAtTime(cur, t); param.linearRampToValueAtTime(v, t + Math.max(1e-4, dur));
+  if (st.kind === 'curve' && t <= st.t1 + 0.005) {
+    param.cancelScheduledValues(0);
+    param.setValueAtTime(cur, t);
+  } else {
+    param.cancelScheduledValues(t);
+    param.setValueAtTime(cur, t);
+  }
+  param.linearRampToValueAtTime(v, t + Math.max(1e-4, dur));
   st.kind = 'ramp'; st.t0 = t; st.v0 = cur; st.t1 = t + Math.max(1e-4, dur); st.v1 = v;
 }
-/** Exponential approach (setTargetAtTime), first freezing any of our ramps still running. */
+/** Exponential approach (setTargetAtTime), first freezing any of our ramps or curves still running. */
 function targetParam(param, v, ctx, st, tc) {
   const t = ctx.currentTime;
-  if (st.kind === 'ramp' && t < st.t1) { const cur = heldValue(param, st, t); param.cancelScheduledValues(t); param.setValueAtTime(cur, t); }
-  param.setTargetAtTime(v, t, tc); st.kind = 'target';
+  if (st.kind === 'ramp' && t < st.t1) {
+    const cur = heldValue(param, st, t);
+    param.cancelScheduledValues(t);
+    param.setValueAtTime(cur, t);
+  } else if (st.kind === 'curve' && t <= st.t1 + 0.005) {
+    // Web Audio forbids setTargetAtTime overlapping an active setValueCurveAtTime (even by sub-quantum ε)
+    const cur = param.value;
+    if (typeof param.cancelAndHoldAtTime === 'function') param.cancelAndHoldAtTime(t);
+    else param.cancelScheduledValues(0);
+    param.setValueAtTime(cur, t);
+  }
+  try {
+    param.setTargetAtTime(v, t, tc);
+  } catch {
+    const cur = param.value;
+    param.cancelScheduledValues(0);
+    param.setValueAtTime(cur, t);
+    param.setTargetAtTime(v, t, tc);
+  }
+  st.kind = 'target';
 }
 /** Equal-gain cross-fade between two gains over `dur` (linear ramps). */
 function xfade(ctx, from, to, dur = 0.03) {
@@ -188,10 +213,15 @@ export class Channel extends Emitter {
           st.kind = 'curve'; st.t0 = t; st.t1 = t + dur; st.v1 = curve[n - 1];
         }
       } catch {
+        // Roll back partial scheduling so fader and postFader never diverge
+        for (const [param, st] of [[this.fader.gain, this.pst.fader], [this.postFader.gain, this.pst.postFader]]) {
+          try { const cur = param.value; param.cancelScheduledValues(0); param.setValueAtTime(cur, t); } catch { /* */ }
+          st.kind = 'target';
+        }
         return false;
       }
       this._autoHold = this._autoHold || {};
-      this._autoHold[key] = t + dur;
+      this._autoHold[key] = t + dur + 0.005;
       return true;
     }
     if ((key === 'eqLow' || key === 'eqMid' || key === 'eqHigh') && this.eq?.bands) {
@@ -509,18 +539,27 @@ export class Engine extends Emitter {
     this.worker = null; // lazily spawned on first analyze() and terminated when idle (saves ~25-35 MB RAM)
     this._workerIdleT = null;
     await this.applyOutputs();
+    // Drive engine ticks at ~30 Hz only while playing / scratching / automixing; sleep when completely idle
     let lastTick = 0;
+    const isBusy = () => this.automixDriving || this.decks.some((d) => d.playing || d.scratching || d.loading);
     const tick = (now = performance.now()) => {
-      this._raf = requestAnimationFrame(tick);
+      this._raf = 0;
       if (document.hidden) return;
-      const busy = this.automixDriving || this.decks.some((d) => d.playing || d.scratching);
-      const minMs = busy ? 32 : 200; // ~30 Hz when active, 5 Hz when idle (beats/FX still updated accurately)
-      if (now - lastTick < minMs) return;
+      const busy = isBusy();
+      if (busy) this._raf = requestAnimationFrame(tick);
+      if (busy && now - lastTick < 32) return;
       lastTick = now;
       this.tick();
     };
-    tick();
-    setInterval(() => { if (document.hidden && (this.automixDriving || this.decks.some((d) => d.playing))) this.tick(); }, 50); // keep automix/sync alive when hidden, sleep when idle
+    this._wakeTick = () => { if (!this._raf && !document.hidden) this._raf = requestAnimationFrame(tick); };
+    for (const d of this.decks) { d.on('state', this._wakeTick); d.on('load', this._wakeTick); }
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && isBusy()) this._wakeTick(); });
+    this.tick();
+    setInterval(() => {
+      if (!isBusy()) return;
+      if (document.hidden) this.tick();
+      else this._wakeTick();
+    }, 50); // keep automix/sync alive when hidden and wake rAF if automixDriving starts externally
   }
 
   /** Build the mixer graph on this.ctx (also used offline by the tests with { decks: false }). */

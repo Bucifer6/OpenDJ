@@ -48,6 +48,7 @@ class LfoProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
     this.beat = 0; this.beatSec = 0.5; this.clock = null; this.y = [0, 0];
+    this._k = 1 - Math.exp(-1 / (0.0015 * sampleRate)); // 1.5 ms output smoothing: no steps, even on jumps
     this.port.onmessage = (e) => onClock(this, e.data);
   }
   shape(ph, shape, duty, edge) {
@@ -69,7 +70,7 @@ class LfoProcessor extends AudioWorkletProcessor {
     const dBeat = 1 / (this.beatSec * sampleRate);
     lockBeat(this); // big errors jump (new track / seek), small ones slew over ~50 ms
     const cycleSec = beats * this.beatSec, edge = clamp(0.0025 / cycleSec, 0.002, duty * 0.3);
-    const k = 1 - Math.exp(-1 / (0.0015 * sampleRate)); // 1.5 ms output smoothing: no steps, even on jumps
+    const k = this._k;
     let y0 = this.y[0], y1 = this.y[1];
     for (let i = 0; i < n; i++) {
       const ph = frac(this.beat / beats + offset);
@@ -112,12 +113,16 @@ class ReverbProcessor extends AudioWorkletProcessor {
       return { buf: new Float32Array(cap), cap, w: 0, base, lp: 0, g: 0, modRate: 0.3 + j * 0.07, modPh: j * 0.7 };
     });
     this.x = new Float32Array(8); this.hold = 0; this.energy = 0;
+    this.mods = new Float64Array(4);
+    this.erOff = new Float64Array(ER.length);
+    this._pk = 1 - Math.exp(-1 / (0.05 * sr));
     this.last = { decay: -1, damping: -1, size: -1 };
   }
   coeffs(decay, damping, size) {
     const sr = sampleRate;
     this.damp = Math.exp(-TAU * damping / sr); // one-pole low-pass in each line
     for (const L of this.lines) { L.len = L.base * size; L.g = Math.pow(10, -3 * L.len / (sr * decay)); }
+    for (let k = 0; k < ER.length; k++) this.erOff[k] = ER[k][0] * size * sr / 1000;
     // keep loudness roughly constant over decay times: the tail's energy grows ~ with RT60
     this.outGain = 0.55 / Math.sqrt(Math.max(0.35, decay));
     this.last.decay = decay; this.last.damping = damping; this.last.size = size;
@@ -133,14 +138,13 @@ class ReverbProcessor extends AudioWorkletProcessor {
     if (this.hold <= 0 && this.energy < 1e-10) { oL.fill(0); if (oR !== oL) oR.fill(0); return true; }
     const decay = p.decay[0], damping = p.damping[0], size = p.size[0], early = p.early[0];
     if (decay !== this.last.decay || damping !== this.last.damping || size !== this.last.size) this.coeffs(decay, damping, size);
-    const sr = sampleRate, pdT = clamp(p.predelay[0], 0, 0.5) * sr, pk = 1 - Math.exp(-1 / (0.05 * sr));
+    const sr = sampleRate, pdT = clamp(p.predelay[0], 0, 0.5) * sr, pk = this._pk;
     if (this.pd == null) this.pd = pdT;
     let pd = this.pd;
     const pre = this.pre, preLen = this.preLen, lines = this.lines, x = this.x, damp = this.damp, og = this.outGain;
-    const diff = this.diff, gDiff = 0.62;
+    const diff = this.diff, gDiff = 0.62, mods = this.mods, erOff = this.erOff;
     let energy = 0;
     // per-block modulation of the first four line lengths (±0.25 ms), interpolated read
-    const mods = [0, 0, 0, 0];
     for (let j = 0; j < 4; j++) { const L = lines[j]; L.modPh += TAU * L.modRate * n / sr; mods[j] = Math.sin(L.modPh) * 0.00025 * sr; }
     for (let i = 0; i < n; i++) {
       const inL = iL ? iL[i] : 0, inR = iL ? iR[i] : 0;
@@ -152,7 +156,10 @@ class ReverbProcessor extends AudioWorkletProcessor {
       // early reflections from the pre-delayed signal
       let eL = 0, eR = 0;
       for (let k = 0; k < ER.length; k++) {
-        const e = ER[k], v = pre[((Math.floor(this.preW - pd - e[0] * size * sr / 1000) % preLen) + preLen) % preLen] * e[1];
+        const e = ER[k];
+        let idx = Math.floor(this.preW - pd - erOff[k]) % preLen;
+        if (idx < 0) idx += preLen;
+        const v = pre[idx] * e[1];
         if (e[2]) eR += v; else eL += v;
       }
       this.preW = (this.preW + 1) % preLen;
@@ -195,10 +202,10 @@ class CrushProcessor extends AudioWorkletProcessor {
       { name: 'rate', defaultValue: 8000, minValue: 100, maxValue: 96000, automationRate: 'k-rate' },
     ];
   }
-  constructor() { super(); this.acc = [1, 1]; this.hold = [0, 0]; this.bits = null; this.rate = null; }
+  constructor() { super(); this.acc = [1, 1]; this.hold = [0, 0]; this.bits = null; this.rate = null; this._k = 1 - Math.exp(-128 / (0.01 * sampleRate)); }
   process(inputs, outputs, p) {
     const inp = inputs[0], out = outputs[0];
-    const n = out[0].length, k = 1 - Math.exp(-n / (0.01 * sampleRate)); // ~10 ms parameter smoothing per block
+    const n = out[0].length, k = n === 128 ? this._k : 1 - Math.exp(-n / (0.01 * sampleRate)); // ~10 ms parameter smoothing per block
     if (this.bits === null) { this.bits = p.bits[0]; this.rate = p.rate[0]; } // start at the set values, then glide
     this.bits += (p.bits[0] - this.bits) * k; this.rate += (p.rate[0] - this.rate) * k;
     const q = Math.pow(2, this.bits - 1), step = Math.min(1, this.rate / sampleRate);
@@ -322,6 +329,7 @@ class ModDelayProcessor extends AudioWorkletProcessor {
     this.buf = [new Float32Array(this.size), new Float32Array(this.size)]; this.w = 0;
     this.beat = 0; this.beatSec = 0.5; this.clock = null;
     this.prev = null; this.hpS = [[0, 0], [0, 0]];
+    this._hpK = Math.exp(-TAU * 160 / sampleRate);
     this.port.onmessage = (e) => onClock(this, e.data);
   }
   process(inputs, outputs, p) {
@@ -330,7 +338,7 @@ class ModDelayProcessor extends AudioWorkletProcessor {
     const shape = Math.round(p.shape[0]), beats = p.beats[0];
     // wet scaled so the comb's average power stays put as feedback rises (dry² + wet²/(1-fb²) = const)
     const wet = p.wet[0] * Math.sqrt(1 - fb * fb);
-    const hpK = Math.exp(-TAU * 160 / sr); // one-pole high-pass in the feedback path: no bass boom at high feedback
+    const hpK = this._hpK; // one-pole high-pass in the feedback path: no bass boom at high feedback
     if (!this.prev) this.prev = { base, depth };
     const b0 = this.prev.base, d0 = this.prev.depth;
     lockBeat(this);
@@ -374,27 +382,38 @@ class PitchProcessor extends AudioWorkletProcessor {
     super();
     this.W = Math.round(0.05 * sampleRate); this.size = this.W + 8;
     this.buf = [new Float32Array(this.size), new Float32Array(this.size)]; this.w = 0; this.ph = 0; this.r = null;
+    this._quiet = 0;
   }
   process(inputs, outputs, p) {
     const inp = inputs[0], out = outputs[0], n = out[0].length, W = this.W, size = this.size;
     const target = p.ratio[0]; if (this.r === null) this.r = target;
-    const r0 = this.r, dr = (target - r0) / n;
     const x0 = inp[0], x1 = inp[1] || inp[0];
-    const b0 = this.buf[0], b1 = this.buf[1], o0 = out[0], o1 = out[1] || out[0];
+    const o0 = out[0], o1 = out[1] || out[0];
+    let silent = !x0;
+    if (!silent) { silent = true; for (let i = 0; i < n; i++) { if (x0[i] !== 0 || x1[i] !== 0) { silent = false; break; } } }
+    if (silent && this._quiet > (size >> 7) + 2) {
+      o0.fill(0); if (o1 !== o0) o1.fill(0);
+      this.r = target;
+      return true;
+    }
+    this._quiet = silent ? this._quiet + 1 : 0;
+    const r0 = this.r, dr = (target - r0) / n, invW = 1 / W;
+    const b0 = this.buf[0], b1 = this.buf[1];
     let w = this.w, ph = this.ph, r = r0;
     for (let i = 0; i < n; i++) {
       b0[w] = x0 ? x0[i] : 0; b1[w] = x1 ? x1[i] : 0;
       r += dr;
-      ph -= (r - 1) / W; ph -= Math.floor(ph); // delay (in windows) shrinks when shifting up
-      let y0 = 0, y1 = 0;
-      for (let k = 0; k < 2; k++) {
-        const phk = k ? (ph + 0.5) % 1 : ph, d = 2 + phk * W;
-        let rp = w - d; if (rp < 0) rp += size;
-        const i0 = Math.floor(rp), f = rp - i0, i1 = i0 + 1 >= size ? 0 : i0 + 1;
-        const g = Math.sin(Math.PI * phk) ** 2;
-        y0 += g * (b0[i0] + (b0[i1] - b0[i0]) * f); y1 += g * (b1[i0] + (b1[i1] - b1[i0]) * f);
-      }
-      o0[i] = y0; if (o1 !== o0) o1[i] = y1;
+      ph -= (r - 1) * invW; ph -= Math.floor(ph); // delay (in windows) shrinks when shifting up
+      // tap 0 at ph, tap 1 at (ph + 0.5) % 1; sin²(π(ph + 0.5)) = cos²(π·ph) = 1 - sin²(π·ph)
+      const s = Math.sin(Math.PI * ph);
+      const g0 = s * s, g1 = 1 - g0;
+      let rp0 = w - (2 + ph * W); if (rp0 < 0) rp0 += size;
+      const i0a = rp0 | 0, f0 = rp0 - i0a, i0b = i0a + 1 >= size ? 0 : i0a + 1;
+      const ph1 = ph < 0.5 ? ph + 0.5 : ph - 0.5;
+      let rp1 = w - (2 + ph1 * W); if (rp1 < 0) rp1 += size;
+      const i1a = rp1 | 0, f1 = rp1 - i1a, i1b = i1a + 1 >= size ? 0 : i1a + 1;
+      o0[i] = g0 * (b0[i0a] + (b0[i0b] - b0[i0a]) * f0) + g1 * (b0[i1a] + (b0[i1b] - b0[i1a]) * f1);
+      if (o1 !== o0) o1[i] = g0 * (b1[i0a] + (b1[i0b] - b1[i0a]) * f0) + g1 * (b1[i1a] + (b1[i1b] - b1[i1a]) * f1);
       w = w + 1 >= size ? 0 : w + 1;
     }
     this.w = w; this.ph = ph; this.r = target;
@@ -418,19 +437,24 @@ class CompProcessor extends AudioWorkletProcessor {
     super();
     this.L = Math.round(0.002 * sampleRate); this.size = this.L + 4;
     this.buf = [new Float32Array(this.size), new Float32Array(this.size)]; this.w = 0; this.lat = 0; this.engaged = false;
-    this.env = 0; this.a = 0; this.g = 1; this.report = 0; this.minG = 1;
+    this.env = 0; this.a = 0; this.g = 1; this.report = 0; this.minG = 1; this.lastGr = 1;
+    this._ka = 1 - Math.exp(-128 / (0.03 * sampleRate));
+    this._rel = Math.exp(-1 / (0.15 * sampleRate));
+    this._gAtk = Math.exp(-1 / (0.0005 * sampleRate));
+    this._gRel = Math.exp(-1 / (0.002 * sampleRate));
+    this._latStep = this.L / (0.3 * sampleRate);
   }
   process(inputs, outputs, p) {
     const inp = inputs[0], out = outputs[0], n = out[0].length;
     const x0 = inp[0], x1 = inp[1] || inp[0], o0 = out[0], o1 = out[1] || out[0];
-    const target = p.amount[0], ka = 1 - Math.exp(-n / (0.03 * sampleRate));
+    const target = p.amount[0], ka = n === 128 ? this._ka : 1 - Math.exp(-n / (0.03 * sampleRate));
     this.a += (target - this.a) * ka; if (Math.abs(this.a - target) < 1e-4) this.a = target;
     if (!x0) { o0.fill(0); if (o1 !== o0) o1.fill(0); return true; }
     if (!this.engaged) { if (this.a === 0) { o0.set(x0); if (o1 !== o0) o1.set(x1); return true; } this.engaged = true; }
     const a = this.a, T = -30 * a, R = 1 + 3 * a, knee = 6, slope = 1 - 1 / R;
     const makeup = 0.9 * Math.max(0, -5 - T) * slope; // detector level of a -14 LUFS programme ~ -5 dB
-    const rel = Math.exp(-1 / (0.15 * sampleRate)), gAtk = Math.exp(-1 / (0.0005 * sampleRate)), gRel = Math.exp(-1 / (0.002 * sampleRate));
-    const L = this.L, size = this.size, b0 = this.buf[0], b1 = this.buf[1], latStep = L / (0.3 * sampleRate);
+    const rel = this._rel, gAtk = this._gAtk, gRel = this._gRel;
+    const L = this.L, size = this.size, b0 = this.buf[0], b1 = this.buf[1], latStep = this._latStep;
     let env = this.env, g = this.g, minG = this.minG, w = this.w, lat = this.lat;
     for (let i = 0; i < n; i++) {
       const l = x0[i], r = x1[i];
@@ -450,10 +474,13 @@ class CompProcessor extends AudioWorkletProcessor {
       g = tg < g ? tg + (g - tg) * gAtk : tg + (g - tg) * gRel;
       if (a === 0 && Math.abs(g - 1) < 1e-6) g = 1;
       o0[i] = dl * g; if (o1 !== o0) o1[i] = dr * g;
-      const grLin = Math.pow(10, gr / 20); if (grLin < minG) minG = grLin;
+      if (gr < 0) { const grLin = Math.pow(10, gr / 20); if (grLin < minG) minG = grLin; }
     }
     this.env = env; this.g = g; this.minG = minG; this.w = w; this.lat = lat;
-    if ((this.report += n) >= 4096) { this.port.postMessage({ gr: this.minG }); this.report = 0; this.minG = 1; }
+    if ((this.report += n) >= 4096) {
+      if (this.minG < 1 || this.lastGr < 1) { this.lastGr = this.minG; this.port.postMessage({ gr: this.minG }); }
+      this.report = 0; this.minG = 1;
+    }
     return true;
   }
 }
@@ -476,12 +503,38 @@ class DuckerProcessor extends AudioWorkletProcessor {
       { name: 'hold', defaultValue: 0.12, minValue: 0, maxValue: 2, automationRate: 'k-rate' },
     ];
   }
-  constructor() { super(); this.env = 0; this.g = 1; this.holdN = 0; this.open = false; this.sent = null; }
+  constructor() {
+    super();
+    this.env = 0; this.g = 1; this.holdN = 0; this.open = false; this.sent = null;
+    this._envRel = Math.exp(-1 / (0.05 * sampleRate));
+    this._att = Math.exp(-1 / (0.003 * sampleRate));
+    this._rel = Math.exp(-1 / (0.08 * sampleRate));
+    this._lastThr = NaN; this._thr = 0;
+    this._lastDepth = NaN; this._depth = 1;
+  }
   process(inputs, outputs, p) {
     const inp = inputs[0], out = outputs[0], n = out[0].length, sr = sampleRate;
-    const thr = Math.pow(10, p.threshold[0] / 20), depth = Math.pow(10, p.depth[0] / 20), auto = p.auto[0] >= 0.5, manual = p.manual[0] >= 0.5, band = p.band[0] >= 0.5;
-    const envRel = Math.exp(-1 / (0.05 * sr)), att = Math.exp(-1 / (0.003 * sr)), rel = Math.exp(-1 / (0.08 * sr)), holdN = p.hold[0] * sr;
+    const auto = p.auto[0] >= 0.5, manual = p.manual[0] >= 0.5, band = p.band[0] >= 0.5;
     const c0 = out[0], c1 = out[1] || out[0];
+    // Fast idle bypass when no voice signal is present and ducker is fully released
+    let silent = !inp || !inp.length;
+    if (!silent) {
+      silent = true;
+      for (let c = 0; c < inp.length && silent; c++) {
+        const ch = inp[c];
+        for (let i = 0; i < n; i++) { if (ch[i] !== 0) { silent = false; break; } }
+      }
+    }
+    if (silent && !manual && !this.open && this.holdN <= 0 && this.env < 1e-7 && this.g >= 0.99999) {
+      c0.fill(0); if (c1 !== c0) c1.fill(0);
+      if (this.sent !== false) { this.sent = false; this.port.postMessage({ ducking: false }); }
+      return true;
+    }
+    const thrDb = p.threshold[0], depthDb = p.depth[0];
+    if (thrDb !== this._lastThr) { this._lastThr = thrDb; this._thr = Math.pow(10, thrDb / 20); }
+    if (depthDb !== this._lastDepth) { this._lastDepth = depthDb; this._depth = Math.pow(10, depthDb / 20); }
+    const thr = this._thr, depth = this._depth;
+    const envRel = this._envRel, att = this._att, rel = this._rel, holdN = p.hold[0] * sr;
     let env = this.env, g = this.g;
     for (let i = 0; i < n; i++) {
       let a = 0; for (let c = 0; c < inp.length; c++) { const v = Math.abs(inp[c][i]); if (v > a) a = v; }
@@ -520,9 +573,20 @@ function truePeakFir() {
     h[n] = sinc * i0(beta * Math.sqrt(1 - (2 * n / (N - 1) - 1) ** 2)) / i0(beta);
   }
   const ph = [];
-  for (let p = 0; p < P; p++) { const c = []; for (let k = p; k < N; k += P) c.push(h[k]); const s = c.reduce((a, b) => a + b, 0); ph.push(Float64Array.from(c, (v) => v / s)); }
-  return ph;
+  let l1 = 1;
+  for (let p = 0; p < P; p++) {
+    const c = []; for (let k = p; k < N; k += P) c.push(h[k]);
+    const s = c.reduce((a, b) => a + b, 0);
+    const norm = Float64Array.from(c, (v) => v / s);
+    let absSum = 0; for (let k = 0; k < norm.length; k++) absSum += Math.abs(norm[k]);
+    if (absSum > l1) l1 = absSum;
+    ph.push(norm);
+  }
+  return { ph, l1 };
 }
+// Fixed O(1) histogram for EBU R128 integrated loudness (-70..+20 LUFS @ 0.05 LU bins = 1800 bins, zero audio-thread GC)
+const HIST_MIN_LU = -70, HIST_SCALE = 20, HIST_BINS = 1800;
+const ABS_GATE_MS = Math.pow(10, (-70 + 0.691) / 10);
 /**
  * Loudness meter (mixer M14, EBU Tech 3341 "EBU Mode"): K-weighted momentary (400 ms), short-term (3 s) and gated
  * integrated loudness (absolute -70 LUFS, relative -10 LU, 400 ms blocks with 75 % overlap), true peak (4x
@@ -532,64 +596,175 @@ function truePeakFir() {
 class MeterProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.kw = kWeighting(sampleRate); this.z = [[0, 0, 0, 0], [0, 0, 0, 0]].map((a) => [a.slice(), a.slice()]);
+    this.kw = kWeighting(sampleRate);
+    this.z = [new Float64Array(8), new Float64Array(8)]; // [preX1, preX2, preY1, preY2, rlbX1, rlbX2, rlbY1, rlbY2]
     this.blk = Math.round(sampleRate / 10); this.acc = [0, 0]; this.cnt = 0; this.sq = [0, 0]; this.pk = [0, 0];
-    this.hist = []; // 100 ms block mean squares (sum over channels)
-    this.gated = []; this.tp = 0; this.tpMax = 0;
-    this.fir = truePeakFir(); this.tl = this.fir[0].length; this.tbuf = [new Float64Array(this.tl * 2), new Float64Array(this.tl * 2)]; this.tw = 0; // doubled ring: contiguous reads
-    this.port.onmessage = (e) => { if (e.data?.cmd === 'reset') { this.gated = []; this.tpMax = 0; } };
+    this.hist = new Float64Array(30); this.histLen = 0; this.histIdx = 0; // ring of last 30 × 100 ms block mean squares
+    this.histCount = new Uint32Array(HIST_BINS); this.histEnergy = new Float64Array(HIST_BINS);
+    this.absCount = 0; this.absEnergy = 0; this.minBin = HIST_BINS; this.maxBin = -1;
+    this.tp = 0; this.tpMax = 0; this._quiet = 0; this._silentPosted = 0;
+    const { ph, l1 } = truePeakFir();
+    this.fir = ph; this.firL1 = l1 * 1.0001; this.tl = ph[0].length;
+    this.tbuf = [new Float64Array(this.tl * 2), new Float64Array(this.tl * 2)];
+    this.tw = [0, 0]; this._tailMax = [0, 0];
+    this.last = { m: -Infinity, s: -Infinity, i: -Infinity, tp: -Infinity, tpMax: -Infinity, rms: [0, 0], peak: [0, 0] };
+    this.port.onmessage = (e) => {
+      if (e.data?.cmd === 'reset') {
+        this.histCount.fill(0); this.histEnergy.fill(0);
+        this.absCount = 0; this.absEnergy = 0; this.minBin = HIST_BINS; this.maxBin = -1;
+        this.tpMax = 0; this._silentPosted = 0;
+      }
+    };
   }
   static lufs(ms) { return ms > 0 ? -0.691 + 10 * Math.log10(ms) : -Infinity; }
+  _integrated() {
+    if (!this.absCount) return -Infinity;
+    const L = MeterProcessor.lufs;
+    const rel = L(this.absEnergy / this.absCount) - 10;
+    const bRel = Math.floor((rel - HIST_MIN_LU) * HIST_SCALE);
+    const start = Math.max(this.minBin, bRel < 0 ? 0 : bRel);
+    const end = this.maxBin;
+    let cnt = 0, sum = 0;
+    const hc = this.histCount, he = this.histEnergy;
+    for (let b = start; b <= end; b++) {
+      const c = hc[b];
+      if (!c) continue;
+      // Boundary bin: check bin's mean loudness against exact relative gate so steady tones never straddle
+      if (b === bRel && L(he[b] / c) <= rel) continue;
+      cnt += c; sum += he[b];
+    }
+    return cnt ? L(sum / cnt) : -Infinity;
+  }
   process(inputs) {
     const inp = inputs[0], n = 128;
     if (!inp || !inp.length) return true;
-    const kw = this.kw, fir = this.fir, tl = this.tl;
-    for (let c = 0; c < 2; c++) {
-      const x = inp[c] || inp[0], z = this.z[c], tb = this.tbuf[c];
-      let acc = 0, sq = 0, pk = this.pk[c], tp = this.tp;
-      let tw = this.tw;
-      for (let i = 0; i < x.length; i++) {
-        let v = x[i];
-        sq += v * v; const av = Math.abs(v); if (av > pk) pk = av;
-        // true peak: 4 interpolated phases of the last 16 samples
-        tb[tw] = v; tb[tw + tl] = v; tw = tw + 1 === tl ? 0 : tw + 1;
-        const top = tw + tl - 1;
-        for (let p = 0; p < 4; p++) { const h = fir[p]; let s = 0; for (let k = 0; k < tl; k++) s += h[k] * tb[top - k]; const a = s < 0 ? -s : s; if (a > tp) tp = a; }
-        // K-weighting (two biquads, direct form I)
-        for (let s = 0; s < 2; s++) {
-          const f = kw[s], st = z[s];
-          const y = f.b[0] * v + f.b[1] * st[0] + f.b[2] * st[1] - f.a[0] * st[2] - f.a[1] * st[3];
-          st[1] = st[0]; st[0] = v; st[3] = st[2]; st[2] = y; v = y;
+    const x0 = inp[0], x1 = inp[1] || inp[0];
+    // Fast idle bypass after ~100 ms of exact digital silence (K-weighting & 12-tap FIR have settled)
+    let silent = true;
+    for (let i = 0; i < x0.length; i++) { if (x0[i] !== 0 || x1[i] !== 0) { silent = false; break; } }
+    if (silent && this._quiet >= 40) {
+      this.cnt += n;
+      if (this.cnt >= this.blk) {
+        this.cnt = 0;
+        if (this._silentPosted < 32) {
+          this._silentPosted++;
+          this.hist[this.histIdx] = 0;
+          this.histIdx = (this.histIdx + 1) % 30;
+          if (this.histLen < 30) this.histLen++;
+          const m4 = this._histMean(4), s30 = this._histMean(30);
+          const L = MeterProcessor.lufs;
+          const dB = (x) => (x > 0 ? 20 * Math.log10(x) : -Infinity);
+          this.last = { m: m4 == null ? -Infinity : L(m4), s: s30 == null ? -Infinity : L(s30), i: this._integrated(), tp: -Infinity, tpMax: dB(this.tpMax), rms: [0, 0], peak: [0, 0] };
+          this.port.postMessage(this.last);
         }
-        acc += v * v;
       }
-      this.acc[c] += acc; this.sq[c] += sq; this.pk[c] = pk; this.tp = tp;
-      if (c === 1) this.tw = tw;
-      if (c === 0 && inp.length === 1) { this.acc[1] += acc; this.sq[1] += sq; this.pk[1] = pk; this.tw = tw; break; }
+      return true;
     }
+    this._quiet = silent ? this._quiet + 1 : 0;
+    if (!silent) this._silentPosted = 0;
+    const kw0 = this.kw[0], kw1 = this.kw[1];
+    const b00 = kw0.b[0], b01 = kw0.b[1], b02 = kw0.b[2], a00 = kw0.a[0], a01 = kw0.a[1];
+    const b10 = kw1.b[0], b11 = kw1.b[1], b12 = kw1.b[2], a10 = kw1.a[0], a11 = kw1.a[1];
+    const fir0 = this.fir[0], fir1 = this.fir[1], fir2 = this.fir[2], fir3 = this.fir[3];
+    const tl = this.tl, firL1 = this.firL1;
+    let tp = this.tp;
+    const nCh = inp.length === 1 ? 1 : 2;
+    for (let c = 0; c < nCh; c++) {
+      const x = c === 0 ? x0 : x1, len = x.length, z = this.z[c], tb = this.tbuf[c];
+      let blkMax = 0, sq = 0, pk = this.pk[c];
+      for (let i = 0; i < len; i++) {
+        const v = x[i]; sq += v * v;
+        const av = v < 0 ? -v : v;
+        if (av > blkMax) blkMax = av;
+      }
+      if (blkMax > pk) pk = blkMax;
+      // Hölder upper bound: skip 48-tap FIR whenever this block + 12-sample tail cannot exceed current window true peak
+      let tw = this.tw[c];
+      if ((blkMax > this._tailMax[c] ? blkMax : this._tailMax[c]) * firL1 > tp) {
+        for (let i = 0; i < len; i++) {
+          const v = x[i];
+          tb[tw] = v; tb[tw + tl] = v; tw = tw + 1 === tl ? 0 : tw + 1;
+          const top = tw + tl - 1;
+          let s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+          for (let k = 0; k < tl; k++) {
+            const tv = tb[top - k];
+            s0 += fir0[k] * tv; s1 += fir1[k] * tv; s2 += fir2[k] * tv; s3 += fir3[k] * tv;
+          }
+          if (s0 < 0) s0 = -s0; if (s0 > tp) tp = s0;
+          if (s1 < 0) s1 = -s1; if (s1 > tp) tp = s1;
+          if (s2 < 0) s2 = -s2; if (s2 > tp) tp = s2;
+          if (s3 < 0) s3 = -s3; if (s3 > tp) tp = s3;
+        }
+      } else {
+        // Maintain exact 12-sample FIR history for the next block
+        const start = len > tl ? len - tl : 0;
+        for (let i = start; i < len; i++) {
+          const v = x[i];
+          tb[tw] = v; tb[tw + tl] = v; tw = tw + 1 === tl ? 0 : tw + 1;
+        }
+      }
+      this.tw[c] = tw;
+      let tmax = 0;
+      for (let k = 0; k < tl; k++) { const av = tb[k] < 0 ? -tb[k] : tb[k]; if (av > tmax) tmax = av; }
+      this._tailMax[c] = tmax;
+      // K-weighting (two biquads, direct form I, scalar unboxed)
+      let px1 = z[0], px2 = z[1], py1 = z[2], py2 = z[3];
+      let rx1 = z[4], rx2 = z[5], ry1 = z[6], ry2 = z[7];
+      let acc = 0;
+      for (let i = 0; i < len; i++) {
+        const v = x[i];
+        const y0 = b00 * v + b01 * px1 + b02 * px2 - a00 * py1 - a01 * py2;
+        px2 = px1; px1 = v; py2 = py1; py1 = y0;
+        const y1 = b10 * y0 + b11 * rx1 + b12 * rx2 - a10 * ry1 - a11 * ry2;
+        rx2 = rx1; rx1 = y0; ry2 = ry1; ry1 = y1;
+        acc += y1 * y1;
+      }
+      z[0] = px1; z[1] = px2; z[2] = py1; z[3] = py2;
+      z[4] = rx1; z[5] = rx2; z[6] = ry1; z[7] = ry2;
+      this.acc[c] += acc; this.sq[c] += sq; this.pk[c] = pk;
+      if (nCh === 1) { this.acc[1] += acc; this.sq[1] += sq; this.pk[1] = pk; }
+    }
+    this.tp = tp;
     this.cnt += n;
     if (this.cnt >= this.blk) {
       const N = this.cnt;
-      this.hist.push((this.acc[0] + this.acc[1]) / N); if (this.hist.length > 30) this.hist.shift();
-      const mean = (k) => { const h = this.hist.slice(-k); return h.length < k ? null : h.reduce((a, b) => a + b, 0) / k; };
-      const m4 = mean(4);
-      if (m4 != null) this.gated.push(m4);
+      this.hist[this.histIdx] = (this.acc[0] + this.acc[1]) / N;
+      this.histIdx = (this.histIdx + 1) % 30;
+      if (this.histLen < 30) this.histLen++;
+      const m4 = this._histMean(4);
       const L = MeterProcessor.lufs;
-      // integrated: absolute gate, then relative gate 10 LU under the absolute-gated loudness
-      let I = -Infinity;
-      const abs = this.gated.filter((v) => L(v) > -70);
-      if (abs.length) {
-        const rel = L(abs.reduce((a, b) => a + b, 0) / abs.length) - 10;
-        const g2 = abs.filter((v) => L(v) > rel);
-        if (g2.length) I = L(g2.reduce((a, b) => a + b, 0) / g2.length);
+      if (m4 != null && m4 > ABS_GATE_MS) {
+        const lu = L(m4);
+        let bin = Math.floor((lu - HIST_MIN_LU) * HIST_SCALE);
+        if (bin < 0) bin = 0; else if (bin >= HIST_BINS) bin = HIST_BINS - 1;
+        this.histCount[bin]++; this.histEnergy[bin] += m4;
+        this.absCount++; this.absEnergy += m4;
+        if (bin < this.minBin) this.minBin = bin;
+        if (bin > this.maxBin) this.maxBin = bin;
       }
+      const s30 = this._histMean(30);
       if (this.tp > this.tpMax) this.tpMax = this.tp;
       const dB = (x) => (x > 0 ? 20 * Math.log10(x) : -Infinity);
-      this.last = { m: m4 == null ? -Infinity : L(m4), s: mean(30) == null ? -Infinity : L(mean(30)), i: I, tp: dB(this.tp), tpMax: dB(this.tpMax), rms: [Math.sqrt(this.sq[0] / N), Math.sqrt(this.sq[1] / N)], peak: this.pk.slice() };
+      this.last = {
+        m: m4 == null ? -Infinity : L(m4),
+        s: s30 == null ? -Infinity : L(s30),
+        i: this._integrated(),
+        tp: dB(this.tp),
+        tpMax: dB(this.tpMax),
+        rms: [Math.sqrt(this.sq[0] / N), Math.sqrt(this.sq[1] / N)],
+        peak: [this.pk[0], this.pk[1]],
+      };
       this.port.postMessage(this.last);
-      this.acc = [0, 0]; this.sq = [0, 0]; this.pk = [0, 0]; this.cnt = 0; this.tp = 0;
+      this.acc[0] = 0; this.acc[1] = 0; this.sq[0] = 0; this.sq[1] = 0; this.pk[0] = 0; this.pk[1] = 0;
+      this.cnt = 0; this.tp = 0;
     }
     return true;
+  }
+  _histMean(k) {
+    if (this.histLen < k) return null;
+    let sum = 0;
+    for (let i = 1; i <= k; i++) sum += this.hist[(this.histIdx - i + 30) % 30];
+    return sum / k;
   }
 }
 registerProcessor('opendj-meter', MeterProcessor);
@@ -601,15 +776,22 @@ registerProcessor('opendj-meter', MeterProcessor);
  */
 class WarmthProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() { return [{ name: 'drive', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' }]; }
-  constructor() { super(); this.d = 0; this.dc = [[0, 0], [0, 0]]; }
+  constructor() {
+    super();
+    this.d = 0; this.dc = [[0, 0], [0, 0]];
+    this._k = 1 - Math.exp(-128 / (0.03 * sampleRate));
+    this._R = 1 - 2 * Math.PI * 8 / sampleRate; // DC blocker on the x² term (8 Hz)
+  }
   process(inputs, outputs, p) {
     const inp = inputs[0], out = outputs[0], n = out[0].length;
-    const target = p.drive[0], d0 = this.d, d1 = Math.abs(target - d0) < 1e-5 ? target : d0 + (target - d0) * (1 - Math.exp(-n / (0.03 * sampleRate)));
-    const R = 1 - 2 * Math.PI * 8 / sampleRate; // DC blocker on the x² term (8 Hz)
+    const target = p.drive[0], d0 = this.d;
+    const k = n === 128 ? this._k : 1 - Math.exp(-n / (0.03 * sampleRate));
+    const d1 = Math.abs(target - d0) < 1e-5 ? target : d0 + (target - d0) * k;
+    const R = this._R;
     for (let c = 0; c < out.length; c++) {
       const x = inp[c] || inp[0], o = out[c];
       if (!x) { o.fill(0); continue; }
-      if (d0 === 0 && d1 === 0) { o.set(x); this.dc[c] = [0, 0]; continue; }
+      if (d0 === 0 && d1 === 0) { o.set(x); this.dc[c][0] = 0; this.dc[c][1] = 0; continue; }
       const st = this.dc[c] || (this.dc[c] = [0, 0]);
       let xp = st[0], yp = st[1];
       for (let i = 0; i < n; i++) {

@@ -549,9 +549,14 @@ class DeckProcessor extends AudioWorkletProcessor {
         if (!this.endedSent && !this.scratch) { this.endedSent = true; this.playing = false; this.port.postMessage({ type: 'ended' }); }
       } else if (this.endedSent && this.pos < this.len - 2) this.endedSent = false;
     }
-    if ((this.counter += frames) >= 512) {
+    if ((this.counter += frames) >= 1024) {
       this.counter = 0;
-      this.port.postMessage({ type: 'pos', frame: this.pos, shadow: this.shadow, rate: this.curRate, playing: this.playing, time: currentTime + frames / sampleRate, alt: !!this.alt, tempo: this.rate, seekSeq: this.seekSeq });
+      const idle = !this.playing && !this.scratch && !this.coast && this.curRate === 0;
+      const sig = `${this.pos}|${this.shadow}|${this.curRate}|${this.playing}|${this.alt ? 1 : 0}|${this.rate}|${this.seekSeq}`;
+      if (!idle || sig !== this._lastPosSig) {
+        this._lastPosSig = sig;
+        this.port.postMessage({ type: 'pos', frame: this.pos, shadow: this.shadow, rate: this.curRate, playing: this.playing, time: currentTime + frames / sampleRate, alt: !!this.alt, tempo: this.rate, seekSeq: this.seekSeq });
+      }
     }
     return true;
   }

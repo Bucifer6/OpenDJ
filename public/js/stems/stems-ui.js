@@ -80,6 +80,7 @@ export function setupStems(app) {
   // 4 s after, so it never competes with playback right then
   let quietAt = 0;
   setInterval(() => {
+    if (!stems.current && !stems.queue?.length && !stems.held) return;
     const busy = !!app.automix?.transition || (app.engine?.decks || []).some((d) => d.loading);
     if (busy) quietAt = Date.now() + 4000;
     stems.setHold(Date.now() < quietAt);
@@ -169,7 +170,7 @@ export function buildStemControls(app, deck) {
     modelDownloading = !!st.model?.downloading;
     render();
   }).catch(() => { runtimeAvailable = false; render(); });
-  stems.on('checking', (on) => { modelMsg = on ? { text: 'AI stems: checking whether the graphics card can be used (once)…', pct: 0 } : null; render(); });
+  stems.on('checking', render);
   stems.on('model', (m) => {
     if (m.ready) modelReady = true;
     if ('downloading' in m) modelDownloading = !!m.downloading;
@@ -177,19 +178,6 @@ export function buildStemControls(app, deck) {
     render();
   });
   deck.on('stems', render); deck.on('load', render); deck.on('loaded', render); deck.on('state', () => { for (const p of parts) p.render?.(); });
-  // once a session: separation on the CPU takes minutes per track, so say so, and how to have stems ready in time
-  let cpuNoticed = false;
-  const cpuNotice = (backend) => {
-    if (cpuNoticed || !['cpu', 'wasm'].includes(backend)) return;
-    cpuNoticed = true;
-    const per = perTrackMinutes(stems);
-    if (stems.browserGpu) { // the server's CPU finishes this one; what comes next runs on this window's graphics card
-      app.toast(`AI stems: this track is prepared on the CPU (about ${per} min); the next ones use the graphics card in this window (WebGPU).`, { duration: 8000 });
-      return;
-    }
-    const why = stems._status?.native?.gpuFailed ? ' (the graphics card could not be used for stems on this computer)' : '';
-    app.toast(`AI stems are being prepared on the CPU${why}: about ${per} min per track. To have them ready when you mix, prepare them ahead: playlist ⋯ → Prepare AI stems, or Automix → Prepare stems for this set.`, { duration: 12000 });
-  };
   stems.on('progress', render); stems.on('queue', render); stems.on('track', render);
   render();
   root.render = render;

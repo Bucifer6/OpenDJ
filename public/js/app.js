@@ -83,7 +83,9 @@ class App {
     this.analyser.autoQueue(); // tracks added earlier (or by another device) that were never analysed
     api.capabilities().then((c) => { this.hosted = !!c.hosted; this.auth = !!c.auth; this.library.renderEmpty(); this.updateHostedUi?.(); }).catch(() => {});
     this.library.refreshDrives();
-    setInterval(() => this.library.refreshDrives(), 15000); // notice USB sticks being plugged in
+    setInterval(() => {
+      if (!document.hidden && !document.documentElement.classList.contains('lib-collapsed')) this.library.refreshDrives();
+    }, 15000); // notice USB sticks being plugged in (skipped while hidden or library collapsed)
     this.setLayout(this.settings.layoutMode || 'classic', false, true);
     this.setDeckCount(this.deckCount, false);
     if (!unavailable('dvs')) this.dvs.init().catch((e) => console.warn('DVS init failed', e));
@@ -98,15 +100,16 @@ class App {
       const busy = !!this.settings.gigMode || this.engine.decks.some((d) => d.playing) || !!this.recording?.recorder?.recording || !!this.automix?.enabled;
       if (busy !== this._powerLocked) { this._powerLocked = busy; window.opendjNative?.setPowerLock?.(busy).catch?.(() => {}); }
     };
+    let lastSnapKey = '';
     const saveRecoverySnapshot = (cleanExit = false) => {
       try {
-        const snap = {
-          at: Date.now(),
-          cleanExit,
-          decks: this.engine.decks.map((d) => (d.track && !d.track.scratchSample ? { id: d.track.id, pos: Math.round((d.position || 0) * 10) / 10, playing: !!d.playing } : null)),
-          queue: this.automix?.enabled ? (this.automix.queue || []).slice(this.automix.idx).map((x) => x.id).slice(0, 50) : [],
-        };
-        if (cleanExit || snap.decks.some(Boolean)) localStorage.setItem('opendj-session-recovery', JSON.stringify(snap));
+        const decks = this.engine.decks.map((d) => (d.track && !d.track.scratchSample ? { id: d.track.id, pos: Math.round((d.position || 0) * 10) / 10, playing: !!d.playing } : null));
+        const queue = this.automix?.enabled ? (this.automix.queue || []).slice(this.automix.idx).map((x) => x.id).slice(0, 50) : [];
+        if (!cleanExit && !decks.some(Boolean)) return;
+        const key = JSON.stringify({ cleanExit, decks, queue });
+        if (!cleanExit && key === lastSnapKey) return;
+        lastSnapKey = key;
+        localStorage.setItem('opendj-session-recovery', JSON.stringify({ at: Date.now(), cleanExit, decks, queue }));
       } catch { /* storage unavailable */ }
     };
     // Detect an unclean previous exit (<6h old) and expose non-intrusive session restore

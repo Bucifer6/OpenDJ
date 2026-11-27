@@ -275,7 +275,7 @@ export function buildDeck(app, deck) {
     beatSel.querySelectorAll('option').forEach((o) => { const b = Number(o.value), e = effectBeats(ch.state.fxType, b); o.textContent = `${fmtBeats(e)} beat${e > 1 ? 's' : ''}`; });
   };
   fxLabels();
-  ch.on('change', (k) => { if (k === 'fxType') { fxSel.value = ch.state.fxType; fxLabels(); } if (k === 'fxBeats') beatSel.value = String(ch.state.fxBeats); });
+  ch.on('change', (k) => { if (k === 'fxType') { fxSel.value = ch.state.fxType; fxLabels(); } if (k === 'fxBeats') beatSel.value = String(ch.state.fxBeats); fxOn.render(); fxMix.render(); fxParam.render(); fxParam2.render(); });
   const fxUnit = el('div', { class: 'fx-unit' }, el('div', { class: 'fx-col' }, fxSel, beatSel), fxMix, fxParam, fxParam2, fxOn);
 
   // ---------- phase meter (beat position in the bar + offset vs master) ----------
@@ -429,16 +429,18 @@ export function buildDeck(app, deck) {
     root.classList.toggle('failed', !t && !!deck.error);
     renderPads();
   };
-  deck.on('key', () => { keyVal.textContent = `${deck.keyShift > 0 ? '+' : ''}${deck.keyShift}`; updateMeta(); renderPads(); });
+  deck.on('key', () => { keyVal.textContent = `${deck.keyShift > 0 ? '+' : ''}${deck.keyShift}`; updateMeta(); renderPads(); renderState(); });
   deck.on('load-progress', () => { const lp = deck.loadPhase; artistNote.textContent = lp ? `${lp.name}${lp.pct != null ? ` ${lp.pct} %` : '…'}` : ''; });
-  deck.on('load', updateMeta); deck.on('loaded', updateMeta); deck.on('error', updateMeta); deck.on('cues', renderPads); deck.on('sample', updateMeta);
+  deck.on('load', updateMeta); deck.on('loaded', () => { updateMeta(); renderState(); }); deck.on('error', updateMeta); deck.on('cues', renderPads); deck.on('sample', updateMeta);
   deck.on('vinyl', () => { renderState(); tempoFader.render(); });
   deck.on('glide', () => renderState());
   const renderState = () => { for (const r of renderers) r.render(); if (masterBadge.hidden === !!deck.isMaster) masterBadge.hidden = !deck.isMaster; };
   // MIX NOW with Automix off depends on the other deck too (loaded, playing)
   const refreshMixNow = () => { mixNowBtn.render(); const st = app.mixNowState?.(i); if (st) mixNowBtn.title = st.title; };
   for (const d of app.engine.decks) for (const ev of ['state', 'load', 'loaded']) d.on(ev, refreshMixNow);
-  deck.on('state', renderState); deck.on('loop', () => { loopSize._t = loopSize.textContent = deck.loop?.active ? fmtBeats(deck.loopBeats) : fmtBeats(autoLoopBeats); });
+  app.automix?.on('state', refreshMixNow);
+  app.engine.on('master-deck', renderState);
+  deck.on('state', renderState); deck.on('loop', () => { loopSize._t = loopSize.textContent = deck.loop?.active ? fmtBeats(deck.loopBeats) : fmtBeats(autoLoopBeats); renderState(); });
   deck.on('tempo', () => tempoFader.render());
   deck.on('tempo-range', () => { rangeSel.value = String(deck.tempoRange); tempoFader.render(); });
 
@@ -469,7 +471,8 @@ export function buildDeck(app, deck) {
     // harmonic hint vs. master deck
     setClass(keyBadge, 'compatible', m && deck.playingCamelot && m.playingCamelot && camelotCompatible(deck.playingCamelot, m.playingCamelot));
     if (!deck.keyLock && deck.tempo !== deck._lastKeyTempo) { deck._lastKeyTempo = deck.tempo; updateMeta(); }
-    renderState();
+    // All other buttons/faders update via deck events; only cueBtn depends on live playhead proximity to cuePoint
+    cueBtn.render();
   };
   return root;
 }
