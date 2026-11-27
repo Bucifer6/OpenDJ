@@ -103,7 +103,7 @@ export function setupLibraryExtras(app) {
   }
   app.engine.on('master-deck', () => refresh());
   for (const d of app.engine.decks) { d.on('loaded', () => refresh()); d.on('state', () => refresh()); }
-  setInterval(() => { fillGenres(); refresh(); }, 2500); // tempo changes, analysis results, library edits (cheap: signature check)
+  setInterval(() => { if (!document.hidden && !document.documentElement.classList.contains('lib-collapsed')) { fillGenres(); refresh(); } }, 2500); // tempo changes, analysis results, library edits (skipped when hidden/collapsed)
 
   // ---------- collapse / expand ----------
   const collapseBtn = el('button', { class: 'btn sm icon-only lib-collapse-btn', title: 'Collapse the library (more room for the decks)', 'aria-label': 'Collapse library', 'aria-expanded': 'true' }, icon('chevron-down'));

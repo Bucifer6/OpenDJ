@@ -211,12 +211,16 @@ export class LibraryUI {
 
   _applyViewInWorker(base, seq) {
     try {
+      clearTimeout(this._viewWorkerIdleT);
       if (!this._viewWorker) {
         this._viewWorker = new Worker(new URL('./library-view-worker.js', import.meta.url), { type: 'module' });
         this._viewWorker.addEventListener('message', (e) => {
           const pending = this._viewPending;
           if (!pending || e.data.seq !== pending.seq) return;
           this._finishView(e.data.indices.map((i) => pending.base[i]), pending.seq);
+          // Reclaim ~25 MB worker RAM when library search/sort is idle for 60 s
+          clearTimeout(this._viewWorkerIdleT);
+          this._viewWorkerIdleT = setTimeout(() => { this._viewWorker?.terminate(); this._viewWorker = null; }, 60_000);
         });
         this._viewWorker.addEventListener('error', () => {
           const pending = this._viewPending;

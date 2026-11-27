@@ -82,7 +82,7 @@ export class LyricsManager {
       if (d.track) this.load(d.track.id).then(() => this.renderRow(d.index, true));
     }
     this._t = setInterval(() => this.tick(), 50);
-    this._videoT = setInterval(() => this.attachVideo(), 1000);
+    this._videoT = setInterval(() => { if (!document.hidden && this.app.videoUi) this.attachVideo(); }, 1000);
     return this;
   }
 
@@ -141,8 +141,13 @@ export class LyricsManager {
   refreshDecks() { for (let i = 0; i < this.engine.decks.length; i++) this.renderRow(i, true); }
 
   tick() {
+    if (typeof document !== 'undefined' && document.hidden) return;
     const n = this.app.deckCount || this.engine.decks.length;
-    for (let i = 0; i < n; i++) this.renderRow(i);
+    for (let i = 0; i < n; i++) {
+      const d = this.engine.decks[i];
+      if (!d?.playing || !d.track || !this.get(d.track.id)?.synced?.length) continue;
+      this.renderRow(i);
+    }
   }
 
   openEditor(i) { return openLyricsEditor(this.app, this.engine.decks[i], this); }

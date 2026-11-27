@@ -639,9 +639,13 @@ export class FxUnit {
     this.wet.connect(this.preRet); this.wet.connect(this.postRet); this.preRet.connect(this.output); this.postRet.connect(this.wetOut);
     this.postFader = !!postFader;
     for (const [n, on] of [[this.preTap, !this.postFader], [this.preRet, !this.postFader], [this.postTap, this.postFader], [this.postRet, this.postFader]]) n.gain.value = on ? 1 : 0;
-    this.type = null; this.on = false; this.mix = 0.5; this.param = 0.5; this.param2 = 0.5; this.beats = 1 / 2; this.beatSec = 0.5;
+    this.type = 'echo'; this.on = false; this.mix = 0.5; this.param = 0.5; this.param2 = 0.5; this.beats = 1 / 2; this.beatSec = 0.5;
     this.clock = null; this.fx = null; this.fade = null;
-    this.setType('echo');
+    // Lazily instantiate the default 'echo' delay graph on first setOn(true) (saves ~19 MB of DelayNode buffers
+    // and 8 biquads + 4 waveshapers across 4 channels while Beat FX are off). Keep a muted send->wet link so
+    // upstream post-fader gain automation stays connected to the destination graph.
+    this.send.connect(this.wet);
+    this._lazyLink = true;
   }
   /** Post-fader FX tails on / off (off = the whole FX unit sits before the channel fader, as before). */
   setPostFader(on) {
@@ -651,8 +655,29 @@ export class FxUnit {
     smooth(this.preTap.gain, on ? 0 : 1, c, FADE); smooth(this.preRet.gain, on ? 0 : 1, c, FADE);
     smooth(this.postTap.gain, on ? 1 : 0, c, FADE); smooth(this.postRet.gain, on ? 1 : 0, c, FADE);
   }
+  _clearLazyLink() {
+    if (!this._lazyLink) return;
+    this._lazyLink = false;
+    try { this.send.disconnect(this.wet); } catch { /* */ }
+  }
+  _ensureFx() {
+    if (this.fx) return this.fx;
+    this._clearLazyLink();
+    const c = this.ctx;
+    this.fx = createEffect(c, this.type || 'echo');
+    this.fade = c.createGain(); this.fade.gain.value = 1;
+    this.send.connect(this.fx.input); this.fx.output.connect(this.fade); this.fade.connect(this.wet);
+    this.fx.setParam?.(this.param); this.fx.setParam2?.(this.param2);
+    this.fx.setTempo?.(this.beatSec, this.beats);
+    if (this.clock) this.fx.setClock?.(...this.clock);
+    return this.fx;
+  }
   setType(type) {
-    if (!FX[type] || type === this.type) return;
+    if (!FX[type] || (type === this.type && (this.fx || !this.on))) return;
+    // Keep send effects (echo, reverb, ...) lazy until turned on if no effect has been built yet;
+    // insert effects (flanger, chorus, ...) build immediately so their delay lines pre-fill cleanly.
+    if (!this.on && !this.fx && FX[type].kind === 'send') { this.type = type; return; }
+    this._clearLazyLink();
     const c = this.ctx, t = c.currentTime;
     if (this.fx) { // fade the old effect out, then free it
       const old = this.fx, oldFade = this.fade, send = this.send;
@@ -668,7 +693,7 @@ export class FxUnit {
     this.apply();
   }
   /** FX on / off, optionally at audio time `when` (quantised starts land exactly on the beat division). */
-  setOn(on, when) { this.on = !!on; this.at = when || 0; this.apply(); }
+  setOn(on, when) { this.on = !!on; this.at = when || 0; if (this.on && !this.fx) this._ensureFx(); this.apply(); }
   setMix(m) { this.mix = m; this.apply(); }
   setParam(p) { this.param = p; this.fx?.setParam?.(p); }
   setParam2(p) { this.param2 = p; this.fx?.setParam2?.(p); }
@@ -677,6 +702,7 @@ export class FxUnit {
   /** Beat grid of the deck: beat position `beat` at audio time `at` (null = free-running). */
   setClock(beat, at, beatSec) { this.clock = [beat, at, beatSec]; this.fx?.setClock?.(beat, at, beatSec); }
   apply() {
+    if (!this.fx) { this.at = 0; return; }
     const c = this.ctx, kind = this.fx.kind, on = this.on, m = this.mix;
     const t0 = Math.max(c.currentTime, this.at || 0), sm = (param, v, tc) => param.setTargetAtTime(v, t0, tc);
     if (t0 > c.currentTime + 0.003) setTimeout(() => this.fx?.setActive?.(this.on), (t0 - c.currentTime) * 1000); else this.fx.setActive?.(on);
