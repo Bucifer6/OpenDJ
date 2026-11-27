@@ -135,10 +135,10 @@ button, input, select { font: inherit; color: inherit; }
 .key-badge.compatible { border-color: var(--green); box-shadow: 0 0 6px color-mix(in srgb, var(--green) 40%, transparent); }
 .badge { font-size: var(--fs-2xs); font-weight: 800; letter-spacing: .06em; padding: 2px 6px; border-radius: var(--r-xs); line-height: 1.3; }
 .master-badge { background: var(--amber); color: #120c00; }
-.deck-times { text-align: right; font: 600 14px var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.02em; contain: layout style; }
+.deck-times { text-align: right; font: 600 14px/1.25 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.02em; width: 76px; height: 34px; contain: layout size style; }
 .deck-time.remain { color: var(--text-2); font-size: 12px; }
 .deck-time.remain.warn { color: var(--red); animation: pulse .5s infinite; }
-.deck-bpmbox { text-align: right; min-width: 92px; contain: layout style; }
+.deck-bpmbox { text-align: right; width: 96px; height: 36px; contain: layout size style; }
 .deck-bpm { font: 700 21px var(--mono); color: var(--deck-color); line-height: 1.1; font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
 .deck-bpm-sub { font: 500 10px var(--mono); color: var(--text-3); font-variant-numeric: tabular-nums; }
 .overview-wrap { height: 38px; border-radius: var(--r-sm); overflow: hidden; border: 1px solid var(--line); background: var(--wave-bg); box-shadow: inset 0 1px 3px rgba(0,0,0,.5); }

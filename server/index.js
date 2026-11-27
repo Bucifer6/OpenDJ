@@ -12,7 +12,7 @@ import { pipeline } from 'node:stream/promises';
 import { parseFile } from 'music-metadata';
 import { Library, newId } from './library.js';
 import { scanFolder, addFile, walk, AUDIO_EXT, isMediaPath } from './scanner.js';
-import { listDrives, browseDir } from './drives.js';
+import { listDrivesAsync, browseDir } from './drives.js';
 import { aiffToWav } from './aiff.js';
 import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clientFor, isInside, uniqueName, safe, sourcePlaylists, openSourcePlaylist, remoteError, plexUsers, switchPlexUser } from './remote.js';
 import { findFfmpeg, needsTranscode, remoteBrowserDecodable, browserPlayableVideo, formatList, DSD_EXT, VIDEO_MIME, extOf, probe, isVideoByName, BROWSER_VIDEO_EXT } from './media.js';
@@ -812,9 +812,9 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     return { started: true };
   });
   route('DELETE', '/api/folders/:id', async ({ params }) => { library.removeFolder(params.id); return { ok: true }; });
-  route('GET', '/api/drives', () => (restricted
+  route('GET', '/api/drives', async () => (restricted
     ? allowedRoots().filter((r) => fs.existsSync(r)).map((r) => ({ path: r, name: path.basename(r) || r, kind: 'home' }))
-    : listDrives()));
+    : await listDrivesAsync()));
   route('GET', '/api/browse', async ({ query }) => {
     const p = query.get('path');
     if (!restricted) return browseDir(p);

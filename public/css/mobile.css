@@ -88,7 +88,7 @@ html.touch .lr .art { width: 28px; height: 28px; margin: 6px 1px; }
   .deck-area .deck, .deck-area .mixer { flex: none; overflow: visible; }
   .deck-header { grid-template-columns: 26px minmax(0, 1fr) auto; row-gap: 2px; }
   .deck-header .deck-cover { display: none; }
-  .deck-header .deck-times { grid-column: 2 / 4; grid-row: 2; display: flex; gap: 10px; justify-content: flex-start; }
+  .deck-header .deck-times { grid-column: 2 / 4; grid-row: 2; display: flex; gap: 10px; justify-content: flex-start; width: auto; height: 18px; }
   .deck-title { font-size: 15px; }
   /* deck: jog + CUE / PLAY + tempo fader on top, all buttons full width below */
   .deck-body { display: grid; grid-template-columns: minmax(0, 1fr) 58px; grid-template-areas: 'left tempo' 'mid mid'; gap: 8px; }

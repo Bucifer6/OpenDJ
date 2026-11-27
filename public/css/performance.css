@@ -52,7 +52,7 @@
 .four-decks .deck-num { width: 22px; height: 22px; font-size: 12px; }
 .four-decks .deck-title { font-size: 12.5px; }
 .four-decks .deck-bpm { font-size: 16px; }
-.four-decks .deck-bpmbox { min-width: 70px; }
+.four-decks .deck-bpmbox { width: 74px; min-width: 70px; }
 .four-decks .overview-wrap { height: 22px; }
 .four-decks .deck-mid { gap: 3px; }
 .four-decks .pad-modes { display: none; } /* pad modes (the beat-jump row hides on short screens: see h920 below) */
@@ -133,7 +133,7 @@
 
 /* 4 decks: give the title room; extra-compact on short screens */
 .four-decks .deck-bpm-sub, .four-decks .phase-meter { display: none; }
-.four-decks .deck-times { font-size: 11px; }
+.four-decks .deck-times { font-size: 11px; width: 64px; height: 28px; }
 .four-decks .deck-time.remain { font-size: 10px; }
 :root.h860 .four-decks .wave-row, :root.h860.four-decks .wave-row { height: 26px; }
 :root.h860 .four-decks .overview-wrap, :root.h860.four-decks .overview-wrap { height: 16px; }
@@ -159,8 +159,8 @@
 
 /* ---- narrow effective width: rules that used to live in viewport media queries (zoom-aware classes) ---- */
 :root.w1300 .deck-header { gap: 5px; }
-:root.w1300 .deck-bpmbox { min-width: 74px; }
-:root.w1300 .deck-times { font-size: 12px; }
+:root.w1300 .deck-bpmbox { width: 78px; min-width: 74px; }
+:root.w1300 .deck-times { font-size: 12px; width: 68px; height: 30px; }
 :root.w1200 .deck-body { grid-template-columns: minmax(110px, 0.6fr) minmax(0, 1.6fr) 54px; }
 :root.w1200 .am-info { display: none; }
 

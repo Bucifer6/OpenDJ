@@ -154,6 +154,29 @@ test('M14: true peak of inter-sample overs within ±0.3 dB; sample peak would un
     console.log(`# true peak ${f.toFixed(0)} Hz: ${tp.toFixed(2)} dBTP (reference ${ref.toFixed(2)}, sample peak ${sp.toFixed(2)} dBFS)`);
   }
 });
+test('M14: loudness meter uses O(1) bounded histogram, resets cleanly, and idles during sustained silence', () => {
+  const posts = [];
+  const p = new processors['opendj-meter']();
+  p.port.postMessage = (m) => posts.push(m);
+  const tone = sine(2, 1000, dbfs(-20));
+  for (let o = 0; o < tone.length; o += 128) {
+    const seg = tone.subarray(o, Math.min(tone.length, o + 128));
+    const blk = new Float32Array(128); blk.set(seg);
+    p.process([[blk, blk]]);
+  }
+  assert.ok(Math.abs(posts.at(-1).i + 20) <= 0.1, `integrated ${posts.at(-1).i}`);
+  // 6 s of digital silence: decays M/S to -Infinity, then stops posting redundant idle messages
+  const zero = new Float32Array(128);
+  const countBefore = posts.length;
+  for (let i = 0; i < Math.ceil((6 * SR) / 128); i++) p.process([[zero, zero]]);
+  assert.equal(posts.at(-1).m, -Infinity);
+  assert.equal(posts.at(-1).s, -Infinity);
+  assert.ok(posts.length - countBefore <= 34, `expected idle meter to stop posting (got ${posts.length - countBefore} msgs)`);
+  // reset clears integrated loudness and true peak max
+  p.port.onmessage({ data: { cmd: 'reset' } });
+  assert.equal(p.absCount, 0);
+  assert.equal(p.tpMax, 0);
+});
 
 // ---------------------------------------------------------------- M11 compressor
 test('M11: compressor: exact pass-through at 0; at max the crest factor drops >= 4 dB, loudness within ±1.5 LU', () => {

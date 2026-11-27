@@ -12,7 +12,7 @@ const r2 = (x) => Math.round(x * 100) / 100;
 const r3 = (x) => Math.round(x * 1000) / 1000;
 
 const FFT_TABLES = new Map();
-function fftTable(n) {
+export function fftTable(n) {
   let t = FFT_TABLES.get(n);
   if (t) return t;
   const bitrev = new Uint16Array(n);
@@ -35,7 +35,7 @@ function fftTable(n) {
   return t;
 }
 
-function fftInPlace(re, im) {
+export function fftInPlace(re, im) {
   const n = re.length;
   const { bitrev, cos, sin } = fftTable(n);
   for (let i = 0; i < n; i++) {
@@ -85,41 +85,66 @@ export function detectVocalActivity(mono, sr) {
   const vEnv = new Float32Array(frames);
 
   const raw = new Float32Array(secs);
+  const invVocBins = 1 / Math.max(1, bHi - bLo + 1);
+  const halfN = N >> 1;
   for (let s = 0; s < secs; s++) {
     const base = s * sr;
     let ratioSum = 0, tonalSum = 0, vEnergySum = 0;
-    for (let fr = 0; fr < frames; fr++) {
-      const start = base + fr * hop * dec;
-      for (let i = 0; i < N; i++) {
-        const idx = start + i * dec;
-        re[i] = (idx < mono.length ? mono[idx] : 0) * win[i];
-        im[i] = 0;
-      }
-      fftInPlace(re, im);
-      let eSub = 0, eVoc = 0, eAll = 1e-12;
-      let logSum = 0, linSum = 1e-12, vocBins = 0;
-      for (let b = 1; b < N / 2; b++) {
-        const p = re[b] * re[b] + im[b] * im[b];
-        eAll += p;
-        if (b < bSub) eSub += p;
-        if (b >= bLo && b <= bHi) {
-          eVoc += p;
-          logSum += Math.log(p + 1e-12);
-          linSum += p;
-          vocBins++;
+    // Pack two consecutive real frames into one complex FFT (z = frA + i*frB): exact power spectra at 2x speed
+    for (let fr = 0; fr < frames; fr += 2) {
+      const hasSecond = fr + 1 < frames;
+      const startA = base + fr * hop * dec;
+      const startB = hasSecond ? startA + hop * dec : 0;
+      const limA = startA + (N - 1) * dec < mono.length;
+      const limB = hasSecond && startB + (N - 1) * dec < mono.length;
+      if (limA && limB) {
+        for (let i = 0; i < N; i++) {
+          const w = win[i];
+          re[i] = mono[startA + i * dec] * w;
+          im[i] = mono[startB + i * dec] * w;
+        }
+      } else {
+        for (let i = 0; i < N; i++) {
+          const w = win[i];
+          const idxA = startA + i * dec;
+          re[i] = (idxA < mono.length ? mono[idxA] : 0) * w;
+          if (hasSecond) {
+            const idxB = startB + i * dec;
+            im[i] = (idxB < mono.length ? mono[idxB] : 0) * w;
+          } else {
+            im[i] = 0;
+          }
         }
       }
-      vEnv[fr] = Math.sqrt(eVoc);
-      vEnergySum += eVoc;
-      // Penalize frames dominated by sub-bass only
-      const ratio = eVoc / (eAll - 0.5 * eSub + 1e-12);
-      // Spectral flatness in voice band (0 = pure harmonics/voice, 1 = flat noise)
-      const gm = Math.exp(logSum / Math.max(1, vocBins));
-      const am = linSum / Math.max(1, vocBins);
-      const flatness = clamp01(gm / (am + 1e-12));
-      const tonality = 1 - Math.sqrt(flatness);
-      ratioSum += ratio;
-      tonalSum += tonality;
+      fftInPlace(re, im);
+      let eSubA = 0, eVocA = 0, eAllA = 1e-12, logSumA = 0, linSumA = 1e-12;
+      let eSubB = 0, eVocB = 0, eAllB = 1e-12, logSumB = 0, linSumB = 1e-12;
+      for (let b = 1; b < halfN; b++) {
+        const nb = N - b;
+        const rk = re[b], ik = im[b], rnk = re[nb], ink = im[nb];
+        const ar = 0.5 * (rk + rnk), ai = 0.5 * (ik - ink);
+        const pA = ar * ar + ai * ai;
+        eAllA += pA;
+        if (b < bSub) eSubA += pA;
+        if (b >= bLo && b <= bHi) { eVocA += pA; logSumA += Math.log(pA + 1e-12); linSumA += pA; }
+        if (hasSecond) {
+          const br = 0.5 * (ik + ink), bi = 0.5 * (rnk - rk);
+          const pB = br * br + bi * bi;
+          eAllB += pB;
+          if (b < bSub) eSubB += pB;
+          if (b >= bLo && b <= bHi) { eVocB += pB; logSumB += Math.log(pB + 1e-12); linSumB += pB; }
+        }
+      }
+      vEnv[fr] = Math.sqrt(eVocA);
+      vEnergySum += eVocA;
+      ratioSum += eVocA / (eAllA - 0.5 * eSubA + 1e-12);
+      tonalSum += 1 - Math.sqrt(clamp01(Math.exp(logSumA * invVocBins) / (linSumA * invVocBins + 1e-12)));
+      if (hasSecond) {
+        vEnv[fr + 1] = Math.sqrt(eVocB);
+        vEnergySum += eVocB;
+        ratioSum += eVocB / (eAllB - 0.5 * eSubB + 1e-12);
+        tonalSum += 1 - Math.sqrt(clamp01(Math.exp(logSumB * invVocBins) / (linSumB * invVocBins + 1e-12)));
+      }
     }
     const meanRatio = ratioSum / frames;
     const meanTonal = tonalSum / frames;
@@ -172,18 +197,22 @@ export function computeBarFeatures(mono, sr, bpm, downbeat = 0) {
   const barFrames = barSec * sr;
   const startFrame = Math.max(0, Math.floor(downbeat * sr));
   const endFrame = Math.min(mono.length, Math.floor((downbeat + nBars * barSec) * sr));
+  let bCur = 0, nextBar = startFrame + barFrames;
+  let bSub = 0, bPunch = 0, bMid = 0, bHigh = 0;
   for (let i = startFrame; i < endFrame; i++) {
+    if (i >= nextBar && bCur + 1 < nBars) {
+      subE[bCur] = bSub; punchE[bCur] = bPunch; midE[bCur] = bMid; highE[bCur] = bHigh;
+      bCur++; nextBar = startFrame + (bCur + 1) * barFrames;
+      bSub = 0; bPunch = 0; bMid = 0; bHigh = 0;
+    }
     const x = mono[i];
     s1 += aSub * (x - s1); s2 += aSub * (s1 - s2);
     l1 += aLow * (x - l1); l2 += aLow * (l1 - l2);
     m1 += aMid * (x - m1); m2 += aMid * (m1 - m2);
     const sub = s2, punch = l2 - s2, mid = m2 - l2, high = x - m2;
-    const b = Math.min(nBars - 1, Math.floor((i - startFrame) / barFrames));
-    subE[b] += sub * sub;
-    punchE[b] += punch * punch;
-    midE[b] += mid * mid;
-    highE[b] += high * high;
+    bSub += sub * sub; bPunch += punch * punch; bMid += mid * mid; bHigh += high * high;
   }
+  subE[bCur] = bSub; punchE[bCur] = bPunch; midE[bCur] = bMid; highE[bCur] = bHigh;
 
   // Per-bar 12-bin chroma (1 FFT per bar centered in the bar, decimated to ~11 kHz)
   const dec = Math.max(1, Math.floor(sr / 11025));
@@ -208,39 +237,54 @@ export function computeBarFeatures(mono, sr, bpm, downbeat = 0) {
   const norm = Math.sqrt(maxBand);
 
   const out = [];
-  const ch = new Float32Array(12);
-  for (let b = 0; b < nBars; b++) {
-    const center = startFrame + Math.floor((b + 0.5) * barFrames);
-    const base = Math.max(0, Math.min(mono.length - N * dec, center - (N * dec) / 2));
-    for (let i = 0; i < N; i++) {
-      const idx = base + i * dec;
-      re[i] = (idx < mono.length ? mono[idx] : 0) * win[i];
-      im[i] = 0;
-    }
-    fftInPlace(re, im);
-    ch.fill(0);
-    let cSum = 1e-9, wFreq = 0, wMag = 1e-9;
-    for (let k = 1; k < N / 2; k++) {
-      const rk = re[k], ik = im[k];
-      const p = rk * rk + ik * ik;
-      const m = Math.sqrt(p);
-      wFreq += m * ((k * fs) / N);
-      wMag += m;
-      if (binPc[k] >= 0) { ch[binPc[k]] += p; cSum += p; }
-    }
+  const chA = new Float32Array(12), chB = new Float32Array(12);
+  const binHz = fs / N, halfN = N >> 1, invBarFrames = 1 / Math.max(1, barFrames);
+  const pushBar = (b, ch, cSum, wFreq, wMag) => {
     const chroma = new Array(12);
     for (let i = 0; i < 12; i++) chroma[i] = Math.round((ch[i] / cSum) * 100) / 100;
-    const sub = clamp01(Math.sqrt(subE[b] / Math.max(1, barFrames)) / norm);
-    const punch = clamp01(Math.sqrt(punchE[b] / Math.max(1, barFrames)) / norm);
-    const mid = clamp01(Math.sqrt(midE[b] / Math.max(1, barFrames)) / norm);
-    const high = clamp01(Math.sqrt(highE[b] / Math.max(1, barFrames)) / norm);
     out.push({
       start: r3(downbeat + b * barSec),
       end: r3(downbeat + (b + 1) * barSec),
-      sub: r2(sub), punch: r2(punch), mid: r2(mid), high: r2(high),
+      sub: r2(clamp01(Math.sqrt(subE[b] * invBarFrames) / norm)),
+      punch: r2(clamp01(Math.sqrt(punchE[b] * invBarFrames) / norm)),
+      mid: r2(clamp01(Math.sqrt(midE[b] * invBarFrames) / norm)),
+      high: r2(clamp01(Math.sqrt(highE[b] * invBarFrames) / norm)),
       centroid: r2(clamp01((wFreq / wMag - 200) / 3800)),
       chroma,
     });
+  };
+  // Pack 2 real bar windows per complex FFT (exact spectra at 2x speed)
+  for (let b = 0; b < nBars; b += 2) {
+    const hasSecond = b + 1 < nBars;
+    const baseA = Math.max(0, Math.min(mono.length - N * dec, startFrame + Math.floor((b + 0.5) * barFrames) - (N * dec) / 2));
+    const baseB = hasSecond ? Math.max(0, Math.min(mono.length - N * dec, startFrame + Math.floor((b + 1.5) * barFrames) - (N * dec) / 2)) : 0;
+    for (let i = 0; i < N; i++) {
+      const w = win[i];
+      const idxA = baseA + i * dec;
+      re[i] = (idxA < mono.length ? mono[idxA] : 0) * w;
+      if (hasSecond) { const idxB = baseB + i * dec; im[i] = (idxB < mono.length ? mono[idxB] : 0) * w; }
+      else im[i] = 0;
+    }
+    fftInPlace(re, im);
+    chA.fill(0); chB.fill(0);
+    let cSumA = 1e-9, wFreqA = 0, wMagA = 1e-9;
+    let cSumB = 1e-9, wFreqB = 0, wMagB = 1e-9;
+    for (let k = 1; k < halfN; k++) {
+      const nk = N - k, f = k * binHz, pc = binPc[k];
+      const rk = re[k], ik = im[k], rnk = re[nk], ink = im[nk];
+      const ar = 0.5 * (rk + rnk), ai = 0.5 * (ik - ink);
+      const pA = ar * ar + ai * ai, mA = Math.sqrt(pA);
+      wFreqA += mA * f; wMagA += mA;
+      if (pc >= 0) { chA[pc] += pA; cSumA += pA; }
+      if (hasSecond) {
+        const br = 0.5 * (ik + ink), bi = 0.5 * (rnk - rk);
+        const pB = br * br + bi * bi, mB = Math.sqrt(pB);
+        wFreqB += mB * f; wMagB += mB;
+        if (pc >= 0) { chB[pc] += pB; cSumB += pB; }
+      }
+    }
+    pushBar(b, chA, cSumA, wFreqA, wMagA);
+    if (hasSecond) pushBar(b + 1, chB, cSumB, wFreqB, wMagB);
   }
   return out;
 }
@@ -378,21 +422,33 @@ export function detectElasticGrid(mono, sr, globalBpm, gridOffset = 0) {
   }
 
   const winSec = 8, stepSec = 4;
-  const beat0 = 60 / globalBpm;
+  const bins = 32;
+  const h = new Float32Array(bins);
+  // Sparse non-zero onset indices for fast folding (skips silent frames, avoids per-iteration allocation & division)
+  const nzIdx = new Int32Array(n), nzVal = new Float32Array(n);
+  let nNz = 0;
+  for (let k = 0; k < n; k++) { if (env[k] > 0) { nzIdx[nNz] = k; nzVal[nNz] = env[k]; nNz++; } }
   const localBpms = [];
+  let pStart = 0;
   for (let t0 = 0; t0 + winSec <= dur; t0 += stepSec) {
     const i0 = Math.floor(t0 * fps), i1 = Math.min(n, Math.floor((t0 + winSec) * fps));
+    while (pStart < nNz && nzIdx[pStart] < i0) pStart++;
+    let pEnd = pStart, winSum = 0;
+    while (pEnd < nNz && nzIdx[pEnd] < i1) { winSum += nzVal[pEnd]; pEnd++; }
+    if (pEnd <= pStart || winSum <= 0) continue;
+    const invMean = bins / (winSum + 1e-9 * bins);
     // Search local BPM within ±6% of globalBpm
     let bestB = globalBpm, bestS = -1;
     for (let b = globalBpm * 0.94; b <= globalBpm * 1.06; b += 0.2) {
-      const P = (fps * 60) / b;
-      const bins = 32;
-      const h = new Float32Array(bins);
-      let sum = 0;
-      for (let k = i0; k < i1; k++) { const ph = (k / P) % 1; h[Math.floor(ph * bins)] += env[k]; sum += env[k]; }
+      const invP = b / (fps * 60);
+      h.fill(0);
+      for (let p = pStart; p < pEnd; p++) {
+        const x = nzIdx[p] * invP;
+        h[((x - (x | 0)) * bins) | 0] += nzVal[p];
+      }
       let mx = 0;
       for (let j = 0; j < bins; j++) if (h[j] > mx) mx = h[j];
-      const sc = mx / (sum / bins + 1e-9);
+      const sc = mx * invMean;
       if (sc > bestS) { bestS = sc; bestB = b; }
     }
     if (bestS > 2.2) localBpms.push({ time: t0 + winSec / 2, bpm: Math.round(bestB * 100) / 100, score: bestS });

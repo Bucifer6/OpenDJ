@@ -78,7 +78,7 @@ button.tag-chip:hover { border-color: var(--accent); color: #fff; }
 /* background analysis progress (library toolbar) */
 .lib-analysis { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-2); white-space: nowrap; }
 .lib-analysis[hidden] { display: none; }
-.lib-analysis::before { content: ''; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--accent); border-right-color: transparent; animation: lib-spin 1s linear infinite; }
+.lib-analysis::before { content: ''; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--accent); border-right-color: transparent; will-change: transform; animation: lib-spin 1s steps(12) infinite; }
 @keyframes lib-spin { to { transform: rotate(360deg); } }
 /* empty library / empty view explanation */
 .lib-empty { position: absolute; inset: 0; padding: 22px 26px; color: var(--text-2); overflow: auto; }

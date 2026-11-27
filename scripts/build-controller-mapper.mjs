@@ -99,8 +99,8 @@ export function buildBundle(index = buildIndex()) {
 
 export function build(index = buildIndex()) {
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-  const tpl = readFileSync(join(dir, 'template.html'), 'utf8');
-  const plain = (f) => readFileSync(join(root, 'public', 'js', 'midi', f), 'utf8').replace(/^export /gm, '');
+  const tpl = readFileSync(join(dir, 'template.html'), 'utf8').replace(/\r\n/g, '\n');
+  const plain = (f) => readFileSync(join(root, 'public', 'js', 'midi', f), 'utf8').replace(/\r\n/g, '\n').replace(/^export /gm, '');
   // wizard.js and community.js have no imports; the `export` keywords are dropped so they run as a plain script
   const wizard = plain('wizard.js'), community = plain('community.js');
   const parts = tpl.split(/(\/\*@@[A-Z]+@@\*\/|@@VERSION@@)/);

@@ -48,14 +48,20 @@ export function registerLinkRoutes({ route, library, emit = () => {}, transport,
     }
   };
 
-  // ---- live stream
+  // ---- live stream (20 Hz while Link is enabled; completely idle / event-driven while off)
   const streams = new Set();
-  let streamT = null, slowCount = 0;
+  let streamT = null;
   const frame = () => `event: state\ndata: ${JSON.stringify(status())}\n\n`;
+  const syncStreamTimer = () => {
+    if (node.enabled && streams.size > 0) {
+      if (!streamT) { streamT = setInterval(tick, 1000 / rateHz); streamT.unref?.(); }
+    } else if (streamT) {
+      clearInterval(streamT); streamT = null;
+    }
+  };
   function sendAll() { if (!streams.size) return; const f = frame(); for (const r of streams) r.write(f); }
   const tick = () => {
-    if (!streams.size) { clearInterval(streamT); streamT = null; return; }
-    if (!node.enabled && (slowCount++ % rateHz)) return; // 1 Hz while off
+    if (!streams.size || !node.enabled) { syncStreamTimer(); return; }
     sendAll();
   };
 
@@ -66,6 +72,7 @@ export function registerLinkRoutes({ route, library, emit = () => {}, transport,
     if ('startStopSync' in body) { patch.startStopSync = !!body.startStopSync; node.startStopSync = patch.startStopSync; }
     if ('enabled' in body) { await setEnabled(!!body.enabled); patch.enabled = !!body.enabled; }
     saveCfg(patch);
+    syncStreamTimer();
     sendAll(); pushSoon();
     return status();
   });
@@ -89,8 +96,8 @@ export function registerLinkRoutes({ route, library, emit = () => {}, transport,
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     res.write(frame());
     streams.add(res);
-    if (!streamT) { streamT = setInterval(tick, 1000 / rateHz); streamT.unref?.(); }
-    req.on('close', () => streams.delete(res));
+    syncStreamTimer();
+    req.on('close', () => { streams.delete(res); syncStreamTimer(); });
     return undefined;
   });
 

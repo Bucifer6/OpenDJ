@@ -3,7 +3,7 @@
 // Pure functions: used by the Web Worker in the app and by Node unit tests.
 
 import { LOUDNESS_TARGET, loudnessProfile, integratedLoudness, sectionLoudness, loudestWindow } from './loudness.js';
-import { detectVocalActivity, computeBarFeatures, computeGrooveAndEmbedding, detectElasticGrid } from './features.js';
+import { detectVocalActivity, computeBarFeatures, computeGrooveAndEmbedding, detectElasticGrid, fftInPlace, fftTable } from './features.js';
 
 export const WAVE_RATE = 150; // waveform points per second
 
@@ -61,15 +61,16 @@ function onsetEnvelope(mono, sr, hop) {
   return out;
 }
 
-/** Sharpness of the beat when folding the onset envelope with period P (in hops). */
-function foldScore(env, P, bins = 48) {
-  const h = new Float32Array(bins);
-  for (let k = 0; k < env.length; k++) {
-    const ph = (k / P) % 1;
-    h[Math.floor(ph * bins)] += env[k];
+/** Sharpness of the beat when folding a sparse onset envelope with period P (in hops). */
+function foldScoreSparse(nzIdx, nzVal, nNz, sum, P, bins, h) {
+  h.fill(0);
+  const invP = 1 / P;
+  for (let i = 0; i < nNz; i++) {
+    const x = nzIdx[i] * invP;
+    h[((x - (x | 0)) * bins) | 0] += nzVal[i];
   }
-  let mx = 0, mi = 0, sum = 0;
-  for (let i = 0; i < bins; i++) { sum += h[i]; if (h[i] > mx) { mx = h[i]; mi = i; } }
+  let mx = 0, mi = 0;
+  for (let i = 0; i < bins; i++) { if (h[i] > mx) { mx = h[i]; mi = i; } }
   return { score: mx / (sum / bins + 1e-9), phase: (mi + 0.5) / bins };
 }
 
@@ -80,8 +81,13 @@ export function detectBpm(mono, sr, { min = 70, max = 180 } = {}) {
   const fps = sr / hop;
   if (env.length < fps * 4) return { bpm: null, offset: 0, confidence: 0 };
   // no onsets at all (digital silence, a steady tone): there is no tempo to find, don't invent one
-  let onsetMean = 0; for (let k = 0; k < env.length; k++) onsetMean += env[k];
-  onsetMean /= env.length;
+  const nzIdx = new Int32Array(env.length), nzVal = new Float32Array(env.length);
+  let nNz = 0, envSum = 0;
+  for (let k = 0; k < env.length; k++) {
+    const v = env[k];
+    if (v > 0) { nzIdx[nNz] = k; nzVal[nNz] = v; nNz++; envSum += v; }
+  }
+  const onsetMean = envSum / env.length;
   if (!(onsetMean > MIN_ONSET)) return { bpm: null, offset: 0, confidence: 0 };
   // 1) autocorrelation over the tempo range
   const minLag = Math.floor(fps * 60 / max), maxLag = Math.ceil(fps * 60 / min);
@@ -105,24 +111,31 @@ export function detectBpm(mono, sr, { min = 70, max = 180 } = {}) {
     if (v > best.v) best = { lag, v };
   }
   if (!best.lag) return { bpm: null, offset: 0, confidence: 0 };
+  const h48 = new Float32Array(48), h96 = new Float32Array(96);
+  const fold48 = (P) => foldScoreSparse(nzIdx, nzVal, nNz, envSum, P, 48, h48);
+  const fold96 = (P) => foldScoreSparse(nzIdx, nzVal, nNz, envSum, P, 96, h96);
   // 1b) 3:2 check: off-beat bass (kick + bass on the "and") makes the ACF favour 1.5 beats (2/3 of the tempo).
   // Folding the onsets at the true beat period is much sharper than at 1.5 beats, so switch when it clearly is.
   let coarseLag = best.lag;
   const l23 = best.lag * 2 / 3;
   const sharpest = (lag) => { // best fold score within ±3 % (integer lags are too coarse to fold a whole track)
     const b0 = 60 * fps / lag; let m = 0;
-    for (let b = b0 * 0.97; b <= b0 * 1.03; b += 0.05) m = Math.max(m, foldScore(env, fps * 60 / b).score);
+    for (let b = b0 * 0.97; b <= b0 * 1.03; b += 0.05) { const s = fold48(fps * 60 / b).score; if (s > m) m = s; }
     return m;
   };
-  if (l23 >= minLag && sharpest(l23) > 1.25 * sharpest(best.lag)) coarseLag = l23;
+  const sharpBest = sharpest(best.lag);
+  let sharpness = sharpBest;
+  if (l23 >= minLag) {
+    const sharp23 = sharpest(l23);
+    if (sharp23 > 1.25 * sharpBest) { coarseLag = l23; sharpness = sharp23; }
+  }
   // A sustained pad can produce a stronger ACF peak than the drums, especially at 48 kHz.
   // If that hypothesis has weak whole-track consistency, search the bounded tempo range
   // before local refinement. Confident estimates keep the fast path and existing disambiguation.
-  const sharpness = sharpest(coarseLag);
   if (sharpness < 4) {
     let alternative = { bpm: 60 * fps / coarseLag, score: sharpness };
     for (let b = min; b <= max; b += 0.25) {
-      const score = foldScore(env, fps * 60 / b).score;
+      const score = fold48(fps * 60 / b).score;
       if (score > alternative.score) alternative = { bpm: b, score };
     }
     if (alternative.score > sharpness * 1.25) coarseLag = fps * 60 / alternative.bpm;
@@ -131,11 +144,11 @@ export function detectBpm(mono, sr, { min = 70, max = 180 } = {}) {
   let coarse = 60 * fps / coarseLag;
   let top = { bpm: coarse, score: 0, phase: 0 };
   for (let b = coarse * 0.97; b <= coarse * 1.03; b += 0.02) {
-    const r = foldScore(env, fps * 60 / b);
+    const r = fold48(fps * 60 / b);
     if (r.score > top.score) top = { bpm: b, ...r };
   }
   for (let b = top.bpm - 0.03; b <= top.bpm + 0.03; b += 0.002) {
-    const r = foldScore(env, fps * 60 / b, 96);
+    const r = fold96(fps * 60 / b);
     if (r.score > top.score * 0.999) top = { bpm: b, ...r };
   }
   let bpm = top.bpm;
@@ -143,7 +156,7 @@ export function detectBpm(mono, sr, { min = 70, max = 180 } = {}) {
   if (Math.abs(bpm - rounded) < 0.06) bpm = rounded; else bpm = Math.round(bpm * 100) / 100;
   // recompute phase with the final bpm
   const P = fps * 60 / bpm;
-  const fin = foldScore(env, P, 96);
+  const fin = fold96(P);
   const beat = 60 / bpm;
   let offset = (fin.phase * P) / fps;
   offset = ((offset % beat) + beat) % beat;
@@ -151,29 +164,6 @@ export function detectBpm(mono, sr, { min = 70, max = 180 } = {}) {
 }
 
 // ---------------- key detection ----------------
-function fft(re, im) {
-  const n = re.length;
-  for (let i = 1, j = 0; i < n; i++) {
-    let bit = n >> 1;
-    for (; j & bit; bit >>= 1) j ^= bit;
-    j ^= bit;
-    if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; }
-  }
-  for (let len = 2; len <= n; len <<= 1) {
-    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
-    for (let i = 0; i < n; i += len) {
-      let cr = 1, ci = 0;
-      for (let j = 0; j < len / 2; j++) {
-        const ar = re[i + j + len / 2] * cr - im[i + j + len / 2] * ci;
-        const ai = re[i + j + len / 2] * ci + im[i + j + len / 2] * cr;
-        re[i + j + len / 2] = re[i + j] - ar; im[i + j + len / 2] = im[i + j] - ai;
-        re[i + j] += ar; im[i + j] += ai;
-        const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
-      }
-    }
-  }
-}
-
 const MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
 const MINOR = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
 export const NOTE_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -197,8 +187,9 @@ export function detectKey(mono, sr) {
   const maxFrames = 160;
   const stride = Math.max(1, Math.floor(frames / maxFrames));
   const chroma = new Float64Array(12);
-  const re = new Float64Array(N), im = new Float64Array(N);
-  const win = new Float64Array(N).map((_, i) => 0.5 - 0.5 * Math.cos(2 * Math.PI * i / N));
+  const frameChromaA = new Float64Array(12), frameChromaB = new Float64Array(12);
+  const re = new Float32Array(N), im = new Float32Array(N);
+  const { win } = fftTable(N);
   const binPc = new Int8Array(N / 2).fill(-1);
   for (let b = 1; b < N / 2; b++) {
     const f = b * fs / N;
@@ -207,18 +198,41 @@ export function detectKey(mono, sr) {
     if (Math.abs(midi - Math.round(midi)) > 0.35) continue; // only bins near a semitone centre
     binPc[b] = ((Math.round(midi) % 12) + 12) % 12;
   }
-  for (let fr = 0; fr < frames; fr += stride) {
-    const base = fr * N * dec;
+  const invDec = 1 / dec, halfN = N >> 1;
+  // Pack 2 real decimated frames per complex FFT (exact spectra at 2x speed)
+  for (let fr = 0; fr < frames; fr += stride * 2) {
+    const hasSecond = fr + stride < frames;
+    const baseA = fr * N * dec;
+    const baseB = hasSecond ? (fr + stride) * N * dec : 0;
     for (let i = 0; i < N; i++) {
-      let s = 0; const o = base + i * dec;
-      for (let d = 0; d < dec; d++) s += mono[o + d] || 0;
-      re[i] = (s / dec) * win[i]; im[i] = 0;
+      let sA = 0; const oA = baseA + i * dec;
+      for (let d = 0; d < dec; d++) sA += mono[oA + d] || 0;
+      const w = win[i];
+      re[i] = sA * invDec * w;
+      if (hasSecond) {
+        let sB = 0; const oB = baseB + i * dec;
+        for (let d = 0; d < dec; d++) sB += mono[oB + d] || 0;
+        im[i] = sB * invDec * w;
+      } else im[i] = 0;
     }
-    fft(re, im);
-    const frameChroma = new Float64Array(12);
-    for (let b = 1; b < N / 2; b++) if (binPc[b] >= 0) frameChroma[binPc[b]] += Math.sqrt(re[b] * re[b] + im[b] * im[b]);
-    const tot = frameChroma.reduce((x, y) => x + y) + 1e-9;
-    for (let i = 0; i < 12; i++) chroma[i] += frameChroma[i] / tot;
+    fftInPlace(re, im);
+    frameChromaA.fill(0); frameChromaB.fill(0);
+    for (let b = 1; b < halfN; b++) {
+      const pc = binPc[b];
+      if (pc < 0) continue;
+      const nb = N - b;
+      const rk = re[b], ik = im[b], rnk = re[nb], ink = im[nb];
+      const ar = 0.5 * (rk + rnk), ai = 0.5 * (ik - ink);
+      frameChromaA[pc] += Math.sqrt(ar * ar + ai * ai);
+      if (hasSecond) {
+        const br = 0.5 * (ik + ink), bi = 0.5 * (rnk - rk);
+        frameChromaB[pc] += Math.sqrt(br * br + bi * bi);
+      }
+    }
+    let totA = 1e-9, totB = 1e-9;
+    for (let i = 0; i < 12; i++) { totA += frameChromaA[i]; totB += frameChromaB[i]; }
+    for (let i = 0; i < 12; i++) chroma[i] += frameChromaA[i] / totA;
+    if (hasSecond) for (let i = 0; i < 12; i++) chroma[i] += frameChromaB[i] / totB;
   }
   const cands = [];
   for (let tonic = 0; tonic < 12; tonic++) {
