@@ -240,43 +240,59 @@ class LimiterProcessor extends AudioWorkletProcessor {
     this.req = new Float32Array(L); // required gains in the window (ring)
     this.dqV = new Float32Array(L + 2); this.dqI = new Float64Array(L + 2); this.dqH = 0; this.dqT = 0; this.t = 0; // monotonic deque (window min)
     this.box = new Float64Array(L); this.boxSum = L; this.box.fill(1); this.bw = 0;
-    this.fast = 1; this.slow = 1; this.gr = 1; this.report = 0;
+    this.fast = 1; this.slow = 1; this.gr = 1; this.lastGr = 1; this.report = 0;
+    this._quiet = 0; this._lastCeil = NaN; this._ceilLin = 1; this._lastRel = NaN; this._relF = 0;
+    this._relS = Math.exp(-1 / (1.2 * sampleRate)); this._atkS = Math.exp(-1 / (0.4 * sampleRate));
   }
   process(inputs, outputs, p) {
     const inp = inputs[0], out = outputs[0];
     const iL = inp[0], iR = inp[1] || inp[0], oL = out[0], oR = out[1] || out[0], n = oL.length;
-    const L = this.L, ceil = Math.pow(10, p.ceiling[0] / 20), on = p.enabled[0] >= 0.5;
-    const relF = Math.exp(-1 / (p.release[0] * sampleRate)), relS = Math.exp(-1 / (1.2 * sampleRate)), atkS = Math.exp(-1 / (0.4 * sampleRate));
+    const L = this.L;
+    // Fast idle bypass when input is silent and look-ahead delay + envelopes have drained
+    let silent = !iL;
+    if (!silent) {
+      silent = true;
+      for (let i = 0; i < n; i++) { if (iL[i] !== 0 || iR[i] !== 0) { silent = false; break; } }
+    }
+    if (silent && this._quiet > 3 && this.fast >= 0.99999 && this.slow >= 0.99999 && this.boxSum >= L - 1e-5) {
+      oL.fill(0); if (oR !== oL) oR.fill(0);
+      if (this.lastGr < 1) { this.lastGr = 1; this.port.postMessage({ gr: 1 }); }
+      return true;
+    }
+    this._quiet = silent ? this._quiet + 1 : 0;
+    const cDb = p.ceiling[0], rel = p.release[0], on = p.enabled[0] >= 0.5;
+    if (cDb !== this._lastCeil) { this._lastCeil = cDb; this._ceilLin = Math.pow(10, cDb / 20); }
+    if (rel !== this._lastRel) { this._lastRel = rel; this._relF = Math.exp(-1 / (rel * sampleRate)); }
+    const ceil = this._ceilLin, relF = this._relF, relS = this._relS, atkS = this._atkS;
     const dqV = this.dqV, dqI = this.dqI, box = this.box, dL = this.dl[0], dR = this.dl[1];
     let minGr = 1;
+    const M = L + 2;
     for (let i = 0; i < n; i++) {
       const xl = iL ? iL[i] : 0, xr = iL ? iR[i] : 0;
       const a = Math.max(Math.abs(xl), Math.abs(xr));
       const req = on && a > ceil ? ceil / a : 1;
       // window minimum of the required gain (monotonic deque, O(1) amortised)
       const t = this.t++;
-      // window = the L+1 samples whose output gain this sample's box average can still touch
-      const M = L + 2;
       while (this.dqT > this.dqH && dqV[(this.dqT - 1) % M] >= req) this.dqT--;
       dqV[this.dqT % M] = req; dqI[this.dqT % M] = t; this.dqT++;
       while (dqI[this.dqH % M] <= t - L - 1) this.dqH++;
       const wmin = dqV[this.dqH % M];
-      // dual release: instant attack (the box filter smooths it), fast + slow recovery
       this.fast = wmin < this.fast ? wmin : wmin + (this.fast - wmin) * relF;
       this.slow = wmin < this.slow ? this.slow * atkS + wmin * (1 - atkS) : wmin + (this.slow - wmin) * relS;
-      const g = Math.min(this.fast, Math.max(this.slow, wmin)); // slow env only holds gain down, never below need
-      // moving average over the look-ahead window
+      const g = Math.min(this.fast, Math.max(this.slow, wmin));
       this.boxSum += g - box[this.bw]; box[this.bw] = g; this.bw = (this.bw + 1) % L;
       const gs = Math.min(1, this.boxSum / L);
-      // delay line
       const yl = dL[this.dw], yr = dR[this.dw]; dL[this.dw] = xl; dR[this.dw] = xr; this.dw = (this.dw + 1) % L;
       let ol = yl * gs, or = yr * gs;
-      if (on) { if (ol > ceil) ol = ceil; else if (ol < -ceil) ol = -ceil; if (or > ceil) or = ceil; else if (or < -ceil) or = -ceil; } // numerical safety
+      if (on) { if (ol > ceil) ol = ceil; else if (ol < -ceil) ol = -ceil; if (or > ceil) or = ceil; else if (or < -ceil) or = -ceil; }
       oL[i] = ol; if (oR !== oL) oR[i] = or;
       if (gs < minGr) minGr = gs;
     }
     this.gr = Math.min(this.gr, minGr);
-    if ((this.report += n) >= 4096) { this.port.postMessage({ gr: this.gr }); this.report = 0; this.gr = 1; }
+    if ((this.report += n) >= 4096) {
+      if (this.gr < 1 || this.lastGr < 1) { this.lastGr = this.gr; this.port.postMessage({ gr: this.gr }); }
+      this.report = 0; this.gr = 1;
+    }
     return true;
   }
 }

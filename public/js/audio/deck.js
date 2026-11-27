@@ -170,6 +170,7 @@ export class Deck extends Emitter {
     if (this.playing && (this.engine.settings.lockPlayingDecks || this.hardLock || this.engine.settings.deckOptions?.hardLock)) throw new Error('Deck is playing');
     if (this.scratchSample) this.post('altReturn', { frame: 0 }); // the worklet's saved track is dropped by the load below
     this.post('play', { value: false }); this.post('loop', { value: null }); this.post('unload');
+    this.engine.channels?.[this.index]?.setActive?.(true);
     this.reset(); this.track = track; this.loading = true;
     const tok = ++this._loadSeq;
     const stale = () => tok !== this._loadSeq;
@@ -191,6 +192,7 @@ export class Deck extends Emitter {
       if (stale()) return false; // another load superseded this one
       phase('Decoding');
       const buf = await this.ctx.decodeAudioData(ab);
+      ab = null; // release compressed audio bytes immediately so RAM doesn't hold both raw + decoded buffers
       if (stale()) return false;
       this.sr = buf.sampleRate; this.duration = buf.duration;
       // waveform + analysis (cached on the server after the first time)
@@ -268,7 +270,13 @@ export class Deck extends Emitter {
   }
 
   // ++_loadSeq: a load still in flight becomes stale (it must not finish into an ejected deck)
-  eject() { if (this.playing) return; if (this.scratchSample) this.scratchSampleReturn(); ++this._loadSeq; this.post('unload'); this.reset(); this.emit('load', null); this.emit('state'); }
+  eject() {
+    if (this.playing) return;
+    if (this.scratchSample) this.scratchSampleReturn();
+    ++this._loadSeq; this.post('unload'); this.reset();
+    if (this.index >= (this.engine.settings?.deckCount || 2)) this.engine.channels?.[this.index]?.setActive?.(false);
+    this.emit('load', null); this.emit('state');
+  }
 
   // ---------- transport ----------
   /**

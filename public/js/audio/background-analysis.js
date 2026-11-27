@@ -84,6 +84,7 @@ export class BackgroundAnalyser extends Emitter {
     this.running = true;
     const run = () => this._loop().catch((e) => console.warn('background analysis', e)).finally(() => {
       this.running = false; this.current = null; this.queue.reset();
+      if (this._worker) { try { this._worker.terminate(); } catch { /* */ } this._worker = null; } // reclaim ~25-40 MB worker RAM when idle
       this.emit('progress', this.status()); this.emit('idle');
     });
     // one tab per browser analyses (others would only repeat the same work)
@@ -191,12 +192,12 @@ export class BackgroundAnalyser extends Emitter {
         // 415: the server can't play this format at all (e.g. no FFmpeg): treat like an undecodable file
         throw Object.assign(new Error(msg), { undecodable: res.status === 415 || res.status === 422 });
       }
-      const ab = await res.arrayBuffer();
+      let ab = await res.arrayBuffer();
       if (!ab.byteLength) throw Object.assign(new Error('Empty file'), { undecodable: true });
       await this._holdWhileLoading(ac.signal); // the decode hand-over below is the one long task: not while a deck loads
       if (ac.signal.aborted) return false;
       let buf;
-      try { buf = await this.engine.ctx.decodeAudioData(ab); } catch (e) { throw Object.assign(e instanceof Error ? e : new Error(String(e)), { undecodable: true }); }
+      try { buf = await this.engine.ctx.decodeAudioData(ab); } catch (e) { throw Object.assign(e instanceof Error ? e : new Error(String(e)), { undecodable: true }); } finally { ab = null; }
       await yieldTask(); // don't add work to the decode hand-over task
       if (ac.signal.aborted) return false;
       const duration = buf.duration, sampleRate = buf.sampleRate;

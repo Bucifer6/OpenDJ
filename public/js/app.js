@@ -460,6 +460,11 @@ class App {
     document.body.classList.toggle('four-decks', n === 4);
     this.deckEls.forEach((d, i) => { d.style.display = i < n ? '' : 'none'; });
     this.waves.forEach((w, i) => { w.style.display = i < n ? '' : 'none'; });
+    // Disconnect unloaded hidden decks (3 & 4 in 2-deck mode) from the Web Audio graph so they cost 0 idle DSP
+    this.engine.channels.forEach((ch, i) => {
+      const d = this.engine.decks[i];
+      ch?.setActive?.(i < n || !!d?.track || !!d?.playing);
+    });
     this.mixer.setDeckCount(n);
     this.renderLayoutSel();
     this.showDeckTab(this.mobileDeck || 0);
@@ -880,19 +885,41 @@ class App {
       if (/^Digit/.test(e.code) && hot[e.code.replace('Digit', '')]) { const [di, n] = hot[e.code.replace('Digit', '')]; this.engine.decks[di].hotCueUp(n); }
     });
     window.addEventListener('beforeunload', (e) => { if (this.engine.decks.some((d) => d.playing) || this.engine.recording || this.recording?.broadcaster?.live) { e.preventDefault(); e.returnValue = ''; } });
+    // Wake full frame rate immediately on any pointer/keyboard input
+    this._lastInputAt = performance.now();
+    const bumpInput = () => { this._lastInputAt = performance.now(); };
+    window.addEventListener('pointerdown', bumpInput, { passive: true });
+    window.addEventListener('pointermove', bumpInput, { passive: true });
+    window.addEventListener('keydown', bumpInput, { passive: true });
+    window.addEventListener('wheel', bumpInput, { passive: true });
   }
 
   frame(now) {
+    if (document.hidden) return; // hidden/minimized window: skip all canvas/DOM repaints (audio & automix keep running)
+    const active = this.engine.decks.some((d) => d.playing || d.scratching || d.loading)
+      || this.engine.recording || this.engine.micOn || this.automix?.enabled
+      || (now - (this._lastInputAt || 0) < 1500);
+    // When completely idle, throttle UI repaints to ~12 fps instead of 60-144 fps (cuts idle CPU/GPU dramatically)
+    if (!active && this._lastFrame && now - this._lastFrame < 80) return;
+    this._lastFrame = now;
     for (let i = 0; i < this.deckCount; i++) { this.waves[i].wf.draw(now); this.deckEls[i].frame(now); }
     this.mixer.frame(now);
     if (!this._slow || now - this._slow > 250) {
       this._slow = now;
       const setText = (n, t) => { if (n.textContent !== t) n.textContent = t; };
-      setText(this.clock, new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      if (!this._clockAt || now - this._clockAt >= 1000) {
+        this._clockAt = now;
+        setText(this.clock, new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      }
       setText(this.recTime, this.engine.recording ? fmtTime((Date.now() - this.engine.recStarted) / 1000).slice(0, 5) : '');
       this.midiDot.classList.toggle('active', now - this.midi.activity < 150);
-      this.midiDot.classList.toggle('connected', (this.midi.devices?.() || this.midi.inputs()).length > 0);
-      this.midiDot.title = this.midi.inputs().map((i) => i.name).join(', ') || 'No MIDI controller';
+      const devs = this.midi.devices?.() || this.midi.inputs();
+      const connected = devs.length > 0;
+      this.midiDot.classList.toggle('connected', connected);
+      if (devs.length !== this._midiCount) {
+        this._midiCount = devs.length;
+        this.midiDot.title = this.midi.inputs().map((i) => i.name).join(', ') || 'No MIDI controller';
+      }
       this.updateAutomixUi();
       this.updateDeckTabs();
     }

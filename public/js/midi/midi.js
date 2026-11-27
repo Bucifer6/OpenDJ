@@ -616,6 +616,7 @@ export class MidiManager extends Emitter {
 
   /** Light controller LEDs: explicit outputs (Mixxx) or note-on 127/0 echoes for mapped buttons that have state. */
   updateLeds() {
+    if (!this.access || this.access.outputs.size === 0) return;
     for (const out of this.outputs()) {
       const map = this.mappingForOutput(out); if (!map) continue;
       const send = (k, msg) => {
