@@ -98,19 +98,50 @@ class App {
       const busy = !!this.settings.gigMode || this.engine.decks.some((d) => d.playing) || !!this.recording?.recorder?.recording || !!this.automix?.enabled;
       if (busy !== this._powerLocked) { this._powerLocked = busy; window.opendjNative?.setPowerLock?.(busy).catch?.(() => {}); }
     };
-    setInterval(() => {
-      syncPower();
+    const saveRecoverySnapshot = (cleanExit = false) => {
       try {
         const snap = {
           at: Date.now(),
+          cleanExit,
           decks: this.engine.decks.map((d) => (d.track && !d.track.scratchSample ? { id: d.track.id, pos: Math.round((d.position || 0) * 10) / 10, playing: !!d.playing } : null)),
           queue: this.automix?.enabled ? (this.automix.queue || []).slice(this.automix.idx).map((x) => x.id).slice(0, 50) : [],
         };
-        if (snap.decks.some(Boolean)) localStorage.setItem('opendj-session-recovery', JSON.stringify(snap));
+        if (cleanExit || snap.decks.some(Boolean)) localStorage.setItem('opendj-session-recovery', JSON.stringify(snap));
       } catch { /* storage unavailable */ }
-    }, 5000);
+    };
+    // Detect an unclean previous exit (<6h old) and expose non-intrusive session restore
+    try {
+      const prev = JSON.parse(localStorage.getItem('opendj-session-recovery') || 'null');
+      if (prev && !prev.cleanExit && Date.now() - prev.at < 6 * 3600_000 && Array.isArray(prev.decks) && prev.decks.some((d) => d && this.library.track(d.id))) {
+        this.recoverableSession = prev;
+      }
+    } catch { /* ignore corrupt snapshot */ }
+    window.addEventListener('beforeunload', () => saveRecoverySnapshot(true));
+    setInterval(() => { syncPower(); saveRecoverySnapshot(false); }, 5000);
+    if (this.settings.gigMode) {
+      this.engine.decks.forEach((d) => { d.hardLock = true; });
+      this.stems?.setHold?.(true);
+    }
     syncPower();
     this.ready = true;
+  }
+
+  /** Safely restore tracks & cue positions from the last unclean-exit session snapshot (paused so audio never blasts unexpectedly). */
+  async restoreLastSession() {
+    const snap = this.recoverableSession;
+    if (!snap?.decks) return 0;
+    let restored = 0;
+    for (let i = 0; i < snap.decks.length && i < this.engine.decks.length; i++) {
+      const entry = snap.decks[i];
+      if (!entry?.id || !this.library.track(entry.id)) continue;
+      try {
+        await this.loadTrack(i, entry.id, { automix: true });
+        if (Number.isFinite(entry.pos) && entry.pos > 0) this.engine.decks[i].seek(entry.pos);
+        restored++;
+      } catch { /* skip unreadable track */ }
+    }
+    this.recoverableSession = null;
+    return restored;
   }
 
   async setSetting(k, v) {

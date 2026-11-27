@@ -176,7 +176,7 @@ export class SqliteStore {
   searchIds(query, limit = 500) {
     if (!this.hasFts) return null;
     const tokens = String(query || '').trim().toLowerCase().split(/\s+/)
-      .map((t) => t.replace(/[^a-z0-9\u00c0-\u024f]/gi, '')).filter((t) => t.length > 0);
+      .map((t) => t.replace(/[^\p{L}\p{N}]/gu, '')).filter((t) => t.length > 0).slice(0, 12);
     if (!tokens.length) return null;
     const expr = tokens.map((t) => `"${t}"*`).join(' AND ');
     return this._withDb((db) => {

@@ -185,17 +185,25 @@ export class Channel extends Emitter {
    * values: array/Float32Array of logical knob/fader values; startAt: audio time (s); dur: seconds (> 0).
    */
   scheduleCurve(key, values, startAt, dur) {
-    if (!values?.length || !(dur > 0.005)) return false;
-    const t = Math.max(this.ctx.currentTime, Number(startAt) || this.ctx.currentTime);
+    if (!values || values.length < 2 || !Number.isFinite(dur) || !(dur > 0.005)) return false;
+    const t = Math.max(this.ctx.currentTime, Number.isFinite(Number(startAt)) ? Number(startAt) : this.ctx.currentTime);
     const n = values.length;
+    const cancel = (param) => {
+      if (typeof param.cancelAndHoldAtTime === 'function') param.cancelAndHoldAtTime(t);
+      else param.cancelScheduledValues(t);
+    };
     if (key === 'volume') {
       const curve = new Float32Array(n);
-      for (let i = 0; i < n; i++) curve[i] = faderGain(clamp(values[i], 0, 1), 'log');
-      for (const [param, st] of [[this.fader.gain, this.pst.fader], [this.postFader.gain, this.pst.postFader]]) {
-        if (typeof param?.setValueCurveAtTime !== 'function') return false;
-        param.cancelScheduledValues(t);
-        param.setValueCurveAtTime(curve, t, dur);
-        st.kind = 'curve'; st.t0 = t; st.t1 = t + dur; st.v1 = curve[n - 1];
+      for (let i = 0; i < n; i++) curve[i] = faderGain(clamp(Number.isFinite(values[i]) ? values[i] : 0, 0, 1), 'log');
+      try {
+        for (const [param, st] of [[this.fader.gain, this.pst.fader], [this.postFader.gain, this.pst.postFader]]) {
+          if (typeof param?.setValueCurveAtTime !== 'function') return false;
+          cancel(param);
+          param.setValueCurveAtTime(curve, t, dur);
+          st.kind = 'curve'; st.t0 = t; st.t1 = t + dur; st.v1 = curve[n - 1];
+        }
+      } catch {
+        return false;
       }
       this._autoHold = this._autoHold || {};
       this._autoHold[key] = t + dur;
@@ -205,9 +213,13 @@ export class Channel extends Emitter {
       const band = this.eq.bands[key === 'eqLow' ? 'low' : key === 'eqMid' ? 'mid' : 'high'];
       if (!band || typeof band.gain?.setValueCurveAtTime !== 'function') return false;
       const curve = new Float32Array(n);
-      for (let i = 0; i < n; i++) curve[i] = isoKnobGain(clamp(values[i], -1, 1));
-      band.gain.cancelScheduledValues(t);
-      band.gain.setValueCurveAtTime(curve, t, dur);
+      for (let i = 0; i < n; i++) curve[i] = isoKnobGain(clamp(Number.isFinite(values[i]) ? values[i] : 0, -1, 1));
+      try {
+        cancel(band.gain);
+        band.gain.setValueCurveAtTime(curve, t, dur);
+      } catch {
+        return false;
+      }
       this._autoHold = this._autoHold || {};
       this._autoHold[key] = t + dur;
       return true;
@@ -218,13 +230,19 @@ export class Channel extends Emitter {
   cancelAutomation(key) {
     const t = this.ctx.currentTime;
     if (this._autoHold) delete this._autoHold[key];
+    const stop = (param) => {
+      if (!param) return;
+      try {
+        if (typeof param.cancelAndHoldAtTime === 'function') param.cancelAndHoldAtTime(t);
+        else if (typeof param.cancelScheduledValues === 'function') { const v = param.value; param.cancelScheduledValues(t); param.setValueAtTime(v, t); }
+      } catch { /* ignore if AudioParam not active */ }
+    };
     if (key === 'volume') {
-      for (const param of [this.fader?.gain, this.postFader?.gain]) {
-        if (param?.cancelScheduledValues) { const v = param.value; param.cancelScheduledValues(t); param.setValueAtTime(v, t); }
-      }
+      stop(this.fader?.gain);
+      stop(this.postFader?.gain);
     } else if ((key === 'eqLow' || key === 'eqMid' || key === 'eqHigh') && this.eq?.bands) {
       const band = this.eq.bands[key === 'eqLow' ? 'low' : key === 'eqMid' ? 'mid' : 'high'];
-      if (band?.gain?.cancelScheduledValues) { const v = band.gain.value; band.gain.cancelScheduledValues(t); band.gain.setValueAtTime(v, t); }
+      stop(band?.gain);
     }
   }
   /** Logical control as set from the UI or a controller: Center Lock applies to the filter knob there (not automix).

@@ -255,11 +255,12 @@ export class Deck extends Emitter {
   }
 
   /** Fetch a bounded Int16 stereo PCM slice from the server for ultra-long tracks (>20 min) without 1 GB RAM decode. */
-  async loadChunkedSlice(trackId, startSec = 0, durSec = 60, sr = this.ctx.sampleRate || 44100) {
+  async loadChunkedSlice(trackId, startSec = 0, durSec = 60, sr = this.ctx?.sampleRate || 44100) {
     const res = await fetch(`/api/tracks/${encodeURIComponent(trackId)}/pcm?start=${encodeURIComponent(startSec)}&dur=${encodeURIComponent(durSec)}&sr=${encodeURIComponent(sr)}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const ab = await res.arrayBuffer();
-    const interleaved = new Int16Array(ab);
+    const evenBytes = ab.byteLength - (ab.byteLength % 4); // guard against mid-stream odd-byte truncation
+    const interleaved = new Int16Array(ab, 0, evenBytes / 2);
     const frames = interleaved.length >> 1;
     const left = new Int16Array(frames), right = new Int16Array(frames);
     for (let i = 0; i < frames; i++) { left[i] = interleaved[i * 2]; right[i] = interleaved[i * 2 + 1]; }

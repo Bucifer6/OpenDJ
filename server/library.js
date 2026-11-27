@@ -26,6 +26,7 @@ export class Library extends LibraryCore {
     this._dirtyTracks = new Set();
     this._removedTracks = new Set();
     this._dirtyMeta = false;
+    this._needsFullSync = false;
     // files written by older versions were 0644: they hold source passwords / tokens and API keys
     for (const f of [this.file, this.dbFile, this.settingsFile, path.join(dataDir, 'auth.json'), path.join(dataDir, 'secrets.json')]) {
       for (const x of [f, f + '.bak', f + '.tmp']) chmodQuiet(x, 0o600);
@@ -57,18 +58,37 @@ export class Library extends LibraryCore {
         this.sqlite = new SqliteStore(this.dbFile);
         if (loadedFromJson) {
           this.sqlite.replaceAll(this.data);
+          this._needsFullSync = false;
         } else if (this.sqlite.trackCount() > 0 || this.sqlite.hasMeta()) {
           this.adoptData(this.sqlite.loadAll());
+          this._needsFullSync = false;
         } else if (jsonExists) {
           this.sqlite.replaceAll(this.data);
+          this._needsFullSync = false;
         }
       } catch (e) {
-        console.warn('[opendj] SQLite unavailable, using JSON store:', e.message);
+        console.warn('[opendj] SQLite library damaged or unavailable, recovering:', e.message);
         this.sqlite = null;
-        if (!loadedFromJson && jsonExists) {
+        // Quarantine corrupt library.db so a fresh DB can be rebuilt from library.json / .bak
+        if (dbExists) {
+          const ts = Date.now();
+          for (const suf of ['', '-wal', '-shm']) {
+            try { if (fs.existsSync(this.dbFile + suf)) fs.renameSync(this.dbFile + suf, `${this.dbFile}.corrupt-${ts}${suf}`); } catch { /* */ }
+          }
+          this.loadErrors.push(`Damaged library.db was quarantined (library.db.corrupt-${ts}) and recovered from backup.`);
+        }
+        if (!loadedFromJson && (jsonExists || fs.existsSync(this.file + '.bak'))) {
           const lib = readJsonSafe(this.file);
           if (lib.error) this.loadErrors.push(lib.error);
           this.adoptData(lib.data);
+        }
+        // Rebuild a fresh SQLite store from the recovered in-memory data if possible
+        try {
+          this.sqlite = new SqliteStore(this.dbFile);
+          this.sqlite.replaceAll(this.data);
+          this._needsFullSync = false;
+        } catch {
+          this.sqlite = null;
         }
       }
     }
@@ -86,6 +106,20 @@ export class Library extends LibraryCore {
 
   _writeAtomic(file, obj) { writeJsonAtomic(file, obj); }
 
+  adoptData(d) {
+    super.adoptData(d);
+    this._needsFullSync = true;
+    this._dirtyTracks?.clear();
+    this._removedTracks?.clear();
+    this._dirtyMeta = false;
+  }
+
+  markTrackDirty(tid) {
+    if (!tid) return;
+    this._dirtyTracks.add(tid);
+    this._removedTracks.delete(tid);
+  }
+
   upsertTrack(t) {
     const res = super.upsertTrack(t);
     this._dirtyTracks.add(res.id);
@@ -98,24 +132,38 @@ export class Library extends LibraryCore {
     return res;
   }
   removeTracks(ids) {
-    for (const tid of ids) { this._dirtyTracks.delete(tid); this._removedTracks.add(tid); }
+    const existing = [];
+    for (const tid of ids) {
+      if (this.getTrack(tid)) {
+        this._dirtyTracks.delete(tid);
+        this._removedTracks.add(tid);
+        existing.push(tid);
+      }
+    }
+    if (!existing.length) return;
     this._dirtyMeta = true;
-    return super.removeTracks(ids);
+    return super.removeTracks(existing);
   }
   changed(what = 'tracks') {
-    if (what !== 'tracks') this._dirtyMeta = true;
+    if (what === 'all') this._needsFullSync = true;
+    else if (what !== 'tracks') this._dirtyMeta = true;
+    else if (!this._dirtyTracks.size && !this._removedTracks.size) this._needsFullSync = true;
     return super.changed(what);
   }
 
-  /** Fast FTS5 full-text search across the library (falls back to in-memory filter if FTS unavailable). */
+  /** Fast FTS5 full-text search across the library (falls back to in-memory filter if FTS unavailable or DB busy). */
   searchTracks(query, limit = 500) {
     const q = String(query || '').trim();
     if (!q) return this.allTracks().slice(0, limit);
     if (this.sqlite) {
-      // Flush pending incremental writes so FTS reflects latest edits immediately
-      if (this._dirtyTracks.size || this._removedTracks.size) this._flushSqlite();
-      const ids = this.sqlite.searchIds(q, limit);
-      if (ids) return ids.map((tid) => this.getTrack(tid)).filter(Boolean);
+      try {
+        // Flush pending incremental writes so FTS reflects latest edits immediately
+        if (this._needsFullSync || this._dirtyTracks.size || this._removedTracks.size) this._flushSqlite();
+        const ids = this.sqlite.searchIds(q, limit);
+        if (ids) return ids.map((tid) => this.getTrack(tid)).filter(Boolean);
+      } catch (e) {
+        console.warn('[opendj] SQLite search failed, falling back to memory search:', e.message);
+      }
     }
     const low = q.toLowerCase();
     return this.allTracks().filter((t) => `${t.title || ''} ${t.artist || ''} ${t.album || ''} ${t.genre || ''} ${(t.tags || []).join(' ')}`.toLowerCase().includes(low)).slice(0, limit);
@@ -123,6 +171,14 @@ export class Library extends LibraryCore {
 
   _flushSqlite() {
     if (!this.sqlite) return;
+    if (this._needsFullSync) {
+      this.sqlite.replaceAll(this.data);
+      this._needsFullSync = false;
+      this._dirtyTracks.clear();
+      this._removedTracks.clear();
+      this._dirtyMeta = false;
+      return;
+    }
     if (this._dirtyTracks.size || this._removedTracks.size || this._dirtyMeta) {
       const upserts = [...this._dirtyTracks].map((tid) => this.getTrack(tid)).filter(Boolean);
       const removes = [...this._removedTracks];
@@ -198,6 +254,8 @@ export class Library extends LibraryCore {
     t.path = abs;
     if (sourceId) t.sourceId = sourceId;
     t.mtime = null; // force a tag re-read on next scan
+    this._dirtyTracks.add(tid);
+    this._dirtyMeta = true;
     return t;
   }
   /** Library folder containing a path (for sourceId of relocated tracks). */

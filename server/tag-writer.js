@@ -1,8 +1,11 @@
-// Opt-in non-destructive ID3v2.3 tag write-back (TBPM, TKEY, and Serato-compatible GEOB "Serato Markers2").
-// Pure Node module (zero external deps): parses existing ID3v2 headers on MP3 files, updates or adds only the
-// requested DJ metadata frames while preserving all other frames (APIC artwork, TIT2, TPE1, etc.), and writes
-// atomically via a temporary file + rename so the original audio stream is never truncated or corrupted.
+// Opt-in non-destructive ID3v2.3/2.4 tag write-back (TBPM, TKEY, and Serato-compatible GEOB "Serato Markers2").
+// Pure Node module (zero external deps): parses existing ID3v2 headers on MP3 files, preserves original ID3v2 major
+// version (v2.3 or v2.4) and all existing frames (APIC artwork, TIT2, TPE1, etc.), refuses symlinks / oversized files
+// / globally unsynchronised tags, and writes atomically via a unique temp file + rename.
 import fs from 'node:fs';
+import crypto from 'node:crypto';
+
+const MAX_TAG_FILE_BYTES = 256 * 1024 * 1024; // 256 MiB cap to prevent OOM DoS
 
 function syncsafeEncode(n) {
   return Buffer.from([(n >> 21) & 0x7f, (n >> 14) & 0x7f, (n >> 7) & 0x7f, n & 0x7f]);
@@ -11,12 +14,26 @@ function syncsafeDecode(buf, off) {
   return ((buf[off] & 0x7f) << 21) | ((buf[off + 1] & 0x7f) << 14) | ((buf[off + 2] & 0x7f) << 7) | (buf[off + 3] & 0x7f);
 }
 
-function makeTextFrame(id, text) {
-  const payload = Buffer.concat([Buffer.from([0x03]), Buffer.from(String(text), 'utf8')]); // UTF-8 encoding
+function makeFrameHeader(id, payloadLen, ver = 3) {
   const hdr = Buffer.alloc(10);
   hdr.write(id, 0, 4, 'ascii');
-  hdr.writeUInt32BE(payload.length, 4);
-  return Buffer.concat([hdr, payload]);
+  if (ver === 4) syncsafeEncode(payloadLen).copy(hdr, 4);
+  else hdr.writeUInt32BE(payloadLen, 4);
+  return hdr;
+}
+
+function makeTextFrame(id, text, ver = 3) {
+  const s = String(text);
+  let payload;
+  if (/^[\x20-\x7e]*$/.test(s)) {
+    // ISO-8859-1 (0x00) is universally supported by ID3v2.3, ID3v2.4, Rekordbox, Serato, Traktor, and Windows
+    payload = Buffer.concat([Buffer.from([0x00]), Buffer.from(s, 'latin1')]);
+  } else if (ver === 4) {
+    payload = Buffer.concat([Buffer.from([0x03]), Buffer.from(s, 'utf8')]);
+  } else {
+    payload = Buffer.concat([Buffer.from([0x01, 0xff, 0xfe]), Buffer.from(s, 'utf16le')]);
+  }
+  return Buffer.concat([makeFrameHeader(id, payload.length, ver), payload]);
 }
 
 /**
@@ -24,7 +41,7 @@ function makeTextFrame(id, text) {
  * Compatible with Serato / Mixxx / Rekordbox Serato-GEOB readers:
  *   header 0x01 0x01 + base64(0x01 0x01 + entries: CUE\0 <len> <0x00> <idx> <ms u32be> <0x00> <R G B> <0x00 0x00> <name\0>)
  */
-export function buildSeratoMarkers2(cues = [], colorHex = null) {
+export function buildSeratoMarkers2(cues = [], colorHex = null, ver = 3) {
   const parts = [Buffer.from([0x01, 0x01])];
   const hexRgb = (hex) => {
     const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
@@ -42,7 +59,7 @@ export function buildSeratoMarkers2(cues = [], colorHex = null) {
     const ms = Math.max(0, Math.round(c.position * 1000));
     const [r, g, b] = hexRgb(c.color);
     const name = Buffer.from(String(c.name || '').slice(0, 60) + '\0', 'utf8');
-    const body = Buffer.alloc(13 + name.length);
+    const body = Buffer.alloc(12 + name.length);
     body[0] = 0x00;
     body[1] = c.index & 0xff;
     body.writeUInt32BE(ms, 2);
@@ -57,26 +74,26 @@ export function buildSeratoMarkers2(cues = [], colorHex = null) {
   }
   const inner = Buffer.concat(parts);
   const b64 = inner.toString('base64');
-  // Wrap in Serato GEOB format: 0x01 0x01 + line-wrapped base64 + null terminator
+  // Wrap in Serato GEOB format: 0x01 0x01 + base64 + null terminator
   const data = Buffer.concat([Buffer.from([0x01, 0x01]), Buffer.from(b64, 'ascii'), Buffer.from([0x00])]);
   // GEOB frame payload: encoding(0) + mime('\0') + filename('\0') + description('Serato Markers2\0') + data
   const payload = Buffer.concat([Buffer.from([0x00, 0x00, 0x00]), Buffer.from('Serato Markers2\0', 'ascii'), data]);
-  const hdr = Buffer.alloc(10);
-  hdr.write('GEOB', 0, 4, 'ascii');
-  hdr.writeUInt32BE(payload.length, 4);
-  return Buffer.concat([hdr, payload]);
+  return Buffer.concat([makeFrameHeader('GEOB', payload.length, ver), payload]);
 }
 
-/** Parse existing ID3v2.3/2.4 frames from an MP3 buffer, returning { audioOffset, frames: [{ id, desc, raw }] }. */
+/** Parse existing ID3v2.3/2.4 frames from an MP3 buffer, returning { ver, audioOffset, frames: [{ id, desc, raw }] }. */
 export function parseId3v2(buf) {
-  if (!buf || buf.length < 10 || buf.toString('ascii', 0, 3) !== 'ID3') return { audioOffset: 0, frames: [] };
+  if (!buf || buf.length < 10 || buf.toString('ascii', 0, 3) !== 'ID3') return { ver: 3, audioOffset: 0, frames: [] };
   const ver = buf[3];
+  if (ver !== 3 && ver !== 4) throw new Error(`Unsupported ID3v2.${ver} header (only ID3v2.3 and ID3v2.4 are supported)`);
+  if (buf[5] & 0x80) throw new Error('Unsynchronised ID3v2 tag cannot be patched safely without re-encoding');
   const tagSize = syncsafeDecode(buf, 6);
   const audioOffset = Math.min(buf.length, 10 + tagSize);
   const frames = [];
   let pos = 10;
   // Skip extended header if present
   if (buf[5] & 0x40) {
+    if (pos + 4 > audioOffset) return { ver, audioOffset, frames };
     const extLen = ver === 4 ? syncsafeDecode(buf, pos) : buf.readUInt32BE(pos);
     pos += ver === 4 ? extLen : extLen + 4;
   }
@@ -90,40 +107,61 @@ export function parseId3v2(buf) {
     if (id === 'GEOB') {
       // Extract description after encoding(1) + mime\0 + filename\0
       const p0 = buf.indexOf(0, pos + 11);
-      const p1 = p0 >= 0 ? buf.indexOf(0, p0 + 1) : -1;
-      const p2 = p1 >= 0 ? buf.indexOf(0, p1 + 1) : -1;
+      const p1 = p0 >= 0 && p0 < pos + 10 + size ? buf.indexOf(0, p0 + 1) : -1;
+      const p2 = p1 >= 0 && p1 < pos + 10 + size ? buf.indexOf(0, p1 + 1) : -1;
       if (p1 >= 0 && p2 > p1) desc = buf.toString('utf8', p1 + 1, p2);
     }
     frames.push({ id, desc, raw });
     pos += 10 + size;
   }
-  return { audioOffset, frames };
+  return { ver, audioOffset, frames };
 }
 
 /** Build a new MP3 buffer with updated TBPM, TKEY, and Serato Markers2 GEOB frames. */
 export function patchMp3Tags(buf, { bpm = null, key = null, cues = null, color = null } = {}) {
-  const { audioOffset, frames } = parseId3v2(buf);
+  const { ver, audioOffset, frames } = parseId3v2(buf);
+  const outVer = ver === 4 ? 4 : 3;
   const kept = frames.filter((f) => {
     if (bpm != null && f.id === 'TBPM') return false;
     if (key != null && f.id === 'TKEY') return false;
     if ((cues != null || color != null) && f.id === 'GEOB' && f.desc === 'Serato Markers2') return false;
     return true;
   }).map((f) => f.raw);
-  if (bpm != null && Number.isFinite(Number(bpm)) && Number(bpm) > 0) kept.push(makeTextFrame('TBPM', String(Math.round(Number(bpm) * 100) / 100)));
-  if (key != null && String(key).trim()) kept.push(makeTextFrame('TKEY', String(key).trim()));
-  if ((Array.isArray(cues) && cues.length) || color) kept.push(buildSeratoMarkers2(cues || [], color));
+  if (bpm != null && Number.isFinite(Number(bpm)) && Number(bpm) > 0) kept.push(makeTextFrame('TBPM', String(Math.round(Number(bpm) * 100) / 100), outVer));
+  if (key != null && String(key).trim()) kept.push(makeTextFrame('TKEY', String(key).trim(), outVer));
+  if ((Array.isArray(cues) && cues.length) || color) kept.push(buildSeratoMarkers2(cues || [], color, outVer));
   const body = Buffer.concat(kept);
-  const hdr = Buffer.concat([Buffer.from('ID3', 'ascii'), Buffer.from([0x03, 0x00, 0x00]), syncsafeEncode(body.length)]);
+  const hdr = Buffer.concat([Buffer.from('ID3', 'ascii'), Buffer.from([outVer, 0x00, 0x00]), syncsafeEncode(body.length)]);
   return Buffer.concat([hdr, body, buf.subarray(audioOffset)]);
 }
 
-/** Atomically write DJ tags (BPM, Key, Serato GEOB hot cues) into an MP3 file on disk. */
+/** Atomically write DJ tags (BPM, Key, Serato GEOB hot cues) into a regular MP3 file on disk. */
 export async function writeTrackTagsToFile(filePath, track) {
   if (!/\.mp3$/i.test(filePath)) throw new Error('Tag write-back currently supports MP3 files (ID3v2 + Serato GEOB)');
+  const st = await fs.promises.lstat(filePath);
+  if (st.isSymbolicLink() || !st.isFile()) throw new Error('Refusing to write tags to a symlink or non-regular file');
+  if (st.size > MAX_TAG_FILE_BYTES) throw new Error('File is too large for in-memory tag write-back (>256 MB)');
   const orig = await fs.promises.readFile(filePath);
   const patched = patchMp3Tags(orig, { bpm: track.bpm, key: track.key, cues: track.cues, color: track.color });
-  const tmp = `${filePath}.opendj-tag.tmp`;
-  await fs.promises.writeFile(tmp, patched);
-  await fs.promises.rename(tmp, filePath);
+  const tmp = `${filePath}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+  try {
+    await fs.promises.writeFile(tmp, patched, { mode: st.mode & 0o777 });
+    // Retry rename briefly on Windows EBUSY/EPERM (e.g. antivirus or audio preview releasing file lock)
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await fs.promises.rename(tmp, filePath);
+        break;
+      } catch (err) {
+        if (attempt < 2 && (err?.code === 'EBUSY' || err?.code === 'EPERM')) {
+          await new Promise((r) => setTimeout(r, 60 * (attempt + 1)));
+          continue;
+        }
+        throw err;
+      }
+    }
+  } catch (e) {
+    try { await fs.promises.unlink(tmp); } catch { /* */ }
+    throw e;
+  }
   return { ok: true, bytes: patched.length };
 }

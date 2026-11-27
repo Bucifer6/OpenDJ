@@ -26,7 +26,10 @@ async function req(method, url, body, raw = false) {
 const enc = (id) => encodeURIComponent(String(id)).replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 export const api = {
   tracks: () => req('GET', '/api/tracks'),
+  searchTracks: (q, limit = 500) => req('GET', `/api/tracks/search?q=${encodeURIComponent(String(q || ''))}&limit=${Math.max(1, Math.min(2000, Number(limit) || 500))}`),
   updateTrack: (id, patch) => req('PATCH', `/api/tracks/${enc(id)}`, patch),
+  writeTags: (id) => req('POST', `/api/tracks/${enc(id)}/write-tags`),
+  pcmSliceUrl: (id, start = 0, dur = 30, sr = 44100) => `/api/tracks/${enc(id)}/pcm?start=${encodeURIComponent(String(start))}&dur=${encodeURIComponent(String(dur))}&sr=${encodeURIComponent(String(sr))}`,
   deleteTracks: (ids) => req('POST', '/api/tracks/delete', { ids }),
   played: (id) => req('POST', '/api/tracks/played', { id }),
   streamUrl: (id) => `/api/tracks/${enc(id)}/stream`,

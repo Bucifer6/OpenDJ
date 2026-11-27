@@ -274,18 +274,28 @@ export class StereoPhaseVocoder {
 
   /** Produce one stereo output sample into out2[0..1], synthesizing a new hop whenever needed. */
   nextSample(readStereo, pos, tempoStep, readStep, pitch, out2) {
-    if (!this.primed) this.prime(readStereo, pos, tempoStep, readStep, pitch);
+    const safePos = Number.isFinite(pos) ? pos : 0;
+    const safeTempo = Number.isFinite(tempoStep) && Math.abs(tempoStep) <= 8 ? tempoStep : 1;
+    const safeRead = Number.isFinite(readStep) && Math.abs(readStep) <= 8 ? readStep : 1;
+    const safePitch = Number.isFinite(pitch) && pitch >= 0.25 && pitch <= 4 ? pitch : 1;
+    if (!this.primed) this.prime(readStereo, safePos, safeTempo, safeRead, safePitch);
     if (this.hopRemain <= 0) {
-      this.synthesizeFrame(readStereo, pos, tempoStep, readStep, pitch, false);
+      this.synthesizeFrame(readStereo, safePos, safeTempo, safeRead, safePitch, false);
       this.hopRemain = PV_HOP;
     }
     const idx = this.olaPos;
-    out2[0] = this.olaL[idx];
-    out2[1] = this.olaR[idx];
+    let l = this.olaL[idx];
+    let r = this.olaR[idx];
     this.olaL[idx] = 0;
     this.olaR[idx] = 0;
     this.olaPos = (idx + 1) & (PV_SIZE - 1);
     this.hopRemain--;
+    if (!Number.isFinite(l) || !Number.isFinite(r)) {
+      this.reset();
+      l = 0; r = 0;
+    }
+    out2[0] = l;
+    out2[1] = r;
     return out2;
   }
 }
