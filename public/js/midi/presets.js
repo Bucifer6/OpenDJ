@@ -1,6 +1,7 @@
 // Built-in controller presets. These are best-effort community mappings: if a control doesn't respond,
 // use MIDI Learn in Settings → Controllers to fix it, then export and share the mapping.
 import { FLX2_PRESET } from './mappings/ddj-flx2.js';
+import { PRO_CONTROLLER_PRESETS } from './mappings/pro-controllers.js';
 
 const k = (type, ch, num) => `${type}:${ch}:${num}`;
 
@@ -66,5 +67,6 @@ function genericTwoDeck() {
 export const PRESETS = [
   FLX2_PRESET, // first-party, CC0 (mappings/ddj-flx2.js)
   { name: 'Pioneer DDJ-400 / DDJ-FLX4 (best-effort)', match: /DDJ-?(400|FLX4)/i, entries: pioneerDdj400() },
+  ...PRO_CONTROLLER_PRESETS,
   { name: 'Generic 2-deck (OpenDJ layout)', match: /^$/, entries: genericTwoDeck() },
 ];

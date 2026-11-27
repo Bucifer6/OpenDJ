@@ -1,6 +1,7 @@
 // AudioWorklet processors: the deck player and the mix recorder.
 // Loaded with audioWorklet.addModule(); runs on the real-time audio thread.
 import { readStemMix, stemCoefficients, smoothGains, isUnity, isSilent } from '../stems/stem-mix.js';
+import { StereoPhaseVocoder } from './phase-vocoder.js';
 
 const GRAIN = 2048; // key-lock grain size (source frames)
 const SPIN_FLICK = 0.06; // backspin: time for the hand to throw the record from play speed to full reverse (s)
@@ -69,6 +70,13 @@ class DeckProcessor extends AudioWorkletProcessor {
     this.ghost2 = { n: 0, p: 0, v: 0, w: 0 }; // second grain when leaving key-lock granular playback
     this.fin = 1;             // fade-in of the main play head after a jump / start
     this.grains = [{ p: 0, age: 0 }, { p: 0, age: GRAIN / 2 }];
+    this.pv = new StereoPhaseVocoder();
+    this.pvSend = new StereoPhaseVocoder();
+    this.pvOut = new Float32Array(2);
+    this.pvSendOut = new Float32Array(2);
+    this.pvFade = 0; this.pvFadePos = 0; this.pvFadeSpeed = 0; this.pvFadeRead = 0; this.pvFadePitch = 1;
+    this.lastSpeed = 1; this.lastRead = 1; this.lastPitch = 1;
+    this.rollSchedule = null; // sample-accurate loop-roll step-down schedule [{ at, start, end }]
     this.counter = 0;
     this.seekSeq = 0;
     // AI stems: original + vocals/drums/bass (Int16), "other" = residual (see stems/stem-mix.js)
@@ -94,9 +102,10 @@ class DeckProcessor extends AudioWorkletProcessor {
         this.pos = this.shadow = 0; this.playing = false; this.curRate = 0; this.loop = null; this.brake = 0; this.spin = null;
         this.scratch = null; this.dir = 1; this.slip = false; this.endedSent = false; this.stems = null; this.ghost.n = 0; this.ghost2.n = 0; this.fin = 1;
         this.hand = null; this.coast = null; this.rateRamp = null; this.armed = null; this.alt = null; this.swap = null; this.fout = 0; this.slipStop = false; this.motorRamp = this.releaseRamp = false;
+        this.rollSchedule = null; this.pvFade = 0; this.pv.reset(); this.pvSend.reset();
         break;
       case 'unload': this.L = this.R = null; this.len = 0; this.playing = false; this.scratch = null; this.dir = 1; this.slip = false; this.stems = null; this.spin = null; this.ghost.n = 0; this.ghost2.n = 0;
-        this.hand = null; this.coast = null; this.rateRamp = null; this.armed = null; this.alt = null; this.swap = null; this.fout = 0; break;
+        this.hand = null; this.coast = null; this.rateRamp = null; this.armed = null; this.alt = null; this.swap = null; this.fout = 0; this.rollSchedule = null; this.pvFade = 0; this.pv.reset(); this.pvSend.reset(); break;
       case 'ping': this.port.postMessage({ type: 'pong', id: m.id }); break; // sync point for tests
       case 'stems': // [{ L, R }] Int16 vocals, drums, bass with exactly the original's length (else ignored: stale load)
         this.stems = Array.isArray(m.value) && m.value.length && m.value.every((x) => x.L.length === this.len && x.R.length === this.len) ? m.value : null;
@@ -150,6 +159,8 @@ class DeckProcessor extends AudioWorkletProcessor {
       case 'scratchPos': this.handPoint(m.pos, m.t); break;
       case 'jogWeight': this.handK = handCoef(m.value); this.tau = handTau(m.value); break;
       case 'armLoop': this.armed = m.value && m.value.end > m.value.start ? { start: m.value.start, end: m.value.end } : null; break;
+      // sample-accurate loop-roll step-down schedule (automix loop-roll build / loop exit): [{ at (audio s), start, end }]
+      case 'rollSchedule': this.rollSchedule = Array.isArray(m.steps) && m.steps.length ? { steps: m.steps, i: 0 } : null; break;
       // scratch samples (T9): play a short sample on this deck, then return to the track (its audio stays here)
       case 'altLoad': this.swap = { kind: 'in', m }; this.fout = this.L && this.curRate !== 0 ? this.FADE : 0; break;
       case 'altReturn': if (this.alt || (this.swap && this.swap.kind === 'in')) { this.swap = { kind: 'out', frame: m.frame }; this.fout = this.L && this.curRate !== 0 ? this.FADE : 0; } break;
@@ -325,7 +336,7 @@ class DeckProcessor extends AudioWorkletProcessor {
     return target + best;
   }
 
-  resetGrains() { this.grains[0].p = this.pos; this.grains[0].age = 0; this.grains[1].p = this.pos; this.grains[1].age = GRAIN / 2; }
+  resetGrains() { this.grains[0].p = this.pos; this.grains[0].age = 0; this.grains[1].p = this.pos; this.grains[1].age = GRAIN / 2; this.pvFade = 0; this.pv.reset(); this.pvSend.reset(); }
 
   // 4-point Hermite interpolation
   sample(buf, x) {
@@ -357,6 +368,15 @@ class DeckProcessor extends AudioWorkletProcessor {
         const rr = this.rateRamp;
         if (tNow >= rr.t1) { this.rate = rr.r1; this.rateRamp = null; this.port.postMessage({ type: 'rampDone', rate: rr.r1, id: rr.id }); }
         else if (tNow >= rr.t0) this.rate = rr.r0 + (rr.r1 - rr.r0) * (tNow - rr.t0) / (rr.t1 - rr.t0);
+      }
+      if (this.rollSchedule) { // sample-accurate scheduled loop-roll steps
+        const rs = this.rollSchedule;
+        while (rs.i < rs.steps.length && tNow >= rs.steps[rs.i].at) {
+          const st = rs.steps[rs.i++];
+          if (st.clear) { this.loop = null; if (this.slip) this.endSlip(); }
+          else if (st.end > st.start) this.loop = { start: st.start, end: st.end };
+        }
+        if (rs.i >= rs.steps.length) this.rollSchedule = null;
       }
       // --- determine the instantaneous speed ---
       let target;
@@ -407,25 +427,36 @@ class DeckProcessor extends AudioWorkletProcessor {
         const readSpeed = (this.keyLock ? 1 : Math.abs(this.curRate)) * this.pitch;
         const granular = !this.scratch && this.brake === 0 && !this.coast && !this.motorRamp && this.curRate > 0 && Math.abs(readSpeed - this.curRate) > 0.002;
         if (granular !== this.wasGranular) {
-          // switching between direct resampling and the key-lock grains (nudge, bend, tempo to / from 0 %, key lock
-          // or key shift): the voice we leave keeps sounding for a few ms, fading out, while the new one fades in
-          if (this.wasGranular) { // leave the grains: both grains fade out as ghosts, at their positions, weights and read speed
-            const v = this.step * this.dir * this.lastRead;
-            this.grains.forEach((g, k) => { const gh = k ? this.ghost2 : this.ghost; gh.p = g.p; gh.v = v; gh.n = this.FADE; gh.w = Math.sin(Math.PI * g.age / GRAIN) ** 2; });
+          // switching between direct resampling and phase-vocoder key lock: cross-fade cleanly over 4 ms
+          if (this.wasGranular) {
+            // Keep the phase vocoder fading out smoothly from its exact continuous phase while direct resampling fades in
+            this.pvFade = this.FADE;
+            this.pvFadePos = this.pos;
+            this.pvFadeSpeed = this.lastSpeed;
+            this.pvFadeRead = this.step * this.dir * this.lastRead;
+            this.pvFadePitch = this.lastPitch;
             this.fin = 0;
-          } else this.resetGrains(); // enter: grain 1 sits at full weight on the play head, so this is seamless
+            this.ghost.n = 0; this.ghost2.n = 0;
+          } else {
+            this.pvFade = 0;
+            this.startGhost(this.curRate * this.step);
+            this.pv.reset(); this.pvSend.reset();
+          }
           this.wasGranular = granular;
         }
+        const readMain = (x, out2) => {
+          if (useMix) readStemMix(this.L, this.R, stems, this.stemCoef, x, this.len, out2);
+          else { out2[0] = this.sample(this.L, x); out2[1] = this.sample(this.R, x); }
+        };
         if (granular) {
-          this.lastRead = readSpeed;
-          // granular time-stretch / pitch-shift, re-seeded from the (rate-scaled) play head
-          for (const g of this.grains) {
-            const w = Math.sin(Math.PI * g.age / GRAIN); const ww = w * w;
-            if (useMix) { readStemMix(this.L, this.R, stems, this.stemCoef, g.p, this.len, mo); l += mo[0] * ww; r += mo[1] * ww; }
-            else { l += this.sample(this.L, g.p) * ww; r += this.sample(this.R, g.p) * ww; }
-            if (useSend) { readStemMix(this.L, this.R, stems, this.sendCoef, g.p, this.len, so); sl += so[0] * ww; sr += so[1] * ww; }
-            g.p += this.step * this.dir * readSpeed; g.age++;
-            if (g.age >= GRAIN) { g.age = 0; g.p = this.wsolaSeed(g === this.grains[0] ? this.grains[1] : this.grains[0], readSpeed); }
+          this.lastRead = readSpeed; this.lastSpeed = speed; this.lastPitch = this.pitch;
+          const readStep = this.step * this.dir * readSpeed;
+          this.pv.nextSample(readMain, this.pos, speed, readStep, this.pitch, this.pvOut);
+          l = this.pvOut[0]; r = this.pvOut[1];
+          if (useSend) {
+            const readFx = (x, out2) => readStemMix(this.L, this.R, stems, this.sendCoef, x, this.len, out2);
+            this.pvSend.nextSample(readFx, this.pos, speed, readStep, this.pitch, this.pvSendOut);
+            sl = this.pvSendOut[0]; sr = this.pvSendOut[1];
           }
         } else {
           if (useMix) { readStemMix(this.L, this.R, stems, this.stemCoef, this.pos, this.len, mo); l = mo[0]; r = mo[1]; }
@@ -439,6 +470,20 @@ class DeckProcessor extends AudioWorkletProcessor {
       const av = Math.abs(this.curRate);
       if (av < VEL_KNEE && !(this.keyLock && !this.scratch && this.brake === 0 && !this.spin && !this.coast && !this.motorRamp && this.curRate > 0)) { const g = av / VEL_KNEE; l *= g; r *= g; sl *= g; sr *= g; }
       if (this.fin < 1) { const g = 0.5 - 0.5 * Math.cos(Math.PI * this.fin); l *= g; r *= g; sl *= g; sr *= g; this.fin = Math.min(1, this.fin + 1 / this.FADE); }
+      if (this.pvFade > 0) {
+        if (this.swap) { this.pvFade = 0; this.pv.reset(); this.pvSend.reset(); }
+        else {
+          const g = 0.5 - 0.5 * Math.cos(Math.PI * this.pvFade / this.FADE);
+          const readMainFade = (x, out2) => {
+            if (useMix) readStemMix(this.L, this.R, stems, this.stemCoef, x, this.len, out2);
+            else { out2[0] = this.sample(this.L, x); out2[1] = this.sample(this.R, x); }
+          };
+          this.pv.nextSample(readMainFade, this.pvFadePos, this.pvFadeSpeed, this.pvFadeRead, this.pvFadePitch, this.pvOut);
+          l += this.pvOut[0] * g; r += this.pvOut[1] * g;
+          this.pvFadePos += this.pvFadeSpeed;
+          if (--this.pvFade === 0) { this.pv.reset(); this.pvSend.reset(); }
+        }
+      }
       if (this.swap) { // fading out before a buffer swap (scratch sample in / out): silent once the fade is done
         const g = this.fout > 0 ? 0.5 - 0.5 * Math.cos(Math.PI * this.fout / this.FADE) : 0; l *= g; r *= g; sl *= g; sr *= g;
         if (this.fout > 0) this.fout--;

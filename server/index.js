@@ -38,6 +38,8 @@ import { findIdenticalTrack } from './upload-dedupe.js';
 import { registerStemRoutes } from './stems.js';
 import { installAppLog, appLog, readAppLog, logLine } from './applog.js';
 import { registerUpdateRoutes } from './update.js';
+import { writeTrackTagsToFile } from './tag-writer.js';
+import { spawn } from 'node:child_process';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const MIME = {
@@ -382,6 +384,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   route('POST', '/api/tracks/played', async ({ body }) => {
     const t = track(body.id); t.playCount = (t.playCount || 0) + 1; t.lastPlayed = Date.now();
     history.record(t, t.lastPlayed);
+    library.markTrackDirty?.(t.id);
     library.changed('tracks'); return t;
   });
 
@@ -417,6 +420,66 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     transcoder.prune(cached).catch(() => {});
     return sendFileRange(req, res, cached, 'audio/wav');
   };
+
+  route('GET', '/api/tracks/search', ({ query }) => {
+    const q = String(query.get('q') || '').trim();
+    const rawLimit = Number(query.get('limit'));
+    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(2000, Math.floor(rawLimit))) : 500;
+    return library.searchTracks(q, limit);
+  });
+
+  // Opt-in tag write-back: write OpenDJ's BPM, Key and Serato-compatible GEOB hot cues into a local MP3 file
+  route('POST', '/api/tracks/:id/write-tags', async ({ params }) => {
+    const t = track(params.id);
+    const local = await servableFile(t);
+    if (!local) throw new HttpError(404, 'Local file not found');
+    allowPath(local.file, 'This file');
+    try {
+      return await writeTrackTagsToFile(local.file, t);
+    } catch (e) {
+      throw new HttpError(400, e.message || 'Could not write tags');
+    }
+  });
+
+  // Chunked PCM window stream (Int16 interleaved stereo) for ultra-long tracks (>20 min) without 1 GB RAM spikes
+  let activePcmProcs = 0;
+  const MAX_PCM_PROCS = 4;
+  route('GET', '/api/tracks/:id/pcm', async ({ params, query, res }) => {
+    const t = track(params.id);
+    const local = await servableFile(t);
+    if (!local) throw new HttpError(404, 'Chunked PCM is only available for local files');
+    await ffReady;
+    if (!ff) throw needsFfmpeg('Chunked PCM streaming');
+    if (activePcmProcs >= MAX_PCM_PROCS) throw new HttpError(503, 'Too many concurrent PCM streams — retry shortly');
+    const rawStart = Number(query.get('start'));
+    const rawDur = Number(query.get('dur'));
+    const rawSr = Number(query.get('sr'));
+    const start = Number.isFinite(rawStart) && rawStart >= 0 ? Math.min(86400, rawStart) : 0;
+    const dur = Number.isFinite(rawDur) && rawDur > 0 ? Math.max(1, Math.min(120, rawDur)) : 30;
+    const sr = Number.isFinite(rawSr) && rawSr > 0 ? Math.max(8000, Math.min(96000, Math.round(rawSr))) : 44100;
+    activePcmProcs++;
+    let child = null;
+    let timer = null;
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      clearTimeout(timer);
+      activePcmProcs = Math.max(0, activePcmProcs - 1);
+      if (child && !child.killed) { try { child.kill(); } catch { /* */ } }
+    };
+    try {
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store', 'X-PCM-Sample-Rate': String(sr), 'X-PCM-Channels': '2' });
+      child = spawn(ff.path, ['-nostdin', '-v', 'error', '-ss', String(start), '-t', String(dur), '-i', path.resolve(local.file), '-f', 's16le', '-acodec', 'pcm_s16le', '-ac', '2', '-ar', String(sr), 'pipe:1'], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+      child.on('error', () => { cleanup(); if (!res.destroyed) res.destroy(); });
+      child.on('close', cleanup);
+      timer = setTimeout(() => { cleanup(); if (!res.destroyed) res.destroy(); }, 30_000);
+      res.on('close', () => { if (!res.writableEnded) cleanup(); });
+      await pipeQuiet(child.stdout, res);
+    } finally {
+      cleanup();
+    }
+  });
 
   const srcName = (t) => { try { return library.getSource(t.sourceId)?.name || ''; } catch { return ''; } };
   route('GET', '/api/tracks/:id/stream', async ({ params, req, res }) => {
@@ -919,6 +982,10 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
     res.setHeader('X-Frame-Options', 'DENY'); // no clickjacking, desktop mode included (frame-ancestors below)
+    if (process.env.OPENDJ_COI !== '0') {
+      res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+      if (url.pathname.startsWith('/api/stems/ort/')) res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+    }
     if (!hostOk(req)) { res.writeHead(421, { 'Content-Type': 'text/plain' }); return res.end('Misdirected request: unknown Host'); }
     if (launchKey && !launchOk(req)) { res.writeHead(401, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }); return res.end('This OpenDJ server only answers the OpenDJ app that started it'); }
     const isApi = url.pathname.startsWith('/api/');
@@ -958,11 +1025,18 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       if (!relCheck || relCheck.startsWith('..') || path.isAbsolute(relCheck)) throw new HttpError(404, 'Not found');
       const st = await fs.promises.stat(file).catch(() => null);
       if (!st?.isFile()) throw new HttpError(404, 'Not found');
-      const headers = { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' };
+      const ext = path.extname(file);
+      const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'no-cache' };
       if (rel === 'sw.js') headers['Service-Worker-Allowed'] = '/';
+      if (process.env.OPENDJ_COI !== '0' && (ext === '.html' || ext === '.js' || ext === '.mjs')) {
+        headers['Cross-Origin-Embedder-Policy'] = 'credentialless';
+      }
       // HTML pages: the page's own <meta> CSP is also sent as a header (one source of truth: the meta tag, read once
       // per file version), plus frame-ancestors, which only works as a header
-      if (path.extname(file) === '.html') headers['Content-Security-Policy'] = await htmlCsp(file, st.mtimeMs);
+      if (ext === '.html') {
+        headers['Content-Security-Policy'] = await htmlCsp(file, st.mtimeMs);
+        if (process.env.OPENDJ_COI !== '0') headers['Cross-Origin-Opener-Policy'] = 'same-origin';
+      }
       // the Controller Mapper is shown inside Settings: only this app may frame it
       if (rel === 'controller-mapper.html') headers['Content-Security-Policy'] = headers['Content-Security-Policy'].replace("frame-ancestors 'none'", "frame-ancestors 'self'");
       res.writeHead(200, headers);
@@ -979,7 +1053,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   server.on('listening', () => { const a = server.address(); if (a && typeof a === 'object') boundPort = a.port; });
 
   const shutdown = () => {
-    try { library.flush(); } catch (e) { log.error?.('[opendj] final save failed:', e.message); }
+    try { library.close(); } catch (e) { log.error?.('[opendj] final save failed:', e.message); }
     try { history.flush(); } catch { /* reported above */ }
     for (const r of sse) r.end();
     try { lighting?.close?.(); } catch { /* already closed */ }

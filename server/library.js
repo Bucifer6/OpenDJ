@@ -1,15 +1,17 @@
 // Persistent library store: tracks, playlists, folders, remote sources and settings.
-// Stored as JSON files in the data directory (no native database dependency). The model itself (merge rules,
-// sanitising, playlists, sources, settings) is public/js/shared/library-core.js, shared with the mobile app.
+// Backed by Node 22's built-in SQLite (`node:sqlite`, WAL mode + FTS5) for O(1) incremental writes across
+// 50,000+ track libraries, with seamless migration and backup compatibility with `library.json`.
 import fs from 'node:fs';
 import path from 'node:path';
 import { readJsonSafe, writeJsonAtomic, chmodQuiet } from './jsonstore.js';
+import { SqliteStore, sqliteAvailable, dbFileExists } from './sqlite-store.js';
 import { sanitizeSettings } from './settings-schema.js';
 import { LibraryCore, DEFAULT_SETTINGS, hashId, onceMigrations } from '../public/js/shared/library-core.js';
 
 export { DEFAULT_SETTINGS, normTags, sanitizeField, newId, okId } from '../public/js/shared/library-core.js';
 
 const id = hashId;
+const JSON_MIRROR_LIMIT = 5000; // keep library.json mirrored on flush for small/medium libraries; large libraries stay SQLite-only for speed
 
 export class Library extends LibraryCore {
   constructor(dataDir) {
@@ -18,9 +20,15 @@ export class Library extends LibraryCore {
     fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 }); // new data dirs are private to the user
     fs.mkdirSync(path.join(dataDir, 'waveforms'), { recursive: true });
     this.file = path.join(dataDir, 'library.json');
+    this.dbFile = path.join(dataDir, 'library.db');
     this.settingsFile = path.join(dataDir, 'settings.json');
+    this.sqlite = null;
+    this._dirtyTracks = new Set();
+    this._removedTracks = new Set();
+    this._dirtyMeta = false;
+    this._needsFullSync = false;
     // files written by older versions were 0644: they hold source passwords / tokens and API keys
-    for (const f of [this.file, this.settingsFile, path.join(dataDir, 'auth.json'), path.join(dataDir, 'secrets.json')]) {
+    for (const f of [this.file, this.dbFile, this.settingsFile, path.join(dataDir, 'auth.json'), path.join(dataDir, 'secrets.json')]) {
       for (const x of [f, f + '.bak', f + '.tmp']) chmodQuiet(x, 0o600);
     }
     this.load();
@@ -28,9 +36,62 @@ export class Library extends LibraryCore {
   }
 
   load() {
-    const lib = readJsonSafe(this.file);
-    if (lib.error) this.loadErrors.push(lib.error);
-    this.adoptData(lib.data);
+    const jsonExists = fs.existsSync(this.file);
+    const dbExists = dbFileExists(this.dbFile);
+    const useSqlite = process.env.OPENDJ_STORAGE !== 'json' && sqliteAvailable();
+    let loadedFromJson = false;
+
+    if (jsonExists) {
+      const lib = readJsonSafe(this.file);
+      if (lib.error) this.loadErrors.push(lib.error);
+      // Prefer library.json when DB doesn't exist yet, when library.json had a corrupt recovery, or when json is newer
+      const jsonMtime = (() => { try { return fs.statSync(this.file).mtimeMs; } catch { return 0; } })();
+      const dbMtime = (() => { try { return fs.statSync(this.dbFile).mtimeMs; } catch { return 0; } })();
+      if (!useSqlite || !dbExists || lib.error || jsonMtime > dbMtime + 500) {
+        this.adoptData(lib.data);
+        loadedFromJson = true;
+      }
+    }
+
+    if (useSqlite) {
+      try {
+        this.sqlite = new SqliteStore(this.dbFile);
+        if (loadedFromJson) {
+          this.sqlite.replaceAll(this.data);
+          this._needsFullSync = false;
+        } else if (this.sqlite.trackCount() > 0 || this.sqlite.hasMeta()) {
+          this.adoptData(this.sqlite.loadAll());
+          this._needsFullSync = false;
+        } else if (jsonExists) {
+          this.sqlite.replaceAll(this.data);
+          this._needsFullSync = false;
+        }
+      } catch (e) {
+        console.warn('[opendj] SQLite library damaged or unavailable, recovering:', e.message);
+        this.sqlite = null;
+        // Quarantine corrupt library.db so a fresh DB can be rebuilt from library.json / .bak
+        if (dbExists) {
+          const ts = Date.now();
+          for (const suf of ['', '-wal', '-shm']) {
+            try { if (fs.existsSync(this.dbFile + suf)) fs.renameSync(this.dbFile + suf, `${this.dbFile}.corrupt-${ts}${suf}`); } catch { /* */ }
+          }
+          this.loadErrors.push(`Damaged library.db was quarantined (library.db.corrupt-${ts}) and recovered from backup.`);
+        }
+        if (!loadedFromJson && (jsonExists || fs.existsSync(this.file + '.bak'))) {
+          const lib = readJsonSafe(this.file);
+          if (lib.error) this.loadErrors.push(lib.error);
+          this.adoptData(lib.data);
+        }
+        // Rebuild a fresh SQLite store from the recovered in-memory data if possible
+        try {
+          this.sqlite = new SqliteStore(this.dbFile);
+          this.sqlite.replaceAll(this.data);
+          this._needsFullSync = false;
+        } catch {
+          this.sqlite = null;
+        }
+      }
+    }
     const st = readJsonSafe(this.settingsFile);
     if (st.error) this.loadErrors.push(st.error);
     const s = st.data && typeof st.data === 'object' ? st.data : {};
@@ -45,10 +106,111 @@ export class Library extends LibraryCore {
 
   _writeAtomic(file, obj) { writeJsonAtomic(file, obj); }
 
+  adoptData(d) {
+    super.adoptData(d);
+    this._needsFullSync = true;
+    this._dirtyTracks?.clear();
+    this._removedTracks?.clear();
+    this._dirtyMeta = false;
+  }
+
+  markTrackDirty(tid) {
+    if (!tid) return;
+    this._dirtyTracks.add(tid);
+    this._removedTracks.delete(tid);
+  }
+
+  upsertTrack(t) {
+    const res = super.upsertTrack(t);
+    this._dirtyTracks.add(res.id);
+    this._removedTracks.delete(res.id);
+    return res;
+  }
+  updateTrack(tid, patch) {
+    const res = super.updateTrack(tid, patch);
+    if (res) { this._dirtyTracks.add(res.id); this._removedTracks.delete(res.id); }
+    return res;
+  }
+  removeTracks(ids) {
+    const existing = [];
+    for (const tid of ids) {
+      if (this.getTrack(tid)) {
+        this._dirtyTracks.delete(tid);
+        this._removedTracks.add(tid);
+        existing.push(tid);
+      }
+    }
+    if (!existing.length) return;
+    this._dirtyMeta = true;
+    return super.removeTracks(existing);
+  }
+  changed(what = 'tracks') {
+    if (what === 'all') this._needsFullSync = true;
+    else if (what !== 'tracks') this._dirtyMeta = true;
+    else if (!this._dirtyTracks.size && !this._removedTracks.size) this._needsFullSync = true;
+    return super.changed(what);
+  }
+
+  /** Fast FTS5 full-text search across the library (falls back to in-memory filter if FTS unavailable or DB busy). */
+  searchTracks(query, limit = 500) {
+    const q = String(query || '').trim();
+    if (!q) return this.allTracks().slice(0, limit);
+    if (this.sqlite) {
+      try {
+        // Flush pending incremental writes so FTS reflects latest edits immediately
+        if (this._needsFullSync || this._dirtyTracks.size || this._removedTracks.size) this._flushSqlite();
+        const ids = this.sqlite.searchIds(q, limit);
+        if (ids) return ids.map((tid) => this.getTrack(tid)).filter(Boolean);
+      } catch (e) {
+        console.warn('[opendj] SQLite search failed, falling back to memory search:', e.message);
+      }
+    }
+    const low = q.toLowerCase();
+    return this.allTracks().filter((t) => `${t.title || ''} ${t.artist || ''} ${t.album || ''} ${t.genre || ''} ${(t.tags || []).join(' ')}`.toLowerCase().includes(low)).slice(0, limit);
+  }
+
+  _flushSqlite() {
+    if (!this.sqlite) return;
+    if (this._needsFullSync) {
+      this.sqlite.replaceAll(this.data);
+      this._needsFullSync = false;
+      this._dirtyTracks.clear();
+      this._removedTracks.clear();
+      this._dirtyMeta = false;
+      return;
+    }
+    if (this._dirtyTracks.size || this._removedTracks.size || this._dirtyMeta) {
+      const upserts = [...this._dirtyTracks].map((tid) => this.getTrack(tid)).filter(Boolean);
+      const removes = [...this._removedTracks];
+      const meta = this._dirtyMeta ? {
+        version: this.data.version ?? 1,
+        playlists: this.data.playlists || [],
+        folders: this.data.folders || [],
+        sources: this.data.sources || [],
+        pathAlias: this.data.pathAlias || {},
+      } : null;
+      this.sqlite.commitIncremental({ upserts, removes, meta });
+      this._dirtyTracks.clear();
+      this._removedTracks.clear();
+      this._dirtyMeta = false;
+    } else if (this.sqlite.trackCount() !== Object.keys(this.data.tracks).length) {
+      this.sqlite.replaceAll(this.data);
+    }
+  }
+
   save() {
     clearTimeout(this._t);
     this._t = setTimeout(() => {
-      try { this.flush(); this._saveFailures = 0; } catch (e) {
+      try {
+        if (this.sqlite && Object.keys(this.data.tracks).length > JSON_MIRROR_LIMIT) {
+          // Large libraries (>5k tracks): incremental O(1) SQLite write only, no giant JSON rewrite
+          this._flushSqlite();
+          this._writeAtomic(this.settingsFile, this.settings);
+        } else {
+          this.flush();
+        }
+        this._saveFailures = 0;
+      } catch (e) {
         // Disk full / read-only / unplugged: keep the data in memory, tell the UI and retry later.
         this._saveFailures = (this._saveFailures || 0) + 1;
         console.error('[opendj] saving the library failed:', e.message);
@@ -59,8 +221,16 @@ export class Library extends LibraryCore {
   }
   flush() {
     clearTimeout(this._t);
-    this._writeAtomic(this.file, this.data);
+    this._flushSqlite();
+    if (!this.sqlite || Object.keys(this.data.tracks).length <= JSON_MIRROR_LIMIT) {
+      this._writeAtomic(this.file, this.data);
+    }
     this._writeAtomic(this.settingsFile, this.settings);
+  }
+  close() {
+    try { this.flush(); } catch { /* */ }
+    this.sqlite?.close();
+    this.sqlite = null;
   }
 
   // ---------- tracks ----------
@@ -84,6 +254,8 @@ export class Library extends LibraryCore {
     t.path = abs;
     if (sourceId) t.sourceId = sourceId;
     t.mtime = null; // force a tag re-read on next scan
+    this._dirtyTracks.add(tid);
+    this._dirtyMeta = true;
     return t;
   }
   /** Library folder containing a path (for sourceId of relocated tracks). */

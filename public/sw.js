@@ -2,7 +2,7 @@
 // - /api/*            network only (never cached: library data, audio, auth)
 // - /js /css icons    cache first, refreshed in the background (so an update shows up on the next load)
 // - page navigations  network first, falling back to the cached shell when the server is unreachable
-const CACHE = 'opendj-shell-v19';
+const CACHE = 'opendj-shell-v20';
 const SHELL = ['/', '/index.html', '/login.html', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (e) => {

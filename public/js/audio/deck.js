@@ -2,10 +2,11 @@
 import { Emitter, clamp } from '../util.js';
 import { api } from '../api.js';
 import { decodeWaveform, toCamelot, camelotCompatible, analyzeStructure, analysisPatch, carryPhraseLufs } from './analysis-core.js';
+import { beatAtTime, localBpmAt } from './features.js';
 import { effectiveGains, LOADED_STEMS } from '../stems/stem-mix.js';
 import { floatToInt16 } from '../stems/stem-dsp.js';
 import { onsetCurve } from './beat-phase.js';
-import { StemEcho } from '../stems/stem-fx.js';
+import { StemEcho, stemMakeupGain } from '../stems/stem-fx.js';
 import { VINYL_DEFAULTS, secPerRev, snapTo, nextQuantizeDiv, glideDuration, bendAt, needleTarget, jumpSizeStep, semitoneRate, TEMPO_RESET_BEATS } from './vinyl.js';
 
 /** Tempo fader ranges (±%), as offered in the deck and Settings. */
@@ -50,7 +51,7 @@ export class Deck extends Emitter {
     this.hardLock = false;  // a playing deck refuses loads
     this.slipReverse = false; this.loopAdjust = null; this._audioOff = null;
     this.stemMacro = [1, 1]; // channel VOC / INST knobs (they drive the AI stems once loaded)
-    this.stemFxOn = false; this.stemFx = null;
+    this.stemFxOn = false; this.stemFx = null; this.stemFxMask = [1, 0, 0, 0]; this.stemMuteFx = false; this._muteFxPulse = null;
     this.resetStemControls();
   }
 
@@ -103,7 +104,7 @@ export class Deck extends Emitter {
   }
 
   // ---------- derived state ----------
-  get position() { return this.positionAt(this.ctx.currentTime); }
+  get position() { return this.ctx ? this.positionAt(this.ctx.currentTime) : (this._pos || 0); }
   /** Track position at audio-clock time `t` (the UI passes a frame-smoothed clock so waveforms scroll evenly). */
   positionAt(t) {
     if (!this.track) return 0;
@@ -113,11 +114,41 @@ export class Deck extends Emitter {
     return clamp(p, 0, this.duration);
   }
   get rate() { return (1 + this.tempo / 100) * (1 + this.bend) * (this.rateMul || 1); }
-  get effectiveBpm() { return this.bpm ? this.bpm * (1 + this.tempo / 100) : 0; }
-  get beatLen() { return this.bpm ? 60 / this.bpm : 0.5; }
+  get effectiveBpm() {
+    const b = this.track?.tempoMap?.length >= 2 ? this.localBpmAt(this.position) : this.bpm;
+    return b ? b * (1 + this.tempo / 100) : 0;
+  }
+  get beatLen() {
+    const b = this.track?.tempoMap?.length >= 2 ? this.localBpmAt(this.position) : this.bpm;
+    return b ? 60 / b : 0.5;
+  }
   get remaining() { return this.duration - this.position; }
-  beatPhase(pos = this.position) { return this.bpm ? (((pos - this.gridOffset) / this.beatLen) % 1 + 1) % 1 : 0; }
-  beatIndex(pos = this.position) { return this.bpm ? Math.floor((pos - this.gridOffset) / this.beatLen + 1e-6) : 0; }
+  localBpmAt(pos = this.position) { return this.track?.tempoMap?.length >= 2 ? localBpmAt(this.track, pos) : this.bpm || 0; }
+  beatPhase(pos = this.position) {
+    if (!this.bpm) return 0;
+    if (this.track?.tempoMap?.length >= 2) { const b = beatAtTime(this.track, pos); return ((b % 1) + 1) % 1; }
+    return (((pos - this.gridOffset) / this.beatLen) % 1 + 1) % 1;
+  }
+  beatIndex(pos = this.position) {
+    if (!this.bpm) return 0;
+    if (this.track?.tempoMap?.length >= 2) return Math.floor(beatAtTime(this.track, pos) + 1e-6);
+    return Math.floor((pos - this.gridOffset) / this.beatLen + 1e-6);
+  }
+  /** Add or update a manual elastic beatgrid warp anchor at `time` (s) with local `bpm`. */
+  addWarpAnchor(time = this.position, bpm = this.localBpmAt(time) || this.bpm) {
+    if (!this.track || !(bpm >= 20 && bpm <= 400)) return null;
+    const base = Array.isArray(this.track.tempoMap) && this.track.tempoMap.length >= 2
+      ? [...this.track.tempoMap]
+      : [{ time: this.gridOffset || 0, bpm: this.bpm || bpm, beat: 0 }];
+    const beat = beatAtTime({ bpm: this.bpm, gridOffset: this.gridOffset, tempoMap: base }, time);
+    const filtered = base.filter((a) => Math.abs(a.time - time) > 0.25);
+    filtered.push({ time: Math.round(time * 1000) / 1000, bpm: Math.round(bpm * 100) / 100, beat: Math.round(beat * 1000) / 1000 });
+    filtered.sort((a, b) => a.time - b.time);
+    this.track.tempoMap = filtered;
+    api.updateTrack(this.track.id, { tempoMap: filtered }).catch(() => {});
+    this.emit('grid');
+    return filtered;
+  }
   snap(t) {
     if (!this.quantize || !this.bpm) return t;
     return snapTo(t, this.gridOffset, this.beatLen, this.quantizeDiv || 1);
@@ -221,6 +252,19 @@ export class Deck extends Emitter {
       this.emit('error', e); this.emit('state');
       throw e;
     }
+  }
+
+  /** Fetch a bounded Int16 stereo PCM slice from the server for ultra-long tracks (>20 min) without 1 GB RAM decode. */
+  async loadChunkedSlice(trackId, startSec = 0, durSec = 60, sr = this.ctx?.sampleRate || 44100) {
+    const res = await fetch(`/api/tracks/${encodeURIComponent(trackId)}/pcm?start=${encodeURIComponent(startSec)}&dur=${encodeURIComponent(durSec)}&sr=${encodeURIComponent(sr)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const ab = await res.arrayBuffer();
+    const evenBytes = ab.byteLength - (ab.byteLength % 4); // guard against mid-stream odd-byte truncation
+    const interleaved = new Int16Array(ab, 0, evenBytes / 2);
+    const frames = interleaved.length >> 1;
+    const left = new Int16Array(frames), right = new Int16Array(frames);
+    for (let i = 0; i < frames; i++) { left[i] = interleaved[i * 2]; right[i] = interleaved[i * 2 + 1]; }
+    return { left, right, sampleRate: Number(res.headers.get('x-pcm-sample-rate')) || sr, frames, startSec };
   }
 
   // ++_loadSeq: a load still in flight becomes stale (it must not finish into an ejected deck)
@@ -686,9 +730,37 @@ export class Deck extends Emitter {
     this.emit('stems');
   }
   get stemsActive() { return this.stemsReady; }
-  setStemMute(i, on) { this.stemMute[i] = !!on; this.postStemGains(); }
+  setStemMute(i, on) {
+    const prev = this.stemMute[i];
+    const next = !!on;
+    // Stem Mute FX (djay-style): when muting a stem with Mute FX enabled, send a brief beat-synced echo pulse
+    if (this.stemMuteFx && this.stemsReady && this.playing && !prev && next && i >= 0 && i < 4) {
+      this.triggerStemMuteFx(i);
+    }
+    this.stemMute[i] = next;
+    this.postStemGains();
+  }
   toggleStem(i) { this.setStemMute(i, !this.stemMute[i]); }
   setStemLevel(i, v) { this.stemLevels[i] = Math.max(0, Math.min(1, v)); this.postStemGains(); }
+  setStemMuteFx(on) { this.stemMuteFx = !!on; this.emit('stems'); }
+  /** Choose which stems feed the Stem FX bus: mask [vocals, drums, bass, other] (0..1 each). */
+  setStemFxMask(mask) {
+    if (!Array.isArray(mask) || mask.length !== 4) return;
+    this.stemFxMask = mask.map((v) => clamp(Number(v) || 0, 0, 1));
+    this.postStemGains();
+  }
+  /** Fire a short beat-synced echo tail on stem `i` right as it is muted so the cut rings out naturally. */
+  triggerStemMuteFx(i) {
+    this.ensureStemFx();
+    const beatSec = this.effectiveBpm ? 60 / this.effectiveBpm : 0.5;
+    this.stemFx?.setBeat(beatSec);
+    const pulse = [0, 0, 0, 0];
+    pulse[i] = this.stemLevels[i] ?? 1;
+    this._muteFxPulse = pulse;
+    this.post('stemSend', { value: pulse });
+    clearTimeout(this._muteFxT);
+    this._muteFxT = setTimeout(() => { this._muteFxPulse = null; this.postStemGains(); }, Math.min(450, Math.max(80, beatSec * 350)));
+  }
   /** Acapella: vocals only (press again for all stems). */
   stemAcapella() { const on = this.isAcapella; this.stemMute = on ? [false, false, false, false] : [false, true, true, true]; this.postStemGains(); }
   /** Instrumental: everything but vocals (press again for all stems). */
@@ -700,18 +772,26 @@ export class Deck extends Emitter {
   get stemGains() { return [...effectiveGains({ levels: this.stemLevels, mute: this.stemMute }, this.stemMacro[0], this.stemMacro[1])]; }
   postStemGains() {
     const g = this.stemGains;
-    this.post('stemGains', { value: g });
-    this.post('stemSend', { value: this.stemFxOn ? [g[0], 0, 0, 0] : [0, 0, 0, 0] });
-    if (this.stemFxOn) this.stemFx?.setBeat(this.effectiveBpm ? 60 / this.effectiveBpm : 0.5);
+    // Apply gentle stem loudness makeup when isolating stems so energy stays balanced
+    const mk = this.stemsReady ? stemMakeupGain(g) : 1;
+    const scaled = mk > 1.001 ? g.map((x) => x * mk) : g;
+    this.post('stemGains', { value: scaled });
+    const send = this._muteFxPulse || (this.stemFxOn ? g.map((v, idx) => v * (this.stemFxMask[idx] ?? 0)) : [0, 0, 0, 0]);
+    this.post('stemSend', { value: send });
+    if (this.stemFxOn || this._muteFxPulse) this.stemFx?.setBeat(this.effectiveBpm ? 60 / this.effectiveBpm : 0.5);
     this.emit('stems');
   }
-  /** Stem FX: beat-synced echo on the vocal stem only (send from worklet output 1 into this channel). */
-  setStemFx(on) {
-    if (on && !this.stemFx) {
+  ensureStemFx() {
+    if (!this.stemFx) {
       this.stemFx = new StemEcho(this.ctx);
       this.node.connect(this.stemFx.input, 1);
       this.stemFx.output.connect(this.engine.channels[this.index].trimNode);
     }
+    return this.stemFx;
+  }
+  /** Stem FX: beat-synced echo on selected stems (default: vocal stem) from worklet output 1 into this channel. */
+  setStemFx(on) {
+    if (on) this.ensureStemFx();
     this.stemFxOn = !!on; this.postStemGains();
   }
 

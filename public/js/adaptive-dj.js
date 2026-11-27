@@ -6,6 +6,7 @@ import { decodeVocalMap } from './shared/vocal-map.js';
 import { pairFamily, FAMILIES } from './dj-styles.js';
 import { checkTransition } from './transition-check.js';
 import { regionBeatSafety } from './audio/analysis-core.js';
+import { localChromaSimilarity } from './audio/features.js';
 
 const finite = (x) => typeof x === 'number' && Number.isFinite(x);
 /** Share of a track (from where it came in) that plays before the next transition may begin. */
@@ -80,9 +81,9 @@ function localEnergy(t, a, b) {
  */
 export function planAdaptiveTransition(out, inn, opts = {}) {
   if (!out || !inn || !finite(out.duration) || !finite(inn.duration) || out.duration <= 0 || inn.duration <= 0) return null;
-  // Decode measured vocals once per search, rather than once per style/length/window.
-  out = { ...out, vocalMap: out.vocalMap || decodeVocalMap(out.stems?.vocals) };
-  inn = { ...inn, vocalMap: inn.vocalMap || decodeVocalMap(inn.stems?.vocals) };
+  // Decode measured vocals once per search (AI stems take priority; DSP VAD provides automatic fallback).
+  out = { ...out, vocalMap: out.vocalMap || decodeVocalMap(out.stems?.vocals) || decodeVocalMap(out.vocalMapAuto) };
+  inn = { ...inn, vocalMap: inn.vocalMap || decodeVocalMap(inn.stems?.vocals) || decodeVocalMap(inn.vocalMapAuto) };
   const outSections = sections(out), inSections = sections(inn);
   const position = finite(opts.position) ? Math.max(0, opts.position) : 0;
   const entry = finite(opts.entry) ? Math.max(0, opts.entry) : 0;
@@ -207,9 +208,16 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
     const vo = vocalsBetween(out, timing.begin, finish), vi = vocalsBetween(inn, cue, cue + Math.max(2, inSpan));
     const eo = localEnergy(out, timing.begin, finish), ei = localEnergy(inn, cue, cue + Math.max(2, inSpan));
     const harmonic = camelotRelation(out.key, inn.key);
+    const localChroma = !drop ? localChromaSimilarity(out, timing.begin, finish, inn, cue, cue + Math.max(2, inSpan)) : null;
     // Compare actual windows. Holding quick-stem vocals is not treated as perfect source separation.
     const vocalCost = drop ? vo.v * 2 : Math.min(vo.v, vi.v) * (STEM_STYLES.has(p.style) ? 2 : p.style === 'pingpong' ? 0 : 12);
-    const clashCost = !drop && harmonic.kind === 'clash' ? Math.min(8, inSpan / 4) : 0;
+    // Local chroma refines global key clashes: compatible local overlap (e.g. percussion intro) eases clash cost,
+    // while a harsh local chroma clash (< 0.42) adds a penalty even if global keys looked fine (key modulation).
+    let clashCost = !drop && harmonic.kind === 'clash' ? Math.min(8, inSpan / 4) : 0;
+    if (localChroma != null) {
+      if (harmonic.kind === 'clash' && localChroma >= 0.72) clashCost *= 0.4;
+      else if (harmonic.kind !== 'clash' && localChroma < 0.4) clashCost += Math.min(4, (0.4 - localChroma) * 10);
+    }
     // music left unplayed in the outgoing track, and the incoming intro skipped, both cost: a DJ mixes out late and
     // in early, and only moves off those points to avoid two voices or a bad key / energy match
     const unplayed = Math.max(0, end - exit) / Math.max(1, left), skipped = Math.max(0, cue - home) / Math.max(1, inEnd);

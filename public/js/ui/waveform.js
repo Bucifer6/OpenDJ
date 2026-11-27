@@ -8,6 +8,7 @@ import { el, clamp, uiZoom } from '../util.js';
 import { cssVar } from './themes.js';
 import { smoothTime } from './clock.js';
 import { NEEDLE_HOLD_MS } from '../audio/vinyl.js';
+import { decodeVocalMap } from '../shared/vocal-map.js';
 
 // 3-band colours: low (kick/bass), mid (vocals, synths), high (hats, cymbals). 'rgb' follows the theme tokens; 'soft'
 // is the default.
@@ -273,12 +274,48 @@ export class DetailWaveform {
     // phrase bands + labels along the bottom
     g.textBaseline = 'alphabetic';
     g.font = `700 ${8.5 * dpr}px ${font}`;
-    for (const p of deck.track?.phrases || []) {
+    const phrases = deck.track?.phrases || [];
+    for (const p of phrases) {
       const x = X(p.start);
       if (x > W || X(p.end) < 0) continue;
       g.fillStyle = PHRASE_COLORS[p.type] || '#6b7685';
       g.fillRect(Math.round(x), H - 3 * dpr, Math.max(0, Math.round((p.end - p.start) * pxPerSec - 2 * dpr)), 3 * dpr);
       g.fillText(p.type.toUpperCase(), Math.round(Math.max(x, 0)) + 4 * dpr, H - 6 * dpr);
+    }
+    // vocal activity strip along the top edge (from AI stem vocal map or DSP VAD)
+    const vRaw = deck.track?.stems?.vocals || deck.track?.vocalMapAuto;
+    if (vRaw) {
+      if (this._vKey !== vRaw) { this._vKey = vRaw; this._vMap = decodeVocalMap(vRaw); }
+      const vm = this._vMap;
+      if (vm?.length) {
+        const s0 = Math.max(0, Math.floor(t0)), s1 = Math.min(vm.length - 1, Math.ceil(t0 + W / pxPerSec));
+        const vh = Math.max(2, Math.round(2.5 * dpr));
+        for (let s = s0; s <= s1; s++) {
+          if (vm[s] < 0.35) continue;
+          const x1 = Math.round(X(s)), x2 = Math.round(X(s + 1));
+          g.fillStyle = `rgba(218, 112, 214, ${Math.min(0.85, vm[s] * 0.85).toFixed(2)})`;
+          g.fillRect(x1, 0, Math.max(1, x2 - x1), vh);
+        }
+      }
+    }
+    // Performance HUD: bars-to-next-phrase countdown (and ELASTIC badge for tempo-mapped tracks)
+    if (deck.bpm > 0 && phrases.length) {
+      const nextP = phrases.find((p) => p.start > pos + 0.05);
+      if (nextP) {
+        const barsLeft = Math.max(0, Math.ceil((nextP.start - pos) / (deck.beatLen * 4)));
+        if (barsLeft > 0 && barsLeft <= 64) {
+          const badge = `${barsLeft} BAR${barsLeft === 1 ? '' : 'S'} → ${nextP.type.toUpperCase()}${deck.track?.tempoMap?.length >= 2 ? ' · ELASTIC' : ''}`;
+          g.font = `700 ${9 * dpr}px ${font}`;
+          const tw = g.measureText(badge).width + 10 * dpr, th = 14 * dpr;
+          const bx = W - tw - 6 * dpr, by = 4 * dpr;
+          g.fillStyle = 'rgba(11, 13, 16, 0.78)';
+          g.fillRect(bx, by, tw, th);
+          g.fillStyle = PHRASE_COLORS[nextP.type] || '#e8ecf2';
+          g.textBaseline = 'middle';
+          g.fillText(badge, bx + 5 * dpr, by + th / 2 + 0.5 * dpr);
+          g.textBaseline = 'alphabetic';
+        }
+      }
     }
     // hot cues / memory cues: flag at the top with the pad letter
     for (const c of cues) {
