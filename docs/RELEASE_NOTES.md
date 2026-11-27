@@ -24,6 +24,11 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.6.2
+- **Fixed audio-thread and long-session CPU spikes.** Replaced `MeterProcessor`'s unbounded loudness history with an O(1) LUFS histogram, added an exact Hölder-bound bypass for the 4× true-peak FIR filter and silent idle bypass, cached per-block effect worklet coefficients (`Reverb`, `Pitch`, `Comp`, `Ducker`, `ModDelay`, `Crush`, `Warmth`, `LFO`), and halved deck worklet IPC while stopping idle position traffic.
+- **2× faster track analysis and zero idle polling.** Sparse onset folding (`detectBpm` 4.9× faster, `detectElasticGrid` 1.8× faster), 2-for-1 real-FFT packing across vocal/bar/key analysis, and a 3× faster main-thread `onsetCurve` cut full track analysis time in half; Ableton Link timers, server SSE ticks, `Engine` rAF loops, drive scans (now non-blocking on Windows), and drawer/deck DOM updates now stay idle when unused.
+- **Reliability and layout polish.** Fixed a `NotSupportedError` race when Automix volume curves overlapped `setTargetAtTime`, fixed an undefined `modelMsg` reference in deck stem controls, and added CSS containment / memoization on the Loudness drawer and deck headers (4× fewer layouts with the Loudness drawer open).
+
 ### New in 0.6.1
 - **Much lower CPU usage (up to 64–73 % lower idle audio CPU).** The stereo phase vocoder now packs L and R into a single 2-for-1 FFT (~3× faster key lock and key sync), `DeckProcessor` and `LimiterProcessor` bypass sample loops and IPC traffic when stopped/silent with zero per-sample audio-thread allocations, DSP Quick Stems and default Beat FX delay lines build lazily on first use, and unloaded Decks 3 & 4 disconnect from the audio graph in 2-deck mode.
 - **Much lower RAM footprint and smoother UI.** Analysis and library-view Web Workers now spawn lazily and auto-terminate when idle (~75–100 MB RAM reclaimed), raw audio file buffers release immediately after decode, waveform tile caches use ~60 % less GPU/canvas memory and clear on eject, background analysis runs ~2.1× faster with 0 main-thread long tasks during playback, and idle UI/VU/lyrics/MIDI/suggestion loops throttle or pause when inactive or hidden.
@@ -61,9 +66,4 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 ### New in 0.5.12
 - **A new air horn.** The Air Horn pad now plays a dancehall air horn recorded by the_mred on Freesound (CC0): a full 1.5-second blast with its natural fade, instead of the short pneumatic horn. *Air Horn ×3* is now made from the same recording (two short stabs, then the full blast) instead of a synthesised horn.
 - **Ableton Link joins faster on a shaky network.** When lost packets cut a clock measurement short, OpenDJ now keeps the readings it already has, or tries again within half a second, instead of waiting 5 seconds before joining the session.
-
-### New in 0.5.11
-- **Automix blends like real DJ mixes.** Measured over about 20,000 transitions in real mixes, the typical blend is 16 bars (half are 8–26), and a track plays about 4 minutes before the next comes in (see `docs/automix-research/04-real-mixes.md`). House, techno and trance now prefer 16-bar blends and go to 32 at most; only a long outro over a long intro runs longer. A long club track now hands over after about 4–5 minutes instead of playing for 6 or more.
-- **The bass changes hands as the next groove arrives**, on the incoming track's drop or main part when it starts inside the blend, else a little past the middle. The incoming hi-hats stay down until then and come in with its bass.
-- **Teases of the next record redone** (still off unless you turn them on): 4 bars instead of 8, one transition in five at most and never two in a row, 8–16 bars before the mix, never over the current track's vocals. With AI stems it's the next track's vocal hook or drums; without stems its intro beat with the bass cut. The thin, filtered slice of the whole track is gone.
 
