@@ -117,6 +117,7 @@ const newCanvas = (w, h) => (typeof OffscreenCanvas !== 'undefined' ? new Offscr
 const TILE = 256; // css px per tile (times render DPR)
 const MAX_TILES = 20; // >2.5x viewport width; cuts offscreen canvas/GPU memory by ~60% per deck
 const waveDpr = () => Math.min(2, devicePixelRatio || 1); // keep dense displays crisp without multiplying raster cost
+const validPhrase = (p) => typeof p?.type === 'string' && Number.isFinite(p.start) && Number.isFinite(p.end);
 
 export class DetailWaveform {
   static all = new Set();
@@ -276,8 +277,9 @@ export class DetailWaveform {
     // phrase bands + labels along the bottom
     g.textBaseline = 'alphabetic';
     g.font = `700 ${8.5 * dpr}px ${font}`;
-    const phrases = deck.track?.phrases || [];
+    const phrases = Array.isArray(deck.track?.phrases) ? deck.track.phrases : [];
     for (const p of phrases) {
+      if (!validPhrase(p)) continue;
       const x = X(p.start);
       if (x > W || X(p.end) < 0) continue;
       g.fillStyle = PHRASE_COLORS[p.type] || '#6b7685';
@@ -302,7 +304,7 @@ export class DetailWaveform {
     }
     // Performance HUD: bars-to-next-phrase countdown (and ELASTIC badge for tempo-mapped tracks)
     if (deck.bpm > 0 && phrases.length) {
-      const nextP = phrases.find((p) => p.start > pos + 0.05);
+      const nextP = phrases.find((p) => validPhrase(p) && p.start > pos + 0.05);
       if (nextP) {
         const barsLeft = Math.max(0, Math.ceil((nextP.start - pos) / (deck.beatLen * 4)));
         if (barsLeft > 0 && barsLeft <= 64) {
@@ -420,7 +422,9 @@ export class OverviewWaveform {
     // phrase / structure bands (intro, drop, breakdown, outro…): along the top, or a strip along the bottom in the
     // the Player styles
     const pro = proStyle(this.wfStyle()), ph = pro ? 4 * dpr : 3 * dpr, py = pro ? H - ph : 0;
-    for (const p of deck.track?.phrases || []) {
+    const phrases = Array.isArray(deck.track?.phrases) ? deck.track.phrases : [];
+    for (const p of phrases) {
+      if (!validPhrase(p)) continue;
       g.fillStyle = PHRASE_COLORS[p.type] || '#6b7685';
       g.fillRect(Math.round(p.start / deck.duration * W + dpr), py, Math.max(1, Math.round((p.end - p.start) / deck.duration * W - 2 * dpr)), ph);
     }

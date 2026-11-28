@@ -1075,15 +1075,19 @@ export class Engine extends Emitter {
 
   // ---------- master deck / sync ----------
   masterDeck(except) {
-    if (this.master && this.master !== except && this.master.track && this.master.bpm) return this.master;
+    if (this.master?.canBeMaster && this.master !== except) return this.master;
     // otherwise: a playing, audible deck
-    return this.decks.find((d) => d !== except && d.track && d.bpm && d.playing && this.channels[d.index].state.volume > 0.05)
-      || this.decks.find((d) => d !== except && d.track && d.bpm && d.playing) || null;
+    return this.decks.find((d) => d !== except && d?.canBeMaster && d.playing && this.channels[d.index].state.volume > 0.05)
+      || this.decks.find((d) => d !== except && d?.canBeMaster && d.playing) || null;
   }
   setMaster(deck) {
-    for (const d of this.decks) d.isMaster = d === deck;
+    if ((deck && !deck.canBeMaster) || this.master === deck) return;
+    for (const d of this.decks) if (d) d.isMaster = d === deck;
     this.master = deck; this.emit('master-deck', deck);
-    for (const d of this.decks) d.emit('state');
+    for (const d of this.decks) d?.emit('state');
+  }
+  onDeckUnavailable(deck) {
+    if (this.master === deck) this.setMaster(this.masterDeck(deck));
   }
   onDeckPlay(deck) {
     if (!this.master || !this.master.playing) { if (!deck.syncOn || !this.master) this.setMaster(deck); }
@@ -1116,7 +1120,7 @@ export class Engine extends Emitter {
       for (const b of this.fxBuses) if (b) { b.setBeatSec(mBeat); b.setClock(live ? (m.position - m.gridOffset) / m.beatLen : null, now, mBeat); }
     }
     if (this.master && !this.master.playing) {
-      const other = this.decks.find((d) => d.playing && d.track && d !== this.master);
+      const other = this.masterDeck(this.master);
       if (other) this.setMaster(other);
     }
     // Continuous beat-phase & elastic-tempo lock for manually synced decks (Automix drives phase during its own blends/teases)

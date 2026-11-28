@@ -24,6 +24,11 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.6.6
+
+- Fixed frozen waveforms, BPM displays and clocks on visible decks in desktop and compact landscape layouts.
+- Cached tracks can play while optional analysis loads, and master selection stays with a ready deck.
+
 ### New in 0.6.5
 - **Full-stack resource optimization (lower RAM, CPU, GPU/VRAM, disk I/O, and ~90 MB smaller installers).** Split heavy per-bar analysis (`barFeatures` / `tempoMap`) into an on-demand SQLite `track_analysis` table with slim `/api/tracks?slim=1` payloads, persistent SQLite prepared statements, gzip + `ETag`/`304` HTTP caching, bounded cover-art LRU caching, multiplexed SSE events, and 60 s throttled `library.json` mirroring. Native AI stem separation now streams FFmpeg PCM via temp files (~6 MB RAM instead of multi-GB on long mixes), skips redundant GPU warm-up checks, caches STFT inverse envelopes, disposes ONNX tensors promptly, and releases raw model buffers after load.
 - **Zero-GC audio thread, demand-driven idle power savings, and smoother UI.** Eliminated audio-thread scratch allocations and trig/exp hotspots across `DeckProcessor`, FX worklets, phase vocoder, DVS timecode, and the PCM recorder; added FFT-based BPM autocorrelation, 10 s idle `AudioContext.suspend()`, and dynamic Electron background throttling tied to playback/Gig Mode. Fixed Scratch View platter VRAM leaks, dirty-checked 1080p karaoke overlay uploads, capped video/UI frame rates and paused them when hidden, reduced AutoMix queue planning from O(K²) to O(K) with targeted LibraryUI row patches and lazy loading for Video, Sampler Catalog, and CDJ Export, and trimmed unused `onnxruntime-web` bundles from desktop packages.
@@ -65,7 +70,3 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 - **MIX NOW without Automix.** On deck 1 or 2, MIX NOW now also works with Automix off: it mixes the playing track into the one loaded on the other deck right away, then leaves the new track playing on its own. Its tooltip says what is missing when it can't (nothing playing, nothing loaded, the other deck already playing).
 - **Smoother playback during mixes.** AI stems that OpenDJ prepares in the background in this window now pause while an Automix transition runs or a deck loads (and for 4 seconds after), then carry on; stems you ask for are never paused. Page stalls and, where the browser reports them, audio dropouts are written to the app log with what was going on, so a stutter can be traced (*Settings → About → Logs*).
 - **Bass preview removed** (added in 0.5.14): it did not sound right in use.
-
-### New in 0.5.15
-- **Fixed: synced decks could seem a few milliseconds out of phase when they weren't.** Each deck's position was read up to several audio blocks (2.9 ms each) early, by a different amount per deck, so the beat-phase keeper sometimes saw phantom offsets of 3 to 13 ms and nudged the incoming track's pitch for nothing. Positions are now exact; in tests the measured offset between two synced decks holds steady instead of jumping.
-

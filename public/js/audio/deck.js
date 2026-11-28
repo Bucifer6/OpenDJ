@@ -59,7 +59,7 @@ export class Deck extends Emitter {
     this.track = null; this.duration = 0; this.sr = this.ctx.sampleRate;
     this._pos = 0; this._t = 0; this._rate = 0; this._seekGuard = 0; this.playing = false;
     this.cuePoint = 0; this.loop = null; this.loopIn = null; this.waveform = null; this.onsets = null;
-    this.bpm = 0; this.gridOffset = 0; this.loading = false; this.error = null; this.failedTrack = null;
+    this.bpm = 0; this.gridOffset = 0; this.loading = false; this.loadPhase = null; this.error = null; this.failedTrack = null;
     this._countedPlay = false;
     this.frames = 0; this._stemSeq = (this._stemSeq || 0) + 1;
     if (this.stemsReady || this.stemsLoading) { this.stemsReady = false; this.engine.channels?.[this.index]?.setAiStems?.(false); }
@@ -174,6 +174,7 @@ export class Deck extends Emitter {
     this.reset(); this.track = track; this.loading = true;
     const tok = ++this._loadSeq;
     const stale = () => tok !== this._loadSeq;
+    this.engine.onDeckUnavailable?.(this);
     this.emit('load', track); this.emit('state');
     try {
       // load progress for the deck (a one-hour file takes many seconds): reading x %, decoding, analysing
@@ -191,10 +192,6 @@ export class Deck extends Emitter {
       }
       if (stale()) return false; // another load superseded this one
       phase('Decoding');
-      // Hydrate on-demand heavy analysis (barFeatures, tempoMap) in parallel with audio decode when slim catalog omitted them
-      const analysisP = track.analyzed && (!track.barFeatures || !track.tempoMap) && api.trackAnalysis
-        ? api.trackAnalysis(track.id).then((extra) => { if (extra && typeof extra === 'object' && this.track === track) Object.assign(track, extra); }, () => {})
-        : null;
       // Decode on a short-lived OfflineAudioContext so Chromium releases decoder buffers promptly (falls back to ctx in mocks)
       const decCtx = typeof OfflineAudioContext === 'function' ? new OfflineAudioContext(2, 1, this.ctx.sampleRate) : this.ctx;
       let buf = await decCtx.decodeAudioData(ab);
@@ -204,6 +201,12 @@ export class Deck extends Emitter {
       // waveform + analysis (cached on the server after the first time)
       let wave = track.analyzed ? decodeWaveform(await api.waveform(track.id) || new ArrayBuffer(0)) : null;
       if (stale()) { buf = null; return false; }
+      if (wave && (!track.barFeatures || !track.tempoMap)) {
+        // The lite catalog already has the grid and cues. A slow optional lookup must not block playback.
+        api.trackAnalysis(track.id).then((extra) => {
+          if (!stale() && this.track === track) Object.assign(track, extra);
+        }).catch(() => {});
+      }
       if (!wave) { // analyse once; tracks whose BPM can't be detected aren't re-analysed on every load
         // time-sliced mono mixdown so loading an unanalyzed track never freezes waveforms/UI
         const c0 = buf.getChannelData(0), c1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : null;
@@ -220,7 +223,6 @@ export class Deck extends Emitter {
         api.saveWaveform(track.id, r.wave).catch(() => {});
         api.updateTrack(track.id, patch).then((t) => this.engine.emit('track-updated', t)).catch(() => {});
       }
-      if (analysisP) await analysisP;
       this.waveform = wave;
       this.bpm = track.bpm || 0; this.gridOffset = track.gridOffset || 0;
       if (!track.phrases && wave && this.bpm) this.refreshStructure(false); // tracks analysed before phrase detection existed
@@ -287,6 +289,7 @@ export class Deck extends Emitter {
     if (this.playing) return;
     if (this.scratchSample) this.scratchSampleReturn();
     ++this._loadSeq; this.post('unload'); this.reset();
+    this.engine.onDeckUnavailable?.(this);
     if (this.index >= (this.engine.settings?.deckCount || 2)) this.engine.channels?.[this.index]?.setActive?.(false);
     this.emit('load', null); this.emit('state');
   }
@@ -656,6 +659,7 @@ export class Deck extends Emitter {
     if (this.matchTempo() && this.playing) this.alignPhase();
     this.emit('state');
   }
+  get canBeMaster() { return !!this.track && !this.loading && Number.isFinite(this.bpm) && this.bpm > 0; }
   setMaster() { this.engine.setMaster(this); }
 
   // ---------- jog / scratch ----------

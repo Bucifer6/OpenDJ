@@ -48,6 +48,30 @@ try {
   }, { long: ids.Long, short: ids.Short });
   check(race.title === 'Short' && race.duration === 20 && race.bpm === 128, `a superseded load can't overwrite the newer track (${JSON.stringify(race)})`);
 
+  const visibleDeckTimes = await page.evaluate(async () => {
+    const app = window.opendj;
+    const [first, second] = app.engine.decks;
+    const phrases = second.track.phrases;
+    second.track.phrases = [{ start: 0, end: 5 }];
+    try {
+      first.play();
+      second.play();
+      const times = () => app.deckEls.slice(0, 2).map((deck) => deck.querySelector('.deck-time').textContent);
+      const before = times();
+      await new Promise((resolve) => setTimeout(resolve, 650));
+      return {
+        clocks: times().every((time, i) => time !== before[i]),
+        waveforms: app.waves.slice(0, 2).every((row) => row.wf.tiles.size > 0),
+      };
+    } finally {
+      first.pause();
+      second.pause();
+      second.track.phrases = phrases;
+    }
+  });
+  check(visibleDeckTimes.clocks, 'both visible desktop deck clocks advance with an incomplete legacy phrase marker');
+  check(visibleDeckTimes.waveforms, 'both desktop scrolling waveforms render audio tiles');
+
   // play counting for every track, not just the first one on a deck
   const plays = await page.evaluate(async ({ a, b }) => {
     const app = window.opendj, d = app.engine.decks[0]; let n = 0;

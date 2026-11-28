@@ -90,7 +90,10 @@ class App {
     if (!unavailable('dvs')) this.dvs.init().catch((e) => console.warn('DVS init failed', e));
     this.engine.setMasterVolume(0.8); this.engine.setHeadphoneVolume(0.8);
     if (this.engine.ctx.state !== 'running') this.showStartOverlay();
-    const frame = (now) => { this.frame(now); requestAnimationFrame(frame); };
+    const frame = (now) => {
+      requestAnimationFrame(frame);
+      this.frame(now);
+    };
     requestAnimationFrame(frame);
     document.getElementById('boot')?.remove();
     this.updates = setupUpdates(this); // "a new version is available" (checks after a short delay, never during a set)
@@ -269,6 +272,13 @@ class App {
     this.waveArea = el('section', { class: 'waves' }, ...this.waves, zoomBtns);
     // decks + mixer
     this.deckEls = this.engine.decks.map((d) => buildDeck(this, d));
+    // The mobile tab class stays on decks across layouts. Observe which panels CSS actually displays.
+    const visibility = new ResizeObserver((entries) => {
+      for (const { target, contentRect } of entries) {
+        target._hasLayout = contentRect.width > 0 && contentRect.height > 0;
+      }
+    });
+    for (const panel of [this.waveArea, ...this.deckEls]) visibility.observe(panel);
     this.mixer = buildMixer(this);
     // small screens show one deck at a time (css/mobile.css): these tabs pick it
     this.deckTabs = el('div', { class: 'deck-tabs', role: 'tablist' }, ...this.engine.decks.map((d, i) => el('button', {
@@ -924,9 +934,8 @@ class App {
     if (document.body.classList.contains('scratch-view-open')) return; // full-screen Scratch View covers all main decks/waveforms
     for (let i = 0; i < this.deckCount; i++) {
       const elD = this.deckEls[i];
-      if (elD.classList.contains('m-hide')) continue;
-      this.waves[i].wf.draw(now);
-      elD.frame(now);
+      if (this.waveArea._hasLayout !== false) this.waves[i].wf.draw(now);
+      if (elD._hasLayout !== false) elD.frame(now);
     }
     this.mixer.frame(now);
     if (!this._slow || now - this._slow > 250) {

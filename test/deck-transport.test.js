@@ -2,6 +2,65 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Deck } from '../public/js/audio/deck.js';
 import { Engine } from '../public/js/audio/engine.js';
+import { api } from '../public/js/api.js';
+import { encodeWaveform } from '../public/js/audio/analysis-core.js';
+
+test('a cached track can play while heavy analysis is pending, and a late response cannot update an ejected track', { timeout: 2000 }, async (t) => {
+  const samples = new Float32Array(64);
+  const band = new Uint8Array([10]);
+  t.mock.method(api, 'waveform', async () => encodeWaveform({ rate: 1, peak: band, low: band, mid: band, high: band }).buffer);
+  let finishAnalysis;
+  t.mock.method(api, 'trackAnalysis', () => new Promise((resolve) => { finishAnalysis = resolve; }));
+  const posted = [];
+  const deck = Object.assign(Object.create(Deck.prototype), {
+    index: 0,
+    engine: { settings: {}, channels: [{ setAutoGain() {} }], prefetched: new Map([['cached', new ArrayBuffer(1)]]) },
+    ctx: {
+      sampleRate: 48000, currentTime: 0,
+      async decodeAudioData() {
+        return { sampleRate: 48000, duration: 1, numberOfChannels: 1, getChannelData: () => samples };
+      },
+    },
+    node: { port: { postMessage: (message) => posted.push(message) } },
+    _loadSeq: 0, tempo: 0, bend: 0, stemMacro: [1, 1],
+    emit() {},
+  });
+  const track = { id: 'cached', analyzed: true, bpm: 120, phrases: [] };
+  assert.equal(await deck.load(track), true);
+  assert.equal(deck.loading, false);
+  assert.equal(deck.bpm, 120);
+  assert.ok(deck.waveform && posted.some((message) => message.type === 'load'));
+  deck.eject();
+  finishAnalysis({ tempoMap: [{ time: 0, bpm: 120, beat: 0 }] });
+  await Promise.resolve();
+  assert.equal(track.tempoMap, undefined);
+  assert.equal(deck.track, null);
+});
+
+test('the master remains a ready deck while the other deck loads or is ejected', () => {
+  const engine = Object.assign(Object.create(Engine.prototype), {
+    master: null, settings: {}, emit() {},
+    channels: [{ state: { volume: 0.8 } }, { state: { volume: 0.8 } }],
+  });
+  const deck = (index, playing) => Object.assign(Object.create(Deck.prototype), {
+    engine, index, playing, track: {}, bpm: 120, ctx: { sampleRate: 48000 },
+    isMaster: false, _loadSeq: 0, emit() {}, post() {},
+  });
+  const first = deck(0, true), second = deck(1, false);
+  engine.decks = [first, second];
+  first.setMaster();
+  second.loading = true;
+  second.setMaster();
+  assert.equal(engine.master, first);
+  assert.equal(second.isMaster, false);
+  second.loading = false;
+  second.setMaster();
+  assert.equal(engine.master, second);
+  second.eject();
+  assert.equal(engine.master, first);
+  assert.equal(first.isMaster, true);
+  assert.equal(second.isMaster, false);
+});
 
 test('a queued position report with the same timestamp cannot undo a newer seek', () => {
   const d = Object.assign(Object.create(Deck.prototype), { sr: 48000, ctx: { currentTime: 10 }, _pos: 6.6, _seekGuard: 10, _seekSeq: 4, playing: false, emit() {} });
