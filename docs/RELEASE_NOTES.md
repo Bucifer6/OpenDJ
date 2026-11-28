@@ -24,6 +24,11 @@ Mix on 2 or 4 decks with your own music from local folders, USB sticks, NAS shar
 
 **Check your download:** `SHA256SUMS.txt` lists the checksum of every file (`sha256sum -c SHA256SUMS.txt --ignore-missing`). Security problems: please report them privately, see `SECURITY.md`.
 
+### New in 0.6.6
+
+- Fixed frozen waveforms, BPM displays and clocks on visible decks in desktop and compact landscape layouts.
+- Cached tracks can play while optional analysis loads, and master selection stays with a ready deck.
+
 ### New in 0.6.5
 - **Full-stack resource optimization (lower RAM, CPU, GPU/VRAM, disk I/O, and ~90 MB smaller installers).** Split heavy per-bar analysis (`barFeatures` / `tempoMap`) into an on-demand SQLite `track_analysis` table with slim `/api/tracks?slim=1` payloads, persistent SQLite prepared statements, gzip + `ETag`/`304` HTTP caching, bounded cover-art LRU caching, multiplexed SSE events, and 60 s throttled `library.json` mirroring. Native AI stem separation now streams FFmpeg PCM via temp files (~6 MB RAM instead of multi-GB on long mixes), skips redundant GPU warm-up checks, caches STFT inverse envelopes, disposes ONNX tensors promptly, and releases raw model buffers after load.
 - **Zero-GC audio thread, demand-driven idle power savings, and smoother UI.** Eliminated audio-thread scratch allocations and trig/exp hotspots across `DeckProcessor`, FX worklets, phase vocoder, DVS timecode, and the PCM recorder; added FFT-based BPM autocorrelation, 10 s idle `AudioContext.suspend()`, and dynamic Electron background throttling tied to playback/Gig Mode. Fixed Scratch View platter VRAM leaks, dirty-checked 1080p karaoke overlay uploads, capped video/UI frame rates and paused them when hidden, reduced AutoMix queue planning from O(K²) to O(K) with targeted LibraryUI row patches and lazy loading for Video, Sampler Catalog, and CDJ Export, and trimmed unused `onnxruntime-web` bundles from desktop packages.
