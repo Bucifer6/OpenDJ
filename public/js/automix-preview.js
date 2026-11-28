@@ -51,12 +51,19 @@ export function filterHz(v) {
   return [v < 0 ? 20000 * Math.pow(0.012, -v) : 20000, v > 0 ? 20 * Math.pow(250, v) : 10];
 }
 
-const decoded = new Map(); // track id -> AudioBuffer (the last two previewed tracks)
+const decoded = new Map(); // track id -> AudioBuffer (the last two previewed tracks, evicted after 60 s idle)
+let decodedEvictT = null;
+function touchDecoded() {
+  clearTimeout(decodedEvictT);
+  decodedEvictT = setTimeout(() => { decoded.clear(); decodedEvictT = null; }, 60_000);
+}
 async function decode(ctx, track) {
+  touchDecoded();
   if (decoded.has(track.id)) return decoded.get(track.id);
   const res = await fetch(api.streamUrl(track.id));
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const buf = await ctx.decodeAudioData(await res.arrayBuffer());
+  const decCtx = typeof OfflineAudioContext === 'function' ? new OfflineAudioContext(2, 1, ctx.sampleRate) : ctx;
+  const buf = await decCtx.decodeAudioData(await res.arrayBuffer());
   decoded.set(track.id, buf);
   while (decoded.size > 2) decoded.delete(decoded.keys().next().value);
   return buf;

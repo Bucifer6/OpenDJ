@@ -59,6 +59,22 @@ export function aiffToWav(buf) {
   if (littleEndian || bytes === 1) {
     pcm.set(data.subarray(0, len));
     if (bytes === 1) for (let i = 0; i < len; i++) pcm[i] = (pcm[i] + 128) & 0xff; // signed -> unsigned 8-bit
+  } else if (bytes === 2) {
+    pcm.set(data.subarray(0, len));
+    if (typeof Buffer !== 'undefined' && Buffer.from) {
+      Buffer.from(pcm.buffer, pcm.byteOffset, len & ~1).swap16();
+    } else {
+      for (let i = 0; i + 2 <= len; i += 2) { const t = pcm[i]; pcm[i] = pcm[i + 1]; pcm[i + 1] = t; }
+    }
+  } else if (bytes === 3) {
+    for (let i = 0; i + 3 <= len; i += 3) { pcm[i] = data[i + 2]; pcm[i + 1] = data[i + 1]; pcm[i + 2] = data[i]; }
+  } else if (bytes === 4) {
+    pcm.set(data.subarray(0, len));
+    if (typeof Buffer !== 'undefined' && Buffer.from) {
+      Buffer.from(pcm.buffer, pcm.byteOffset, len & ~3).swap32();
+    } else {
+      for (let i = 0; i + 4 <= len; i += 4) { const a = pcm[i], b = pcm[i + 1]; pcm[i] = pcm[i + 3]; pcm[i + 1] = pcm[i + 2]; pcm[i + 2] = b; pcm[i + 3] = a; }
+    }
   } else {
     for (let i = 0; i + bytes <= len; i += bytes) for (let b = 0; b < bytes; b++) pcm[i + b] = data[i + bytes - 1 - b];
   }

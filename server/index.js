@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -14,7 +15,7 @@ import { Library, newId } from './library.js';
 import { scanFolder, addFile, walk, AUDIO_EXT, isMediaPath } from './scanner.js';
 import { listDrivesAsync, browseDir } from './drives.js';
 import { aiffToWav } from './aiff.js';
-import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clientFor, isInside, uniqueName, safe, sourcePlaylists, openSourcePlaylist, remoteError, plexUsers, switchPlexUser } from './remote.js';
+import { addSource, syncSource, remoteStream, remoteCover, DownloadManager, clientFor, dropClient, isInside, uniqueName, safe, sourcePlaylists, openSourcePlaylist, remoteError, plexUsers, switchPlexUser } from './remote.js';
 import { findFfmpeg, needsTranscode, remoteBrowserDecodable, browserPlayableVideo, formatList, DSD_EXT, VIDEO_MIME, extOf, probe, isVideoByName, BROWSER_VIDEO_EXT } from './media.js';
 import { Transcoder } from './transcode.js';
 import { Auth, parseCookies, parseTrustProxy } from './auth.js';
@@ -110,10 +111,31 @@ async function readBody(req, limit = DEFAULT_BODY_LIMIT) {
   throw new HttpError(415, 'Send JSON (Content-Type: application/json)');
 }
 
-function sendJson(res, status, obj) {
-  const body = JSON.stringify(obj);
-  res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-  res.end(body);
+const COMPRESSIBLE_EXT = new Set(['.html', '.js', '.mjs', '.css', '.json', '.svg', '.webmanifest', '.txt']);
+const weakEtag = (st) => `W/"${st.size.toString(16)}-${Math.trunc(st.mtimeMs).toString(16)}"`;
+const acceptsGzip = (req) => typeof req?.headers?.['accept-encoding'] === 'string' && /\bgzip\b/i.test(req.headers['accept-encoding']);
+const etagMatches = (req, etag) => {
+  const inm = req?.headers?.['if-none-match'];
+  if (!inm) return false;
+  return inm === '*' || inm.split(',').some((t) => t.trim() === etag);
+};
+
+function sendJson(res, status, obj, req = null) {
+  const raw = Buffer.from(JSON.stringify(obj), 'utf8');
+  if (raw.length >= 2048 && acceptsGzip(req)) {
+    const gz = zlib.gzipSync(raw, { level: 1 });
+    res.writeHead(status, {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+      'Content-Encoding': 'gzip',
+      'Vary': 'Accept-Encoding',
+      'Content-Length': gz.length,
+    });
+    res.end(gz);
+    return;
+  }
+  res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Content-Length': raw.length });
+  res.end(raw);
 }
 
 function sendBodyLimitError(req, res, obj) {
@@ -150,20 +172,24 @@ export function parseRange(header, size) {
 
 const pipeQuiet = (src, res) => pipeline(src, res).catch(() => { if (!res.destroyed) res.destroy(); });
 
-async function sendFileRange(req, res, file, mime) {
-  const st = await fs.promises.stat(file).catch(() => null);
+const STREAM_HWM = 256 * 1024;
+async function sendFileRange(req, res, file, mime, knownStat = null) {
+  const st = knownStat || await fs.promises.stat(file).catch(() => null);
   if (!st || !st.isFile()) throw new HttpError(404, 'File missing (drive disconnected?)');
+  const etag = weakEtag(st);
+  const lastMod = new Date(st.mtimeMs).toUTCString();
   const range = parseRange(req.headers.range, st.size);
-  const headers = { 'Content-Type': mime, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache' };
+  const headers = { 'Content-Type': mime, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache', ETag: etag, 'Last-Modified': lastMod };
+  if (!req.headers.range && etagMatches(req, etag)) { res.writeHead(304, headers); return res.end(); }
   if (range === 'invalid') { res.writeHead(416, { 'Content-Range': `bytes */${st.size}` }); return res.end(); }
   if (range) {
     res.writeHead(206, { ...headers, 'Content-Range': `bytes ${range.start}-${range.end}/${st.size}`, 'Content-Length': range.end - range.start + 1 });
     if (req.method === 'HEAD') return res.end();
-    return pipeQuiet(fs.createReadStream(file, { start: range.start, end: range.end }), res);
+    return pipeQuiet(fs.createReadStream(file, { start: range.start, end: range.end, highWaterMark: STREAM_HWM }), res);
   }
   res.writeHead(200, { ...headers, 'Content-Length': st.size });
   if (req.method === 'HEAD') return res.end();
-  return pipeQuiet(fs.createReadStream(file), res);
+  return pipeQuiet(fs.createReadStream(file, { highWaterMark: STREAM_HWM }), res);
 }
 
 const PLACEHOLDER = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" fill="#20252d"/><path d="M24 11v13.5a4 4 0 1 1-2-3.46V15l-6 1.5v10a4 4 0 1 1-2-3.46V13z" fill="#4a5361"/></svg>';
@@ -243,8 +269,13 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   const library = new Library(dataDir);
   const sse = new Set();
   const emit = (type, payload) => {
+    if (!sse.size) return;
     const msg = `event: ${type}\ndata: ${JSON.stringify(payload ?? {})}\n\n`;
-    for (const r of sse) r.write(msg);
+    for (const r of sse) {
+      if (r.destroyed || r.writableEnded) { sse.delete(r); continue; }
+      if (r.writableLength > 262144) { sse.delete(r); try { r.destroy(); } catch { /* */ } continue; }
+      r.write(msg);
+    }
   };
   library.listeners.add(emit);
   const history = new History(dataDir);
@@ -304,9 +335,13 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   const needsFfmpeg = (what) => Object.assign(new HttpError(415, `${what} needs FFmpeg, which is not installed on the server. Install FFmpeg or use the desktop app.`), { code: 'needs-ffmpeg' });
 
   const playlistTrackIds = (p) => (p.smart ? evaluateSmart(p.smart, library.allTracks()) : p.trackIds);
+  let _plCacheRev = -1, _plCache = null;
   const resolvedPlaylists = () => {
+    if (_plCache && _plCacheRev === library._rev) return _plCache;
     const all = library.data.playlists.some((p) => p.smart) ? library.allTracks() : null;
-    return library.data.playlists.map((p) => (p.smart ? { ...p, trackIds: evaluateSmart(p.smart, all) } : p));
+    _plCache = library.data.playlists.map((p) => (p.smart ? { ...p, trackIds: evaluateSmart(p.smart, all) } : p));
+    _plCacheRev = library._rev;
+    return _plCache;
   };
   const attachment = (res, type, name, body) => {
     res.writeHead(200, { 'Content-Type': type, 'Content-Disposition': `attachment; filename="${String(name).replace(/[^\w.\- ]+/g, '_')}"; filename*=UTF-8''${encodeURIComponent(name)}` });
@@ -327,10 +362,13 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   };
 
   const routes = [];
+  const staticRoutes = new Map(); // O(1) fast path for routes without :params
   const route = (method, pattern, handler, opts = {}) => {
     const keys = [];
     const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)'; }) + '$');
-    routes.push({ method, re, keys, handler, ...opts });
+    const entry = { method, re, keys, handler, ...opts };
+    if (!keys.length) staticRoutes.set(`${method}:${pattern}`, entry);
+    else routes.push(entry);
   };
   const track = (tid) => { const t = library.getTrack(tid); if (!t) throw new HttpError(404, 'Track not found'); return t; };
 
@@ -348,22 +386,32 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       ffmpeg: !!ff, version: ff?.version || null, ffmpegSource: ff?.source || null, videoEncode: !!ff?.encoders?.libx264,
       formats: formatList(ff).all, formatGroups: formatList(ff),
       hosted: restricted, auth: auth.enabled, upload: { maxMB: Number(library.settings.uploadMaxMB) || 2048, accept: formatList(ff).all.map((e) => '.' + e) },
-      transcodeCache: transcoder.stats(),
+      transcodeCache: await transcoder.statsAsync(),
     };
   });
 
   // ---------------- tracks ----------------
-  route('GET', '/api/tracks', async () => {
+  route('GET', '/api/tracks', async ({ query }) => {
     const all = library.allTracks();
     const miss = await missing.missingIdsAsync(all);
-    return miss.size ? all.map((t) => (miss.has(t.id) ? { ...t, missing: true } : t)) : all;
+    const slim = query.get('slim') === '1';
+    if (!slim && !miss.size) return all;
+    return all.map((t) => {
+      const base = slim ? library.slimTrack(t) : t;
+      return miss.has(t.id) ? { ...base, missing: true } : base;
+    });
+  });
+  route('GET', '/api/tracks/:id/analysis', ({ params }) => {
+    const t = track(params.id);
+    return library.getTrackAnalysis(t.id) || {};
   });
   route('PATCH', '/api/tracks/:id', async ({ params, body }) => library.updateTrack(track(params.id).id, body));
   // Bulk edit: apply the same patch to many tracks (multi-select track info editor).
   route('POST', '/api/tracks/update', async ({ body }) => {
     const ids = (Array.isArray(body.ids) ? body.ids : []).filter((i) => library.getTrack(i));
-    for (const i of ids) library.updateTrack(i, body.patch && typeof body.patch === 'object' ? body.patch : {});
-    return { updated: ids.length };
+    const patch = body.patch && typeof body.patch === 'object' ? body.patch : {};
+    const updated = library.updateTracksBatch(ids, patch);
+    return { updated };
   }, { bodyLimit: BIG_JSON });
   route('GET', '/api/tracks/missing', async () => [...await missing.missingIdsAsync(library.allTracks(), { full: true })]);
   route('POST', '/api/tracks/relocate', async ({ body }) => {
@@ -378,6 +426,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   route('POST', '/api/tracks/delete', async ({ body }) => {
     const ids = Array.isArray(body.ids) ? body.ids.filter((x) => typeof x === 'string') : [];
     library.removeTracks(ids);
+    missing.invalidate(ids);
     for (const id of ids) stems.evict(id).catch(() => {});
     for (const id of ids) transcoder.evict(id).catch(() => {});
     return { ok: true };
@@ -391,11 +440,16 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
 
   /** Local file of a track, checked: exists, is a regular media file, may be served. */
   const servableFile = async (t) => {
-    const file = t.localPath && (await statOk(t.localPath))?.isFile() ? t.localPath : t.sourceType === 'local' ? t.path : null;
+    let file = null, st = null;
+    if (t.localPath) {
+      const lst = await statOk(t.localPath);
+      if (lst?.isFile()) { file = t.localPath; st = lst; }
+    }
+    if (!file && t.sourceType === 'local') file = t.path || null;
     if (!file) return null;
     if (!isMediaPath(file)) throw new HttpError(403, 'Not a media file');
     if (!readable(file)) throw new HttpError(403, 'File is outside the allowed music folders');
-    const st = await statOk(file);
+    if (!st) st = await statOk(file);
     if (st === undefined) throw new HttpError(504, 'The drive holding this file does not respond');
     if (!st) { // tell the library right away (the Missing files view, the ⚠ in the row), not 15 s and a refresh later
       missing.invalidate([t.id]); missing.missingIdsAsync([t]).then((m) => { if (m.has(t.id)) emit('library', { what: 'missing' }); }).catch(() => {});
@@ -405,20 +459,32 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     return { file, st };
   };
 
-  /** AIFF -> WAV in-process (cached in the transcode cache, served with Range). Falls back to FFmpeg for AIFF-C codecs. */
+  /** AIFF -> WAV in-process (cached in the transcode cache, served with Range). Falls back to FFmpeg for AIFF-C codecs or large files. */
+  const aiffJobs = new Map();
+  const AIFF_INPROC_MAX = 128 * MiB;
   const serveAiff = async (req, res, t, file, st) => {
     const cached = transcoder.file(t.id, 'wav');
     if (await transcoder.fresh(cached, st.mtimeMs)) { transcoder.touch(cached); return sendFileRange(req, res, cached, 'audio/wav'); }
-    let wav;
-    try { wav = aiffToWav(await fs.promises.readFile(file)); } catch (e) {
+    if (st.size > AIFF_INPROC_MAX) {
+      await ffReady;
+      if (ff) return transcoder.serveAudio(req, res, { key: t.id, input: file, srcMtime: st.mtimeMs, sampleRate: t.sampleRate });
+    }
+    let job = aiffJobs.get(t.id);
+    if (!job) {
+      job = (async () => {
+        const wav = aiffToWav(await fs.promises.readFile(file));
+        const tmp = `${cached}.${crypto.randomBytes(4).toString('hex')}.part`;
+        await fs.promises.writeFile(tmp, wav);
+        await fs.promises.rename(tmp, cached);
+        transcoder.prune(cached).catch(() => {});
+      })().finally(() => aiffJobs.delete(t.id));
+      aiffJobs.set(t.id, job);
+    }
+    try { await job; } catch (e) {
       await ffReady;
       if (ff) return transcoder.serveAudio(req, res, { key: t.id, input: file, srcMtime: st.mtimeMs, sampleRate: t.sampleRate });
       throw /Unsupported AIFC/.test(e.message) ? needsFfmpeg('This compressed AIFF-C file') : new HttpError(415, `Cannot read AIFF: ${e.message}`);
     }
-    const tmp = `${cached}.${crypto.randomBytes(4).toString('hex')}.part`;
-    await fs.promises.writeFile(tmp, wav);
-    await fs.promises.rename(tmp, cached);
-    transcoder.prune(cached).catch(() => {});
     return sendFileRange(req, res, cached, 'audio/wav');
   };
 
@@ -443,22 +509,22 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   });
 
   // Chunked PCM window stream (Int16 interleaved stereo) for ultra-long tracks (>20 min) without 1 GB RAM spikes
-  let activePcmProcs = 0;
+  const activePcmChildren = new Set();
   const MAX_PCM_PROCS = 4;
+  const PCM_FFMPEG_THREADS = String(Math.min(2, Math.max(1, Math.floor((os.cpus()?.length || 2) / 2))));
   route('GET', '/api/tracks/:id/pcm', async ({ params, query, res }) => {
     const t = track(params.id);
     const local = await servableFile(t);
     if (!local) throw new HttpError(404, 'Chunked PCM is only available for local files');
     await ffReady;
     if (!ff) throw needsFfmpeg('Chunked PCM streaming');
-    if (activePcmProcs >= MAX_PCM_PROCS) throw new HttpError(503, 'Too many concurrent PCM streams — retry shortly');
+    if (activePcmChildren.size >= MAX_PCM_PROCS) throw new HttpError(503, 'Too many concurrent PCM streams — retry shortly');
     const rawStart = Number(query.get('start'));
     const rawDur = Number(query.get('dur'));
     const rawSr = Number(query.get('sr'));
     const start = Number.isFinite(rawStart) && rawStart >= 0 ? Math.min(86400, rawStart) : 0;
     const dur = Number.isFinite(rawDur) && rawDur > 0 ? Math.max(1, Math.min(120, rawDur)) : 30;
     const sr = Number.isFinite(rawSr) && rawSr > 0 ? Math.max(8000, Math.min(96000, Math.round(rawSr))) : 44100;
-    activePcmProcs++;
     let child = null;
     let timer = null;
     let cleaned = false;
@@ -466,12 +532,15 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       if (cleaned) return;
       cleaned = true;
       clearTimeout(timer);
-      activePcmProcs = Math.max(0, activePcmProcs - 1);
-      if (child && !child.killed) { try { child.kill(); } catch { /* */ } }
+      if (child) {
+        activePcmChildren.delete(child);
+        if (!child.killed) { try { child.kill(); } catch { /* */ } }
+      }
     };
     try {
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store', 'X-PCM-Sample-Rate': String(sr), 'X-PCM-Channels': '2' });
-      child = spawn(ff.path, ['-nostdin', '-v', 'error', '-ss', String(start), '-t', String(dur), '-i', path.resolve(local.file), '-f', 's16le', '-acodec', 'pcm_s16le', '-ac', '2', '-ar', String(sr), 'pipe:1'], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+      child = spawn(ff.path, ['-nostdin', '-v', 'error', '-threads', PCM_FFMPEG_THREADS, '-ss', String(start), '-t', String(dur), '-i', path.resolve(local.file), '-f', 's16le', '-acodec', 'pcm_s16le', '-ac', '2', '-ar', String(sr), 'pipe:1'], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+      activePcmChildren.add(child);
       child.on('error', () => { cleanup(); if (!res.destroyed) res.destroy(); });
       child.on('close', cleanup);
       timer = setTimeout(() => { cleanup(); if (!res.destroyed) res.destroy(); }, 30_000);
@@ -495,12 +564,12 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
         await ffReady;
         if (!ff) {
           // Without FFmpeg, mp4/mov/webm videos may still decode in the browser (audio track); the rest can't.
-          if (BROWSER_VIDEO_EXT.has(ext) && t.codec !== 'alac') return sendFileRange(req, res, file, MIME[ext] || 'video/mp4');
+          if (BROWSER_VIDEO_EXT.has(ext) && t.codec !== 'alac') return sendFileRange(req, res, file, MIME[ext] || 'video/mp4', st);
           throw needsFfmpeg(`This ${ext.slice(1).toUpperCase()}${t.codec && t.codec !== ext.slice(1) ? ` (${t.codec})` : ''} file`);
         }
         return transcoder.serveAudio(req, res, { key: t.id, input: file, srcMtime: st.mtimeMs, sampleRate: t.sampleRate, dsd: DSD_EXT.has(ext) });
       }
-      return sendFileRange(req, res, file, MIME[ext] || 'application/octet-stream');
+      return sendFileRange(req, res, file, MIME[ext] || 'application/octet-stream', st);
     }
     if (t.sourceType !== 'remote') throw new HttpError(404, 'File missing');
     if (!remoteBrowserDecodable(t.format)) {
@@ -543,20 +612,59 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     }
     if (hasVideo === undefined) hasVideo = BROWSER_VIDEO_EXT.has(ext) || isVideoByName(ext);
     if (!hasVideo) throw new HttpError(404, 'This track has no video');
-    if (browserPlayableVideo(ext, ff ? videoCodec : '', ff ? codec : '')) return sendFileRange(req, res, file, VIDEO_MIME[ext] || 'video/mp4');
+    if (browserPlayableVideo(ext, ff ? videoCodec : '', ff ? codec : '')) return sendFileRange(req, res, file, VIDEO_MIME[ext] || 'video/mp4', st);
     if (!ff) throw needsFfmpeg('Playing this video');
     return transcoder.serveVideo(req, res, { key: t.id, input: file, srcMtime: st.mtimeMs, videoCodec, audioCodec: codec });
   });
 
+  // Bounded LRU cache for local cover artwork (keyed by trackId + mtimeMs) to avoid repeated full-file parseFile() I/O
+  const coverCache = new Map();
+  const COVER_CACHE_MAX = 200;
+  const COVER_CACHE_BYTES_MAX = 32 * MiB;
+  let coverCacheBytes = 0;
+  let coverActive = 0;
+  const coverWaiters = [];
+  const acquireCoverSlot = () => (coverActive < 4 ? (coverActive++, Promise.resolve()) : new Promise((r) => coverWaiters.push(r)));
+  const releaseCoverSlot = () => { if (coverWaiters.length) coverWaiters.shift()(); else coverActive = Math.max(0, coverActive - 1); };
+  const putCoverCache = (k, val) => {
+    const prev = coverCache.get(k);
+    if (prev) { coverCacheBytes -= prev.buf?.length || 0; coverCache.delete(k); }
+    const sz = val.buf?.length || 0;
+    if (sz > 4 * MiB) return; // don't pin giant raw artwork in RAM
+    coverCache.set(k, val);
+    coverCacheBytes += sz;
+    while (coverCache.size > COVER_CACHE_MAX || coverCacheBytes > COVER_CACHE_BYTES_MAX) {
+      const oldestKey = coverCache.keys().next().value;
+      const oldest = coverCache.get(oldestKey);
+      coverCacheBytes -= oldest?.buf?.length || 0;
+      coverCache.delete(oldestKey);
+    }
+  };
+
   route('GET', '/api/tracks/:id/cover', async ({ params, req, res }) => {
     const t = track(params.id);
     const file = t.localPath || (t.sourceType === 'local' ? t.path : null);
-    if (file && isMediaPath(file) && readable(file) && (await statOk(file))?.isFile()) {
-      const mm = await parseFile(file, { duration: false }).catch(() => null);
-      const pic = mm?.common.picture?.[0];
-      if (!pic) return sendPlaceholder(res);
-      res.writeHead(200, { 'Content-Type': safeMediaType(pic.format, 'image'), 'Cache-Control': 'max-age=86400' });
-      return res.end(Buffer.from(pic.data));
+    if (file && isMediaPath(file) && readable(file)) {
+      const st = await statOk(file);
+      if (st?.isFile()) {
+        const key = `${t.id}|${Math.trunc(st.mtimeMs)}`;
+        const etag = `W/"cov-${t.id}-${Math.trunc(st.mtimeMs).toString(16)}"`;
+        let hit = coverCache.get(key);
+        if (hit) { coverCache.delete(key); coverCache.set(key, hit); }
+        else {
+          await acquireCoverSlot();
+          try {
+            const mm = await parseFile(file, { duration: false }).catch(() => null);
+            const pic = mm?.common.picture?.[0];
+            hit = pic ? { type: safeMediaType(pic.format, 'image'), buf: Buffer.from(pic.data.buffer, pic.data.byteOffset, pic.data.byteLength) } : { empty: true };
+            putCoverCache(key, hit);
+          } finally { releaseCoverSlot(); }
+        }
+        if (hit.empty) return sendPlaceholder(res);
+        if (etagMatches(req, etag)) { res.writeHead(304, { ETag: etag, 'Cache-Control': 'max-age=86400' }); return res.end(); }
+        res.writeHead(200, { 'Content-Type': hit.type, 'Cache-Control': 'max-age=86400', ETag: etag, 'Content-Length': hit.buf.length });
+        return res.end(req.method === 'HEAD' ? undefined : hit.buf);
+      }
     }
     const r = t.sourceType === 'remote' ? remoteCover(library, t) : null;
     if (!r) return sendPlaceholder(res);
@@ -564,8 +672,12 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
   });
   route('GET', '/api/tracks/:id/waveform', async ({ params, req, res }) => {
     const f = library.waveformPath(track(params.id).id);
-    if (!(await statOk(f))?.isFile()) throw new HttpError(404, 'Not analysed');
-    res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-cache' });
+    const st = await statOk(f);
+    if (!st?.isFile()) throw new HttpError(404, 'Not analysed');
+    const etag = weakEtag(st);
+    const headers = { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-cache', ETag: etag, 'Content-Length': st.size };
+    if (etagMatches(req, etag)) { res.writeHead(304, { ETag: etag, 'Cache-Control': 'no-cache' }); return res.end(); }
+    res.writeHead(200, headers);
     if (req.method === 'HEAD') return res.end();
     return pipeQuiet(fs.createReadStream(f), res);
   });
@@ -876,7 +988,7 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     runJob('sync:' + params.id, () => syncSource(library, params.id, { onProgress: (p) => emit('sync', p) }));
     return r;
   });
-  route('DELETE', '/api/sources/:id', async ({ params }) => { library.removeSource(params.id); return { ok: true }; });
+  route('DELETE', '/api/sources/:id', async ({ params }) => { library.removeSource(params.id); dropClient(params.id); return { ok: true }; });
 
   // ---------------- downloads ----------------
   route('GET', '/api/downloads', () => downloads.list());
@@ -997,16 +1109,26 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     if ((mutating || isApi) && !originOk(req)) { res.writeHead(403, { 'Content-Type': 'text/plain' }); return res.end('Forbidden origin'); }
     try {
       if (isApi) {
-        for (const r of routes) {
-          if (r.method !== req.method && !(r.method === 'GET' && req.method === 'HEAD')) continue;
-          const m = r.re.exec(url.pathname);
-          if (!m) continue;
+        const lookupMethod = req.method === 'HEAD' ? 'GET' : req.method;
+        const fast = staticRoutes.get(`${lookupMethod}:${url.pathname}`);
+        let matched = fast ? { r: fast, params: {} } : null;
+        if (!matched) {
+          for (const r of routes) {
+            if (r.method !== lookupMethod) continue;
+            const m = r.re.exec(url.pathname);
+            if (!m) continue;
+            let params;
+            try { params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])])); } catch { throw new HttpError(400, 'Bad URL'); }
+            matched = { r, params };
+            break;
+          }
+        }
+        if (matched) {
+          const { r, params } = matched;
           if (!r.public && !auth.check(req)) throw new HttpError(401, 'Login required');
-          let params;
-          try { params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])])); } catch { throw new HttpError(400, 'Bad URL'); }
           const body = ['POST', 'PUT', 'PATCH'].includes(req.method) && !r.raw ? await readBody(req, r.bodyLimit) : (r.raw ? undefined : {});
           const out = await r.handler({ req, res, params, body, query: url.searchParams });
-          if (!res.headersSent && out !== undefined) sendJson(res, 200, out);
+          if (!res.headersSent && out !== undefined) sendJson(res, 200, out, req);
           return;
         }
         throw new HttpError(404, 'No such endpoint');
@@ -1027,7 +1149,14 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       const st = await fs.promises.stat(file).catch(() => null);
       if (!st?.isFile()) throw new HttpError(404, 'Not found');
       const ext = path.extname(file);
-      const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'no-cache' };
+      const etag = weakEtag(st);
+      const isImmutableFont = ext === '.woff2' || ext === '.png' || ext === '.ico';
+      const headers = {
+        'Content-Type': MIME[ext] || 'application/octet-stream',
+        'Cache-Control': isImmutableFont ? 'public, max-age=86400' : 'no-cache',
+        ETag: etag,
+        'Last-Modified': new Date(st.mtimeMs).toUTCString(),
+      };
       if (rel === 'sw.js') headers['Service-Worker-Allowed'] = '/';
       if (process.env.OPENDJ_COI !== '0' && (ext === '.html' || ext === '.js' || ext === '.mjs')) {
         headers['Cross-Origin-Embedder-Policy'] = 'credentialless';
@@ -1040,14 +1169,25 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
       }
       // the Controller Mapper is shown inside Settings: only this app may frame it
       if (rel === 'controller-mapper.html') headers['Content-Security-Policy'] = headers['Content-Security-Policy'].replace("frame-ancestors 'none'", "frame-ancestors 'self'");
-      res.writeHead(200, headers);
-      if (req.method === 'HEAD') return res.end();
-      await pipeQuiet(fs.createReadStream(file), res);
+      if (etagMatches(req, etag)) { res.writeHead(304, headers); return res.end(); }
+      const useGzip = st.size >= 2048 && COMPRESSIBLE_EXT.has(ext) && acceptsGzip(req);
+      if (useGzip) {
+        headers['Content-Encoding'] = 'gzip';
+        headers.Vary = 'Accept-Encoding';
+        res.writeHead(200, headers);
+        if (req.method === 'HEAD') return res.end();
+        await pipeQuiet(fs.createReadStream(file).pipe(zlib.createGzip({ level: 1 })), res);
+      } else {
+        headers['Content-Length'] = st.size;
+        res.writeHead(200, headers);
+        if (req.method === 'HEAD') return res.end();
+        await pipeQuiet(fs.createReadStream(file), res);
+      }
     } catch (e) {
       if (!e.status) log.error?.('[opendj]', e);
       if (e.retryAfter) res.setHeader('Retry-After', String(e.retryAfter));
       if (e.status === 413 && !res.headersSent) return sendBodyLimitError(req, res, { error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) });
-      if (!res.headersSent) sendJson(res, e.status || 500, { error: e.status ? e.message : 'Internal error', ...(e.code && typeof e.code === 'string' && e.status ? { code: e.code } : {}) });
+      if (!res.headersSent) sendJson(res, e.status || 500, { error: e.status ? e.message : 'Internal error', ...(e.code && typeof e.code === 'string' && e.status ? { code: e.code } : {}) }, req);
       else res.end();
     }
   });
@@ -1057,14 +1197,29 @@ export function createServer({ dataDir = defaultDataDir(), log = console, auth: 
     try { library.close(); } catch (e) { log.error?.('[opendj] final save failed:', e.message); }
     try { history.flush(); } catch { /* reported above */ }
     for (const r of sse) r.end();
-    try { lighting?.close?.(); } catch { /* already closed */ }
-    try { link?.close?.(); } catch { /* already closed */ }
-    try { stems?.close?.(); } catch { /* already closed */ }
-    try { recording?.close?.(); } catch { /* already closed */ }
-    try { broadcast?.close?.(); } catch { /* already closed */ }
-    try { mcp?.close?.(); } catch { /* already closed */ }
+    sse.clear();
+    try { transcoder.close(); } catch { /* */ }
+    for (const child of activePcmChildren) { try { child.kill('SIGKILL'); } catch { /* */ } }
+    activePcmChildren.clear();
+    const closes = [
+      () => lighting?.close?.(),
+      () => link?.close?.(),
+      () => stems?.close?.(),
+      () => recording?.close?.(),
+      () => broadcast?.close?.(),
+      () => mcp?.close?.(),
+    ];
+    const pending = [];
+    for (const fn of closes) {
+      try {
+        const r = fn();
+        if (r && typeof r.then === 'function') pending.push(r.catch(() => {}));
+      } catch { /* already closed */ }
+    }
     downloads.queue = [];
     for (const j of downloads.active.values()) j.ctrl.abort();
+    if (!pending.length) return Promise.resolve();
+    return Promise.race([Promise.all(pending), new Promise((r) => { const t = setTimeout(r, 2500); t.unref?.(); })]);
   };
   return { server, library, history, downloads, transcoder, auth, lighting, link, stems, recording, broadcast, mcp, updates, ffmpegReady: ffReady, shutdown, newId };
 }

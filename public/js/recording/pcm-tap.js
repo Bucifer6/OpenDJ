@@ -25,6 +25,10 @@ export class PcmTap {
   _onChunk(m) {
     for (const fn of [...this.subs]) { try { fn(m); } catch (e) { console.error(e); } }
     if (m.cut !== undefined && m.cut !== true) { const r = this._cuts.get(m.cut); this._cuts.delete(m.cut); r?.(); }
+    // Recycle full-size chunk buffers back to the audio worklet to eliminate 192 KB allocations on the audio thread
+    if (!m.cut && m.pcm?.buffer && m.pcm.length === this.chunkFrames * 2 && this.node && this.subs.size) {
+      try { this.node.port.postMessage({ cmd: 'recycle', buf: m.pcm.buffer }, [m.pcm.buffer]); } catch { /* transferred by subscriber */ }
+    }
   }
   /** fn({ pcm: Float32Array, frames, peakL, peakR }) for every chunk until the returned function is called. */
   async subscribe(fn) {

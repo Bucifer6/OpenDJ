@@ -59,7 +59,14 @@ export function registerLinkRoutes({ route, library, emit = () => {}, transport,
       clearInterval(streamT); streamT = null;
     }
   };
-  function sendAll() { if (!streams.size) return; const f = frame(); for (const r of streams) r.write(f); }
+  function sendAll() {
+    if (!streams.size) return;
+    const f = frame();
+    for (const r of streams) {
+      if (r.destroyed || r.writableEnded || r.writableLength > 262144) { streams.delete(r); try { r.destroy(); } catch { /* */ } continue; }
+      r.write(f);
+    }
+  }
   const tick = () => {
     if (!streams.size || !node.enabled) { syncStreamTimer(); return; }
     sendAll();

@@ -60,8 +60,10 @@ export class LinkClient {
     try { Object.assign(this.state, await jget('/api/link')); } catch { this.available = false; }
     if (topbar) this.mountButton();
     if (!this.available) return this;
-    this.openStream();
-    if (this.state.enabled) await this.syncClock().catch(() => {});
+    if (this.state.enabled) {
+      this.openStream();
+      await this.syncClock().catch(() => {});
+    }
     this._syncTimers();
     for (const d of this.engine.decks) {
       d.on('tempo', () => this.onDeckTempo(d));
@@ -108,8 +110,12 @@ export class LinkClient {
 
   // ------------------------------------------------------------------ actions
   async setEnabled(on) {
-    try { this.state = { ...this.state, ...(await jsend('PUT', '/api/link', { enabled: !!on })) }; this._changed(); }
-    catch (e) { this.app.toast?.(`Link: ${e.message}`); }
+    try {
+      this.state = { ...this.state, ...(await jsend('PUT', '/api/link', { enabled: !!on })) };
+      if (this.state.enabled && !this.es) this.openStream();
+      else if (!this.state.enabled && this.es) { this.es.close(); this.es = null; }
+      this._changed();
+    } catch (e) { this.app.toast?.(`Link: ${e.message}`); }
     if (on && this.prefs.lead && !this.prefs.follow) this.onDeckTempo(this.engine.master);
   }
   toggle() { return this.setEnabled(!this.state.enabled); }
@@ -230,11 +236,14 @@ export class LinkClient {
   }
 
   _renderBeat() {
-    if (!this.beatEl) return;
-    const on = this.state.enabled && this.state.host;
+    if (!this.beatEl || (typeof document !== 'undefined' && document.hidden)) return;
+    const on = !!(this.state.enabled && this.state.host);
     const q = this.state.quantum || 4;
     const b = on ? this.beatNow() : 0;
     const cur = on ? Math.floor(((b % q) + q) % q) : -1;
+    const sig = `${on ? 1 : 0}|${q}|${cur}`;
+    if (sig === this._lastBeatSig) return;
+    this._lastBeatSig = sig;
     const dots = this.beatEl.children;
     const n = Math.min(dots.length, q);
     for (let i = 0; i < dots.length; i++) {

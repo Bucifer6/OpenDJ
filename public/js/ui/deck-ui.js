@@ -281,12 +281,13 @@ export function buildDeck(app, deck) {
 
   // ---------- phase meter (beat position in the bar + offset vs master) ----------
   const phase = el('canvas', { class: 'phase-meter', height: 12 });
-  let phaseW = 0, phaseSig = '';
-  new ResizeObserver((es) => { phaseW = es.at(-1).contentRect.width * uiZoom(); }).observe(phase);
+  let phaseW = 0, phaseObserved = false, phaseSig = '';
+  new ResizeObserver((es) => { phaseObserved = true; phaseW = es.at(-1).contentRect.width * uiZoom(); }).observe(phase);
   window.addEventListener('opendj-theme', () => { phaseSig = ''; });
   const drawPhase = (now) => {
-    const dpr = devicePixelRatio || 1;
-    if (!phaseW) phaseW = phase.getBoundingClientRect().width || 1;
+    if (phaseObserved && phaseW <= 0) return; // hidden (display:none in Waveform / 4-Deck layouts)
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    if (!phaseW) { phaseW = phase.getBoundingClientRect().width; if (phaseW <= 0) return; }
     const W = Math.round(phaseW * dpr) || 1, H = Math.round(12 * dpr);
     if (phase.width !== W || phase.height !== H) { phase.width = W; phase.height = H; phaseSig = ''; }
     const m0 = app.engine.masterDeck(deck);

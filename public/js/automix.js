@@ -22,6 +22,18 @@ import { audibleOffset, MIN_CONFIDENCE, phaseErrorSec } from './audio/beat-phase
 import { barProfileAt } from './audio/features.js';
 import { isVocalSolo } from './stems/stem-fx.js';
 
+function sampleRandom(arr, k) {
+  const n = arr.length;
+  if (n <= k) return shuffle(arr);
+  if (k * 2 >= n) return shuffle(arr).slice(0, k);
+  const picked = new Set(), out = [];
+  while (out.length < k) {
+    const idx = Math.floor(Math.random() * n);
+    if (!picked.has(idx)) { picked.add(idx); out.push(arr[idx]); }
+  }
+  return out;
+}
+
 export const LOG_BPM_JUMP = Math.log(1.08); // > 8 % tempo change (after half/double matching) is a "big jump"
 
 /** Tempo distance as |log ratio|, allowing half / double time (87 ↔ 174 = 0). */
@@ -727,9 +739,9 @@ export class AutoMix extends Emitter {
     let add;
     const last = this.queue.at(-1) || this.current?.track;
     if (r.mode === 'smart' || r.mode === 'legacy-smart') {
-      const sm = smartMix(pool.length > 400 ? shuffle(pool).slice(0, 400) : pool, { shape: r.shape, sliders: r.sliders, limit: 8, start: last ? lib?.track?.(last.id) || last : null, ...this.partyCtx({ endless: r.endless }) });
+      const sm = smartMix(pool.length > 400 ? sampleRandom(pool, 400) : pool, { shape: r.shape, sliders: r.sliders, limit: 8, start: last ? lib?.track?.(last.id) || last : null, ...this.partyCtx({ endless: r.endless }) });
       add = sm.tracks; sm.steps.forEach((s) => this.reasons.set(s.track, s.reason));
-    } else add = shuffle(pool).slice(0, 8);
+    } else add = sampleRandom(pool, 8);
     if (!r.endless) {
       let planned = this.queue.reduce((n, t) => n + secs(t), 0);
       const keep = [];
@@ -1002,7 +1014,7 @@ export class AutoMix extends Emitter {
   }
 
   /** Style (and why) for the transition into queue entry i. */
-  styleFor(i, prevTrack) {
+  styleFor(i, prevTrack, prevStyleOverride) {
     const t = this.queue[i]; if (!t) return null;
     const ov = this.overrides.get(t);
     const def = ov || this.opts.style || 'blend';
@@ -1010,7 +1022,7 @@ export class AutoMix extends Emitter {
     const lib = this.app.library;
     const fresh = (x) => (x && lib?.track?.(x.id)) || x;
     if (def === 'auto') {
-      const prevStyle = i > this.idx ? this.styleFor(i - 1)?.style : this._lastStyle;
+      const prevStyle = prevStyleOverride !== undefined ? prevStyleOverride : (i > this.idx ? this.styleFor(i - 1)?.style : this._lastStyle);
       const plan = this.planFor(i, prev, prevStyle);
       if (plan) return { style: plan.style, why: plan.why, override: !!ov, plan };
       return { ...pickStyle(fresh(prev), fresh(t), { prev: prevStyle, vary: !!this.opts.varyStyles, seed: `${prev?.id}>${t.id}` }), override: !!ov };

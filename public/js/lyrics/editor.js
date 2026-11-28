@@ -126,15 +126,23 @@ export function openLyricsEditor(app, deck, mgr) {
     else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); deck.seek(Math.max(0, deck.position + (e.key === 'ArrowLeft' ? -5 : 5))); }
   };
   document.addEventListener('keydown', onKey);
-  let raf = 0;
-  const live = () => {
+  let raf = 0, lastLive = 0, lastTimeTxt = '', lastNowIdx = -2, cachedLyrics = null, cachedKey = '';
+  const live = (now = performance.now()) => {
     raf = requestAnimationFrame(live);
+    if (document.hidden || (lastLive && now - lastLive < 50)) return;
+    lastLive = now;
     const t = heard();
-    timeEl.textContent = formatTime(t);
+    const txt = formatTime(t);
+    if (txt !== lastTimeTxt) { lastTimeTxt = txt; timeEl.textContent = txt; }
     playBtn.classList.toggle('active', deck.playing);
-    const st = lyricStateAt(linesToLyrics(lines), t);
-    const idx = st.line ? lines.indexOf(lines.find((l) => l.t === st.line.t && l.text === st.line.text)) : -1;
-    for (const r of list.children) r.classList.toggle('now', Number(r.dataset.i) === idx);
+    const key = `${lines.length}|${lines[0]?.t}|${lines[lines.length - 1]?.t}|${cursor}`;
+    if (!cachedLyrics || key !== cachedKey) { cachedKey = key; cachedLyrics = linesToLyrics(lines); }
+    const st = lyricStateAt(cachedLyrics, t);
+    const idx = st.line ? lines.findIndex((l) => l.t === st.line.t && l.text === st.line.text) : -1;
+    if (idx !== lastNowIdx) {
+      lastNowIdx = idx;
+      for (const r of list.children) r.classList.toggle('now', Number(r.dataset.i) === idx);
+    }
   };
   render(); live();
   if (textMode) setTimeout(() => textarea.focus(), 40);

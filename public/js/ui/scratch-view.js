@@ -86,15 +86,24 @@ export function openScratchView(app, deck) {
   );
   // the platter takes the largest square that fits its area
   const plat = view.querySelector('.sv-platter');
-  const fitJog = new ResizeObserver(() => { const r = plat.getBoundingClientRect(); const s = Math.max(120, Math.floor(Math.min(r.width, r.height))); jog.style.width = jog.style.height = `${s}px`; });
+  const fitJog = new ResizeObserver((es) => { const r = es.at(-1).contentRect; const s = Math.max(120, Math.floor(Math.min(r.width, r.height))); jog.style.width = jog.style.height = `${s}px`; });
   fitJog.observe(plat);
-  let raf = 0;
+  let raf = 0, lastFrame = 0, lastV = '';
+  const renderDirty = () => {
+    const v = strip.get(), s = v.toFixed(4);
+    if (s === lastV) return;
+    lastV = s;
+    track.style.setProperty('--v', s);
+    track.setAttribute('aria-valuenow', v.toFixed(2));
+  };
   const frame = (now) => {
+    raf = requestAnimationFrame(frame);
+    if (document.hidden || now - lastFrame < 15) return; // cap at ~60 fps on 120-240 Hz monitors
+    lastFrame = now;
     jog.draw(now); play.render();
     const t = deck.track; const txt = t ? `${t.title || 'Untitled'}${deck.scratchSample ? '' : t.artist ? ` — ${t.artist}` : ''}` : 'No track loaded';
     if (title._t !== txt) { title._t = txt; title.textContent = txt; }
-    if (dragId == null && saved == null) render();
-    raf = requestAnimationFrame(frame);
+    if (dragId == null && saved == null) renderDirty();
   };
   const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); api.close(); } };
   const api = {
@@ -103,6 +112,7 @@ export function openScratchView(app, deck) {
       cancelAnimationFrame(raf); fitJog.disconnect(); document.removeEventListener('keydown', onKey, true);
       if (saved != null) { strip.set(saved); saved = null; }
       if (deck.scratching) deck.jogPositionEnd?.(performance.now());
+      jog.destroy?.();
       view.remove(); document.body.classList.remove('scratch-view-open'); open = null;
     },
   };

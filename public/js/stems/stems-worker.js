@@ -41,7 +41,7 @@ async function init(m) {
     // multi-threaded WASM needs SharedArrayBuffer, i.e. a cross-origin isolated page (COOP/COEP headers)
     ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.max(1, m.threads || 1) : 1;
     ort.env.logLevel = 'error';
-    const bytes = await fetchModel(m.modelUrl);
+    let bytes = await fetchModel(m.modelUrl);
     const opts = { graphOptimizationLevel: 'all' };
     let session = null, backend = 'wasm';
     const gpuOk = m.backend !== 'wasm' && 'gpu' in navigator && await navigator.gpu.requestAdapter().then((a) => !!a, () => false);
@@ -70,17 +70,21 @@ async function init(m) {
         }
       }
     }
-    // WebGPU is checked once against WASM on real audio (verifiedRunChunk: noise that still adds up to the track
-    // passes mixtureError), unless this page already checked it
+    // Release the ~170 MB raw ONNX byte buffer immediately so it isn't pinned in RAM for the worker's lifetime;
+    // the rare WASM reference/fallback re-fetches from the local server URL instead.
+    const modelUrl = m.modelUrl;
+    bytes = null;
     wasmReference = backend === 'wasm' || m.gpuVerified ? null : async () => {
-      const cpu = await ort.InferenceSession.create(bytes, { ...opts, executionProviders: ['wasm'] });
+      const b = await fetchModel(modelUrl);
+      const cpu = await ort.InferenceSession.create(b, { ...opts, executionProviders: ['wasm'] });
       return { runChunk: createRunner(cpu, ort.Tensor).runChunk, release: () => cpu.release?.() };
     };
     gpuRun = null;
     // WebGPU that runs but returns invalid stems: separate() redoes the track on WASM
     toWasm = backend === 'wasm' ? null : async () => {
       await session.release?.().catch?.(() => {});
-      session = await ort.InferenceSession.create(bytes, { ...opts, executionProviders: ['wasm'] });
+      const b = await fetchModel(modelUrl);
+      session = await ort.InferenceSession.create(b, { ...opts, executionProviders: ['wasm'] });
       runner = createRunner(session, ort.Tensor);
       info = { backend: 'wasm', threads: ort.env.wasm.numThreads, kind: runner.kind };
       toWasm = null; wasmReference = null; gpuRun = null;
@@ -93,10 +97,17 @@ async function init(m) {
 // Hold (from the page): while a mix transition runs or a deck loads, background separation waits between chunks so
 // playback and the waveforms have the machine to themselves; it carries on from the same chunk when released.
 const hold = makeHold();
+// Upload backpressure: cap in-flight blocks waiting to upload to 3 (~12 MB) so fast WebGPU can't pile up unbounded RAM.
+let inFlightBlocks = 0;
+const blockWaiters = [];
+const MAX_IN_FLIGHT_BLOCKS = 3;
+const waitBlockSlot = () => (inFlightBlocks < MAX_IN_FLIGHT_BLOCKS ? Promise.resolve() : new Promise((r) => blockWaiters.push(r)));
 
 async function separate(m) {
   if (!runner) throw new Error('Model not loaded');
   const t0 = performance.now();
+  inFlightBlocks = 0;
+  blockWaiters.splice(0).forEach((r) => r());
   const left = m.left, right = m.right || m.left;
   const runChunk = () => {
     if (!wasmReference) return runner.runChunk;
@@ -107,8 +118,10 @@ async function separate(m) {
     channels: [left, right], length: m.length, segment: runner.segment, overlap: m.overlap ?? 0.25, sources: runner.sources.length,
     runChunk: hold.gate(runChunk()),
     onProgress: (done, total) => postMessage({ type: 'progress', id: m.id, done, total }),
-    onBlock: ({ frame, frames, data }) => {
+    onBlock: async ({ frame, frames, data }) => {
+      await waitBlockSlot();
       const stems = order.map((k) => interleaveInt16(data, 2, frames, k * 2 * frames));
+      inFlightBlocks++;
       postMessage({ type: 'block', id: m.id, frame, frames, stems }, stems.map((s) => s.buffer));
     },
   });
@@ -127,6 +140,11 @@ async function separate(m) {
 self.onmessage = async (e) => {
   const m = e.data;
   if (m.type === 'hold') { hold.set(m.on); return; }
+  if (m.type === 'ack') {
+    inFlightBlocks = Math.max(0, inFlightBlocks - 1);
+    if (inFlightBlocks < MAX_IN_FLIGHT_BLOCKS && blockWaiters.length) blockWaiters.shift()();
+    return;
+  }
   try {
     if (m.type === 'init') await init(m);
     else if (m.type === 'separate') await separate(m);

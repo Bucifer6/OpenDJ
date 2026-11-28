@@ -61,25 +61,27 @@ export function checkTransition(out, inn, plan, limits = CHECK_LIMITS) {
   const kSwap = finite(plan.kSwap) ? plan.kSwap : SWAP_STYLES.has(plan.style) || plan.style === 'blend' ? 0.5 : null;
   const beat = out?.bpm ? 60 / out.bpm : 0.5;
   const steps = Math.max(32, Math.min(256, Math.round(len / beat)));
+  const invRefGain = 1 / faderGain(0.8, 'log');
   let lowBeats = 0, vocalSec = 0;
   for (let i = 0; i <= steps; i++) {
     const k = i / steps, to = plan.begin + k * len, ti = plan.inStart + k * len * ratio;
     const L = mixLevels(plan.style, k, kSwap != null && k >= kSwap ? kSwap : null);
-    const vol = (v, d) => faderGain(v ?? d, 'log');
     const dd = plan.doubleDrop ? doubleDropTrim(k, kSwap) : 1;
-    const go = vol((L.outVol ?? 0.8) * dd, 0.8) / faderGain(0.8, 'log'), gi = vol((L.inVol ?? 0) * dd, 0) / faderGain(0.8, 'log');
-    const eq = (v) => isoKnobGain(v ?? 0);
-    const ao = Math.pow(10, levelAt(out, to) / 20) * go, ai = Math.pow(10, levelAt(inn, ti) / 20) * gi;
+    const go = faderGain((L.outVol ?? 0.8) * dd, 'log') * invRefGain, gi = faderGain((L.inVol ?? 0) * dd, 'log') * invRefGain;
+    const lo = levelAt(out, to), li = levelAt(inn, ti);
+    const ao = Math.pow(10, lo / 20) * go, ai = Math.pow(10, li / 20) * gi;
     // Per-bar measured spectral shares when available (falls back to typical club mix)
     const bsO = bandShareAt(out, to), bsI = bandShareAt(inn, ti);
     // the low band of beat-matched tracks adds up in phase (amplitudes); mids and highs add as powers
-    const low = Math.pow(ao * Math.sqrt(bsO[0]) * eq(L.outLow) + ai * Math.sqrt(bsI[0]) * eq(L.inLow), 2);
-    const mid = Math.pow(ao * eq(L.outMid), 2) * bsO[1] + Math.pow(ai * eq(L.inMid), 2) * bsI[1];
-    const high = Math.pow(ao * eq(L.outHigh), 2) * bsO[2] + Math.pow(ai * eq(L.inHigh), 2) * bsI[2];
+    const lowAmp = ao * Math.sqrt(bsO[0]) * isoKnobGain(L.outLow ?? 0) + ai * Math.sqrt(bsI[0]) * isoKnobGain(L.inLow ?? 0);
+    const midO = ao * isoKnobGain(L.outMid ?? 0), midI = ai * isoKnobGain(L.inMid ?? 0);
+    const hiO = ao * isoKnobGain(L.outHigh ?? 0), hiI = ai * isoKnobGain(L.inHigh ?? 0);
+    const low = lowAmp * lowAmp;
+    const mid = midO * midO * bsO[1] + midI * midI * bsI[1];
+    const high = hiO * hiO * bsO[2] + hiI * hiI * bsI[2];
     const heard = toDb(low + mid + high);
     // what each track would sound like alone right now (its own section loudness, level-matched): the mix should
     // never be much louder than the louder of the two (bump), nor fall well below the line from one to the other (dip)
-    const lo = levelAt(out, to), li = levelAt(inn, ti);
     metrics.bumpLu = Math.max(metrics.bumpLu, heard - Math.max(lo, li));
     metrics.dipLu = Math.max(metrics.dipLu, lo + (li - lo) * k - heard);
     if (twoBasslines(L) && go > 0.1 && gi > 0.1) lowBeats += len / steps / beat;
@@ -89,7 +91,9 @@ export function checkTransition(out, inn, plan, limits = CHECK_LIMITS) {
   metrics.lowOverlapBeats = Math.round(lowBeats * 10) / 10;
   metrics.vocalOverlapSec = Math.round(vocalSec * 10) / 10;
   metrics.bumpLu = Math.round(metrics.bumpLu * 10) / 10; metrics.dipLu = Math.round(metrics.dipLu * 10) / 10;
-  metrics.chromaSim = localChromaSimilarity(out, plan.begin, plan.begin + len, inn, plan.inStart, plan.inStart + len * ratio);
+  metrics.chromaSim = plan.chromaSim !== undefined
+    ? plan.chromaSim
+    : localChromaSimilarity(out, plan.begin, plan.begin + len, inn, plan.inStart, plan.inStart + len * ratio);
   if (out?.bpm && inn?.bpm) {
     const r = (out.bpm * (plan.rate || 1)) / inn.bpm, best = [r, r * 2, r / 2].reduce((a, b) => (Math.abs(Math.log(b)) < Math.abs(Math.log(a)) ? b : a));
     metrics.stretchPct = Math.round(Math.abs(best - 1) * 1000) / 10;

@@ -110,6 +110,8 @@ export class DvsManager extends Emitter {
     this.sink = this.ctx.createGain(); this.sink.gain.value = 0; this.sink.connect(this.ctx.destination);
     this.deviceLabel = track?.label || '';
     this.running = true;
+    this.engine._dvsRunning = true;
+    this.engine._wakeTick?.();
     if (!this._deckHooks) { // keep the decoder's direct link in step with deck reloads
       this._deckHooks = this.engine.decks.map((d, i) => d.on('loaded', () => this.decks[i].node?.port.postMessage({ type: 'resync' })));
     }
@@ -123,6 +125,8 @@ export class DvsManager extends Emitter {
     try { this.source?.disconnect(); this.splitter?.disconnect(); this.sink?.disconnect(); } catch { /* */ }
     if (this._ownStream) this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null; this.source = null; this.splitter = null; this.running = false;
+    this.engine._dvsRunning = false;
+    if (emit) this._tables.clear();
     if (emit) this.emit('change');
   }
 
@@ -179,15 +183,23 @@ export class DvsDeck extends Emitter {
   sendTable() {
     if (!this.node) return;
     const def = this.def;
-    if (this.mode !== 'abs' || !def.bits) return;
+    if (this.mode !== 'abs' || !def.bits) {
+      if (this._sentTableId) {
+        this._sentTableId = null;
+        this.node.port.postMessage({ type: 'table', table: null });
+      }
+      return;
+    }
+    if (this._sentTableId === def.id) return;
     const t = this.mgr.table(def);
     const copy = t.slice();
+    this._sentTableId = def.id;
     this.node.port.postMessage({ type: 'table', table: copy }, [copy.buffer]);
   }
 
   disconnect() {
     if (this.node) { try { this.node.port.postMessage({ type: 'config', mode: 'int' }); this.merger.disconnect(); this.node.disconnect(); } catch { /* */ } }
-    this.node = null; this.merger = null; this.status = null;
+    this.node = null; this.merger = null; this.status = null; this._sentTableId = null;
     this.release(false);
   }
 

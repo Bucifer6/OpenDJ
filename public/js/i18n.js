@@ -170,9 +170,23 @@ function skipped(elm) {
 function doText(node) {
   // nodeValue of a Text node: plain text, never parsed as HTML
   const v = node.nodeValue;
-  if (written.get(node) === v) return;
+  if (written.get(node) === v || skipped(node.parentNode)) return;
   const r = translateText(v);
-  if (r != null && r !== v && !skipped(node.parentNode)) { written.set(node, r); node.nodeValue = r; }
+  if (r != null && r !== v) { written.set(node, r); node.nodeValue = r; }
+}
+
+function doAttr(elm, attr) {
+  if (attr === 'value') {
+    if (elm.tagName === 'INPUT' && /^(button|submit|reset)$/i.test(elm.type) && elm.value) {
+      const r = translateText(elm.value);
+      if (r != null && r !== elm.value) elm.value = r;
+    }
+    return;
+  }
+  const v = elm.getAttribute(attr);
+  if (!v) return;
+  const r = translateText(v);
+  if (r != null && r !== v) elm.setAttribute(attr, r);
 }
 
 function doAttrs(elm) {
@@ -212,7 +226,7 @@ export function translateDom(root = document) {
   const mo = new MO((list) => {
     for (const m of list) {
       if (m.type === 'characterData') doText(m.target);
-      else if (m.type === 'attributes') { if (m.target.nodeType === 1 && !skipped(m.target)) doAttrs(m.target); }
+      else if (m.type === 'attributes') { if (m.target.nodeType === 1 && !skipped(m.target)) doAttr(m.target, m.attributeName); }
       else for (const n of m.addedNodes) if (n.isConnected) translateTree(n);
     }
   });

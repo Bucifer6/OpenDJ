@@ -369,7 +369,7 @@ html.odj-local .panel-tab[data-panel="stems"] { display: none; }
 .lib-collapse-btn { margin-left: auto; flex: none; }
 :root.lib-collapsed { --browser-h: 46px !important; }
 :root.lib-collapsed .lib-chips, :root.lib-collapsed .lib-suggest, :root.lib-collapsed .lib-header, :root.lib-collapsed .lib-scroll, :root.lib-collapsed .lib-tree { visibility: hidden; }
-:root.lib-anim #app { transition: grid-template-rows 180ms var(--ease); }
+:root.lib-anim #app { transition: none; }
 @media (prefers-reduced-motion: reduce) { :root.lib-anim #app { transition: none; } }
 @media (max-width: 699px), (max-height: 560px) {
   .chip { min-height: 40px; font-size: 12px; }

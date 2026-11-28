@@ -29,10 +29,18 @@ export function createRunner(session, Tensor, { sources = DEMUCS_SOURCES } = {})
       kind: 'hybrid', segment, sources,
       async runChunk(mix) {
         const spec = demucsSpec(mix, C, segment);
-        const r = await session.run({ [mixName]: new Tensor('float32', mix, [1, C, segment]), [specName]: new Tensor('float32', spec, [1, C * 2, BINS, T]) });
+        const mixT = new Tensor('float32', mix, [1, C, segment]);
+        const specT = new Tensor('float32', spec, [1, C * 2, BINS, T]);
+        let r;
+        try {
+          r = await session.run({ [mixName]: mixT, [specName]: specT });
+        } finally {
+          mixT.dispose?.();
+          specT.dispose?.();
+        }
         let zx = null, xt = null;
         for (const n of outs) { const t = r[n]; if (t.dims.length === 5) zx = t; else xt = t; }
-        if (!zx || !xt) throw new Error('Unexpected model outputs');
+        if (!zx || !xt) { for (const n of outs) r[n].dispose?.(); throw new Error('Unexpected model outputs'); }
         const out = new Float32Array(xt.data); // time branch, [S][C][segment]
         demucsISpec(zx.data, S, C, segment, out);
         for (const n of outs) r[n].dispose?.();
@@ -44,7 +52,9 @@ export function createRunner(session, Tensor, { sources = DEMUCS_SOURCES } = {})
   return {
     kind: 'waveform', segment, sources,
     async runChunk(mix) {
-      const r = await session.run({ [ins[0]]: new Tensor('float32', mix, [1, C, segment]) });
+      const mixT = new Tensor('float32', mix, [1, C, segment]);
+      let r;
+      try { r = await session.run({ [ins[0]]: mixT }); } finally { mixT.dispose?.(); }
       const t = r[outs[0]];
       const out = new Float32Array(t.data);
       t.dispose?.();

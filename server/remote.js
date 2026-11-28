@@ -10,14 +10,19 @@ import { addFile } from './scanner.js';
 const clients = new Map();
 const TOKEN_ONLY = new Set(['plex', 'jellyfin', 'emby']);
 const USER_DATA = (t) => t.analyzed || t.cues?.length || t.loops?.length || t.hotLoops?.length || t.rating || t.playCount || t.comment || t.tags?.length || t.color;
+const cfgSig = (cfg) => `${cfg.type || ''}|${cfg.url || ''}|${cfg.user || ''}|${cfg.password || ''}|${cfg.token || ''}|${cfg.accountToken || ''}|${cfg.libraryId || ''}|${cfg.userId || ''}`;
+
+export function dropClient(sourceId) { clients.delete(sourceId); }
 
 export function clientFor(library, sourceId) {
   const cfg = library.getSource(sourceId);
   if (!cfg) throw new Error('Unknown source');
+  const sig = cfgSig(cfg);
   let c = clients.get(sourceId);
-  if (!c || c._cfgVersion !== JSON.stringify(cfg)) {
+  if (!c || c._cfgVersion !== sig) {
     c = createClient(cfg);
-    c._cfgVersion = JSON.stringify(cfg);
+    c._cfgVersion = sig;
+    c._connectedAt = 0;
     clients.set(sourceId, c);
   }
   return c;
@@ -52,26 +57,41 @@ export async function syncSource(library, sourceId, { onProgress } = {}) {
   await client.connect();
   const persist = client.persistable();
   if (Object.keys(persist).length) Object.assign(cfg, persist);
-  const tracks = await client.listTracks({ onProgress: (done, total) => onProgress?.({ source: sourceId, done, total }) });
-  const seen = new Set(upsertRemoteTracks(library, cfg, tracks).map((t) => t.id));
+  let lastProgAt = 0;
+  const tracks = await client.listTracks({
+    onProgress: (done, total) => {
+      const now = Date.now();
+      if (done === total || now - lastProgAt >= 250) {
+        lastProgAt = now;
+        onProgress?.({ source: sourceId, done, total });
+      }
+    },
+  });
+  const upserted = upsertRemoteTracks(library, cfg, tracks);
+  const seen = new Set(upserted.map((t) => t.id));
   // Tracks no longer on the server. A server that suddenly lists nothing (or less than half of what it had) is
   // more likely broken or half-indexed than emptied, so nothing is pruned then. Tracks with the user's work on
   // them (cues, analysis, ratings, plays…) are kept and flagged `remoteMissing` instead of deleted.
-  const prevCount = library.allTracks().filter((t) => t.sourceId === sourceId && t.sourceType === 'remote').length;
-  const gone = library.allTracks().filter((t) => t.sourceId === sourceId && !seen.has(t.id));
+  let prevCount = 0;
+  const gone = [];
+  for (const t of library.allTracks()) {
+    if (t.sourceId !== sourceId) continue;
+    if (t.sourceType === 'remote') prevCount++;
+    if (!seen.has(t.id)) gone.push(t);
+  }
   let pruned = 0, kept = 0;
   const suspicious = gone.length && (tracks.length === 0 || (prevCount >= 10 && tracks.length < prevCount * 0.5));
   if (!suspicious) {
-    for (const t of gone) { if (t.localPath) { t.sourceType = 'local'; t.path = t.localPath; } }
+    for (const t of gone) { if (t.localPath) { t.sourceType = 'local'; t.path = t.localPath; library.markTrackDirty?.(t.id); } }
     const drop = [];
     for (const t of gone) {
       if (t.localPath) continue;
-      if (USER_DATA(t)) { t.remoteMissing = true; kept++; } else drop.push(t.id);
+      if (USER_DATA(t)) { t.remoteMissing = true; library.markTrackDirty?.(t.id); kept++; } else drop.push(t.id);
     }
     pruned = drop.length;
-    library.removeTracks(drop);
+    if (drop.length) library.removeTracks(drop);
   }
-  for (const rt of tracks) { const t = library.getTrack(Library.remoteId(sourceId, rt.remoteId)); if (t?.remoteMissing) delete t.remoteMissing; }
+  for (const t of upserted) { if (t?.remoteMissing) { delete t.remoteMissing; library.markTrackDirty?.(t.id); } }
 
   let playlists = [];
   try { playlists = await client.listPlaylists(); } catch { /* playlists optional */ }

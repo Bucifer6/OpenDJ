@@ -19,9 +19,13 @@ const BINS = HALF + 1;
 const TAU = Math.PI * 2;
 const COLA = 2 / 3; // 1 / sum(hann^2) for 75 % overlap (N/Hs = 4)
 
-// Precomputed Hann window and radix-2 bit-reversal + twiddle tables (shared across all deck instances).
+// Precomputed Hann window, synthesis Hann*COLA, and radix-2 bit-reversal + twiddle tables (shared across all deck instances).
 const HANN = new Float32Array(PV_SIZE);
-for (let i = 0; i < PV_SIZE; i++) HANN[i] = 0.5 * (1 - Math.cos((TAU * i) / PV_SIZE));
+const SYNTH_HANN = new Float32Array(PV_SIZE);
+for (let i = 0; i < PV_SIZE; i++) {
+  HANN[i] = 0.5 * (1 - Math.cos((TAU * i) / PV_SIZE));
+  SYNTH_HANN[i] = HANN[i] * COLA;
+}
 
 const BITREV = new Uint16Array(PV_SIZE);
 for (let i = 0, bits = Math.log2(PV_SIZE); i < PV_SIZE; i++) {
@@ -69,8 +73,14 @@ export function fft2048(re, im, inverse = false) {
 }
 
 function wrapPhase(p) {
-  p = (p + Math.PI) % TAU;
-  return p < 0 ? p + TAU - Math.PI : p - Math.PI;
+  if (p > Math.PI) {
+    p -= TAU;
+    if (p > Math.PI) { p = (p + Math.PI) % TAU; return p < 0 ? p + TAU - Math.PI : p - Math.PI; }
+  } else if (p < -Math.PI) {
+    p += TAU;
+    if (p < -Math.PI) { p = (p + Math.PI) % TAU; return p < 0 ? p + TAU - Math.PI : p - Math.PI; }
+  }
+  return p;
 }
 
 export class StereoPhaseVocoder {
@@ -147,6 +157,7 @@ export class StereoPhaseVocoder {
     for (let k = 0; k < BINS; k++) {
       const rl = reL[k], il = imL[k], rr = reR[k], ir = imR[k];
       const p2 = rl * rl + il * il + rr * rr + ir * ir;
+      if (p2 <= 1e-18) { mag[k] = 0; inPhase[k] = 0; continue; }
       const m = Math.sqrt(p2);
       mag[k] = m;
       magSum += m;
@@ -243,7 +254,7 @@ export class StereoPhaseVocoder {
     const mask = PV_SIZE - 1;
     for (let i = 0; i < PV_SIZE; i++) {
       const idx = (base + i) & mask;
-      const w = HANN[i] * COLA;
+      const w = SYNTH_HANN[i];
       olaL[idx] += zRe[i] * w;
       olaR[idx] += zIm[i] * w;
     }

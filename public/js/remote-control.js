@@ -215,6 +215,7 @@ export async function setupRemoteControl(app, api) {
   if (platform.local) return null; // mobile app: no server
   let cfg;
   try { cfg = await (await fetch('/api/mcp/config', { credentials: 'same-origin' })).json(); } catch { return null; }
+  if (!cfg?.enabled) return { pageId, es: null, enabled: false };
   const claim = () => post('/api/mcp/claim', { page: pageId }).catch(() => {});
   await claim();
   const es = api.events({
@@ -228,5 +229,5 @@ export async function setupRemoteControl(app, api) {
       } catch (e) { await post('/api/mcp/result', { id, error: String(e?.message || e).slice(0, 300) }); }
     },
   });
-  return { pageId, es, enabled: !!cfg?.enabled };
+  return { pageId, es, enabled: true };
 }

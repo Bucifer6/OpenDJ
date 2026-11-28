@@ -30,16 +30,43 @@ const META_SQL = 'INSERT INTO meta (k, json) VALUES (?, ?) ON CONFLICT(k) DO UPD
 const FTS_DEL_SQL = 'DELETE FROM tracks_fts WHERE rowid = ?';
 const FTS_INS_SQL = 'INSERT INTO tracks_fts (rowid, id, title, artist, album, genre, tags) VALUES (?, ?, ?, ?, ?, ?, ?)';
 
+const ANALYSIS_FIELDS = ['barFeatures', 'tempoMap'];
+const ANALYSIS_UPSERT_SQL = 'INSERT INTO track_analysis (id, json) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET json=excluded.json';
+const ANALYSIS_DEL_SQL = 'DELETE FROM track_analysis WHERE id = ?';
+const ANALYSIS_GET_SQL = 'SELECT json FROM track_analysis WHERE id = ?';
+const IDLE_CLOSE_MS = 5000;
+
+export function stripHeavyAnalysis(t) {
+  if (!t || (!('barFeatures' in t) && !('tempoMap' in t))) return t;
+  const { barFeatures, tempoMap, ...slim } = t;
+  return slim;
+}
+
+function extractHeavyAnalysis(t) {
+  let out = null;
+  for (const k of ANALYSIS_FIELDS) {
+    if (t[k] !== undefined && t[k] !== null && (!Array.isArray(t[k]) || t[k].length > 0)) {
+      if (!out) out = {};
+      out[k] = t[k];
+    }
+  }
+  return out;
+}
+
 export class SqliteStore {
   constructor(dbPath) {
     if (!sqliteMod?.DatabaseSync) throw new Error('node:sqlite is not available in this Node runtime');
     this.path = dbPath;
     this.hasFts = false;
+    this._db = null;
+    this._st = null;
+    this._idleT = null;
     this._withDb((db) => {
       db.exec(`
         PRAGMA journal_mode = WAL;
         PRAGMA synchronous = NORMAL;
         PRAGMA temp_store = MEMORY;
+        PRAGMA cache_size = -16000;
         CREATE TABLE IF NOT EXISTS tracks (
           id TEXT PRIMARY KEY,
           title TEXT,
@@ -55,6 +82,10 @@ export class SqliteStore {
         );
         CREATE INDEX IF NOT EXISTS idx_tracks_bpm ON tracks(bpm);
         CREATE INDEX IF NOT EXISTS idx_tracks_key ON tracks(key_code);
+        CREATE TABLE IF NOT EXISTS track_analysis (
+          id TEXT PRIMARY KEY,
+          json TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS meta (
           k TEXT PRIMARY KEY,
           json TEXT NOT NULL
@@ -98,23 +129,51 @@ export class SqliteStore {
     for (const suf of ['', '-wal', '-shm']) chmodQuiet(dbPath + suf, 0o600);
   }
 
-  _withDb(fn) {
+  _open() {
+    if (this._db) return this._db;
     const db = new sqliteMod.DatabaseSync(this.path);
     try {
-      db.exec('PRAGMA busy_timeout = 3000; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY;');
-      return fn(db);
-    } finally {
+      db.exec('PRAGMA busy_timeout = 3000; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -16000;');
+    } catch (e) {
       try { db.close(); } catch { /* */ }
-      chmodQuiet(this.path, 0o600);
+      throw e;
+    }
+    this._db = db;
+    this._st = null;
+    return db;
+  }
+
+  _touchIdle() {
+    clearTimeout(this._idleT);
+    this._idleT = setTimeout(() => this.close(), IDLE_CLOSE_MS);
+    this._idleT.unref?.();
+  }
+
+  _withDb(fn) {
+    const db = this._open();
+    try {
+      return fn(db);
+    } catch (e) {
+      // If the handle errored (e.g. corrupt/external change), drop it so the next call reopens cleanly.
+      this.close();
+      throw e;
+    } finally {
+      if (this._db) this._touchIdle();
     }
   }
 
   trackCount() {
-    return this._withDb((db) => Number(db.prepare('SELECT COUNT(*) AS n FROM tracks').get()?.n) || 0);
+    return this._withDb((db) => {
+      if (!this._st) this._st = this._prepareWriters(db);
+      return Number(this._st.countTracks.get()?.n) || 0;
+    });
   }
 
   hasMeta() {
-    return this._withDb((db) => (Number(db.prepare('SELECT COUNT(*) AS n FROM meta').get()?.n) || 0) > 0);
+    return this._withDb((db) => {
+      if (!this._st) this._st = this._prepareWriters(db);
+      return (Number(this._st.countMeta.get()?.n) || 0) > 0;
+    });
   }
 
   _prepareWriters(db) {
@@ -123,8 +182,14 @@ export class SqliteStore {
       getRowid: db.prepare(GET_ROWID_SQL),
       del: db.prepare(DELETE_SQL),
       meta: db.prepare(META_SQL),
+      analysisUpsert: db.prepare(ANALYSIS_UPSERT_SQL),
+      analysisDel: db.prepare(ANALYSIS_DEL_SQL),
+      analysisGet: db.prepare(ANALYSIS_GET_SQL),
+      countTracks: db.prepare('SELECT COUNT(*) AS n FROM tracks'),
+      countMeta: db.prepare('SELECT COUNT(*) AS n FROM meta'),
       ftsDel: this.hasFts ? db.prepare(FTS_DEL_SQL) : null,
       ftsIns: this.hasFts ? db.prepare(FTS_INS_SQL) : null,
+      ftsSearch: this.hasFts ? db.prepare('SELECT id FROM tracks_fts WHERE tracks_fts MATCH ? LIMIT ?') : null,
     };
   }
 
@@ -132,14 +197,17 @@ export class SqliteStore {
     if (!t?.id) return;
     const prev = !isReplaceAll && st.ftsDel ? st.getRowid.get(t.id) : null;
     if (prev) st.ftsDel.run(prev.rowid);
+    const heavy = extractHeavyAnalysis(t);
+    const slim = heavy ? stripHeavyAnalysis(t) : t;
     const info = st.upsert.run(
       t.id, t.title || '', t.artist || '', t.album || '', t.genre || '',
       Number.isFinite(Number(t.bpm)) ? Number(t.bpm) : null,
       t.key || null,
       Number.isFinite(Number(t.energy)) ? Number(t.energy) : null,
       Number(t.rating) || 0, Number(t.playCount) || 0,
-      JSON.stringify(t),
+      JSON.stringify(slim),
     );
+    if (heavy) st.analysisUpsert.run(t.id, JSON.stringify(heavy));
     if (st.ftsIns) {
       const rowid = prev ? prev.rowid : (info?.lastInsertRowid ?? st.getRowid.get(t.id)?.rowid);
       if (rowid != null) {
@@ -151,7 +219,8 @@ export class SqliteStore {
   /** Incremental O(dirty) transaction: writes only changed/removed tracks and updated metadata. */
   commitIncremental({ upserts = [], removes = [], meta = null } = {}) {
     this._withDb((db) => {
-      const st = this._prepareWriters(db);
+      if (!this._st) this._st = this._prepareWriters(db);
+      const st = this._st;
       db.exec('BEGIN IMMEDIATE');
       try {
         for (const t of upserts) this._writeOneTrack(st, t);
@@ -161,6 +230,7 @@ export class SqliteStore {
             if (prev) st.ftsDel.run(prev.rowid);
           }
           st.del.run(id);
+          st.analysisDel.run(id);
         }
         if (meta) {
           for (const [k, v] of Object.entries(meta)) st.meta.run(k, JSON.stringify(v));
@@ -176,10 +246,12 @@ export class SqliteStore {
   /** Replace the entire DB snapshot (used during initial migration from library.json or backup restore). */
   replaceAll(data) {
     this._withDb((db) => {
-      const st = this._prepareWriters(db);
+      if (!this._st) this._st = this._prepareWriters(db);
+      const st = this._st;
       db.exec('BEGIN IMMEDIATE');
       try {
         db.exec('DELETE FROM tracks');
+        db.exec('DELETE FROM track_analysis');
         if (this.hasFts) db.exec('DELETE FROM tracks_fts');
         for (const t of Object.values(data.tracks || {})) this._writeOneTrack(st, t, { isReplaceAll: true });
         for (const k of ['version', 'playlists', 'folders', 'sources', 'pathAlias']) {
@@ -197,13 +269,24 @@ export class SqliteStore {
   loadAll() {
     return this._withDb((db) => {
       const out = { version: 1, tracks: {}, playlists: [], folders: [], sources: [] };
-      for (const row of db.prepare('SELECT id, json FROM tracks').all()) {
+      for (const row of db.prepare('SELECT id, json FROM tracks').iterate()) {
         try { out.tracks[row.id] = JSON.parse(row.json); } catch { /* skip corrupt row */ }
       }
       for (const row of db.prepare('SELECT k, json FROM meta').all()) {
         try { out[row.k] = JSON.parse(row.json); } catch { /* */ }
       }
       return out;
+    });
+  }
+
+  /** Load heavy on-demand analysis fields (`barFeatures`, `tempoMap`) for one track. */
+  getAnalysis(id) {
+    if (!id) return null;
+    return this._withDb((db) => {
+      if (!this._st) this._st = this._prepareWriters(db);
+      const row = this._st.analysisGet.get(id);
+      if (!row?.json) return null;
+      try { return JSON.parse(row.json); } catch { return null; }
     });
   }
 
@@ -215,8 +298,9 @@ export class SqliteStore {
     if (!tokens.length) return null;
     const expr = tokens.map((t) => `"${t}"*`).join(' AND ');
     return this._withDb((db) => {
+      if (!this._st) this._st = this._prepareWriters(db);
       try {
-        const rows = db.prepare('SELECT id FROM tracks_fts WHERE tracks_fts MATCH ? LIMIT ?').all(expr, limit);
+        const rows = this._st.ftsSearch.all(expr, limit);
         return rows.map((r) => r.id);
       } catch {
         return null;
@@ -225,7 +309,15 @@ export class SqliteStore {
   }
 
   close() {
-    // Connections are scoped to each operation and closed immediately.
+    clearTimeout(this._idleT);
+    this._idleT = null;
+    const db = this._db;
+    this._db = null;
+    this._st = null;
+    if (db) {
+      try { db.close(); } catch { /* */ }
+      chmodQuiet(this.path, 0o600);
+    }
   }
 }
 

@@ -276,7 +276,7 @@ test('stems server: a GPU that crashes the engine: the track is redone on the CP
     assert.equal(ev.backend, 'stub', 'redone on the CPU');
     assert.deepEqual(failed, [], 'the crash is not reported as a failure');
     const st = await h.json('GET', '/api/stems/status');
-    assert.match(st.native.gpuFailed?.message || '', /stopped \(signal SIGKILL\)/);
+    assert.match(st.native.gpuFailed?.message || '', process.platform === 'win32' ? /stopped \((?:signal SIGKILL|exit 1)\)/ : /stopped \(signal SIGKILL\)/);
     const saved = JSON.parse(fs.readFileSync(path.join(h.dir, 'stems', 'gpu-check.json'), 'utf8'));
     assert.equal(saved.backend, 'gpu'); assert.equal(saved.ort, 'stub'); assert.equal(saved.version, GPU_CHECK_VERSION);
     // retry: the record is gone and the next load tries the GPU again

@@ -107,17 +107,24 @@ export function detectBpm(mono, sr, { min = 70, max = 180, _envOut = null } = {}
   }
   const onsetMean = envSum / env.length;
   if (!(onsetMean > MIN_ONSET)) return { bpm: null, offset: 0, confidence: 0 };
-  // 1) autocorrelation over the tempo range
+  // 1) autocorrelation over the tempo range via radix-2 FFT (O(N log N) instead of O(N * maxLag))
   const minLag = Math.floor(fps * 60 / max), maxLag = Math.ceil(fps * 60 / min);
   const N = Math.min(env.length, Math.floor(fps * 120)); // first 2 minutes is plenty for ACF
   const start = Math.max(0, Math.floor((env.length - N) / 2));
   let best = { lag: 0, v: -1 };
-  const acf = new Float32Array(maxLag * 2 + 2);
-  for (let lag = Math.floor(minLag / 2); lag <= maxLag * 2 + 1; lag++) {
-    let v = 0;
-    for (let k = start; k + lag < start + N; k++) v += env[k] * env[k + lag];
-    acf[lag] = v;
-  }
+  const acfMax = maxLag * 2 + 1;
+  const acf = new Float32Array(acfMax + 1);
+  let fftN = 1;
+  while (fftN < N + acfMax + 1) fftN <<= 1;
+  const re = new Float64Array(fftN), im = new Float64Array(fftN);
+  for (let i = 0; i < N; i++) re[i] = env[start + i];
+  fftInPlace(re, im);
+  for (let i = 0; i < fftN; i++) { re[i] = re[i] * re[i] + im[i] * im[i]; im[i] = 0; }
+  // Inverse FFT of real even power spectrum: IFFT(P) = Re(FFT(P)) / fftN
+  fftInPlace(re, im);
+  const invFftN = 1 / fftN;
+  const lagLo = Math.floor(minLag / 2);
+  for (let lag = lagLo; lag <= acfMax; lag++) acf[lag] = re[lag] * invFftN;
   const A = (l) => Math.max(acf[l - 1] || 0, acf[l] || 0, acf[l + 1] || 0); // tolerate fractional periods
   for (let lag = minLag; lag <= maxLag; lag++) {
     const bpm = 60 * fps / lag;

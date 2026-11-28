@@ -58,7 +58,7 @@ export class Deck extends Emitter {
   reset() {
     this.track = null; this.duration = 0; this.sr = this.ctx.sampleRate;
     this._pos = 0; this._t = 0; this._rate = 0; this._seekGuard = 0; this.playing = false;
-    this.cuePoint = 0; this.loop = null; this.loopIn = null; this.waveform = null;
+    this.cuePoint = 0; this.loop = null; this.loopIn = null; this.waveform = null; this.onsets = null;
     this.bpm = 0; this.gridOffset = 0; this.loading = false; this.error = null; this.failedTrack = null;
     this._countedPlay = false;
     this.frames = 0; this._stemSeq = (this._stemSeq || 0) + 1;
@@ -191,48 +191,60 @@ export class Deck extends Emitter {
       }
       if (stale()) return false; // another load superseded this one
       phase('Decoding');
-      const buf = await this.ctx.decodeAudioData(ab);
+      // Hydrate on-demand heavy analysis (barFeatures, tempoMap) in parallel with audio decode when slim catalog omitted them
+      const analysisP = track.analyzed && (!track.barFeatures || !track.tempoMap) && api.trackAnalysis
+        ? api.trackAnalysis(track.id).then((extra) => { if (extra && typeof extra === 'object' && this.track === track) Object.assign(track, extra); }, () => {})
+        : null;
+      // Decode on a short-lived OfflineAudioContext so Chromium releases decoder buffers promptly (falls back to ctx in mocks)
+      const decCtx = typeof OfflineAudioContext === 'function' ? new OfflineAudioContext(2, 1, this.ctx.sampleRate) : this.ctx;
+      let buf = await decCtx.decodeAudioData(ab);
       ab = null; // release compressed audio bytes immediately so RAM doesn't hold both raw + decoded buffers
-      if (stale()) return false;
+      if (stale()) { buf = null; return false; }
       this.sr = buf.sampleRate; this.duration = buf.duration;
       // waveform + analysis (cached on the server after the first time)
       let wave = track.analyzed ? decodeWaveform(await api.waveform(track.id) || new ArrayBuffer(0)) : null;
-      if (stale()) return false;
+      if (stale()) { buf = null; return false; }
       if (!wave) { // analyse once; tracks whose BPM can't be detected aren't re-analysed on every load
-        // analysis copy straight from the decoded audio (no intermediate full-length float copies)
+        // time-sliced mono mixdown so loading an unanalyzed track never freezes waveforms/UI
         const c0 = buf.getChannelData(0), c1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : null;
         const mono = new Float32Array(c0.length);
-        if (c1) for (let i = 0; i < mono.length; i++) mono[i] = (c0[i] + c1[i]) * 0.5; else mono.set(c0);
+        if (c1) await sliced(mono.length, (a, b) => { for (let i = a; i < b; i++) mono[i] = (c0[i] + c1[i]) * 0.5; });
+        else mono.set(c0);
+        if (stale()) { buf = null; return false; }
         phase('Analysing');
         const r = await this.engine.analyze(mono, buf.sampleRate);
-        if (stale()) return false;
+        if (stale()) { buf = null; return false; }
         wave = decodeWaveform(r.wave.buffer);
         const patch = analysisPatch(track, r.result, { duration: buf.duration, autoCues: this.engine.settings.autoCues });
         Object.assign(track, patch);
         api.saveWaveform(track.id, r.wave).catch(() => {});
         api.updateTrack(track.id, patch).then((t) => this.engine.emit('track-updated', t)).catch(() => {});
       }
+      if (analysisP) await analysisP;
       this.waveform = wave;
       this.bpm = track.bpm || 0; this.gridOffset = track.gridOffset || 0;
       if (!track.phrases && wave && this.bpm) this.refreshStructure(false); // tracks analysed before phrase detection existed
       // Deck memory: 16-bit samples by default (CD resolution, half the RAM of float); 32-bit float on request.
-      const hiPrec = !!this.engine.settings.highPrecisionAudio;
       const ch0 = buf.getChannelData(0), ch1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : null;
+      const sampleRate = buf.sampleRate;
+      const hiPrec = !!this.engine.settings.highPrecisionAudio;
       // 16-bit decks: material above 0 dBFS (float files, inter-sample overs of loud lossy masters) is stored
       // peak-normalised and scaled back in the worklet, so it never clips before the channel / auto gain.
       // time-sliced (yields to the event loop every few ms) so a load never freezes the UI or the other deck's waveform
       const scale = hiPrec ? 1 : Math.max(1, await peakAbsSliced(ch0), ch1 ? await peakAbsSliced(ch1) : 0);
-      if (stale()) return false;
+      if (stale()) { buf = null; return false; }
       this.audioScale = scale;
       const left = await deckChannelSliced(ch0, hiPrec, scale);
       const right = ch1 ? await deckChannelSliced(ch1, hiPrec, scale) : null;
-      if (stale()) return false;
+      if (stale()) { buf = null; return false; }
       this.frames = left.length;
-      this.node.port.postMessage({ type: 'load', left, right, sampleRate: buf.sampleRate, scale }, right ? [left.buffer, right.buffer] : [left.buffer]);
-      // kick onset curve for automix's audible phase check (audio/beat-phase.js), built in the background in slices;
-      // aborts immediately if the deck is reloaded/ejected so the decoded AudioBuffer is never retained
+      this.node.port.postMessage({ type: 'load', left, right, sampleRate, scale }, right ? [left.buffer, right.buffer] : [left.buffer]);
+      // kick onset curve for automix's audible phase check (audio/beat-phase.js): compute on a compact mono mix
+      // or release buf right after so the 115 MB+ stereo Float32 AudioBuffer is never pinned across GC cycles
       this.onsets = null;
-      onsetCurve(ch0, ch1, buf.sampleRate, { shouldAbort: stale }).then((c) => { if (c && !stale()) this.onsets = c; }, () => {});
+      const onsetBuf = buf;
+      buf = null;
+      onsetCurve(ch0, ch1, sampleRate, { shouldAbort: stale }).then((c) => { if (c && !stale()) this.onsets = c; }, () => {}).finally(() => { void onsetBuf; });
       this.resetStemControls(); this.postStemGains();
       this.rateMul = 1; this.post('rate', { value: this.rate }); this.post('keylock', { value: this.keyLock });
       this.keyShift = 0; this.post('pitch', { value: 1 });
@@ -730,18 +742,31 @@ export class Deck extends Emitter {
     this.stemsLoading = true; this.stemsError = null; this.emit('stems');
     try {
       const out = [];
+      const decCtx = typeof OfflineAudioContext === 'function' ? new OfflineAudioContext(2, 1, this.ctx.sampleRate) : this.ctx;
+      const scale = this.audioScale || 1;
+      const g = 32767 / (scale > 1 ? scale : 1);
       for (const name of STEM_NAMES.slice(0, LOADED_STEMS)) { // "other" is the residual, computed in the worklet
         const res = await fetch(stemUrl(track.id, name), { credentials: 'same-origin' });
         if (!res.ok) throw new Error(`stem ${name}: HTTP ${res.status}`);
-        const ab = await res.arrayBuffer();
+        let ab = await res.arrayBuffer();
         if (stale()) return false;
-        const buf = await this.ctx.decodeAudioData(ab);
+        const buf = await decCtx.decodeAudioData(ab);
+        ab = null;
         if (stale()) return false;
         if (Math.abs(buf.length - frames) > this.ctx.sampleRate * 0.5) throw new Error('Stems do not match this file (prepare them again)');
         const pair = {};
         for (const [k, c] of [['L', 0], ['R', Math.min(1, buf.numberOfChannels - 1)]]) {
           const src = buf.getChannelData(c), dst = new Int16Array(frames);
-          floatToInt16(src.length > frames ? src.subarray(0, frames) : src, dst, this.audioScale || 1); // same scale as the deck audio
+          const n = Math.min(src.length, frames);
+          // Time-sliced Int16 conversion so loading AI stems onto a playing deck never stalls waveforms/UI
+          await sliced(n, (a, b) => {
+            for (let i = a; i < b; i++) {
+              let v = src[i] * g;
+              v = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
+              dst[i] = Math.round(v);
+            }
+          });
+          if (stale()) return false;
           pair[k] = dst;
         }
         out.push(pair);
@@ -1040,7 +1065,19 @@ export function deckChannel(src, highPrecision = false, scale = 1) {
 // ---- time-sliced versions for the UI thread: same results, but they hand control back after ~4 ms of work, so the
 // waveform and platters keep drawing at full frame rate while a track loads ----
 const CHUNK = 1 << 14, BUDGET_MS = 4;
-const yieldTask = () => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => { c.port1.close(); r(); }; c.port2.postMessage(0); });
+let _yieldCh = null, _yieldWaiters = [];
+const yieldTask = () => {
+  if (typeof globalThis.scheduler?.yield === 'function') return globalThis.scheduler.yield();
+  if (typeof globalThis.setImmediate === 'function') return new Promise((r) => globalThis.setImmediate(r));
+  return new Promise((r) => {
+    if (!_yieldCh) {
+      _yieldCh = new MessageChannel();
+      _yieldCh.port1.onmessage = () => { const list = _yieldWaiters.splice(0); for (const fn of list) fn(); };
+    }
+    _yieldWaiters.push(r);
+    if (_yieldWaiters.length === 1) _yieldCh.port2.postMessage(0);
+  });
+};
 const now = () => globalThis.performance?.now?.() ?? Date.now();
 /** Runs work(a, b) over [0, n) in chunks, yielding to the event loop whenever ~BUDGET_MS has been used. */
 async function sliced(n, work) {

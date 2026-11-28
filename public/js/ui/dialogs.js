@@ -660,15 +660,17 @@ export class Dialogs {
     );
     const dvsTab = el('div', { class: 'form' }, el('p', { class: 'hint' }, 'Control decks with Serato or Traktor timecode vinyl / CDs through your audio interface inputs.'), el('button', { class: 'btn', onclick: () => import('../dvs/dvs-ui.js').then((m) => m.openDvsPanel(app)) }, 'Open DVS setup…'));
     const about = this.aboutPane(chk);
+    let stemsPane = null, remotePane = null;
     const tabs = platform.local
       ? { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], mobile: ['Mobile', this.mobileInfo()], about: ['About', about] }
-      : { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], mapper: ['Controller Mapper', mapperPane], dvs: ['DVS', dvsTab], stems: ['AI stems', stemsSettingsPane(app)], remote: ['Remote control', remoteSettingsPane(app)], keys: ['Shortcuts', shortcuts], about: ['About', about] };
+      : { appearance: ['Appearance', appearance], audio: ['Audio', audio], decks: ['Decks', decks], automix: ['Automix', automix], library: ['Library', library], controllers: ['Controllers', controllers], mapper: ['Controller Mapper', mapperPane], dvs: ['DVS', dvsTab], stems: ['AI stems', () => (stemsPane ||= stemsSettingsPane(app))], remote: ['Remote control', () => (remotePane ||= remoteSettingsPane(app))], keys: ['Shortcuts', shortcuts], about: ['About', about] };
     if (!tabs[tab]) tab = 'audio';
     const tabBar = el('div', { class: 'tabs' });
     const pane = el('div', { class: 'tab-pane' });
     const show = (k, reload = false) => {
       const wasMapper = pane.firstChild === mapperPane;
-      pane.replaceChildren(tabs[k][1]);
+      const content = typeof tabs[k][1] === 'function' ? (tabs[k][1] = tabs[k][1]()) : tabs[k][1];
+      pane.replaceChildren(content);
       for (const b of tabBar.children) b.classList.toggle('active', b.dataset.k === k);
       pane.closest('.modal')?.classList.toggle('mapper-wide', k === 'mapper');
       if (k === 'mapper' && (reload || !wasMapper || !mapperFrame)) loadMapper(); // moving a frame in the DOM reloads it anyway
@@ -683,6 +685,7 @@ export class Dialogs {
     app.midi.attachMapper(null);
     app.midi.cancelLearn();
     controllers?.destroy?.();
+    stemsPane?.destroy?.();
   }
 
   /** Settings → Library in the mobile app (no folders: import, rekordbox / M3U, exports through the share sheet). */

@@ -94,9 +94,11 @@ export function bundledFfmpegPath() {
   } catch { return null; }
 }
 
+const ffmpegProbeCache = new Map();
+
 /**
  * Find a working ffmpeg. `explicit`: a path, false/"none" (disabled), or undefined (auto).
- * Returns { path, version, source, encoders: { libx264, aac } } or null.
+ * Returns { path, version, source, encoders: { libx264, aac, flac, libmp3lame, libopus } } or null.
  */
 export async function findFfmpeg(explicit = process.env.OPENDJ_FFMPEG) {
   const cands = [];
@@ -108,11 +110,33 @@ export async function findFfmpeg(explicit = process.env.OPENDJ_FFMPEG) {
     cands.push({ path: process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', source: 'path' });
   }
   for (const c of cands) {
+    let statKey = c.path;
+    try {
+      const st = fs.statSync(c.path);
+      statKey = `${c.path}|${st.size}|${Math.trunc(st.mtimeMs)}`;
+    } catch { /* PATH binary */ }
+    const hit = ffmpegProbeCache.get(statKey);
+    if (hit !== undefined) {
+      if (hit) return { ...hit, source: c.source };
+      continue;
+    }
     const r = await run(c.path, ['-hide_banner', '-version']);
     const m = /ffmpeg version (\S+)/.exec(r.out + r.err);
-    if (r.code !== 0 || !m) continue;
+    if (r.code !== 0 || !m) { ffmpegProbeCache.set(statKey, null); continue; }
     const enc = await run(c.path, ['-hide_banner', '-encoders']);
-    return { ...c, version: m[1], encoders: { libx264: /\blibx264\b/.test(enc.out), aac: /\baac\b/.test(enc.out), flac: /\bflac\b/.test(enc.out) } };
+    const info = {
+      ...c,
+      version: m[1],
+      encoders: {
+        libx264: /\blibx264\b/.test(enc.out),
+        aac: /\baac\b/.test(enc.out),
+        flac: /\bflac\b/.test(enc.out),
+        libmp3lame: /\blibmp3lame\b/.test(enc.out),
+        libopus: /\blibopus\b/.test(enc.out),
+      },
+    };
+    ffmpegProbeCache.set(statKey, info);
+    return info;
   }
   return null;
 }

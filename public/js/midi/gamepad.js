@@ -30,7 +30,15 @@ export class GamepadManager {
   start() {
     if (this.running) return;
     this.running = true;
-    const loop = () => { if (!this.running) return; this.poll(); requestAnimationFrame(loop); };
+    let lastAt = 0;
+    const loop = (now) => {
+      if (!this.running) return;
+      requestAnimationFrame(loop);
+      if (document.hidden || (lastAt && now - lastAt < 15.5)) return;
+      this._dtScale = lastAt ? Math.min(3, (now - lastAt) / 16.667) : 1;
+      lastAt = now;
+      this.poll();
+    };
     requestAnimationFrame(loop);
   }
 
@@ -83,7 +91,7 @@ export class GamepadManager {
   }
   /** Deflection → steady movement: jog turns ~0.7 rev/s at full tilt, list targets scroll ~15 rows/s. */
   relStep(e, t, v) {
-    const speed = /jog/i.test(t.id) ? 8 : 0.25;
+    const speed = (/jog/i.test(t.id) ? 8 : 0.25) * (this._dtScale || 1);
     const a = (this.acc.get(e) || 0) + v * speed;
     const whole = Math.trunc(a);
     this.acc.set(e, a - whole);

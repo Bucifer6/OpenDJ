@@ -260,27 +260,39 @@ export function jogWheel(deck, opts = {}) {
   // Static layers are rendered once per size / theme / skin (platter-skins.js); a frame draws the moving parts only,
   // and frames whose signature did not change are skipped.
   let touched = false, size = 0, body = null, sig = '', deckColor = null, skinId = '', skin = null, armK = null;
-  let roW = 0; // platter size from the observer entry (no layout read in the draw)
+  let roW = 0, roObserved = false; // platter size from the observer entry (no layout read in the draw)
   let art = null, artKey = '', artFor = null, lastNow = 0;
   const strobe = [0, 0, 0];
   const reducedQ = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
   const frameState = { ang: 0, k: 0, strobe, cues: [] };
-  const ro = new ResizeObserver((es) => { roW = es.at(-1).contentRect.width * uiZoom(); size = 0; });
+  const ro = new ResizeObserver((es) => { roObserved = true; roW = es.at(-1).contentRect.width * uiZoom(); size = 0; });
   ro.observe(canvas);
   // The deck's platter style (Settings → Decks) wins; with Minimal, the skin's own jog style (Brushed / Digital / Vinyl,
   // Settings → Appearance) is drawn by jog-art.js, and 'classic' is the Minimal platter.
   let jogStyle = document.documentElement.dataset.jogStyle || 'classic';
-  window.addEventListener('opendj-theme', () => { jogStyle = document.documentElement.dataset.jogStyle || 'classic'; body = null; deckColor = null; sig = ''; });
+  const onTheme = () => { jogStyle = document.documentElement.dataset.jogStyle || 'classic'; body = null; deckColor = null; sig = ''; };
+  window.addEventListener('opendj-theme', onTheme);
+  root.destroy = () => {
+    ro.disconnect();
+    window.removeEventListener('opendj-theme', onTheme);
+    body = null; skin = null; art = null;
+    canvas.width = 0; canvas.height = 0;
+  };
   const pickSkin = () => {
     const chosen = opts.skin?.() || 'minimal';
     const id = chosen === 'minimal' && jogStyle !== 'classic' ? `jog:${jogStyle}` : chosen;
     if (id !== skinId) { skinId = id; skin = id.startsWith('jog:') ? new JogArtSkin(jogStyle) : makeSkin(id); body = null; sig = ''; root.dataset.skin = id.startsWith('jog:') ? 'minimal' : id; }
   };
+  const maxBacking = opts.maxBacking || 640;
   root.draw = (now = performance.now()) => {
+    // Skip rendering completely when platter is display:none (Performance / Waveform / 4-Deck layouts)
+    if (roObserved && roW <= 0) return;
     pickSkin();
     if (!size) {
       const w = roW || canvas.getBoundingClientRect().width;
-      size = Math.max(64, Math.min(1024, Math.round(w * (devicePixelRatio || 1)))) || 360;
+      if (w <= 0) return;
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      size = Math.max(64, Math.min(maxBacking, Math.round(w * dpr))) || 360;
       if (canvas.width !== size) { canvas.width = size; canvas.height = size; body = null; sig = ''; }
     }
     const W = canvas.width;

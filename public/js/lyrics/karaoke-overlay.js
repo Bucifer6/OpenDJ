@@ -75,22 +75,35 @@ export function drawKaraoke(g, W, H, { state, color = '#3ea6ff', showNext = true
   return true;
 }
 
+function karaokeSig(f) {
+  if (!f?.state) return '';
+  const s = f.state;
+  const gapDots = s.gap && s.next ? Math.ceil(Math.max(0, s.next.t - (s.t ?? s.next.t))) : 0;
+  return `${s.line?.t ?? ''}|${s.line?.text ?? ''}|${s.wordIndex ?? -1}|${Math.round((s.wordProgress || 0) * 60)}|${Math.round((s.progress || 0) * 160)}|${s.next?.t ?? ''}|${s.gap ? 1 : 0}|${gapDots}|${f.color || ''}|${f.showNext === false ? 0 : 1}`;
+}
+
 /** Hook the karaoke layer into a VideoMixer instance (idempotent). Returns { uninstall }. */
 export function installKaraokeOverlay(mixer, getFrame) {
   if (!mixer || typeof mixer.paintOverlay !== 'function') return null;
   if (mixer._karaoke) { mixer._karaoke.getFrame = getFrame; return mixer._karaoke; }
   const orig = mixer.paintOverlay;
-  const k = { getFrame, was: false };
+  const k = { getFrame, was: false, lastSig: '' };
   mixer.paintOverlay = function paintOverlayWithKaraoke(now) {
     let f = null;
     try { f = k.getFrame(now); } catch (e) { console.warn('karaoke overlay', e); }
-    if (f || k.was) this.overlayDirty = true; // redraw the overlay while lyrics move (and once to clear them)
+    const sig = karaokeSig(f);
+    const changed = sig !== k.lastSig;
+    if (changed) { this.overlayDirty = true; k.lastSig = sig; }
     k.was = !!f;
+    const wasDirty = this.overlayDirty;
     const has = orig.call(this, now);
     if (!f) return has;
-    const drawn = drawKaraoke(this.og, this.overlay.width, this.overlay.height, f);
-    this._overlayChanged = true;
-    return has || drawn;
+    if (wasDirty || changed) {
+      const drawn = drawKaraoke(this.og, this.overlay.width, this.overlay.height, f);
+      this._overlayChanged = true;
+      return has || drawn;
+    }
+    return true;
   };
   k.uninstall = () => { mixer.paintOverlay = orig; delete mixer._karaoke; mixer.overlayDirty = true; };
   mixer._karaoke = k;

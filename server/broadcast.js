@@ -292,12 +292,12 @@ export class BroadcastOutput extends EventEmitter {
     if (t.type === 'rtmp') {
       const [w, h] = t.resolution.split('x').map(Number);
       const img = this.image && fs.existsSync(this.image) ? this.image : null;
-      const video = img ? ['-re', '-loop', '1', '-framerate', '10', '-thread_queue_size', '64', '-i', img] : ['-re', '-f', 'lavfi', '-i', `color=c=0x101418:s=${w}x${h}:r=10`];
+      const video = img ? ['-re', '-loop', '1', '-framerate', '2', '-thread_queue_size', '64', '-i', img] : ['-re', '-f', 'lavfi', '-i', `color=c=0x101418:s=${w}x${h}:r=2`];
       const url = this.rtmpTarget();
       return ['-hide_banner', '-nostdin', '-loglevel', 'error', '-stats_period', '2', '-progress', 'pipe:2', ...this.inputArgs(), ...video,
         '-map', '1:v', '-map', '0:a',
         '-vf', `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,format=yuv420p`,
-        '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-r', '10', '-g', '20', '-keyint_min', '20', '-sc_threshold', '0',
+        '-c:v', 'libx264', '-threads', '2', '-preset', 'veryfast', '-tune', 'zerolatency', '-r', '2', '-g', '4', '-keyint_min', '4', '-sc_threshold', '0',
         '-b:v', `${t.videoBitrate}k`, '-maxrate', `${t.videoBitrate}k`, '-bufsize', `${t.videoBitrate * 2}k`,
         '-c:a', 'aac', '-b:a', `${t.audioBitrate}k`, '-ar', '44100', '-ac', '2',
         '-flvflags', 'no_duration_filesize', '-f', 'flv', url];

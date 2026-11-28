@@ -16,9 +16,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ids = new Set(targetList().map((t) => t.id));
 
 test('controller mapper: committed files are up to date (run node scripts/build-controller-mapper.mjs)', () => {
-  assert.equal(readFileSync(INDEX, 'utf8'), buildIndex());
-  assert.equal(readFileSync(BUNDLE, 'utf8'), buildBundle());
-  assert.equal(readFileSync(OUT, 'utf8'), build());
+  const norm = (s) => s.replace(/\r\n/g, '\n');
+  assert.equal(norm(readFileSync(INDEX, 'utf8')), buildIndex());
+  assert.equal(norm(readFileSync(BUNDLE, 'utf8')), buildBundle());
+  assert.equal(norm(readFileSync(OUT, 'utf8')), build());
 });
 
 test('controller mapper: page embeds every OpenDJ function, the wizard code and the controller list', () => {

@@ -197,7 +197,7 @@ export class MidiManager extends Emitter {
     this.mappings = structuredClone(this.app.settings.midiMappings || {});
     this.hid.init().catch((e) => console.warn('HID:', e));
     this.gamepads.init();
-    setInterval(() => this.updateLeds(), 80);
+    this._ledT = null;
     if (typeof navigator === 'undefined' || !navigator.requestMIDIAccess) { this.unsupported = true; return; }
     try {
       this.access = await navigator.requestMIDIAccess({ sysex: false });
@@ -208,9 +208,15 @@ export class MidiManager extends Emitter {
       setInterval(() => this.checkCommunityUpdates().catch(() => {}), 6 * 3600 * 1000);
     } catch (e) { this.error = e.message; }
   }
+  _syncLedTimer() {
+    const hasOut = this.outputs().length > 0;
+    if (hasOut && !this._ledT) this._ledT = setInterval(() => this.updateLeds(), 80);
+    else if (!hasOut && this._ledT) { clearInterval(this._ledT); this._ledT = null; }
+  }
   inputs() { return this.access ? [...this.access.inputs.values()] : []; }
   outputs() { return this.access ? [...this.access.outputs.values()] : []; }
   bind() {
+    this._syncLedTimer();
     for (const inp of this.inputs()) {
       inp.onmidimessage = (e) => this.onMessage(inp, e.data);
       // a bundled preset that was updated since it was stored (corrected chart values): refresh its entries

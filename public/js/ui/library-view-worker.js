@@ -1,6 +1,7 @@
 import { camelotCompatible, toCamelot } from '../audio/analysis-core.js';
 
 const upper = (v) => (v.includes('.') ? +v : +v + 0.999);
+const COLLATOR = new Intl.Collator(undefined, { numeric: true });
 let cachedKey = '';
 let cachedItems = [];
 
@@ -56,7 +57,7 @@ self.addEventListener('message', ({ data }) => {
     list = [...list].sort((a, b) => {
       const x = val(a), y = val(b);
       if (x == null || x === '') return 1; if (y == null || y === '') return -1;
-      return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true })) * dir;
+      return (typeof x === 'number' ? x - y : COLLATOR.compare(String(x), String(y))) * dir;
     });
   }
   const indices = new Int32Array(list.length);

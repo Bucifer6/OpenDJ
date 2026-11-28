@@ -91,8 +91,14 @@ export async function openDvsPanel(app) {
     'Timecode position decoding (ABS) uses community-documented parameters that have not yet been verified with physical records; REL works with any 1 kHz / 2 kHz quadrature timecode.');
   const body = el('div', { class: 'dvs-panel' }, top, cardsBox, help);
   const offChange = mgr.on('change', () => renderTop());
-  let raf = 0;
-  const frame = () => { if (!body.isConnected) { cancelAnimationFrame(raf); return; } for (const c of cards) c.frame(); raf = requestAnimationFrame(frame); };
+  let raf = 0, lastAt = 0;
+  const frame = (now) => {
+    if (!body.isConnected) { cancelAnimationFrame(raf); return; }
+    raf = requestAnimationFrame(frame);
+    if (document.hidden || (lastAt && now - lastAt < 33)) return;
+    lastAt = now;
+    for (const c of cards) c.frame();
+  };
   raf = requestAnimationFrame(frame);
   await app.dialogs.modal('DVS — timecode vinyl / CD control', body, [{ label: 'Close', primary: true, value: true }], { wide: true });
   cancelAnimationFrame(raf); offChange();
@@ -139,35 +145,42 @@ function deckCard(app, mgr, i, sel, chk) {
       el('div', { class: 'dvs-stats' }, mLevel, mQual, nSpeed, nPitch, nFreq, nPos, nErr)));
 
   const g = scope.getContext('2d');
+  let deckColor = null, lastMode = '';
+  const setText = (elNode, txt) => { if (elNode.textContent !== txt) elNode.textContent = txt; };
   card.frame = () => {
     const st = dd.status, W = scope.width, H = scope.height;
     g.fillStyle = '#07080a'; g.fillRect(0, 0, W, H);
     g.strokeStyle = '#1c2128'; g.lineWidth = 1; g.beginPath(); g.moveTo(W / 2, 0); g.lineTo(W / 2, H); g.moveTo(0, H / 2); g.lineTo(W, H / 2); g.stroke();
     g.beginPath(); g.arc(W / 2, H / 2, W * 0.36, 0, Math.PI * 2); g.stroke();
-    renderMode();
-    if (!dd.active || !st) { state.textContent = mgr.running ? 'no input on this pair' : 'off'; state.className = 'dvs-state off'; return; }
+    if (dd.mode !== lastMode) { lastMode = dd.mode; renderMode(); }
+    if (!dd.active || !st) { setText(state, mgr.running ? 'no input on this pair' : 'off'); state.className = 'dvs-state off'; return; }
     // Lissajous, auto-scaled to the recent peak
-    const sc = st.scope; let pk = 1e-4;
-    for (let k = 0; k < sc.length; k++) pk = Math.max(pk, Math.abs(sc[k]));
-    const k0 = (W * 0.42) / pk;
-    g.strokeStyle = getComputedStyle(card).getPropertyValue('--deck-color').trim() || '#3ea6ff'; g.globalAlpha = 0.85; g.beginPath();
-    for (let k = 0; k < sc.length; k += 2) { const x = W / 2 + sc[k] * k0, y = H / 2 - sc[k + 1] * k0; k ? g.lineTo(x, y) : g.moveTo(x, y); }
-    g.stroke(); g.globalAlpha = 1;
+    const sc = st.scope;
+    if (sc && sc.length) {
+      let pk = 1e-4;
+      for (let k = 0; k < sc.length; k++) pk = Math.max(pk, Math.abs(sc[k]));
+      const k0 = (W * 0.42) / pk;
+      deckColor ||= getComputedStyle(card).getPropertyValue('--deck-color').trim() || '#3ea6ff';
+      g.strokeStyle = deckColor; g.globalAlpha = 0.85; g.beginPath();
+      for (let k = 0; k < sc.length; k += 2) { const x = W / 2 + sc[k] * k0, y = H / 2 - sc[k + 1] * k0; k ? g.lineTo(x, y) : g.moveTo(x, y); }
+      g.stroke(); g.globalAlpha = 1;
+    }
     const db = 20 * Math.log10(Math.max(1e-6, st.peak));
-    fLevel.style.width = `${Math.max(0, Math.min(100, (db + 60) / 60 * 100))}%`; tLevel.textContent = db < -90 ? "−∞" : `${db.toFixed(0)} dB`;
+    fLevel.style.width = `${Math.max(0, Math.min(100, (db + 60) / 60 * 100))}%`; setText(tLevel, db < -90 ? "−∞" : `${db.toFixed(0)} dB`);
     fLevel.classList.toggle('clip', st.peak > 0.98);
-    fQual.style.width = `${Math.round(st.quality * 100)}%`; tQual.textContent = `${Math.round(st.quality * 100)}%`;
+    fQual.style.width = `${Math.round(st.quality * 100)}%`; setText(tQual, `${Math.round(st.quality * 100)}%`);
     fQual.style.background = st.quality > 0.8 ? 'var(--green)' : st.quality > 0.5 ? 'var(--amber)' : 'var(--red)';
     const rpmF = RPM_FACTOR[dd.settings.rpm] || 1;
-    vSpeed.textContent = st.signal ? `${(st.velocity).toFixed(3)}×` : '–';
-    vPitch.textContent = st.pitch ? `${(st.pitch / rpmF - 1) * 100 >= 0 ? '+' : ''}${((st.pitch / rpmF - 1) * 100).toFixed(2)}%` : '–';
-    vFreq.textContent = st.signal ? `${Math.abs(st.carrierHz).toFixed(0)} Hz` : '–';
+    setText(vSpeed, st.signal ? `${(st.velocity).toFixed(3)}×` : '–');
+    setText(vPitch, st.pitch ? `${(st.pitch / rpmF - 1) * 100 >= 0 ? '+' : ''}${((st.pitch / rpmF - 1) * 100).toFixed(2)}%` : '–');
+    setText(vFreq, st.signal ? `${Math.abs(st.carrierHz).toFixed(0)} Hz` : '–');
     const def = dd.def;
-    vPos.textContent = st.lock && st.pos >= 0 ? fmtTime(st.pos / def.carrier) : def.bits ? (dd.mode === 'abs' ? 'searching' : '–') : 'n/a (relative timecode)';
-    vErr.textContent = st.bitsRead ? `${(st.bitErrors / st.bitsRead * 100).toFixed(1)}%` : '–';
+    setText(vPos, st.lock && st.pos >= 0 ? fmtTime(st.pos / def.carrier) : def.bits ? (dd.mode === 'abs' ? 'searching' : '–') : 'n/a (relative timecode)');
+    setText(vErr, st.bitsRead ? `${(st.bitErrors / st.bitsRead * 100).toFixed(1)}%` : '–');
     const txt = !st.signal ? 'no signal (needle up / record stopped)' : dd.leadIn ? 'lead-in' : dd.endWarning ? 'near the end of the record!' : st.speed < -0.05 ? 'reverse' : 'playing';
-    state.textContent = txt;
-    state.className = `dvs-state ${!st.signal ? 'off' : dd.endWarning ? 'warn' : 'ok'}`;
+    setText(state, txt);
+    const cls = `dvs-state ${!st.signal ? 'off' : dd.endWarning ? 'warn' : 'ok'}`;
+    if (state.className !== cls) state.className = cls;
   };
   return card;
 }

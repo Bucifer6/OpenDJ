@@ -106,6 +106,20 @@ async function load(m, { cpuOnly = false } = {}) {
       let remembered = null;
       try { remembered = JSON.parse(fs.readFileSync(memo, 'utf8')); } catch { /* first time */ }
       if (remembered?.ok === false && remembered.ort === ortVersion()) { gpuFailed ||= { backend: ep, message: remembered.message }; log(`${ep}: ${remembered.message} (checked before)`); continue; }
+      // Fast path: if this exact GPU provider + level + ORT version already passed verification before,
+      // load it directly without re-running a 1-5 s synthetic CPU-vs-GPU inference on every 90 s respawn.
+      if (remembered?.ok === true && remembered.ort === ortVersion() && remembered.level) {
+        const epOpts = { ...opts, graphOptimizationLevel: remembered.level, ...(ep === 'dml' ? { enableMemPattern: false, executionMode: 'sequential' } : {}) };
+        try {
+          log(`loading verified ${ep} (graph optimisation: ${remembered.level})`);
+          const s = await ort.InferenceSession.create(m.model, { ...epOpts, executionProviders: [ep] });
+          gpuFailed = null;
+          session = s; runner = createRunner(s, ort.Tensor); info = { backend: ep, threads: 0, loadMs: Date.now() - t0, level: remembered.level };
+          return;
+        } catch (e) {
+          log(`${ep} (${remembered.level}) reload failed, re-verifying: ${e.message}`);
+        }
+      }
       const levels = [...new Set([remembered?.ok ? remembered.level : null, ...GPU_LEVELS].filter(Boolean))];
       const failures = [];
       let input, ref;
@@ -166,10 +180,10 @@ async function release() {
   try { await s?.release?.(); } catch { /* already released */ }
 }
 
-/** Decode any input FFmpeg reads to planar float 44.1 kHz stereo. */
-function decode(ffmpeg, input, maxFrames) {
+/** Stream FFmpeg decode to a temporary interleaved f32le stereo file on disk (~6 MB RAM even for 90-min mixes). */
+function decodeToFile(ffmpeg, input, maxFrames, tmpFile) {
   return new Promise((resolve, reject) => {
-    const args = ['-hide_banner', '-loglevel', 'error', '-nostdin'];
+    const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-threads', '2'];
     if (input.url) {
       const h = Object.entries(input.headers || {}).map(([k, v]) => `${k}: ${v}\r\n`).join('');
       if (h) args.push('-headers', h);
@@ -177,25 +191,28 @@ function decode(ffmpeg, input, maxFrames) {
     } else args.push('-i', input.file);
     args.push('-map', '0:a:0', '-vn', '-f', 'f32le', '-ac', '2', '-ar', String(MODEL_RATE), '-');
     const p = spawn(ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-    const chunks = []; let bytes = 0, err = '', tooLong = false;
+    const out = fs.createWriteStream(tmpFile);
+    let bytes = 0, err = '', tooLong = false, settled = false;
+    const fail = (e) => { if (!settled) { settled = true; try { out.destroy(); } catch { /* */ } reject(e); } };
+    out.on('error', (e) => { p.kill(); fail(e); });
     p.stdout.on('data', (c) => {
       bytes += c.length;
-      if (maxFrames && bytes > maxFrames * 8) { tooLong = true; p.kill(); return; }
-      chunks.push(c);
+      if (maxFrames && bytes > maxFrames * 8) { tooLong = true; p.kill(); out.destroy(); return; }
+      if (!out.write(c)) p.stdout.pause();
     });
+    out.on('drain', () => p.stdout.resume());
     p.stderr.on('data', (d) => { err = (err + d).slice(-2000); });
-    p.on('error', reject);
+    p.on('error', fail);
     p.on('close', (code) => {
-      if (tooLong) return reject(new Error(`The track is too long for stems (max. ${Math.round(maxFrames / MODEL_RATE / 60)} minutes)`));
-      if (code !== 0) return reject(new Error(`Could not decode the track: ${err.trim().split('\n').pop() || `ffmpeg exited with ${code}`}`));
-      const buf = Buffer.concat(chunks);
-      chunks.length = 0;
-      const length = Math.floor(buf.length / 8);
-      if (!length) return reject(new Error('The track has no audio'));
-      const f = new Float32Array(buf.buffer, buf.byteOffset, length * 2);
-      const left = new Float32Array(length), right = new Float32Array(length);
-      for (let i = 0; i < length; i++) { left[i] = f[2 * i]; right[i] = f[2 * i + 1]; }
-      resolve({ left, right, length });
+      if (tooLong) return fail(new Error(`The track is too long for stems (max. ${Math.round(maxFrames / MODEL_RATE / 60)} minutes)`));
+      if (code !== 0) return fail(new Error(`Could not decode the track: ${err.trim().split('\n').pop() || `ffmpeg exited with ${code}`}`));
+      out.end(() => {
+        if (settled) return;
+        settled = true;
+        const length = Math.floor(bytes / 8);
+        if (!length) return reject(new Error('The track has no audio'));
+        resolve({ file: tmpFile, length });
+      });
     });
   });
 }
@@ -203,12 +220,37 @@ function decode(ffmpeg, input, maxFrames) {
 async function job(m) {
   const t0 = Date.now();
   send({ type: 'progress', id: m.id, phase: 'decoding', done: 0, total: 0 });
-  const audio = await decode(m.ffmpeg, m.input, m.maxFrames);
+  const pcmFile = `${m.dir}/input.f32`;
+  const decoded = await decodeToFile(m.ffmpeg, m.input, m.maxFrames, pcmFile);
+  const pcmFd = fs.openSync(decoded.file, 'r');
   const fds = STEMS.map((s) => fs.openSync(`${m.dir}/${s}.raw`, 'w'));
   const pos = STEMS.map(() => 0);
   let lastSent = 0;
+  let readBuf = null;
+  const fillChunk = (offset, chunkLen, segment, out) => {
+    const start = offset - Math.floor((segment - chunkLen) / 2);
+    out.fill(0);
+    const a = Math.max(0, start), b = Math.min(decoded.length, start + segment);
+    const count = b - a;
+    if (count <= 0) return;
+    const needBytes = count * 8;
+    if (!readBuf || readBuf.length < needBytes) readBuf = Buffer.allocUnsafe(segment * 8);
+    let got = 0;
+    while (got < needBytes) {
+      const r = fs.readSync(pcmFd, readBuf, got, needBytes - got, a * 8 + got);
+      if (r <= 0) break;
+      got += r;
+    }
+    const frames = Math.floor(got / 8);
+    const f = new Float32Array(readBuf.buffer, readBuf.byteOffset, frames * 2);
+    const dstOff = a - start;
+    for (let i = 0; i < frames; i++) {
+      out[dstOff + i] = f[2 * i];
+      out[segment + dstOff + i] = f[2 * i + 1];
+    }
+  };
   const run = async () => separateChunked({
-    channels: [audio.left, audio.right], length: audio.length, segment: runner.segment, overlap: m.overlap ?? 0.25, sources: runner.sources.length,
+    channelCount: 2, fillChunk, length: decoded.length, segment: runner.segment, overlap: m.overlap ?? 0.25, sources: runner.sources.length,
     runChunk: runner.runChunk,
     onProgress: (done, total) => {
       const now = Date.now();
@@ -231,10 +273,12 @@ async function job(m) {
       pos.fill(0);
       r = await run();
     }
-    send({ type: 'done', id: m.id, frames: audio.length, ms: Date.now() - t0, chunks: r.chunks, backend: info.backend, threads: info.threads, ...(gpuFailed ? { gpuFailed } : {}) });
+    send({ type: 'done', id: m.id, frames: decoded.length, ms: Date.now() - t0, chunks: r.chunks, backend: info.backend, threads: info.threads, ...(gpuFailed ? { gpuFailed } : {}) });
   } finally {
-    audio.left = null; audio.right = null;
-    for (const fd of fds) fs.closeSync(fd);
+    readBuf = null;
+    try { fs.closeSync(pcmFd); } catch { /* */ }
+    for (const fd of fds) { try { fs.closeSync(fd); } catch { /* */ } }
+    try { fs.rmSync(pcmFile, { force: true }); } catch { /* */ }
   }
 }
 
