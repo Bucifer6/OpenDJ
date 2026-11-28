@@ -48,6 +48,35 @@ export function hann(n) {
   return hannCache.get(n);
 }
 
+const ispecInvEnvCache = new Map();
+let ispecScaleCache = null;
+const fftReScratch = new Float64Array(4096);
+const fftImScratch = new Float64Array(4096);
+
+function getIspecScale() {
+  if (!ispecScaleCache) {
+    const w = hann(NFFT), norm = Math.sqrt(NFFT);
+    ispecScaleCache = new Float32Array(NFFT);
+    for (let i = 0; i < NFFT; i++) ispecScaleCache[i] = w[i] * norm / NFFT;
+  }
+  return ispecScaleCache;
+}
+
+function getIspecInvEnv(length) {
+  let inv = ispecInvEnvCache.get(length);
+  if (inv) return inv;
+  const le = specFrames(length), pad = (HOP / 2) * 3;
+  const w = hann(NFFT);
+  const off = pad + NFFT / 2 - 2 * HOP;
+  const env = new Float64Array(length);
+  for (let t = -2; t < le + 2; t++) for (let i = 0; i < NFFT; i++) { const k = t * HOP + i - off; if (k >= 0 && k < length) env[k] += w[i] * w[i]; }
+  inv = new Float32Array(length);
+  for (let k = 0; k < length; k++) inv[k] = env[k] > 0 ? 1 / env[k] : 0;
+  if (ispecInvEnvCache.size > 4) ispecInvEnvCache.clear();
+  ispecInvEnvCache.set(length, inv);
+  return inv;
+}
+
 /** Reflect index into [0, n) (torch 'reflect' padding, edge sample not repeated). */
 function reflect(i, n) {
   if (n === 1) return 0;
@@ -72,7 +101,7 @@ export function demucsSpec(mix, channels, length) {
   const padLen = le * HOP + 2 * pad;          // after HTDemucs' own padding
   const out = new Float32Array(channels * 2 * BINS * le);
   const plan = fftPlan(NFFT), w = hann(NFFT), norm = 1 / Math.sqrt(NFFT);
-  const re = new Float64Array(NFFT), im = new Float64Array(NFFT);
+  const re = fftReScratch, im = fftImScratch;
   // padded signal of channel c: two reflect paddings (HTDemucs pad1d, then stft center padding)
   const padded = [];
   for (let c = 0; c < channels; c++) {
@@ -110,14 +139,11 @@ export function demucsSpec(mix, channels, length) {
  */
 export function demucsISpec(z, sources, channels, length, out = new Float32Array(sources * channels * length)) {
   const le = specFrames(length), pad = (HOP / 2) * 3;
-  const plan = fftPlan(NFFT), w = hann(NFFT), norm = Math.sqrt(NFFT);
-  const re = new Float64Array(NFFT), im = new Float64Array(NFFT);
-  // window-square envelope (torch istft divides by it); constant 1.5 in the region we keep, computed anyway
+  const plan = fftPlan(NFFT);
+  const re = fftReScratch, im = fftImScratch;
   const off = pad + NFFT / 2 - 2 * HOP; // sample k of the output sits at offset k + off from data frame 0's start
-  const env = new Float64Array(length);
-  for (let t = -2; t < le + 2; t++) for (let i = 0; i < NFFT; i++) { const k = t * HOP + i - off; if (k >= 0 && k < length) env[k] += w[i] * w[i]; }
-  const scale = new Float64Array(NFFT);
-  for (let i = 0; i < NFFT; i++) scale[i] = w[i] * norm / NFFT; // ifft 1/n, normalized=True, synthesis window
+  const invEnv = getIspecInvEnv(length);
+  const scale = getIspecScale();
   const plane = BINS * le;
   for (let s = 0; s < sources; s++) {
     for (let c = 0; c < channels; c += 2) {
@@ -141,8 +167,9 @@ export function demucsISpec(z, sources, channels, length, out = new Float32Array
         const i0 = Math.max(0, -start), i1 = Math.min(NFFT, length - start);
         for (let i = i0; i < i1; i++) {
           const k = start + i;
-          out[oA + k] += re[i] * scale[i] / env[k];
-          if (two) out[oB + k] += -im[i] * scale[i] / env[k];
+          const sc = scale[i] * invEnv[k];
+          out[oA + k] += re[i] * sc;
+          if (two) out[oB + k] += -im[i] * sc;
         }
       }
     }
@@ -273,8 +300,8 @@ export const backendMismatchError = (backend, diff) => Object.assign(new Error(`
  * Every chunk is checked (mixtureError) before it is used: invalid output throws badOutputError, so the caller
  * can redo the track on another backend instead of writing noise.
  */
-export async function separateChunked({ channels, length, segment, overlap = 0.25, sources, runChunk, onBlock, onProgress, shouldStop }) {
-  const C = channels.length;
+export async function separateChunked({ channels, channelCount, fillChunk, length, segment, overlap = 0.25, sources, runChunk, onBlock, onProgress, shouldStop }) {
+  const C = channelCount || channels.length;
   const { stride, chunks } = planChunks(length, segment, overlap);
   const ola = new StreamingOLA(sources, C, length, segment, stride);
   const input = new Float32Array(C * segment);
@@ -282,7 +309,8 @@ export async function separateChunked({ channels, length, segment, overlap = 0.2
   for (let i = 0; i < chunks.length; i++) {
     if (shouldStop?.()) throw Object.assign(new Error('Cancelled'), { name: 'AbortError' });
     const { offset, length: n } = chunks[i];
-    chunkInput(channels, length, offset, n, segment, input);
+    if (fillChunk) fillChunk(offset, n, segment, input);
+    else chunkInput(channels, length, offset, n, segment, input);
     const out = await runChunk(input);
     const bad = mixtureError(input, out, sources, C, segment);
     if (!(bad <= MAX_MIXTURE_ERROR)) throw badOutputError(bad);

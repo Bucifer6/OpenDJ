@@ -12,6 +12,23 @@
 // Loaded with audioWorklet.addModule() (see loadEffectWorklets in effects.js).
 
 const TAU = Math.PI * 2;
+const LUT_N = 1024;
+const COS_LUT = new Float32Array(LUT_N + 1);
+const SIN2_LUT = new Float32Array(LUT_N + 1);
+for (let i = 0; i <= LUT_N; i++) {
+  COS_LUT[i] = 0.5 - 0.5 * Math.cos((TAU * i) / LUT_N);
+  const s = Math.sin((Math.PI * i) / LUT_N);
+  SIN2_LUT[i] = s * s;
+}
+function cos01(ph) {
+  const x = ph * LUT_N, i = x | 0;
+  return COS_LUT[i] + (COS_LUT[i + 1] - COS_LUT[i]) * (x - i);
+}
+function sin2Pi(ph) {
+  const x = ph * LUT_N, i = x | 0;
+  return SIN2_LUT[i] + (SIN2_LUT[i + 1] - SIN2_LUT[i]) * (x - i);
+}
+function nextPow2(n) { let p = 1; while (p < n) p <<= 1; return p; }
 /** Beat clock message { beat, at, beatSec }: beat = null -> free-run at beatSec. */
 function onClock(o, m) {
   if (!m || !(m.beatSec > 0)) return;
@@ -24,7 +41,7 @@ function lockBeat(o) {
   const target = o.clock.beat + (currentTime - o.clock.at) / o.beatSec, err = target - o.beat;
   o.beat += Math.abs(err) > 0.25 ? err : err * 0.06;
 }
-function lfoShape(ph, shape) { return shape === 1 ? (ph < 0.5 ? ph * 2 : 2 - ph * 2) : 0.5 - 0.5 * Math.cos(TAU * ph); }
+function lfoShape(ph, shape) { return shape === 1 ? (ph < 0.5 ? ph * 2 : 2 - ph * 2) : cos01(ph); }
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
 const frac = (x) => x - Math.floor(x);
 
@@ -55,13 +72,13 @@ class LfoProcessor extends AudioWorkletProcessor {
     switch (shape) {
       case 1: return ph < 0.5 ? ph * 2 : 2 - ph * 2;
       case 2: { // gate: on for [0, duty), raised-cosine edges `edge` wide (in cycles)
-        if (ph < edge) return 0.5 - 0.5 * Math.cos(Math.PI * ph / edge);
+        if (ph < edge) return cos01(0.5 * ph / edge);
         if (ph < duty - edge) return 1;
-        if (ph < duty) return 0.5 + 0.5 * Math.cos(Math.PI * (ph - duty + edge) / edge);
+        if (ph < duty) return 1 - cos01(0.5 * (ph - duty + edge) / edge);
         return 0;
       }
       case 3: return 1 - ph;
-      default: return 0.5 - 0.5 * Math.cos(TAU * ph);
+      default: return cos01(ph);
     }
   }
   process(_in, outputs, p) {
@@ -106,11 +123,11 @@ class ReverbProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
     const sr = sampleRate;
-    this.preLen = Math.ceil(0.6 * sr) + 2; this.pre = new Float32Array(this.preLen); this.preW = 0;
+    this.preLen = nextPow2(Math.ceil(0.6 * sr) + 2); this.preMask = this.preLen - 1; this.pre = new Float32Array(this.preLen); this.preW = 0;
     this.diff = DIFF_MS.map((ms) => { const len = Math.round(ms * sr / 1000); return { buf: new Float32Array(len), i: 0, len }; });
     this.lines = FDN_MS.map((ms, j) => {
-      const base = ms * sr / 1000, cap = Math.ceil(base * 1.6) + 64;
-      return { buf: new Float32Array(cap), cap, w: 0, base, lp: 0, g: 0, modRate: 0.3 + j * 0.07, modPh: j * 0.7 };
+      const base = ms * sr / 1000, cap = nextPow2(Math.ceil(base * 1.6) + 64);
+      return { buf: new Float32Array(cap), cap, mask: cap - 1, w: 0, base, lp: 0, g: 0, modRate: 0.3 + j * 0.07, modPh: j * 0.7 };
     });
     this.x = new Float32Array(8); this.hold = 0; this.energy = 0;
     this.mods = new Float64Array(4);
@@ -141,7 +158,7 @@ class ReverbProcessor extends AudioWorkletProcessor {
     const sr = sampleRate, pdT = clamp(p.predelay[0], 0, 0.5) * sr, pk = this._pk;
     if (this.pd == null) this.pd = pdT;
     let pd = this.pd;
-    const pre = this.pre, preLen = this.preLen, lines = this.lines, x = this.x, damp = this.damp, og = this.outGain;
+    const pre = this.pre, preMask = this.preMask, lines = this.lines, x = this.x, damp = this.damp, og = this.outGain;
     const diff = this.diff, gDiff = 0.62, mods = this.mods, erOff = this.erOff;
     let energy = 0;
     // per-block modulation of the first four line lengths (±0.25 ms), interpolated read
@@ -151,25 +168,23 @@ class ReverbProcessor extends AudioWorkletProcessor {
       pre[this.preW] = (inL + inR) * 0.5;
       pd += (pdT - pd) * pk; // pre-delay glides (no read-pointer jumps)
       const rp = this.preW - pd; const ri = Math.floor(rp), rf = rp - ri;
-      const a = pre[(ri + preLen) % preLen], b = pre[(ri + 1 + preLen) % preLen];
+      const a = pre[ri & preMask], b = pre[(ri + 1) & preMask];
       let s = a + (b - a) * rf;
       // early reflections from the pre-delayed signal
       let eL = 0, eR = 0;
       for (let k = 0; k < ER.length; k++) {
         const e = ER[k];
-        let idx = Math.floor(this.preW - pd - erOff[k]) % preLen;
-        if (idx < 0) idx += preLen;
-        const v = pre[idx] * e[1];
+        const v = pre[Math.floor(this.preW - pd - erOff[k]) & preMask] * e[1];
         if (e[2]) eR += v; else eL += v;
       }
-      this.preW = (this.preW + 1) % preLen;
+      this.preW = (this.preW + 1) & preMask;
       // input diffusion (series all-passes)
-      for (let k = 0; k < 4; k++) { const d = diff[k], z = d.buf[d.i]; const v = s + gDiff * z; d.buf[d.i] = v; s = z - gDiff * v; d.i = (d.i + 1) % d.len; }
+      for (let k = 0; k < 4; k++) { const d = diff[k], z = d.buf[d.i]; const v = s + gDiff * z; d.buf[d.i] = v; s = z - gDiff * v; if (++d.i >= d.len) d.i = 0; }
       // read the delay lines
       for (let j = 0; j < 8; j++) {
         const L = lines[j], len = L.len + (j < 4 ? mods[j] : 0);
         const r = L.w - len, r0 = Math.floor(r), f = r - r0;
-        const c = L.cap, y0 = L.buf[(r0 % c + c) % c], y1 = L.buf[((r0 + 1) % c + c) % c];
+        const m = L.mask, y0 = L.buf[r0 & m], y1 = L.buf[(r0 + 1) & m];
         let y = y0 + (y1 - y0) * f;
         L.lp = y + (L.lp - y) * damp; // damping
         x[j] = L.lp * L.g;
@@ -180,7 +195,7 @@ class ReverbProcessor extends AudioWorkletProcessor {
       let outL = 0, outR = 0;
       for (let j = 0; j < 8; j++) {
         const L = lines[j], v = x[j] * sc + s * (j & 1 ? -0.5 : 0.5);
-        L.buf[L.w] = v; L.w = (L.w + 1) % L.cap;
+        L.buf[L.w] = v; L.w = (L.w + 1) & L.mask;
         const y = L.lp;
         outL += (j & 1) ? -y : y; outR += (j & 2) ? -y : y;
         energy += y * y;
@@ -208,14 +223,21 @@ class CrushProcessor extends AudioWorkletProcessor {
     const n = out[0].length, k = n === 128 ? this._k : 1 - Math.exp(-n / (0.01 * sampleRate)); // ~10 ms parameter smoothing per block
     if (this.bits === null) { this.bits = p.bits[0]; this.rate = p.rate[0]; } // start at the set values, then glide
     this.bits += (p.bits[0] - this.bits) * k; this.rate += (p.rate[0] - this.rate) * k;
-    const q = Math.pow(2, this.bits - 1), step = Math.min(1, this.rate / sampleRate);
+    const x0 = inp[0], x1 = inp[1] || inp[0];
+    let silent = !x0;
+    if (!silent) { silent = true; for (let i = 0; i < n; i++) { if (x0[i] !== 0 || x1[i] !== 0) { silent = false; break; } } }
+    if (silent && this.hold[0] === 0 && this.hold[1] === 0) {
+      for (let c = 0; c < out.length; c++) out[c].fill(0);
+      return true;
+    }
+    const q = Math.pow(2, this.bits - 1), invQ = 1 / q, step = Math.min(1, this.rate / sampleRate);
     for (let c = 0; c < out.length; c++) {
       const o = out[c], x = inp[c] || inp[0];
       if (!x) { o.fill(0); continue; }
       let acc = this.acc[c] ?? 1, h = this.hold[c] ?? 0;
       for (let i = 0; i < n; i++) {
         acc += step;
-        if (acc >= 1) { acc -= 1; h = Math.round(x[i] * q) / q; }
+        if (acc >= 1) { acc -= 1; h = Math.round(x[i] * q) * invQ; }
         o[i] = h;
       }
       this.acc[c] = acc; this.hold[c] = h;
@@ -244,8 +266,8 @@ class LimiterProcessor extends AudioWorkletProcessor {
     super();
     const L = this.L = Math.max(8, Math.round(0.003 * sampleRate)); // 3 ms look-ahead
     this.dl = [new Float32Array(L), new Float32Array(L)]; this.dw = 0;
-    this.req = new Float32Array(L); // required gains in the window (ring)
-    this.dqV = new Float32Array(L + 2); this.dqI = new Float64Array(L + 2); this.dqH = 0; this.dqT = 0; this.t = 0; // monotonic deque (window min)
+    this.M = nextPow2(L + 2); this.dqMask = this.M - 1;
+    this.dqV = new Float32Array(this.M); this.dqI = new Float64Array(this.M); this.dqH = 0; this.dqT = 0; this.t = 0; // monotonic deque (window min)
     this.box = new Float64Array(L); this.boxSum = L; this.box.fill(1); this.bw = 0;
     this.fast = 1; this.slow = 1; this.gr = 1; this.lastGr = 1; this.report = 0;
     this._quiet = 0; this._lastCeil = NaN; this._ceilLin = 1; this._lastRel = NaN; this._relF = 0;
@@ -273,23 +295,23 @@ class LimiterProcessor extends AudioWorkletProcessor {
     const ceil = this._ceilLin, relF = this._relF, relS = this._relS, atkS = this._atkS;
     const dqV = this.dqV, dqI = this.dqI, box = this.box, dL = this.dl[0], dR = this.dl[1];
     let minGr = 1;
-    const M = L + 2;
+    const mask = this.dqMask;
     for (let i = 0; i < n; i++) {
       const xl = iL ? iL[i] : 0, xr = iL ? iR[i] : 0;
       const a = Math.max(Math.abs(xl), Math.abs(xr));
       const req = on && a > ceil ? ceil / a : 1;
       // window minimum of the required gain (monotonic deque, O(1) amortised)
       const t = this.t++;
-      while (this.dqT > this.dqH && dqV[(this.dqT - 1) % M] >= req) this.dqT--;
-      dqV[this.dqT % M] = req; dqI[this.dqT % M] = t; this.dqT++;
-      while (dqI[this.dqH % M] <= t - L - 1) this.dqH++;
-      const wmin = dqV[this.dqH % M];
+      while (this.dqT > this.dqH && dqV[(this.dqT - 1) & mask] >= req) this.dqT--;
+      dqV[this.dqT & mask] = req; dqI[this.dqT & mask] = t; this.dqT++;
+      while (dqI[this.dqH & mask] <= t - L - 1) this.dqH++;
+      const wmin = dqV[this.dqH & mask];
       this.fast = wmin < this.fast ? wmin : wmin + (this.fast - wmin) * relF;
       this.slow = wmin < this.slow ? this.slow * atkS + wmin * (1 - atkS) : wmin + (this.slow - wmin) * relS;
       const g = Math.min(this.fast, Math.max(this.slow, wmin));
-      this.boxSum += g - box[this.bw]; box[this.bw] = g; this.bw = (this.bw + 1) % L;
+      this.boxSum += g - box[this.bw]; box[this.bw] = g; if (++this.bw >= L) this.bw = 0;
       const gs = Math.min(1, this.boxSum / L);
-      const yl = dL[this.dw], yr = dR[this.dw]; dL[this.dw] = xl; dR[this.dw] = xr; this.dw = (this.dw + 1) % L;
+      const yl = dL[this.dw], yr = dR[this.dw]; dL[this.dw] = xl; dR[this.dw] = xr; if (++this.dw >= L) this.dw = 0;
       let ol = yl * gs, or = yr * gs;
       if (on) { if (ol > ceil) ol = ceil; else if (ol < -ceil) ol = -ceil; if (or > ceil) or = ceil; else if (or < -ceil) or = -ceil; }
       oL[i] = ol; if (oR !== oL) oR[i] = or;
@@ -328,7 +350,7 @@ class ModDelayProcessor extends AudioWorkletProcessor {
     this.size = Math.ceil(0.064 * sampleRate);
     this.buf = [new Float32Array(this.size), new Float32Array(this.size)]; this.w = 0;
     this.beat = 0; this.beatSec = 0.5; this.clock = null;
-    this.prev = null; this.hpS = [[0, 0], [0, 0]];
+    this.prev = null; this.hpS = [[0, 0], [0, 0]]; this._quiet = 0;
     this._hpK = Math.exp(-TAU * 160 / sampleRate);
     this.port.onmessage = (e) => onClock(this, e.data);
   }
@@ -336,6 +358,16 @@ class ModDelayProcessor extends AudioWorkletProcessor {
     const inp = inputs[0], out = outputs[0], n = out[0].length, sr = sampleRate;
     const base = p.base[0], depth = p.depth[0], fb = p.feedback[0], dry = p.dry[0], spread = p.spread[0];
     const shape = Math.round(p.shape[0]), beats = p.beats[0];
+    const x0 = inp[0], x1 = inp[1] || inp[0];
+    let silent = !x0;
+    if (!silent) { silent = true; for (let i = 0; i < n; i++) { if (x0[i] !== 0 || x1[i] !== 0) { silent = false; break; } } }
+    if (silent && this._quiet > (this.size >> 7) + 4 && Math.abs(this.hpS[0][1]) < 1e-7 && Math.abs(this.hpS[1][1]) < 1e-7) {
+      out[0].fill(0); if (out[1] && out[1] !== out[0]) out[1].fill(0);
+      lockBeat(this); this.beat += n / (this.beatSec * sr);
+      if (this.prev) { this.prev.base = base; this.prev.depth = depth; }
+      return true;
+    }
+    this._quiet = silent ? this._quiet + 1 : 0;
     // wet scaled so the comb's average power stays put as feedback rises (dry² + wet²/(1-fb²) = const)
     const wet = p.wet[0] * Math.sqrt(1 - fb * fb);
     const hpK = this._hpK; // one-pole high-pass in the feedback path: no bass boom at high feedback
@@ -405,8 +437,7 @@ class PitchProcessor extends AudioWorkletProcessor {
       r += dr;
       ph -= (r - 1) * invW; ph -= Math.floor(ph); // delay (in windows) shrinks when shifting up
       // tap 0 at ph, tap 1 at (ph + 0.5) % 1; sin²(π(ph + 0.5)) = cos²(π·ph) = 1 - sin²(π·ph)
-      const s = Math.sin(Math.PI * ph);
-      const g0 = s * s, g1 = 1 - g0;
+      const g0 = sin2Pi(ph), g1 = 1 - g0;
       let rp0 = w - (2 + ph * W); if (rp0 < 0) rp0 += size;
       const i0a = rp0 | 0, f0 = rp0 - i0a, i0b = i0a + 1 >= size ? 0 : i0a + 1;
       const ph1 = ph < 0.5 ? ph + 0.5 : ph - 0.5;
@@ -437,7 +468,7 @@ class CompProcessor extends AudioWorkletProcessor {
     super();
     this.L = Math.round(0.002 * sampleRate); this.size = this.L + 4;
     this.buf = [new Float32Array(this.size), new Float32Array(this.size)]; this.w = 0; this.lat = 0; this.engaged = false;
-    this.env = 0; this.a = 0; this.g = 1; this.report = 0; this.minG = 1; this.lastGr = 1;
+    this.env = 0; this.a = 0; this.g = 1; this.report = 0; this.minGrDb = 0; this.lastGr = 1; this._quiet = 0;
     this._ka = 1 - Math.exp(-128 / (0.03 * sampleRate));
     this._rel = Math.exp(-1 / (0.15 * sampleRate));
     this._gAtk = Math.exp(-1 / (0.0005 * sampleRate));
@@ -455,7 +486,15 @@ class CompProcessor extends AudioWorkletProcessor {
     const makeup = 0.9 * Math.max(0, -5 - T) * slope; // detector level of a -14 LUFS programme ~ -5 dB
     const rel = this._rel, gAtk = this._gAtk, gRel = this._gRel;
     const L = this.L, size = this.size, b0 = this.buf[0], b1 = this.buf[1], latStep = this._latStep;
-    let env = this.env, g = this.g, minG = this.minG, w = this.w, lat = this.lat;
+    let silent = true;
+    for (let i = 0; i < n; i++) { if (x0[i] !== 0 || x1[i] !== 0) { silent = false; break; } }
+    if (silent && this._quiet > 3 && this.env < 1e-7 && this.g === 1) {
+      o0.fill(0); if (o1 !== o0) o1.fill(0);
+      if (this.lastGr < 1) { this.lastGr = 1; this.port.postMessage({ gr: 1 }); }
+      return true;
+    }
+    this._quiet = silent ? this._quiet + 1 : 0;
+    let env = this.env, g = this.g, minGrDb = this.minGrDb, w = this.w, lat = this.lat;
     for (let i = 0; i < n; i++) {
       const l = x0[i], r = x1[i];
       b0[w] = l; b1[w] = r;
@@ -474,12 +513,13 @@ class CompProcessor extends AudioWorkletProcessor {
       g = tg < g ? tg + (g - tg) * gAtk : tg + (g - tg) * gRel;
       if (a === 0 && Math.abs(g - 1) < 1e-6) g = 1;
       o0[i] = dl * g; if (o1 !== o0) o1[i] = dr * g;
-      if (gr < 0) { const grLin = Math.pow(10, gr / 20); if (grLin < minG) minG = grLin; }
+      if (gr < minGrDb) minGrDb = gr;
     }
-    this.env = env; this.g = g; this.minG = minG; this.w = w; this.lat = lat;
+    this.env = env; this.g = g; this.minGrDb = minGrDb; this.w = w; this.lat = lat;
     if ((this.report += n) >= 4096) {
-      if (this.minG < 1 || this.lastGr < 1) { this.lastGr = this.minG; this.port.postMessage({ gr: this.minG }); }
-      this.report = 0; this.minG = 1;
+      const minG = this.minGrDb < 0 ? Math.pow(10, this.minGrDb / 20) : 1;
+      if (minG < 1 || this.lastGr < 1) { this.lastGr = minG; this.port.postMessage({ gr: minG }); }
+      this.report = 0; this.minGrDb = 0;
     }
     return true;
   }

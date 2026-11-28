@@ -40,11 +40,9 @@ export function setupRecording(app) {
   const anchor = app.recTime || app.recBtn;
   if (anchor?.parentNode) anchor.after(sizeEl, moreBtn, ...(unavailable('broadcast') ? [] : [liveBtn])); // mobile: no live streaming
   if (app.recBtn) app.recBtn.title = 'Record your mix to disk (WAV / FLAC / MP3 / AAC / Opus). R = start / stop';
-  let lastCastError = null, wasActive = true;
-  const topbarTick = setInterval(() => {
+  let lastCastError = null, topbarTimer = null;
+  const renderTopbar = () => {
     const active = !!broadcaster.live || !!recorder.recording;
-    if (!active && !wasActive) return;
-    wasActive = active;
     const outs = broadcaster.status?.outputs || [];
     liveBtn.classList.toggle('active', broadcaster.live);
     liveBtn.classList.toggle('warn', broadcaster.live && outs.some((o) => o.state !== 'live'));
@@ -57,8 +55,13 @@ export function setupRecording(app) {
     if (sizeEl.textContent !== (recorder.recording ? mb(recorder.bytes) : '')) sizeEl.textContent = recorder.recording ? mb(recorder.bytes) : '';
     if (broadcaster.live && !onAir && outs[0]?.error && outs[0].error !== lastCastError) { lastCastError = outs[0].error; toast(`⚠ Broadcast: ${outs[0].error}`); }
     if (onAir) lastCastError = null;
-  }, 500);
-  recorder.on('state', (on) => { app.recBtn?.classList.toggle('active', on); if (!on && app.recTime) app.recTime.textContent = ''; });
+    if (active && !topbarTimer) topbarTimer = setInterval(renderTopbar, 500);
+    else if (!active && topbarTimer) { clearInterval(topbarTimer); topbarTimer = null; }
+  };
+  renderTopbar();
+  recorder.on('state', (on) => { app.recBtn?.classList.toggle('active', on); if (!on && app.recTime) app.recTime.textContent = ''; renderTopbar(); });
+  broadcaster.on('state', () => renderTopbar());
+  broadcaster.on('status', () => renderTopbar());
   recorder.on('warning', (m) => toast(`⚠ ${m}`));
   recorder.on('error', (e) => toast(`⚠ Recording stopped: ${e.message}`));
   recorder.on('stopped', (r) => {

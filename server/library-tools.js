@@ -15,10 +15,11 @@ export { normTitle, findDuplicates, mergeDuplicates, REDACTED, redactSettings, b
  * and `onChange` fires when that changes any status.
  */
 export class MissingChecker {
-  constructor(library, { ttl = 15_000, budgetMs = 150, onChange } = {}) {
+  constructor(library, { ttl = 60_000, budgetMs = 150, onChange } = {}) {
     this.library = library; this.ttl = ttl; this.budgetMs = budgetMs; this.onChange = onChange;
     this.cache = new Map(); // trackId -> { path, missing, at }
     this._bg = null;
+    this._bgAsync = null;
   }
   static fileOf(t) { return t.sourceType === 'local' ? t.path : null; }
 
@@ -73,26 +74,35 @@ export class MissingChecker {
     const now = Date.now();
     const stale = tracks.filter((t) => t.sourceType === 'local' && !this._fresh(t, now));
     if (stale.length) {
-      let i = 0, changed = false;
-      const worker = async () => {
-        while (i < stale.length) {
-          const t = stale[i++];
-          const file = MissingChecker.fileOf(t);
-          const st = file ? await Promise.race([fs.promises.stat(file).then(() => 'ok', () => 'missing'), new Promise((r) => { const tm = setTimeout(() => r('timeout'), timeoutMs); tm.unref?.(); })]) : 'ok';
-          if (st === 'timeout') continue;
-          const prev = this.cache.get(t.id);
-          const missing = st === 'missing';
-          this.cache.set(t.id, { path: file, missing, at: Date.now() });
-          if (prev ? prev.missing !== missing : missing) changed = true;
-        }
-      };
-      const all = Promise.all(Array.from({ length: Math.min(concurrency, stale.length) }, worker));
-      if (full) await all;
-      else {
+      if (this._bgAsync && !full) {
         let timer;
-        const done = await Promise.race([all.then(() => true), new Promise((r) => { timer = setTimeout(() => r(false), budgetMs); })]);
+        await Promise.race([this._bgAsync, new Promise((r) => { timer = setTimeout(r, budgetMs); })]);
         clearTimeout(timer);
-        if (!done) all.then(() => { if (changed) this.onChange?.(); });
+      } else {
+        let i = 0, changed = false;
+        const worker = async () => {
+          while (i < stale.length) {
+            const t = stale[i++];
+            const file = MissingChecker.fileOf(t);
+            const st = file ? await Promise.race([fs.promises.stat(file).then(() => 'ok', () => 'missing'), new Promise((r) => { const tm = setTimeout(() => r('timeout'), timeoutMs); tm.unref?.(); })]) : 'ok';
+            if (st === 'timeout') continue;
+            const prev = this.cache.get(t.id);
+            const missing = st === 'missing';
+            this.cache.set(t.id, { path: file, missing, at: Date.now() });
+            if (prev ? prev.missing !== missing : missing) changed = true;
+          }
+        };
+        const all = Promise.all(Array.from({ length: Math.min(concurrency, stale.length) }, worker)).finally(() => {
+          if (this._bgAsync === all) this._bgAsync = null;
+        });
+        if (!full) this._bgAsync = all;
+        if (full) await all;
+        else {
+          let timer;
+          const done = await Promise.race([all.then(() => true), new Promise((r) => { timer = setTimeout(() => r(false), budgetMs); })]);
+          clearTimeout(timer);
+          if (!done) all.then(() => { if (changed) this.onChange?.(); });
+        }
       }
     }
     const out = new Set();

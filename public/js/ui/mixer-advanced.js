@@ -145,11 +145,11 @@ export function buildDrawer(app, mixerRoot) {
     const P = `fx${u + 1}`, cfg = () => mx()[P], bus = () => eng.fxBus(u), setU = (patch) => set({ [P]: { ...cfg(), ...patch } });
     const strip = el('div', { class: 'fx-strip', role: 'slider', 'aria-label': `FX ${u + 1} strip`, tabindex: 0, title: 'FX strip: touch a beat division to engage the effect, slide to change it, lift to release' },
       ...STRIP_DIVISIONS.map((d) => el('span', {}, fmtDiv(d))));
-    let held = false;
-    const at = (e) => { const r = strip.getBoundingClientRect(); return Math.min(0.999, Math.max(0, (e.clientX - r.left) / r.width)); };
-    strip.addEventListener('pointerdown', (e) => { held = true; strip.setPointerCapture(e.pointerId); if (cfg().assign === 'off') setU({ assign: 'master' }); bus().strip(at(e)); strip.classList.add('held'); });
+    let held = false, rect = null;
+    const at = (e) => { const r = rect || strip.getBoundingClientRect(); return Math.min(0.999, Math.max(0, (e.clientX - r.left) / r.width)); };
+    strip.addEventListener('pointerdown', (e) => { held = true; rect = strip.getBoundingClientRect(); strip.setPointerCapture(e.pointerId); if (cfg().assign === 'off') setU({ assign: 'master' }); bus().strip(at(e)); strip.classList.add('held'); });
     strip.addEventListener('pointermove', (e) => { if (held) bus().strip(at(e)); });
-    const up = () => { if (!held) return; held = false; bus().strip(null); strip.classList.remove('held'); };
+    const up = () => { if (!held) return; held = false; rect = null; bus().strip(null); strip.classList.remove('held'); };
     strip.addEventListener('pointerup', up); strip.addEventListener('pointercancel', up);
     return sec(`FX ${u + 1}`,
       row('Effect', select(EFFECTS.map((e) => [e.id, e.label]), () => cfg().type, (v) => setU({ type: v }), `FX ${u + 1} effect`)),
@@ -198,6 +198,14 @@ export function buildDrawer(app, mixerRoot) {
       el('button', { class: 'btn xs adv-close', 'aria-label': 'Close the advanced mixer', title: 'Close (Esc)', onclick: () => api.toggle(false) }, '✕')),
     el('div', { class: 'adv-tabs', role: 'tablist' }, ...tabBtns), body);
   let tab = 'channel', raf = 0;
+  const LIVE_TABS = new Set(['channel', 'loudness', 'mic']);
+  function syncRaf() {
+    if (!drawer.hidden && LIVE_TABS.has(tab)) {
+      if (!raf) raf = requestAnimationFrame(frame);
+    } else if (raf) {
+      cancelAnimationFrame(raf); raf = 0;
+    }
+  }
   function show(id) {
     tab = id; // every pane stays in the DOM (hidden), so their controls are always reachable by selectors
     for (const [k, p] of Object.entries(pane)) { if (p.parentNode !== body) body.append(p); p.hidden = k !== id; }
@@ -205,6 +213,7 @@ export function buildDrawer(app, mixerRoot) {
     if (id === 'loudness') eng.ensureMeter();
     if (id !== 'channel') eng.channels.forEach((c) => c.bandLevels(false));
     render();
+    syncRaf();
   }
   function render() {
     for (const r of renderers) r.render?.();
@@ -212,26 +221,39 @@ export function buildDrawer(app, mixerRoot) {
   }
   let lastDraw = 0;
   const BAND_COLORS = ['#ff5964', '#55d98a', '#4da8ff'];
+  const chQuiet = [true, true, true, true];
   const frame = (now = performance.now()) => {
     raf = 0;
-    if (drawer.hidden) return;
+    if (drawer.hidden || !LIVE_TABS.has(tab)) return;
     raf = requestAnimationFrame(frame);
     if (document.hidden) return;
     const minMs = tab === 'channel' ? 33 : 50; // ~30 fps for channel band bars, ~20 fps for loudness / mic text
     if (now - lastDraw < minMs) return;
     lastDraw = now;
     if (tab === 'loudness') renderLoud();
-    else if (tab === 'channel') chRows.forEach((r, i) => {
-      if (eng.channels[i] && !r.hidden) {
+    else if (tab === 'channel') {
+      const deckCount = app.deckCount || 2;
+      chRows.forEach((r, i) => {
+        if (i >= deckCount || !eng.channels[i] || r.hidden) return;
+        const deck = eng.decks[i];
+        const active = !!(deck?.playing || deck?.scratching || eng.channels[i].fx?.on);
+        if (!active && chQuiet[i]) return;
         const lv = eng.channels[i].bandLevels(true), { cv: c, ctx: g } = chCanvases[i];
+        const maxLv = Math.max(lv[0], lv[1], lv[2]);
+        if (!active && maxLv < 1e-4) {
+          g.clearRect(0, 0, c.width, c.height);
+          chQuiet[i] = true;
+          return;
+        }
+        chQuiet[i] = false;
         g.clearRect(0, 0, c.width, c.height);
         for (let k = 0; k < lv.length; k++) {
           const h = Math.max(1, Math.min(1, (20 * Math.log10(lv[k] + 1e-6) + 60) / 60) * c.height);
           g.fillStyle = BAND_COLORS[k];
           g.fillRect(k * 20 + 2, c.height - h, 16, h);
         }
-      }
-    });
+      });
+    }
     else if (tab === 'mic') notchInfo.render();
   };
   const api = {
@@ -241,8 +263,8 @@ export function buildDrawer(app, mixerRoot) {
       drawer.hidden = !on;
       mixerRoot.classList.toggle('drawer-open', on);
       mixerRoot.querySelector('.mixer-adv-btn')?.setAttribute('aria-expanded', String(on));
-      if (on) { show(toTab || tab); if (!raf) raf = requestAnimationFrame(frame); drawer.querySelector('.adv-tab.active')?.focus({ preventScroll: true }); }
-      else { eng.channels.forEach((c) => c.bandLevels(false)); }
+      if (on) { show(toTab || tab); drawer.querySelector('.adv-tab.active')?.focus({ preventScroll: true }); }
+      else { syncRaf(); eng.channels.forEach((c) => c.bandLevels(false)); }
     },
     render,
   };

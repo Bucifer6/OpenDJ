@@ -44,7 +44,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 12px/1.35 var(--font); font-feature-settings: "cv05", "cv08", "ss03"; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; overflow: hidden; user-select: none; -webkit-user-select: none; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 12px/1.35 var(--font); font-feature-settings: "cv05", "cv08", "ss03"; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; overflow: hidden; user-select: none; -webkit-user-select: none; }
 .ico { width: 1.15em; height: 1.15em; flex: 0 0 auto; display: inline-block; vertical-align: -0.2em; stroke-width: 2; }
 .btn .ico + .lbl { margin-left: 1px; }
 button, input, select { font: inherit; color: inherit; }

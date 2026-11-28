@@ -334,9 +334,10 @@ export class StemsManager extends Emitter {
   async decode(trackId) {
     const res = await fetch(`/api/tracks/${encodeURIComponent(trackId)}/stream`, { credentials: 'same-origin' });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
-    const ab = await res.arrayBuffer();
+    let ab = await res.arrayBuffer();
     const ctx = new OfflineAudioContext(2, 1, MODEL_RATE);
     const buf = await ctx.decodeAudioData(ab);
+    ab = null;
     const left = new Float32Array(buf.getChannelData(0));
     const right = buf.numberOfChannels > 1 ? new Float32Array(buf.getChannelData(1)) : null;
     return { left, right, length: buf.length };
@@ -361,8 +362,10 @@ export class StemsManager extends Emitter {
           else if (m.type === 'block') {
             uploads = uploads.then(async () => {
               if (uploadError || this._cancel) return;
-              for (let s = 0; s < STEMS.length; s++) await stemsApi.part(t.id, token, STEMS[s], m.frame, m.stems[s]);
-            }).catch((err) => { uploadError = err; reject(err); });
+              await Promise.all(STEMS.map((s, idx) => stemsApi.part(t.id, token, s, m.frame, m.stems[idx])));
+            }).catch((err) => { uploadError = err; reject(err); }).finally(() => {
+              try { w.postMessage({ type: 'ack' }); } catch { /* worker gone */ }
+            });
           } else if (m.type === 'backend') { // WebGPU output failed a check: WASM now, and for the rest of this page's life
             this.backend = { ...this.backend, backend: m.backend, threads: m.threads };
             if (m.failed) this.gpuFailed = true;

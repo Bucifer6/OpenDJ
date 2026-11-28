@@ -3,7 +3,6 @@ import { api } from './api.js';
 import { setupClientLog } from './client-log.js';
 import { startPerfWatch } from './perf-watch.js';
 import { Engine } from './audio/engine.js';
-import { SAMPLE_CATALOG } from './audio/sample-catalog.js';
 import { VoiceBus } from './audio/voice.js';
 import { Dedications } from './dedications.js';
 import { setupRemoteControl } from './remote-control.js';
@@ -21,7 +20,6 @@ import { applyTheme } from './ui/themes.js';
 import { icon, iconLabel } from './ui/icons.js';
 import { setupLibraryExtras } from './ui/library-extras.js';
 import { Lighting } from './lighting/lighting.js';
-import { setupVideo } from './video/video-ui.js';
 import { setupUpload } from './ui/upload.js';
 import { DvsManager } from './dvs/dvs.js';
 import { setupLink } from './link/link.js';
@@ -74,18 +72,19 @@ class App {
     this.wireEvents(); // subscribe to server events before loading the library so no change is missed
     if (!unavailable('link')) setupLink(this); // Ableton Link: UDP multicast through the server
     setupLyrics(this);
-    await this.midi.init();
-    if (this.settings.midiClockOutput) this.midi.setClockOutput(this.settings.midiClockOutput);
+    this.midi.init().then(() => {
+      if (this.settings.midiClockOutput) this.midi.setClockOutput(this.settings.midiClockOutput);
+    }).catch((e) => console.warn('MIDI init failed', e));
     this.lighting = new Lighting(this);
-    if (!unavailable('lighting')) { try { await this.lighting.init(); } catch (e) { console.warn('lighting init failed', e); } }
+    if (!unavailable('lighting')) this.lighting.init().catch((e) => console.warn('lighting init failed', e));
     await this.library.refresh();
     this.libraryExtras = setupLibraryExtras(this);
     this.analyser.autoQueue(); // tracks added earlier (or by another device) that were never analysed
     api.capabilities().then((c) => { this.hosted = !!c.hosted; this.auth = !!c.auth; this.library.renderEmpty(); this.updateHostedUi?.(); }).catch(() => {});
     this.library.refreshDrives();
     setInterval(() => {
-      if (!document.hidden && !document.documentElement.classList.contains('lib-collapsed')) this.library.refreshDrives();
-    }, 15000); // notice USB sticks being plugged in (skipped while hidden or library collapsed)
+      if (!document.hidden && !document.documentElement.classList.contains('lib-collapsed') && !this.settings.gigMode && !this.engine.decks.some((d) => d.playing)) this.library.refreshDrives();
+    }, 15000); // notice USB sticks being plugged in (skipped while hidden, playing, gig mode, or library collapsed)
     this.setLayout(this.settings.layoutMode || 'classic', false, true);
     this.setDeckCount(this.deckCount, false);
     if (!unavailable('dvs')) this.dvs.init().catch((e) => console.warn('DVS init failed', e));
@@ -244,7 +243,13 @@ class App {
       el('div', { class: 'tb-group' }, this.recBtn, this.recTime),
       this.midiDot, this.cpu, this.clock,
       dvsButton(this),
-      el('button', { class: 'btn sm video-btn', title: 'Video mixer, visuals, YouTube & projector output', onclick: () => (this.videoUi ||= setupVideo(this)).toggleMixer() }, iconLabel('video', 'VIDEO')),
+      el('button', { class: 'btn sm video-btn', title: 'Video mixer, visuals, YouTube & projector output', onclick: async () => {
+        if (!this.videoUi) {
+          this._videoInitP ||= import('./video/video-ui.js').then(({ setupVideo }) => (this.videoUi ||= setupVideo(this)));
+          await this._videoInitP;
+        }
+        this.videoUi.toggleMixer();
+      } }, iconLabel('video', 'VIDEO')),
       el('button', { class: 'btn sm light-btn', title: 'Lighting (DMX, Art-Net, sACN, WLED, Hue, OSC)', onclick: () => this.lighting?.openPanel() }, iconLabel('lights', 'LIGHTS')),
       el('button', { class: 'btn icon tb-more', title: 'More', 'aria-label': 'More', 'aria-haspopup': 'menu', onclick: (e) => this.topbarMore(e.currentTarget) }, icon('more')),
       el('button', { class: 'btn icon', title: 'Settings', 'aria-label': 'Settings', onclick: () => this.dialogs.settings() }, icon('settings')),
@@ -365,7 +370,8 @@ class App {
   }
 
   /** Browse and download licensed one-shots into the selected sampler pad. */
-  openSamplerCatalog(i, save) {
+  async openSamplerCatalog(i, save) {
+    const { SAMPLE_CATALOG } = await import('./audio/sample-catalog.js');
     const sampler = this.engine.sampler;
     const categories = ['All sounds', ...new Set(SAMPLE_CATALOG.map((s) => s.category))];
     const category = el('select', { class: 'sel', 'aria-label': 'Sample category' }, ...categories.map((c) => el('option', { value: c }, c)));
@@ -631,10 +637,13 @@ class App {
     const next = a.nextTrack();
     this.amSkip.disabled = !a.enabled || !!a.transition || !next;
     for (const [i, deck] of (this.deckEls || []).entries()) {
-      const mixButton = deck.querySelector('.deck-mix-now');
+      const mixButton = (deck._mixNowBtn ||= deck.querySelector('.deck-mix-now'));
       if (!mixButton) continue;
       const { available, title } = this.mixNowState(i);
-      mixButton.disabled = !available; mixButton.title = title;
+      const dis = !available;
+      if (mixButton.disabled !== dis) mixButton.disabled = dis;
+      const trTitle = t(title);
+      if (mixButton.title !== trTitle) mixButton.title = trTitle;
     }
     let info = '';
     if (a.enabled) {
@@ -727,8 +736,10 @@ class App {
       if (key === lastKey) return;
       lastKey = key;
       const rows = [];
+      let prevStyle = a._lastStyle;
       for (let i = a.idx; i < Math.min(a.queue.length, a.idx + 50); i++) {
-        const t = a.queue[i], st = a.styleFor(i, i === a.idx ? (a.current?.track && this.library.track(a.current.track.id)) || a.current?.track : null);
+        const t = a.queue[i], st = a.styleFor(i, i === a.idx ? (a.current?.track && this.library.track(a.current.track.id)) || a.current?.track : null, prevStyle);
+        prevStyle = st?.style;
         const len = i === a.idx && nt ? nt.length : i > 0 ? a.lengthForQueue(i, st?.style) : null;
         const lenText = lengthText(len, st?.style);
         const name = `${t.artist ? t.artist + ' – ' : ''}${t.title}`;
@@ -910,26 +921,38 @@ class App {
     const minFrameMs = active ? 15.5 : 80;
     if (this._lastFrame && now - this._lastFrame < minFrameMs) return;
     this._lastFrame = now;
-    for (let i = 0; i < this.deckCount; i++) { this.waves[i].wf.draw(now); this.deckEls[i].frame(now); }
+    if (document.body.classList.contains('scratch-view-open')) return; // full-screen Scratch View covers all main decks/waveforms
+    for (let i = 0; i < this.deckCount; i++) {
+      const elD = this.deckEls[i];
+      if (elD.classList.contains('m-hide')) continue;
+      this.waves[i].wf.draw(now);
+      elD.frame(now);
+    }
     this.mixer.frame(now);
     if (!this._slow || now - this._slow > 250) {
       this._slow = now;
-      const setText = (n, t) => { if (n.textContent !== t) n.textContent = t; };
+      const setText = (n, txt) => { if (n.textContent !== txt) n.textContent = txt; };
       if (!this._clockAt || now - this._clockAt >= 1000) {
         this._clockAt = now;
         setText(this.clock, new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       }
       setText(this.recTime, this.engine.recording ? fmtTime((Date.now() - this.engine.recStarted) / 1000).slice(0, 5) : '');
       this.midiDot.classList.toggle('active', now - this.midi.activity < 150);
-      const devs = this.midi.devices?.() || this.midi.inputs();
-      const connected = devs.length > 0;
-      this.midiDot.classList.toggle('connected', connected);
-      if (devs.length !== this._midiCount) {
-        this._midiCount = devs.length;
-        this.midiDot.title = this.midi.inputs().map((i) => i.name).join(', ') || 'No MIDI controller';
+      if (!this._midiDevBound && this.midi?.on) {
+        this._midiDevBound = true;
+        const syncMidiDot = () => {
+          const devs = this.midi.devices?.() || this.midi.inputs();
+          this.midiDot.classList.toggle('connected', devs.length > 0);
+          if (devs.length !== this._midiCount) {
+            this._midiCount = devs.length;
+            this.midiDot.title = this.midi.inputs().map((inp) => inp.name).join(', ') || 'No MIDI controller';
+          }
+        };
+        this.midi.on('devices', syncMidiDot);
+        syncMidiDot();
       }
       this.updateAutomixUi();
-      this.updateDeckTabs();
+      if (window.innerWidth <= 900) this.updateDeckTabs();
     }
   }
 }

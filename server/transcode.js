@@ -7,7 +7,10 @@
 // At most `concurrency` ffmpeg processes run at once; a job is killed when every client waiting on it went away.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+
+const FFMPEG_THREADS = String(Math.min(4, Math.max(1, Math.floor((os.cpus()?.length || 2) / 2))));
 
 class Semaphore {
   constructor(n) { this.n = n; this.q = []; }
@@ -70,7 +73,26 @@ export class Transcoder {
 
   /** Remove a track's cached transcodes (e.g. when the track is deleted). */
   async evict(key) {
-    for (const ext of ['flac', 'mp4']) await fs.promises.rm(this.file(key, ext), { force: true });
+    for (const ext of ['flac', 'mp4', 'wav']) await fs.promises.rm(this.file(key, ext), { force: true });
+  }
+
+  /** Cancel all in-flight FFmpeg transcode jobs (called on server shutdown so no orphan ffmpeg.exe remains). */
+  close() {
+    for (const job of this.jobs.values()) job.cancel();
+    this.jobs.clear();
+  }
+
+  async statsAsync() {
+    let bytes = 0, files = 0;
+    try {
+      const names = await fs.promises.readdir(this.dir);
+      for (const f of names) {
+        if (/\.(part|src)$/.test(f)) continue;
+        const st = await fs.promises.stat(path.join(this.dir, f)).catch(() => null);
+        if (st?.isFile()) { bytes += st.size; files++; }
+      }
+    } catch { /* empty */ }
+    return { bytes, files, maxBytes: this.maxBytes(), running: [...this.jobs.values()].filter((j) => j.proc).length, queued: this.sem.q.length };
   }
 
   stats() {
@@ -125,7 +147,7 @@ export class Transcoder {
     const live = !job && rangeStart(req) === 0 && req.method !== 'HEAD';
     if (!job) {
       job = this._start(final, opts.input, (input, part) => [
-        '-hide_banner', '-nostdin', '-loglevel', 'error', '-y', '-i', input,
+        '-hide_banner', '-nostdin', '-loglevel', 'error', '-threads', FFMPEG_THREADS, '-y', '-i', input,
         ...(live ? this.audioOutputArgs(opts, 'pipe:1') : []),
         ...this.audioOutputArgs(opts, part),
       ], { live: live ? res : null });
@@ -147,7 +169,7 @@ export class Transcoder {
     }
     const copyA = ['aac', 'mp3'].includes(opts.audioCodec);
     const args = (copy) => (input, part) => [
-      '-hide_banner', '-nostdin', '-loglevel', 'error', '-y', '-i', input, '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn',
+      '-hide_banner', '-nostdin', '-loglevel', 'error', '-threads', FFMPEG_THREADS, '-y', '-i', input, '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn',
       ...(copy && copyV ? ['-c:v', 'copy'] : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p']),
       ...(copy && copyA ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '192k', '-ac', '2']),
       '-movflags', '+faststart', '-f', 'mp4', part,
@@ -171,6 +193,7 @@ export class Transcoder {
       if (!ff) return reject(Object.assign(new Error('FFmpeg is not available'), { status: 415 }));
       if (job.killed) return reject(new Error('aborted'));
       const p = spawn(ff.path, argsFn(input, part), { stdio: ['ignore', job.live ? 'pipe' : 'ignore', 'pipe'], windowsHide: true });
+      if (p.pid) { try { os.setPriority(p.pid, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* ignore */ } }
       this.started++;
       job.proc = p;
       let err = '';

@@ -707,7 +707,8 @@ export class FxUnit {
     const t0 = Math.max(c.currentTime, this.at || 0), sm = (param, v, tc) => param.setTargetAtTime(v, t0, tc);
     if (t0 > c.currentTime + 0.003) setTimeout(() => this.fx?.setActive?.(this.on), (t0 - c.currentTime) * 1000); else this.fx.setActive?.(on);
     if (kind === 'insert') {
-      sm(this.send.gain, 1, FADE); // keep inserts fed so switching on never starts from an empty delay line
+      // Gate send to 0 when OFF so inactive insert FX (Crush, Distortion, Phaser, ModDelay, LFO) hit silent bypass
+      sm(this.send.gain, on ? 1 : 0, 0.004);
       sm(this.dry.gain, on ? 1 - m : 1, FADE); sm(this.wet.gain, on ? m : 0, FADE);
     } else {
       // send / generator: dry stays (slight duck at high mix for even loudness), wet level is the mix knob, so a

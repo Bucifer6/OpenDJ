@@ -50,8 +50,8 @@ const parseTitleFromName = (file) => {
  * Tags + format info. `ffmpeg` (optional, path): probe video containers and files music-metadata can't parse
  * (AC3, DTS, TTA…) for streams, duration and sample rate.
  */
-export async function readTags(file, { ffmpeg } = {}) {
-  const st = await fs.promises.stat(file);
+export async function readTags(file, { ffmpeg, stat } = {}) {
+  const st = stat || await fs.promises.stat(file);
   const dotExt = path.extname(file).toLowerCase();
   const ext = dotExt.slice(1);
   const fallback = parseTitleFromName(file);
@@ -59,6 +59,11 @@ export async function readTags(file, { ffmpeg } = {}) {
   try {
     const mm = await parseFile(file, { skipCovers: true, duration: false });
     common = mm.common; format = mm.format; parsed = true;
+    // Only fall back to in-process duration parsing for audio files lacking header duration (avoids spawning ffmpeg.exe)
+    if (!format.duration && !VIDEO_EXT.has(dotExt) && st.size > 0 && st.size < 256 * 1024 * 1024) {
+      const mm2 = await parseFile(file, { skipCovers: true, duration: true }).catch(() => null);
+      if (mm2?.format?.duration) format = { ...format, duration: mm2.format.duration };
+    }
   } catch { /* unreadable tags: use file name */ }
   let { hasVideo, videoCodec } = mmVideoInfo(format);
   let codec = normCodec(format.codec);
@@ -99,30 +104,48 @@ export async function addFile(library, file, sourceId = 'files') {
   const st = await fs.promises.stat(file).catch(() => null);
   if (!st || !st.isFile()) return null;
   if (prev && prev.mtime === st.mtimeMs && 'needsTranscode' in prev) return prev; // unchanged (and has format info)
-  const tags = await readTags(file, { ffmpeg: library.media?.ffmpeg()?.path });
+  const tags = await readTags(file, { ffmpeg: library.media?.ffmpeg()?.path, stat: st });
   // 0-byte files can never play: flag them right away (the browser flags other undecodable files when it tries)
   return library.upsertTrack({ id: tid, sourceType: 'local', sourceId, path: path.resolve(file), ...tags, ...(st.size === 0 ? { unreadable: true } : {}) });
 }
 
 /** Scan a library folder. Removes tracks whose files disappeared (unless the drive itself is gone). */
-export async function scanFolder(library, folder, { onProgress, signal } = {}) {
+export async function scanFolder(library, folder, { onProgress, signal, concurrency = 6 } = {}) {
   const reachable = await Promise.race([fs.promises.stat(folder.path).then((st) => st.isDirectory(), () => false), new Promise((r) => { const t = setTimeout(() => r(false), 10000); t.unref?.(); })]);
   if (!reachable) throw new Error(`Folder not reachable: ${folder.path} (is the USB drive / NAS share mounted?)`);
   const seen = new Set();
-  let n = 0;
+  let n = 0, lastProgressAt = 0;
+  const inFlight = new Set();
+  const limit = Math.max(1, Math.min(12, concurrency));
+  const runOne = (file) => {
+    const p = (async () => {
+      try {
+        const t = await addFile(library, file, folder.id);
+        if (t) seen.add(t.id);
+      } catch { /* skip unreadable file */ }
+      const count = ++n;
+      const now = Date.now();
+      if (count % 25 === 0 && now - lastProgressAt >= 150) {
+        lastProgressAt = now;
+        onProgress?.({ folder: folder.id, scanned: count, file });
+      }
+      if (count % 150 === 0) library.save();
+    })().finally(() => inFlight.delete(p));
+    inFlight.add(p);
+    return p;
+  };
   for await (const file of walk(folder.path, { signal })) {
-    try {
-      const t = await addFile(library, file, folder.id);
-      if (t) seen.add(t.id);
-    } catch { /* skip unreadable file */ }
-    if (++n % 25 === 0) { onProgress?.({ folder: folder.id, scanned: n, file }); library.save(); }
+    runOne(file);
+    if (inFlight.size >= limit) await Promise.race(inFlight);
   }
+  if (inFlight.size) await Promise.all(inFlight);
   const root = folder.path.endsWith(path.sep) ? folder.path : folder.path + path.sep;
   const missing = library.allTracks().filter((t) => t.sourceId === folder.id && !seen.has(t.id) && (!t.path || t.path.startsWith(root))).map((t) => t.id);
   // Like rekordbox, keep vanished tracks (with their cues, grids and play history) and list them under
   // "Missing files", where they can be relocated or removed. Nothing the user prepared is deleted by a rescan.
   folder.lastScan = Date.now();
   folder.trackCount = seen.size;
+  library.markMetaDirty?.();
   library.changed('tracks');
   onProgress?.({ folder: folder.id, scanned: n, done: true });
   return { scanned: n, added: seen.size, missing: missing.length };

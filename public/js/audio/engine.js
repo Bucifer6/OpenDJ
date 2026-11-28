@@ -389,7 +389,7 @@ export class Channel extends Emitter {
     if (cfx) {
       cfx.setColor(x, side, s.colorParam ?? 0.5);
       if (cfx.kind === 'send') { this.colorSend.gain.setTargetAtTime(cfx.sendAmount(x), t, k); this.colorWet.gain.setTargetAtTime(1, t, k); this.colorDry.gain.setTargetAtTime(1, t, k); }
-      else if (cfx.kind === 'insert') { const w = x > 0 ? cfx.wetAmount(x) : 0; this.colorSend.gain.setTargetAtTime(1, t, k); this.colorWet.gain.setTargetAtTime(w, t, k); this.colorDry.gain.setTargetAtTime(1 - w, t, k); }
+      else if (cfx.kind === 'insert') { const w = x > 0 ? cfx.wetAmount(x) : 0; this.colorSend.gain.setTargetAtTime(x > 0 ? 1 : 0, t, k); this.colorWet.gain.setTargetAtTime(w, t, k); this.colorDry.gain.setTargetAtTime(1 - w, t, k); }
       else { this.colorSend.gain.setTargetAtTime(0, t, k); this.colorWet.gain.setTargetAtTime(1, t, k); this.colorDry.gain.setTargetAtTime(1, t, k); }
       this.colorFade?.gain.setTargetAtTime(1, t, 0.012);
     } else { this.colorDry.gain.setTargetAtTime(1, t, k); this.colorWet.gain.setTargetAtTime(0, t, k); this.colorSend.gain.setTargetAtTime(0, t, k); }
@@ -436,14 +436,23 @@ export class Channel extends Emitter {
     this.sideGain.connect(merge, 0, 0); sideNeg.connect(merge, 0, 1);
     merge.connect(this.stemOut);
   }
-  /** Connect or disconnect this channel's output from the music bus so unloaded hidden decks (3/4 in 2-deck mode) cost 0 DSP. */
+  /** Connect or disconnect this channel's output (including cue sends) so unloaded hidden decks (3/4 in 2-deck mode) cost 0 DSP. */
   setActive(on) {
     on = !!on;
     if (this._busConnected === on) return;
     this._busConnected = on;
     try {
-      if (on) { this.busOut.connect(this.engine.musicBus); this.fx.wetOut.connect(this.engine.musicBus); }
-      else { this.busOut.disconnect(this.engine.musicBus); this.fx.wetOut.disconnect(this.engine.musicBus); }
+      if (on) {
+        this.busOut.connect(this.engine.musicBus);
+        this.fx.wetOut.connect(this.engine.musicBus);
+        this.cueSend.connect(this.engine.cueBus);
+        if (this.cueSend2 && this.engine.cueBus2) this.cueSend2.connect(this.engine.cueBus2);
+      } else {
+        this.busOut.disconnect(this.engine.musicBus);
+        this.fx.wetOut.disconnect(this.engine.musicBus);
+        this.cueSend.disconnect(this.engine.cueBus);
+        if (this.cueSend2 && this.engine.cueBus2) this.cueSend2.disconnect(this.engine.cueBus2);
+      }
     } catch { /* already connected/disconnected */ }
   }
   /** One-knob filter: amount x (0..1, dead zone removed), side -1 = low-pass, +1 = high-pass. */
@@ -477,11 +486,24 @@ export class Channel extends Emitter {
   /** Per-band levels (low < 200 Hz < mid < 2.5 kHz < high) for the advanced drawer; the analyser exists only while asked for. */
   bandLevels(on = true) {
     if (!on) { if (this.bandAn) { try { this.fx.output.disconnect(this.bandAn); } catch { /* */ } this.bandAn = null; } return null; }
-    if (!this.bandAn) { this.bandAn = this.ctx.createAnalyser(); this.bandAn.fftSize = 2048; this.bandAn.smoothingTimeConstant = 0.5; this.bandBuf = new Float32Array(1024); this.fx.output.connect(this.bandAn); }
+    if (!this.bandAn) {
+      this.bandAn = this.ctx.createAnalyser(); this.bandAn.fftSize = 2048; this.bandAn.smoothingTimeConstant = 0.5;
+      this.bandBuf = new Float32Array(1024);
+      this._bandOut = [0, 0, 0];
+      const hz = this.ctx.sampleRate / 2048;
+      this._bandCut0 = Math.max(1, Math.min(1024, Math.ceil(ISO_XOVER[0] / hz)));
+      this._bandCut1 = Math.max(this._bandCut0, Math.min(1024, Math.ceil(ISO_XOVER[1] / hz)));
+      this.fx.output.connect(this.bandAn);
+    }
     this.bandAn.getFloatFrequencyData(this.bandBuf);
-    const hz = this.ctx.sampleRate / 2048, sum = [0, 0, 0];
-    for (let i = 1; i < 1024; i++) { const f = i * hz, p = Math.pow(10, this.bandBuf[i] / 10); sum[f < ISO_XOVER[0] ? 0 : f < ISO_XOVER[1] ? 1 : 2] += p; }
-    return sum.map((p) => Math.sqrt(p) * 2 / 1024 * 8);
+    const buf = this.bandBuf, c0 = this._bandCut0, c1 = this._bandCut1, LN10_10 = 0.2302585092994046;
+    let s0 = 0, s1 = 0, s2 = 0;
+    for (let i = 1; i < c0; i++) { const db = buf[i]; if (db > -100) s0 += Math.exp(db * LN10_10); }
+    for (let i = c0; i < c1; i++) { const db = buf[i]; if (db > -100) s1 += Math.exp(db * LN10_10); }
+    for (let i = c1; i < 1024; i++) { const db = buf[i]; if (db > -100) s2 += Math.exp(db * LN10_10); }
+    const k = 16 / 1024, out = this._bandOut;
+    out[0] = Math.sqrt(s0) * k; out[1] = Math.sqrt(s1) * k; out[2] = Math.sqrt(s2) * k;
+    return out;
   }
 }
 
@@ -542,25 +564,57 @@ export class Engine extends Emitter {
     await this.applyOutputs();
     // Drive engine ticks at ~30 Hz only while playing / scratching / automixing; sleep when completely idle
     let lastTick = 0;
+    let hiddenTimer = null;
+    let idleSuspendTimer = null;
     const isBusy = () => this.automixDriving || this.decks.some((d) => d.playing || d.scratching || d.loading);
+    const isAudioNeeded = () => isBusy() || this.recording || !!this.mic?.enabled || !!this._dvsRunning || this.channels.some((c) => c?.fx?.on);
+    const scheduleIdleSuspend = () => {
+      clearTimeout(idleSuspendTimer);
+      if (this._offline || !this.ctx || typeof this.ctx.suspend !== 'function' || isAudioNeeded()) return;
+      idleSuspendTimer = setTimeout(() => {
+        if (!isAudioNeeded() && this.ctx?.state === 'running') {
+          this.ctx.suspend().catch(() => {});
+        }
+      }, 10_000);
+    };
+    const syncHiddenTimer = () => {
+      if (document.hidden && isBusy()) {
+        if (!hiddenTimer) hiddenTimer = setInterval(() => {
+          if (!document.hidden || !isBusy()) { syncHiddenTimer(); return; }
+          this.tick();
+        }, 50);
+      } else if (hiddenTimer) {
+        clearInterval(hiddenTimer);
+        hiddenTimer = null;
+      }
+    };
     const tick = (now = performance.now()) => {
       this._raf = 0;
-      if (document.hidden) return;
+      if (document.hidden) { syncHiddenTimer(); return; }
       const busy = isBusy();
-      if (busy) this._raf = requestAnimationFrame(tick);
+      if (busy) {
+        clearTimeout(idleSuspendTimer);
+        this._raf = requestAnimationFrame(tick);
+      } else {
+        scheduleIdleSuspend();
+      }
       if (busy && now - lastTick < 32) return;
       lastTick = now;
       this.tick();
     };
-    this._wakeTick = () => { if (!this._raf && !document.hidden) this._raf = requestAnimationFrame(tick); };
+    this._wakeTick = () => {
+      clearTimeout(idleSuspendTimer);
+      if (this.ctx?.state === 'suspended' && isAudioNeeded()) this.ctx.resume().catch(() => {});
+      syncHiddenTimer();
+      if (!this._raf && !document.hidden) this._raf = requestAnimationFrame(tick);
+    };
     for (const d of this.decks) { d.on('state', this._wakeTick); d.on('load', this._wakeTick); }
-    document.addEventListener('visibilitychange', () => { if (!document.hidden && isBusy()) this._wakeTick(); });
+    document.addEventListener('visibilitychange', () => {
+      syncHiddenTimer();
+      if (!document.hidden && isBusy()) this._wakeTick();
+    });
     this.tick();
-    setInterval(() => {
-      if (!isBusy()) return;
-      if (document.hidden) this.tick();
-      else this._wakeTick();
-    }, 50); // keep automix/sync alive when hidden and wake rAF if automixDriving starts externally
+    scheduleIdleSuspend();
   }
 
   /** Build the mixer graph on this.ctx (also used offline by the tests with { decks: false }). */
@@ -1094,13 +1148,26 @@ export class Engine extends Emitter {
   }
 
   masterLevels() {
-    const b = (this._mBuf ||= new Float32Array(512)); const peak = (an) => { an.getFloatTimeDomainData(b); let p = 0; for (const v of b) p = Math.max(p, Math.abs(v)); return p; };
-    return [peak(this.masterMeterL), peak(this.masterMeterR)];
+    const b = (this._mBuf ||= new Float32Array(512));
+    const out = (this._mLevelsOut ||= [0, 0]);
+    this.masterMeterL.getFloatTimeDomainData(b);
+    let p0 = 0; for (let i = 0; i < b.length; i++) { const a = b[i] < 0 ? -b[i] : b[i]; if (a > p0) p0 = a; }
+    this.masterMeterR.getFloatTimeDomainData(b);
+    let p1 = 0; for (let i = 0; i < b.length; i++) { const a = b[i] < 0 ? -b[i] : b[i]; if (a > p1) p1 = a; }
+    out[0] = p0; out[1] = p1;
+    return out;
   }
   /** Master peak and RMS per side (one analyser read each) for the RMS bar + peak dot meters. */
   masterMeter() {
-    const b = (this._mBuf ||= new Float32Array(512)), out = { peak: [0, 0], rms: [0, 0] };
-    [this.masterMeterL, this.masterMeterR].forEach((an, i) => { an.getFloatTimeDomainData(b); let p = 0, s = 0; for (const v of b) { const a = v < 0 ? -v : v; if (a > p) p = a; s += v * v; } out.peak[i] = p; out.rms[i] = Math.sqrt(s / b.length); });
+    const b = (this._mBuf ||= new Float32Array(512));
+    const out = (this._mMeterOut ||= { peak: [0, 0], rms: [0, 0] });
+    for (let i = 0; i < 2; i++) {
+      const an = i === 0 ? this.masterMeterL : this.masterMeterR;
+      an.getFloatTimeDomainData(b);
+      let p = 0, s = 0;
+      for (let j = 0; j < b.length; j++) { const v = b[j], a = v < 0 ? -v : v; if (a > p) p = a; s += v * v; }
+      out.peak[i] = p; out.rms[i] = Math.sqrt(s / b.length);
+    }
     return out;
   }
 

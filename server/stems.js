@@ -449,15 +449,19 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
       const ms = await Promise.all(STEM_NAMES.map((s) => meanSquarePerSecond(path.join(u.dir, `${s}.raw`), u.sampleRate)));
       vocals = encodeVocalMap(vocalPresence(ms[STEM_NAMES.indexOf('vocals')], ms));
     } catch (e) { console.warn('[stems] vocal map', e.message); }
+    let addedBytes = 0;
+    const flacThreads = String(Math.min(4, Math.max(1, Math.floor((os.cpus()?.length || 2) / 2))));
     for (const s of STEM_NAMES) {
       const raw = path.join(u.dir, `${s}.raw`);
       const st = await fs.promises.stat(raw);
-      if (flac) await run(ff.path, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 's16le', '-ar', String(u.sampleRate), '-ac', '2', '-i', raw, '-c:a', 'flac', '-compression_level', '5', path.join(u.dir, `${s}.flac`)]);
+      const outPath = path.join(u.dir, `${s}.${flac ? 'flac' : 'wav'}`);
+      if (flac) await run(ff.path, ['-hide_banner', '-loglevel', 'error', '-threads', flacThreads, '-y', '-f', 's16le', '-ar', String(u.sampleRate), '-ac', '2', '-i', raw, '-c:a', 'flac', '-compression_level', '5', outPath]);
       else {
-        const out = fs.createWriteStream(path.join(u.dir, `${s}.wav`));
+        const out = fs.createWriteStream(outPath);
         out.write(wavHeader(st.size, u.sampleRate, 2));
         await pipeline(fs.createReadStream(raw), out);
       }
+      addedBytes += (await fs.promises.stat(outPath).catch(() => null))?.size || 0;
       await fs.promises.rm(raw, { force: true });
     }
     const meta = { model: u.model, backend: u.backend, format: flac ? 'flac' : 'wav', sampleRate: u.sampleRate, frames: u.frames, stems: STEM_NAMES, checked: STEM_CHECK, at: Date.now(), ...(vocals ? { vocals } : {}) };
@@ -469,6 +473,7 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
     const value = { model: u.model, ready: true, format: meta.format, at: meta.at, ...(vocals ? { vocals } : {}) };
     setTrackStems(t.id, value);
     emit('stems', { id: t.id, ready: true, stems: value });
+    engine.noteCacheAdded?.(addedBytes);
     return value;
   }
   route('POST', '/api/stems/:id/finish', async ({ params, query }) => {
@@ -612,7 +617,6 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
         last = { id, title: cur.title, ms: r.ms, seconds: r.frames / STEM_RATE, backend: r.backend, threads: r.threads, chunks: r.chunks };
         emit('stems-done', { ...last, background, stems: value });
         if (background) bg.done++;
-        measureCache().catch(() => {});
       } catch (e) {
         pending = null;
         if (mine()) await dropUpload(id);
@@ -659,6 +663,9 @@ export function registerStemRoutes({ route, library, emit = () => {}, dataDir = 
         version: rt.version || null, backend: backend?.backend || null, threads: backend?.threads || 0, gpuFailed, last, ...state(),
       }),
       state,
+      noteCacheAdded(bytes) {
+        if (bg.cacheBytes != null && Number.isFinite(bytes)) bg.cacheBytes += bytes;
+      },
       add(ids, { force = false, front = false } = {}) {
         if (!installed()) throw bad(rt.reason || 'FFmpeg is needed for server stems', 409);
         if (!modelOk()) throw bad('The stems model is not downloaded yet', 409);

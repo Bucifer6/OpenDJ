@@ -114,27 +114,31 @@ export function setupVideo(app) {
       meterEls.push({ bar: yb, lbl: yl, yt: true });
       meters.append(el('div', { class: 'vid-m yt', hidden: true }, el('b', {}, '▶'), yl, el('span', { class: 'vid-m-bar' }, yb)));
     }
+    let lastFpsTxt = '';
     function live() {
+      if (document.hidden || root.classList.contains('collapsed')) return;
       if (meterEls.length !== mixer.deckCount + 1) { buildMeters(); if (cur === 'mix' || cur === 'fx') show(cur); }
       const w = mixer.weights;
       let any = false;
       for (let i = 0; i < mixer.deckCount; i++) {
         const l = mixer.layers[i], m = meterEls[i];
-        const picker = root.querySelector(`[data-visual-deck="${i}"]`);
-        if (picker && picker.value !== l.visualStyle) picker.value = l.visualStyle;
         const a = w[i]?.alpha || 0; any ||= a > 0.01;
-        m.bar.style.width = `${Math.round(a * 100)}%`;
-        m.lbl.textContent = l.kind === 'video' ? `Video${l.lastDecision ? ` ${l.lastDecision.mode === 'locked' || l.lastDecision.mode === 'nudge' ? `±${Math.round(Math.abs(l.drift) * 1000)}ms` : l.lastDecision.mode}` : ''}` : l.kind === 'visual' ? 'Visualizer' : '—';
+        const pct = `${Math.round(a * 100)}%`;
+        if (m.lastPct !== pct) { m.lastPct = pct; m.bar.style.width = pct; }
+        const lbl = l.kind === 'video' ? `Video${l.lastDecision ? ` ${l.lastDecision.mode === 'locked' || l.lastDecision.mode === 'nudge' ? `±${Math.round(Math.abs(l.drift) * 1000)}ms` : l.lastDecision.mode}` : ''}` : l.kind === 'visual' ? 'Visualizer' : '—';
+        if (m.lastLbl !== lbl) { m.lastLbl = lbl; m.lbl.textContent = lbl; }
       }
       const ym = meterEls[mixer.deckCount];
-      ym.bar.parentElement.parentElement.hidden = !youtube.videoId;
-      ym.bar.style.width = `${Math.round((youtube.videoId ? youtube.weight : 0) * 100)}%`;
+      const ytHidden = !youtube.videoId;
+      if (ym.bar.parentElement.parentElement.hidden !== ytHidden) ym.bar.parentElement.parentElement.hidden = ytHidden;
+      const yPct = `${Math.round((youtube.videoId ? youtube.weight : 0) * 100)}%`;
+      if (ym.lastPct !== yPct) { ym.lastPct = yPct; ym.bar.style.width = yPct; }
       any ||= youtube.videoId && youtube.weight > 0.01;
       stage.classList.toggle('empty', !any && !mixer.config.overlay.text && !mixer.logoImg);
-      fpsEl.textContent = mixer.running ? `${mixer.rendererKind === 'webgl2' ? 'GL' : '2D'} · ${mixer.stats.fps} fps${outputs.isOpen ? ' · OUT' : ''}` : 'paused';
-      ytAttr.hidden = !youtube.videoId;
+      const fpsTxt = mixer.running ? `${mixer.rendererKind === 'webgl2' ? 'GL' : '2D'} · ${mixer.stats.fps} fps${outputs.isOpen ? ' · OUT' : ''}` : 'paused';
+      if (fpsTxt !== lastFpsTxt) { lastFpsTxt = fpsTxt; fpsEl.textContent = fpsTxt; }
+      ytAttr.hidden = ytHidden;
       ytMount.classList.toggle('pip', !!youtube.videoId && !youtube.showInMix);
-      if (cur === 'output') renderOutputs();
     }
     function startLive() { clearInterval(liveT); live(); liveT = setInterval(live, 200); }
     function stopLive() { clearInterval(liveT); liveT = null; }

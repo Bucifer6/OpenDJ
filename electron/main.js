@@ -36,10 +36,9 @@ app.on('web-contents-created', (_e, wc) => {
   wc.on('will-attach-webview', (e) => e.preventDefault());
 });
 
-// Let audio start without a click (DJ software needs it) and keep timers precise when the window is hidden.
+// Let audio start without a click (DJ software needs it). Background throttling is toggled dynamically via
+// gig-power-lock when decks are playing, recording, broadcasting, or in Gig Mode so idle minimized windows can sleep.
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
-app.commandLine.appendSwitch('disable-background-timer-throttling');
-app.commandLine.appendSwitch('disable-renderer-backgrounding');
 
 async function createWindow() {
   // The desktop server has no password, so other local users / processes could otherwise drive it (browse the
@@ -73,7 +72,7 @@ async function createWindow() {
   const win = new BrowserWindow({
     width: 1600, height: 960, minWidth: 1100, minHeight: 700,
     backgroundColor: '#0b0d10', title: 'OpenDJ', show: false,
-    webPreferences: { preload: path.join(here, 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: false },
+    webPreferences: { preload: path.join(here, 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: true },
   });
   win.once('ready-to-show', () => win.show());
   // pop-up / navigation policy: see app.on('web-contents-created') above
@@ -199,7 +198,14 @@ ipcMain.handle('update-install', async (e) => {
 });
 
 app.whenReady().then(createWindow);
-app.on('window-all-closed', () => { server?.shutdown(); app.quit(); });
+let shuttingDown = false;
+app.on('window-all-closed', async () => {
+  if (!shuttingDown) {
+    shuttingDown = true;
+    try { await server?.shutdown?.(); } catch { /* */ }
+  }
+  app.quit();
+});
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 
 // ---- quit confirmation ----
@@ -223,12 +229,16 @@ ipcMain.handle('local-dj-plan', async (event, request) => {
 });
 ipcMain.handle('local-dj-models', async (event) => (trusted(event) ? listModels() : { running: false, models: [] }));
 
-// Gig Safe Mode: prevent OS sleep / display dim while playing, recording, or in Gig Mode
+// Gig Safe Mode: prevent OS sleep / display dim & disable renderer background throttling while playing, recording, or in Gig Mode
 let powerLockId = null;
 ipcMain.handle('gig-power-lock', (event, on) => {
   if (!trusted(event)) return false;
-  if (on && powerLockId == null) powerLockId = powerSaveBlocker.start('prevent-display-sleep');
-  else if (!on && powerLockId != null) { try { powerSaveBlocker.stop(powerLockId); } catch { /* */ } powerLockId = null; }
+  const active = !!on;
+  if (active && powerLockId == null) powerLockId = powerSaveBlocker.start('prevent-display-sleep');
+  else if (!active && powerLockId != null) { try { powerSaveBlocker.stop(powerLockId); } catch { /* */ } powerLockId = null; }
+  for (const w of BrowserWindow.getAllWindows()) {
+    try { w.webContents?.setBackgroundThrottling?.(!active); } catch { /* */ }
+  }
   return powerLockId != null && powerSaveBlocker.isStarted(powerLockId);
 });
 app.on('will-quit', () => { if (powerLockId != null) { try { powerSaveBlocker.stop(powerLockId); } catch { /* */ } powerLockId = null; } });

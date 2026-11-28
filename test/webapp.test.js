@@ -222,7 +222,7 @@ test('loopback mode: no password, but Host (DNS rebinding) and Origin (CSRF) are
 });
 
 test('login.html: CSP hash matches its inline script', () => {
-  const html = fs.readFileSync(new URL('../public/login.html', import.meta.url), 'utf8');
+  const html = fs.readFileSync(new URL('../public/login.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   const start = html.indexOf('<script>') + '<script>'.length;
   const script = html.slice(start, html.indexOf('</script>', start));
   const hash = crypto.createHash('sha256').update(script).digest('base64');

@@ -377,24 +377,24 @@ export class OverviewWaveform {
       if (down && !armed && ev === 'pointerup') this.opts.needleHint?.();
       clearTimeout(holdT); this.canvas.classList.remove('needle-hold'); down = false; armed = false; rect = null;
     });
-    this.ro = new ResizeObserver((es) => { const r = es.at(-1).contentRect, z = uiZoom(); this.cw = r.width * z; this.ch = r.height * z; });
+    this.ro = new ResizeObserver((es) => { this._roSeen = true; const r = es.at(-1).contentRect, z = uiZoom(); this.cw = r.width * z; this.ch = r.height * z; });
     this.ro.observe(this.canvas);
   }
   wfStyle() { return this.getSettings().waveformColors || 'soft'; }
   wfShape() { return this.getSettings().waveformShape || 'bars'; }
-  renderCache(W, H, played) {
-    const w = this.deck.waveform; const s = this.getSettings();
+  renderCache(W, H) {
+    const w = this.deck.waveform;
     const off = newCanvas(W, H);
     const g = off.getContext('2d');
     g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, W, H);
     const n = w.peak.length;
     paintBands(g, w, palette(this.wfStyle()), 0, W, H, (x) => Math.floor(x / W * n), { pad: 1, shape: this.wfShape(), lw: waveDpr() });
-    if (played) { g.globalAlpha = 0.6; g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, W, H); g.globalAlpha = 1; }
     return off;
   }
   draw(now = performance.now()) {
+    if (this._roSeen && (this.cw <= 0 || this.ch <= 0)) return;
     const dpr = waveDpr();
-    if (!this.cw) { const r = this.canvas.getBoundingClientRect(); this.cw = r.width || 1; this.ch = r.height || 1; }
+    if (!this.cw) { const r = this.canvas.getBoundingClientRect(); if (r.width <= 0 || r.height <= 0) return; this.cw = r.width; this.ch = r.height; }
     const W = Math.max(1, Math.round(this.cw * dpr)), H = Math.max(1, Math.round(this.ch * dpr));
     if (this.canvas.width !== W || this.canvas.height !== H) { this.canvas.width = W; this.canvas.height = H; this.cacheKey = ''; this.sig = ''; }
     const { g, deck } = this;
@@ -408,14 +408,14 @@ export class OverviewWaveform {
     this.sig = sig;
     g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, W, H);
     if (!deck.waveform || !deck.duration) {
-      if (this.cache || this.cachePlayed) { this.cache = null; this.cachePlayed = null; this.cacheKey = ''; }
+      if (this.cache) { this.cache = null; this.cacheKey = ''; }
       return;
     }
     const key = `${deck.track?.id}:${W}:${H}:${this.wfStyle()}/${this.wfShape()}:${themeRev}`;
-    if (key !== this.cacheKey) { this.cache = this.renderCache(W, H, false); this.cachePlayed = this.renderCache(W, H, true); this.cacheKey = key; }
-    // played part from the dimmed copy, the rest at full colour
-    if (px > 0) g.drawImage(this.cachePlayed, 0, 0, px, H, 0, 0, px, H);
-    if (px < W) g.drawImage(this.cache, px, 0, W - px, H, px, 0, W - px, H);
+    if (key !== this.cacheKey) { this.cache = this.renderCache(W, H); this.cacheKey = key; }
+    // Single cached offscreen canvas + 1 translucent rect for the played section (halves build CPU & VRAM)
+    g.drawImage(this.cache, 0, 0);
+    if (px > 0) { g.globalAlpha = 0.6; g.fillStyle = cssVar('--wave-bg'); g.fillRect(0, 0, px, H); g.globalAlpha = 1; }
     if (loop) { g.fillStyle = 'rgba(46,212,122,0.30)'; g.fillRect(loop.start / deck.duration * W, 0, Math.max(2, (loop.end - loop.start) / deck.duration * W), H); }
     // phrase / structure bands (intro, drop, breakdown, outro…): along the top, or a strip along the bottom in the
     // the Player styles

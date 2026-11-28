@@ -4,14 +4,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readJsonSafe, writeJsonAtomic, chmodQuiet } from './jsonstore.js';
-import { SqliteStore, sqliteAvailable, dbFileExists } from './sqlite-store.js';
+import { SqliteStore, sqliteAvailable, dbFileExists, stripHeavyAnalysis } from './sqlite-store.js';
 import { sanitizeSettings } from './settings-schema.js';
-import { LibraryCore, DEFAULT_SETTINGS, hashId, onceMigrations } from '../public/js/shared/library-core.js';
+import { LibraryCore, DEFAULT_SETTINGS, hashId, onceMigrations, EDITABLE_TRACK_FIELDS, sanitizeField, normTags } from '../public/js/shared/library-core.js';
 
 export { DEFAULT_SETTINGS, normTags, sanitizeField, newId, okId } from '../public/js/shared/library-core.js';
 
 const id = hashId;
 const JSON_MIRROR_LIMIT = 5000; // keep library.json mirrored on flush for small/medium libraries; large libraries stay SQLite-only for speed
+const JSON_MIRROR_THROTTLE_MS = 60_000; // when SQLite is active, only refresh the library.json mirror every 60 s (and on close/flush)
+const ANALYSIS_CACHE_MAX = 64;
 
 export class Library extends LibraryCore {
   constructor(dataDir) {
@@ -26,7 +28,12 @@ export class Library extends LibraryCore {
     this._dirtyTracks = new Set();
     this._removedTracks = new Set();
     this._dirtyMeta = false;
+    this._dirtySettings = false;
+    this._dirtyJson = false;
     this._needsFullSync = false;
+    this._lastJsonMirrorAt = 0;
+    this._rev = 0;
+    this._analysisCache = new Map(); // trackId -> { barFeatures?, tempoMap? } LRU
     // files written by older versions were 0644: they hold source passwords / tokens and API keys
     for (const f of [this.file, this.dbFile, this.settingsFile, path.join(dataDir, 'auth.json'), path.join(dataDir, 'secrets.json')]) {
       for (const x of [f, f + '.bak', f + '.tmp']) chmodQuiet(x, 0o600);
@@ -41,13 +48,21 @@ export class Library extends LibraryCore {
     const useSqlite = process.env.OPENDJ_STORAGE !== 'json' && sqliteAvailable();
     let loadedFromJson = false;
 
+    const dbMtimeOf = () => {
+      let m = 0;
+      for (const suf of ['', '-wal']) {
+        try { const t = fs.statSync(this.dbFile + suf).mtimeMs; if (t > m) m = t; } catch { /* */ }
+      }
+      return m;
+    };
+
+    // Stat mtimes BEFORE parsing library.json so normal SQLite startups skip reading/parsing a multi-MB JSON file.
     if (jsonExists) {
-      const lib = readJsonSafe(this.file);
-      if (lib.error) this.loadErrors.push(lib.error);
-      // Prefer library.json when DB doesn't exist yet, when library.json had a corrupt recovery, or when json is newer
       const jsonMtime = (() => { try { return fs.statSync(this.file).mtimeMs; } catch { return 0; } })();
-      const dbMtime = (() => { try { return fs.statSync(this.dbFile).mtimeMs; } catch { return 0; } })();
-      if (!useSqlite || !dbExists || lib.error || jsonMtime > dbMtime + 500) {
+      const dbMtime = dbExists ? dbMtimeOf() : 0;
+      if (!useSqlite || !dbExists || jsonMtime > dbMtime) {
+        const lib = readJsonSafe(this.file);
+        if (lib.error) this.loadErrors.push(lib.error);
         this.adoptData(lib.data);
         loadedFromJson = true;
       }
@@ -63,6 +78,9 @@ export class Library extends LibraryCore {
           this.adoptData(this.sqlite.loadAll());
           this._needsFullSync = false;
         } else if (jsonExists) {
+          const lib = readJsonSafe(this.file);
+          if (lib.error) this.loadErrors.push(lib.error);
+          this.adoptData(lib.data);
           this.sqlite.replaceAll(this.data);
           this._needsFullSync = false;
         }
@@ -102,6 +120,7 @@ export class Library extends LibraryCore {
     onceMigrations(this.settings, clean);
     if (!(clean.automix?.effectsOff >= 1)) Object.assign(this.settings.automix, { tricks: 'off', tease: false, stemTransitions: false, effectsOff: 1 });
     for (const e of this.loadErrors) console.error('[opendj]', e);
+    if (process.platform === 'win32') this.sqlite?.close();
   }
 
   _writeAtomic(file, obj) { writeJsonAtomic(file, obj); }
@@ -109,33 +128,96 @@ export class Library extends LibraryCore {
   adoptData(d) {
     super.adoptData(d);
     this._needsFullSync = true;
+    this._dirtyJson = true;
     this._dirtyTracks?.clear();
     this._removedTracks?.clear();
     this._dirtyMeta = false;
+    this._analysisCache?.clear();
+    this._rev = (this._rev || 0) + 1;
   }
 
   markTrackDirty(tid) {
     if (!tid) return;
     this._dirtyTracks.add(tid);
     this._removedTracks.delete(tid);
+    this._dirtyJson = true;
+    this._rev++;
   }
   markMetaDirty() {
     this._dirtyMeta = true;
+    this._dirtyJson = true;
+    this._rev++;
   }
 
   upsertTrack(t) {
     const res = super.upsertTrack(t);
     this._dirtyTracks.add(res.id);
     this._removedTracks.delete(res.id);
+    this._dirtyJson = true;
+    this._rev++;
     return res;
   }
   updateTrack(tid, patch) {
     // Mark dirty BEFORE super.updateTrack() invokes this.changed('tracks') so we stay on O(1) incremental SQLite writes.
     const existed = !!this.getTrack(tid);
-    if (existed) { this._dirtyTracks.add(tid); this._removedTracks.delete(tid); }
+    if (existed) {
+      this._dirtyTracks.add(tid);
+      this._removedTracks.delete(tid);
+      this._dirtyJson = true;
+      this._rev++;
+      if (patch && ('barFeatures' in patch || 'tempoMap' in patch)) this._analysisCache.delete(tid);
+    }
     const res = super.updateTrack(tid, patch);
     if (!res && existed) this._dirtyTracks.delete(tid);
     return res;
+  }
+  /** Batch-edit many tracks with a single SQLite flush and single SSE event (avoids N SSE broadcasts). */
+  updateTracksBatch(ids, patch) {
+    if (!Array.isArray(ids) || !ids.length || !patch || typeof patch !== 'object') return 0;
+    let updated = 0;
+    for (const tid of ids) {
+      const t = this.getTrack(tid);
+      if (!t) continue;
+      const oldKey = t.key;
+      for (const k of EDITABLE_TRACK_FIELDS) if (k in patch) t[k] = sanitizeField(k, patch[k]);
+      if ('key' in patch && !('keyConfidence' in patch) && t.key !== oldKey) t.keyConfidence = t.key ? 1 : null;
+      if ('tags' in patch) t.tags = normTags(patch.tags);
+      if (['title', 'artist', 'album', 'genre', 'year'].some((k) => k in patch)) t.userEdited = true;
+      this._dirtyTracks.add(tid);
+      this._removedTracks.delete(tid);
+      if ('barFeatures' in patch || 'tempoMap' in patch) this._analysisCache.delete(tid);
+      updated++;
+    }
+    if (updated) {
+      this._dirtyJson = true;
+      this._rev++;
+      this.changed('tracks');
+    }
+    return updated;
+  }
+  /** Load on-demand heavy analysis fields (`barFeatures`, `tempoMap`) for a track (LRU cached). */
+  getTrackAnalysis(tid) {
+    const t = this.getTrack(tid);
+    if (!t) return null;
+    if (t.barFeatures || t.tempoMap) {
+      return { ...(t.barFeatures ? { barFeatures: t.barFeatures } : {}), ...(t.tempoMap ? { tempoMap: t.tempoMap } : {}) };
+    }
+    if (this._analysisCache.has(tid)) {
+      const hit = this._analysisCache.get(tid);
+      this._analysisCache.delete(tid);
+      this._analysisCache.set(tid, hit);
+      return hit;
+    }
+    const data = this.sqlite?.getAnalysis(tid) || {};
+    this._analysisCache.set(tid, data);
+    if (this._analysisCache.size > ANALYSIS_CACHE_MAX) this._analysisCache.delete(this._analysisCache.keys().next().value);
+    return data;
+  }
+  /** Return track object stripped of heavy on-demand analysis blobs (`barFeatures`, `tempoMap`). */
+  slimTrack(t) { return stripHeavyAnalysis(t); }
+  updateSettings(patch) {
+    this._dirtySettings = true;
+    return super.updateSettings(patch);
   }
   removeTracks(ids) {
     const existing = [];
@@ -143,17 +225,21 @@ export class Library extends LibraryCore {
       if (this.getTrack(tid)) {
         this._dirtyTracks.delete(tid);
         this._removedTracks.add(tid);
+        this._analysisCache.delete(tid);
         existing.push(tid);
       }
     }
     if (!existing.length) return;
     this._dirtyMeta = true;
+    this._dirtyJson = true;
+    this._rev++;
     return super.removeTracks(existing);
   }
   changed(what = 'tracks', extra = null) {
     if (what === 'all') this._needsFullSync = true;
     else if (what !== 'tracks') this._dirtyMeta = true;
-    else if (!this._dirtyTracks.size && !this._removedTracks.size) this._needsFullSync = true;
+    this._dirtyJson = true;
+    this._rev++;
     return super.changed(what, extra);
   }
 
@@ -199,8 +285,23 @@ export class Library extends LibraryCore {
       this._dirtyTracks.clear();
       this._removedTracks.clear();
       this._dirtyMeta = false;
-    } else if (this.sqlite.trackCount() !== Object.keys(this.data.tracks).length) {
-      this.sqlite.replaceAll(this.data);
+    }
+  }
+
+  _writeJsonMirror() {
+    this._writeAtomic(this.file, this.data);
+    this._dirtyJson = false;
+    this._lastJsonMirrorAt = Date.now();
+    // Keep the mirror's mtime slightly behind library.db so healthy startups skip re-parsing library.json,
+    // while any external edit or corruption after flush() has jsonMtime > dbMtime and is detected immediately.
+    if (this.sqlite) {
+      let dbMtime = 0;
+      for (const suf of ['', '-wal']) {
+        try { const t = fs.statSync(this.dbFile + suf).mtimeMs; if (t > dbMtime) dbMtime = t; } catch { /* */ }
+      }
+      if (dbMtime > 0) {
+        try { const d = new Date(dbMtime - 20); fs.utimesSync(this.file, d, d); } catch { /* */ }
+      }
     }
   }
 
@@ -208,10 +309,17 @@ export class Library extends LibraryCore {
     clearTimeout(this._t);
     this._t = setTimeout(() => {
       try {
-        if (this.sqlite && Object.keys(this.data.tracks).length > JSON_MIRROR_LIMIT) {
-          // Large libraries (>5k tracks): incremental O(1) SQLite write only, no giant JSON rewrite
+        if (this.sqlite) {
+          const hadWork = this._needsFullSync || this._dirtyTracks.size || this._removedTracks.size || this._dirtyMeta || this._dirtyJson || this._dirtySettings;
           this._flushSqlite();
-          this._writeAtomic(this.settingsFile, this.settings);
+          if (this._dirtyJson && Object.keys(this.data.tracks).length <= JSON_MIRROR_LIMIT && Date.now() - this._lastJsonMirrorAt >= JSON_MIRROR_THROTTLE_MS) {
+            this._writeJsonMirror();
+          }
+          if (this._dirtySettings || !hadWork) {
+            this._writeAtomic(this.settingsFile, this.settings);
+            this._dirtySettings = false;
+          }
+          if (process.platform === 'win32') this.sqlite.close();
         } else {
           this.flush();
         }
@@ -229,9 +337,11 @@ export class Library extends LibraryCore {
     clearTimeout(this._t);
     this._flushSqlite();
     if (!this.sqlite || Object.keys(this.data.tracks).length <= JSON_MIRROR_LIMIT) {
-      this._writeAtomic(this.file, this.data);
+      this._writeJsonMirror();
     }
     this._writeAtomic(this.settingsFile, this.settings);
+    this._dirtySettings = false;
+    if (process.platform === 'win32') this.sqlite?.close();
   }
   close() {
     try { this.flush(); } catch { /* */ }
@@ -272,7 +382,7 @@ export class Library extends LibraryCore {
   }
 
   onTracksRemoved(ids) {
-    for (const tid of ids) { try { fs.unlinkSync(this.waveformPath(tid)); } catch { /* none */ } }
+    for (const tid of ids) fs.promises.unlink(this.waveformPath(tid)).catch(() => {});
   }
 
   waveformPath(tid) { return path.join(this.dataDir, 'waveforms', tid.replace(/[^a-z0-9]/gi, '') + '.bin'); }

@@ -293,6 +293,16 @@ export function computeBarFeatures(mono, sr, bpm, downbeat = 0) {
   return out;
 }
 
+/** Binary search index of first bar with bar.end > x0 (barFeatures are sorted by start/end). */
+function firstBarAfter(bf, x0) {
+  let lo = 0, hi = bf.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (bf[mid].end <= x0) lo = mid + 1; else hi = mid;
+  }
+  return lo;
+}
+
 /** Cosine similarity (0..1) of mean 12-bin chroma between two track windows [a0,a1] and [b0,b1]. null when unavailable. */
 export function localChromaSimilarity(out, a0, a1, inn, b0, b1) {
   const meanChroma = (t, x0, x1) => {
@@ -300,7 +310,9 @@ export function localChromaSimilarity(out, a0, a1, inn, b0, b1) {
     if (!bf?.length) return null;
     const acc = new Float64Array(12);
     let w = 0;
-    for (const bar of bf) {
+    for (let idx = firstBarAfter(bf, x0); idx < bf.length; idx++) {
+      const bar = bf[idx];
+      if (bar.start >= x1) break;
       if (!Array.isArray(bar.chroma) || bar.chroma.length !== 12) continue;
       const ov = Math.min(x1, bar.end) - Math.max(x0, bar.start);
       if (ov <= 0) continue;
@@ -323,7 +335,9 @@ export function barProfileAt(track, a, b = a + 0.1) {
   const bf = Array.isArray(track?.barFeatures) ? track.barFeatures : null;
   if (!bf?.length) return null;
   let sub = 0, punch = 0, mid = 0, high = 0, centroid = 0, w = 0;
-  for (const bar of bf) {
+  for (let idx = firstBarAfter(bf, a); idx < bf.length; idx++) {
+    const bar = bf[idx];
+    if (bar.start >= b) break;
     const ov = Math.min(b, bar.end) - Math.max(a, bar.start);
     if (ov <= 0) continue;
     sub += (bar.sub || 0) * ov;

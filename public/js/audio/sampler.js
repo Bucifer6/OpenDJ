@@ -495,7 +495,18 @@ export class Sampler {
     this.onChange = null;
     const pads = Array.isArray(config?.pads) ? config.pads : [];
     this.slots = DEFAULT_PADS.map((id, i) => this._builtinSlot(pads[i]?.sound || id, pads[i]));
-    this.ready = Promise.all(this.slots.map((s, i) => this._fill(i, s))).then(() => this.restoreUserSamples());
+    // Restore user samples first so we don't synthesize built-ins that get immediately overwritten;
+    // render remaining built-in pads sequentially (yielding between pads) instead of 9 parallel OfflineAudioContexts at startup.
+    this.ready = (async () => {
+      await this.restoreUserSamples();
+      for (let i = 0; i < this.slots.length; i++) {
+        const s = this.slots[i];
+        if (s && s.builtin && !s.buffer) {
+          await new Promise((r) => setTimeout(r, 0));
+          if (this.slots[i] === s && !s.buffer) await this._fill(i, s);
+        }
+      }
+    })();
   }
   static get bank() { return SOUND_BANK.map(({ id, name }) => ({ id, name })); }
   _builtinSlot(id, cfg = {}) {
@@ -576,7 +587,13 @@ export class Sampler {
     return t && t > now + 0.003 && t < now + 2 ? t : 0;
   }
   trigger(i, { velocity = 1, when = 0, choke = true } = {}) {
-    const s = this.slots[i]; if (!s?.buffer) return;
+    const s = this.slots[i];
+    if (!s) return;
+    if (this.ctx?.state === 'suspended') this.ctx.resume?.().catch(() => {});
+    if (!s.buffer) {
+      if (s.builtin) this._fill(i, s).then(() => { if (this.slots[i] === s && s.buffer) this.trigger(i, { velocity, when: 0, choke }); });
+      return;
+    }
     const at = this.startTime(i, when);
     if (s.playing && choke) {
       // a short fade instead of a hard stop: no click when re-triggering a pad that is still ringing

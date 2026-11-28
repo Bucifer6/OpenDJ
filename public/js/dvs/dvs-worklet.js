@@ -17,6 +17,7 @@ class DvsDecoderProcessor extends AudioWorkletProcessor {
     this.trim = 1;
     this.deckPort = null; this.lastSent = null;
     this.statusEvery = Math.round(sampleRate / 30); this.statusCount = 0;
+    this._vEvery = Math.round(sampleRate / 30); this._vCount = 0; this._lastSig = false;
     this.peak = 0;
     this.port.onmessage = (e) => this.onMessage(e.data);
   }
@@ -44,9 +45,20 @@ class DvsDecoderProcessor extends AudioWorkletProcessor {
     // direct, audio-thread-to-audio-thread speed control (no main-thread latency), when the deck supports it
     if (this.deckPort && external) {
       const vv = Math.abs(v) < 1e-3 ? 0 : v;
-      if (vv !== this.lastSent) { this.deckPort.postMessage({ type: 'scratch', value: { velocity: vv } }); this.lastSent = vv; }
+      if (this.lastSent === null || (vv === 0) !== (this.lastSent === 0) || Math.abs(vv - this.lastSent) > 1e-4) {
+        this.deckPort.postMessage({ type: 'scratch', value: { velocity: vv } });
+        this.lastSent = vv;
+      }
     } else if (this.deckPort && this.lastSent !== null) { this.deckPort.postMessage({ type: 'scratch', value: null }); this.lastSent = null; }
-    this.port.postMessage({ type: 'v', v, speed: d.speed, sig: d.signal, pos: d.position, lock: d.lock, t: currentTime });
+    // When deckPort handles audio-thread velocity directly, only send main-thread 'v' updates at ~30 Hz (or immediately on ABS lock / signal transitions)
+    const sigChanged = !!d.signal !== this._lastSig;
+    this._lastSig = !!d.signal;
+    this._vCount += L.length;
+    const needV = !this.deckPort || (this.mode === 'abs' && d.lock) || sigChanged || (external && d.signal && this._vCount >= this._vEvery);
+    if (needV) {
+      this._vCount = 0;
+      this.port.postMessage({ type: 'v', v, speed: d.speed, sig: d.signal, pos: d.position, lock: d.lock, t: currentTime });
+    }
     if (this.calibrating && d.calibration && !d._cal) {
       this.calibrating = false;
       this.port.postMessage({ type: 'calibrated', result: d.calibration, gR: d.gR, rho: d.rho, invertPhase: d.invertPhase, rpm: d.rpm, gate: d.gate });
@@ -54,13 +66,18 @@ class DvsDecoderProcessor extends AudioWorkletProcessor {
     }
     if ((this.statusCount += L.length) >= this.statusEvery) {
       this.statusCount = 0;
-      const n = Math.min(256, d.scopeN), scope = new Float32Array(n * 2);
-      for (let k = 0; k < n; k++) { const j = ((d.scopeN - n + k) & 255) * 2; scope[2 * k] = d.scope[j]; scope[2 * k + 1] = d.scope[j + 1]; }
+      const hasSig = this.peak > 1e-6 || d.signal;
+      let scope = null;
+      if (hasSig) {
+        const n = Math.min(256, d.scopeN);
+        scope = new Float32Array(n * 2);
+        for (let k = 0; k < n; k++) { const j = ((d.scopeN - n + k) & 255) * 2; scope[2 * k] = d.scope[j]; scope[2 * k + 1] = d.scope[j + 1]; }
+      }
       this.port.postMessage({
         type: 'status', level: d.level, peak: this.peak, quality: d.quality, coherence: d.coherence, speed: d.speed, pitch: d.pitch,
         velocity: d.velocity, carrierHz: d.carrierHz, signal: d.signal, lock: d.lock, pos: d.position, bitErrors: d.bitErrors, bitsRead: d.bitsRead,
         rpm: d.rpm, scope, t: currentTime,
-      }, [scope.buffer]);
+      }, scope ? [scope.buffer] : []);
       this.peak = 0;
     }
     return true;

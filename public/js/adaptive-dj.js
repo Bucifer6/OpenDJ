@@ -65,9 +65,9 @@ const pairHash = (a, b) => { let h = 2166136261; for (const c of `${a}>${b}`) h 
 const spread = (points, limit = 8) => points.length <= limit ? points :
   Array.from({ length: limit }, (_, i) => points[Math.round(i * (points.length - 1) / (limit - 1))]);
 
-function localEnergy(t, a, b) {
+function localEnergy(t, a, b, preSections = null) {
   let sum = 0, weight = 0;
-  for (const p of sections(t)) {
+  for (const p of (preSections || sections(t))) {
     const overlap = Math.max(0, Math.min(b, p.end) - Math.max(a, p.start));
     // Phrase detector energy is normalised 0..1; library energy is 1..10.
     if (finite(p.energy)) { sum += overlap * clamp(p.energy, 0, 1) * 10; weight += overlap; }
@@ -206,7 +206,7 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
       if (safety === 'none') continue;
     }
     const vo = vocalsBetween(out, timing.begin, finish), vi = vocalsBetween(inn, cue, cue + Math.max(2, inSpan));
-    const eo = localEnergy(out, timing.begin, finish), ei = localEnergy(inn, cue, cue + Math.max(2, inSpan));
+    const eo = localEnergy(out, timing.begin, finish, outSections), ei = localEnergy(inn, cue, cue + Math.max(2, inSpan), inSections);
     const harmonic = camelotRelation(out.key, inn.key);
     const localChroma = !drop ? localChromaSimilarity(out, timing.begin, finish, inn, cue, cue + Math.max(2, inSpan)) : null;
     // Compare actual windows. Holding quick-stem vocals is not treated as perfect source separation.
@@ -241,7 +241,7 @@ export function planAdaptiveTransition(out, inn, opts = {}) {
       if (hit && !measuredClash && harmonic.value >= 0.8 && Math.abs(Math.log(ratio)) <= Math.log(1.02) && Math.min(eo, ei) >= 6 && !opts.recent?.includes('doubledrop')) doubleDrop = true;
     }
     // objective check of the simulated blend (P4.1): loudness bump / dip, two basslines, vocals on vocals, stretch
-    const check = drop ? null : checkTransition(out, inn, { style: p.style, begin: timing.begin, len: timing.len, inStart: cue, ratio: ratio / rate, rate, doubleDrop,
+    const check = drop ? null : checkTransition(out, inn, { style: p.style, begin: timing.begin, len: timing.len, inStart: cue, ratio: ratio / rate, rate, doubleDrop, chromaSim: localChroma,
       kSwap: doubleDrop && inSpan > 0 ? (landing - cue) / inSpan : undefined });
     if (check) phrasing -= check.penalty;
     if (safety === 'short' && p.bars > 8) phrasing -= (p.bars - 8) * 0.8; // the beat isn't steady enough for a long overlap

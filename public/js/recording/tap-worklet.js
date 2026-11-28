@@ -6,12 +6,16 @@ class OpenDjPcmTap extends AudioWorkletProcessor {
     super();
     this.size = Math.max(128, (options.processorOptions && options.processorOptions.chunkFrames) || 24000);
     this.on = false; this.n = 0; this.pl = 0; this.pr = 0;
+    this.pool = [];
     this.buf = new Float32Array(this.size * 2);
     this.port.onmessage = (e) => {
       const m = e.data || {};
       if (m.cmd === 'on') { this.on = true; }
       else if (m.cmd === 'off') { this.flush(m.id); this.on = false; }
       else if (m.cmd === 'cut') { this.flush(m.id); }
+      else if (m.cmd === 'recycle' && m.buf instanceof ArrayBuffer && m.buf.byteLength === this.size * 8 && this.pool.length < 3) {
+        this.pool.push(new Float32Array(m.buf));
+      }
     };
   }
   flush(id) {
@@ -32,7 +36,7 @@ class OpenDjPcmTap extends AudioWorkletProcessor {
       if (++this.n === this.size) {
         const pcm = this.buf;
         this.port.postMessage({ pcm, frames: this.n, peakL: this.pl, peakR: this.pr }, [pcm.buffer]);
-        this.buf = new Float32Array(this.size * 2); this.n = 0; this.pl = 0; this.pr = 0;
+        this.buf = this.pool.pop() || new Float32Array(this.size * 2); this.n = 0; this.pl = 0; this.pr = 0;
       }
     }
     return true;

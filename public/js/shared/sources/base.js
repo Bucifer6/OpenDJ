@@ -22,10 +22,14 @@
 // { remoteId: string, name: string, trackCount: number|null, duration: seconds|null, smart?: boolean }
 // playlistTracks(remoteId) returns one playlist's tracks, in order, in the listTracks() track shape.
 
+const DEFAULT_TIMEOUT_MS = 30_000;
+
 export class SourceClient {
-  constructor(config, { fetchImpl = globalThis.fetch } = {}) {
+  constructor(config, { fetchImpl = globalThis.fetch, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
     this.config = { ...config, url: (config.url || '').replace(/\/+$/, '') };
-    this.fetch = fetchImpl;
+    this.fetch = fetchImpl === globalThis.fetch && timeoutMs > 0 && typeof AbortSignal?.timeout === 'function'
+      ? (url, init) => fetchImpl(url, init?.signal ? init : { ...init, signal: AbortSignal.timeout(timeoutMs) })
+      : fetchImpl;
   }
   /** Validate credentials; may populate this.config.token/userId. Returns { ok: true, serverName, version } or throws. */
   async connect() { throw new Error('not implemented'); }

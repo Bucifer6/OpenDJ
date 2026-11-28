@@ -48,8 +48,18 @@ export class VideoMixer extends Emitter {
     this.weights = []; this.outputs = new Set(); this.running = false;
     this.lt = { text: '', start: -1e9, key: null };
     this.stats = { fps: 0, frames: 0, t0: performance.now(), drawn: 0 };
-    this._wasBlack = false; this._items = [];
-    this._loop = (now) => { if (!this.running) return; this._raf = requestAnimationFrame(this._loop); this.frame(now); };
+    this._wasBlack = false; this._items = []; this._lastFrameAt = 0;
+    this._loop = (now) => {
+      if (!this.running) return;
+      this._raf = requestAnimationFrame(this._loop);
+      const hasPopup = this.outputs.has('popup');
+      if (document.hidden && !hasPopup) return;
+      // Cap at 60 fps (or 30 fps when only rendering the in-panel preview) to save GPU on 120-240 Hz monitors
+      const minMs = hasPopup ? 15.5 : 31;
+      if (now - this._lastFrameAt < minMs) return;
+      this._lastFrameAt = now;
+      this.frame(now);
+    };
     for (const d of this.engine.decks) d.on('loaded', () => { this.lt.key = null; });
   }
 

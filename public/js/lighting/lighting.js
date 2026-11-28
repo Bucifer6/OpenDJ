@@ -82,7 +82,9 @@ export class Lighting extends Emitter {
     const ph = (t.phrases || []).find((p) => pos >= p.start && pos < p.end);
     const db = Number.isFinite(t.downbeat) ? Math.round((t.downbeat - d.gridOffset) / beatLen) : 0;
     let level = 0;
-    try { const [l, r] = eng.masterLevels(); level = Math.min(1, Math.max(l, r)); } catch { /* no meter */ }
+    if (d.playing) {
+      try { const [l, r] = eng.masterLevels(); level = Math.min(1, Math.max(l, r)); } catch { /* no meter */ }
+    }
     return {
       playing: !!d.playing, at, bpm: Math.round(d.bpm * rate * 1000) / 1000, beat: Math.round(beat * 10000) / 10000,
       barOffset: ((db % 4) + 4) % 4,
@@ -96,11 +98,13 @@ export class Lighting extends Emitter {
     const s = this.sample();
     const beat = s.playing ? Math.floor(s.beat + 1e-6) : null;
     const now = s.at;
+    const playingChanged = s.playing !== this._last.playing;
     const beatChanged = beat !== this._last.beat, phraseChanged = s.phrase !== this._last.phrase;
-    if (beatChanged || phraseChanged || now - this._last.sent >= SEND_MS) this._push(s);
+    const minSend = s.playing ? SEND_MS : 1000;
+    if (playingChanged || beatChanged || phraseChanged || now - this._last.sent >= minSend) this._push(s);
     if (beatChanged && beat != null) this._midiBeat(((beat - s.barOffset) % 4 + 4) % 4 === 0);
     if (phraseChanged && s.phrase && s.playing) this._midiPhrase(s.phrase);
-    this._last.beat = beat; this._last.phrase = s.phrase; this._last.bpm = s.bpm;
+    this._last.beat = beat; this._last.phrase = s.phrase; this._last.bpm = s.bpm; this._last.playing = s.playing;
   }
 
   _push(s) {

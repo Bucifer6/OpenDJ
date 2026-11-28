@@ -40,11 +40,16 @@ export class LyricsManager {
   savePrefs() { try { localStorage.setItem(STORE, JSON.stringify(this.prefs)); } catch { /* */ } }
 
   // ------------------------------------------------------------------ data
+  _cacheSet(trackId, val) {
+    if (this.cache.has(trackId)) this.cache.delete(trackId);
+    this.cache.set(trackId, val);
+    if (this.cache.size > 100) this.cache.delete(this.cache.keys().next().value);
+  }
   get(trackId) { const v = this.cache.get(trackId); return v && !(v instanceof Promise) ? v : null; }
   async fetch(trackId, { online = false, refresh = false } = {}) {
     const q = new URLSearchParams(); if (online) q.set('online', '1'); if (refresh) q.set('refresh', '1');
     const l = await req('GET', `/api/tracks/${encodeURIComponent(trackId)}/lyrics${q.size ? `?${q}` : ''}`);
-    if (!online) this.cache.set(trackId, l);
+    if (!online) this._cacheSet(trackId, l);
     return l;
   }
   load(trackId) {
@@ -52,10 +57,10 @@ export class LyricsManager {
     const v = this.cache.get(trackId);
     if (v) return Promise.resolve(v);
     const p = this.fetch(trackId).catch(() => { this.cache.delete(trackId); return null; });
-    this.cache.set(trackId, p);
+    this._cacheSet(trackId, p);
     return p;
   }
-  async save(trackId, body) { const r = await req('PUT', `/api/tracks/${encodeURIComponent(trackId)}/lyrics`, body); this.cache.set(trackId, r); this.refreshDecks(); return r; }
+  async save(trackId, body) { const r = await req('PUT', `/api/tracks/${encodeURIComponent(trackId)}/lyrics`, body); this._cacheSet(trackId, r); this.refreshDecks(); this._syncTimer(); return r; }
   async remove(trackId) { await req('DELETE', `/api/tracks/${encodeURIComponent(trackId)}/lyrics`); this.cache.delete(trackId); await this.load(trackId); this.refreshDecks(); }
   settings() { return req('GET', '/api/lyrics/settings'); }
   saveSettings(p) { return req('PUT', '/api/lyrics/settings', p); }
@@ -73,16 +78,39 @@ export class LyricsManager {
     return { ...lyricStateAt(l, t), t };
   }
 
+  _syncTimer() {
+    const n = this.app.deckCount || this.engine.decks.length;
+    let active = false;
+    if (typeof document === 'undefined' || !document.hidden) {
+      for (let i = 0; i < n; i++) {
+        const d = this.engine.decks[i];
+        if (d?.playing && d.track && this.get(d.track.id)?.synced?.length) { active = true; break; }
+      }
+    }
+    if (active && !this._t) this._t = setInterval(() => this.tick(), 50);
+    else if (!active && this._t) { clearInterval(this._t); this._t = null; }
+  }
+
   // ------------------------------------------------------------------ deck lines
   init() {
     this.mountDeckLines();
     for (const d of this.engine.decks) {
-      d.on('load', () => { this.lastKey[d.index] = null; this.renderRow(d.index, true); });
-      d.on('loaded', (t) => this.load(t?.id).then(() => this.renderRow(d.index, true)));
-      if (d.track) this.load(d.track.id).then(() => this.renderRow(d.index, true));
+      d.on('load', () => { this.lastKey[d.index] = null; this.renderRow(d.index, true); this._syncTimer(); });
+      d.on('state', () => this._syncTimer());
+      d.on('loaded', (t) => this.load(t?.id).then(() => { this.renderRow(d.index, true); this._syncTimer(); }));
+      if (d.track) this.load(d.track.id).then(() => { this.renderRow(d.index, true); this._syncTimer(); });
     }
-    this._t = setInterval(() => this.tick(), 50);
-    this._videoT = setInterval(() => { if (!document.hidden && this.app.videoUi) this.attachVideo(); }, 1000);
+    if (typeof document !== 'undefined') {
+      this._onVis = () => this._syncTimer();
+      document.addEventListener('visibilitychange', this._onVis);
+    }
+    this._syncTimer();
+    this._videoT = setInterval(() => {
+      if (!document.hidden && this.app.videoUi) {
+        this.attachVideo();
+        if (this._mixer) { clearInterval(this._videoT); this._videoT = null; }
+      }
+    }, 1000);
     return this;
   }
 
@@ -210,6 +238,7 @@ export class LyricsManager {
 
   dispose() {
     clearInterval(this._t); clearInterval(this._videoT);
+    if (this._onVis && typeof document !== 'undefined') document.removeEventListener('visibilitychange', this._onVis);
     for (const r of this.rows) { r.root.remove(); r.row?.classList.remove('has-lyrics'); }
     this.app.video?.mixer?._karaoke?.uninstall();
   }

@@ -1,6 +1,5 @@
 import { el, fmtDur, escapeHtml } from '../util.js';
 import { uploadButton } from './upload.js';
-import { openCdjExport } from '../cdj/export-dialog.js';
 import { stemsMenuItems } from '../stems/stems-ui.js';
 import { api } from '../api.js';
 import { toCamelot, camelotCompatible } from '../audio/analysis-core.js';
@@ -8,6 +7,8 @@ import { LibraryDialogs, TRACK_COLORS, colorName, flipSubmenus } from './library
 import { icon as uiIcon, iconLabel, glyphIcon, iconHtml } from './icons.js';
 import { platform, unavailable } from '../platform.js';
 import { t as tr } from '../i18n.js';
+
+const COLLATOR = new Intl.Collator(undefined, { numeric: true });
 
 // rows are taller on touch screens (phones, tablets) so a finger can pick one
 const COARSE = !!globalThis.matchMedia?.('(pointer: coarse)').matches;
@@ -137,7 +138,28 @@ export class LibraryUI {
       this.suggestRev++;
     }
     this.rev++;
-    this._rowsRaf ||= requestAnimationFrame(() => { this._rowsRaf = 0; this.renderRows(true); });
+    // Only redraw the visible row if this track is currently mounted in the viewport (avoids rebuilding 40 rows for off-screen background analysis)
+    if (this._rowMap?.size) {
+      let dirtyIdx = -1;
+      for (const [idx] of this._rowMap) { if (this.rows[idx]?.id === t.id) { dirtyIdx = idx; break; } }
+      if (dirtyIdx >= 0) {
+        (this._dirtyRowIdxs ||= new Set()).add(dirtyIdx);
+        this._rowsRaf ||= requestAnimationFrame(() => {
+          this._rowsRaf = 0;
+          const idxs = this._dirtyRowIdxs; this._dirtyRowIdxs = null;
+          if (!idxs || !this._rowMap) return;
+          const ctx = this.rowContext();
+          for (const i of idxs) {
+            const oldRow = this._rowMap.get(i);
+            if (!oldRow || !this.rows[i]) continue;
+            const nextRow = this.buildRow(i, ctx);
+            if (nextRow._art) { nextRow.firstArt.style.backgroundImage = nextRow._art; nextRow._art = null; }
+            oldRow.replaceWith(nextRow);
+            this._rowMap.set(i, nextRow);
+          }
+        });
+      }
+    }
   }
 
   viewTracks() {
@@ -230,7 +252,7 @@ export class LibraryUI {
       list = [...list].sort((a, b) => {
         const x = val(a), y = val(b);
         if (x == null || x === '') return 1; if (y == null || y === '') return -1;
-        return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true })) * dir;
+        return (typeof x === 'number' ? x - y : COLLATOR.compare(String(x), String(y))) * dir;
       });
     }
     this._finishView(list);
@@ -373,9 +395,9 @@ export class LibraryUI {
     this.rowsEl = el('div', { class: 'lib-rows', translate: 'no' }); // track rows: titles, artists, genres are user data
     this.emptyEl = el('div', { class: 'lib-empty', hidden: true });
     this.scroller = el('div', { class: 'lib-scroll', tabindex: 0 }, this.spacer, this.rowsEl, this.emptyEl);
-    this.scroller.addEventListener('scroll', () => this.renderRows());
+    this.scroller.addEventListener('scroll', () => this.renderRows(), { passive: true });
     this.scroller.addEventListener('keydown', (e) => this.onKey(e));
-    new ResizeObserver(() => this.renderRows(true)).observe(this.scroller);
+    new ResizeObserver(() => this.renderRows(false)).observe(this.scroller);
     this.preview = new Audio();
     this.root = el('section', { class: 'library' }, this.tree, el('div', { class: 'lib-main' }, tools, this.header, this.scroller));
   }
@@ -444,7 +466,9 @@ export class LibraryUI {
     const src = t.sourceType === 'remote' ? (SOURCE_ICONS[t.sourceKind] || tr('Server')) : tr('Local');
     const dup = this.view.kind === 'duplicates' ? ` dup-${this.dupIndex.get(t.id) % 2 ? 'b' : 'a'} ${this.dupGroups[this.dupIndex.get(t.id)]?.ids[0] === t.id ? 'dup-keep' : ''}` : '';
     const sw = t.color ? `<i class="lc-sw" style="background:${escapeHtml(t.color)}" title="${escapeHtml(tr(colorName(t.color)) || t.color)}"></i>` : '';
-    const when = this.view.kind === 'session' ? (t._playedAt ? new Date(t._playedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') : (t.addedAt ? new Date(t.addedAt).toLocaleDateString() : '');
+    const dateFmt = (LibraryUI._dateFmt ||= new Intl.DateTimeFormat());
+    const timeFmt = (LibraryUI._timeFmt ||= new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }));
+    const when = this.view.kind === 'session' ? (t._playedAt ? timeFmt.format(t._playedAt) : '') : (t.addedAt ? dateFmt.format(t.addedAt) : '');
     const row = el('div', {
       class: `lr ${i % 2 ? 'alt' : ''} ${this.selected.has(t.id) ? 'sel' : ''} ${i === this.cursor ? 'cursor' : ''} ${loaded.has(t.id) ? 'loaded' : ''} ${t.playCount ? 'played' : ''} ${t.missing ? 'missing' : ''} ${t.unreadable ? 'unreadable' : ''}${dup}`,
       title: t.missing ? tr('File missing: {0}', { 0: t.path }) : t.unreadable ? tr('Could not decode this file: {0}', { 0: t.path || t.title }) : null,
@@ -465,6 +489,16 @@ export class LibraryUI {
     return row;
   }
 
+  /** Patch selection and cursor classes on mounted rows in place without destroying/rebuilding DOM via innerHTML. */
+  syncRowSelection() {
+    if (!this._rowMap) return;
+    for (const [i, row] of this._rowMap) {
+      const t = this.rows[i];
+      row.classList.toggle('sel', !!t && this.selected.has(t.id));
+      row.classList.toggle('cursor', i === this.cursor);
+    }
+  }
+
   wireRows() {
     this._wired = true;
     const idx = (e) => { const r = e.target.closest('.lr'); return r ? +r.dataset.i : -1; };
@@ -472,12 +506,18 @@ export class LibraryUI {
       const i = idx(e); if (i < 0) return;
       if (e.detail === 2 && !e.target.closest('[data-s]')) { this.loadToFreeDeck(this.rows[i].id); return; }
       const star = e.target.closest('[data-s]');
-      if (star) { const t = this.rows[i]; const r = +star.dataset.s === t.rating ? 0 : +star.dataset.s; t.rating = r; api.updateTrack(t.id, { rating: r }).catch((err) => this.app.toast(`Could not save the rating: ${err.message}`)); this.renderRows(true); return; }
+      if (star) {
+        const t = this.rows[i]; const r = +star.dataset.s === t.rating ? 0 : +star.dataset.s; t.rating = r;
+        api.updateTrack(t.id, { rating: r }).catch((err) => this.app.toast(`Could not save the rating: ${err.message}`));
+        const row = this._rowMap?.get(i);
+        if (row) row.querySelectorAll('[data-s]').forEach((sp) => sp.classList.toggle('on', +sp.dataset.s <= r));
+        return;
+      }
       const id = this.rows[i].id;
       if (e.shiftKey && this.cursor >= 0) { const [a, b] = [Math.min(this.cursor, i), Math.max(this.cursor, i)]; for (let k = a; k <= b; k++) this.selected.add(this.rows[k].id); }
       else if (e.ctrlKey || e.metaKey) { this.selected.has(id) ? this.selected.delete(id) : this.selected.add(id); }
       else { this.selected = new Set([id]); }
-      this.cursor = i; this.renderRows(true); this.scroller.focus({ preventScroll: true });
+      this.cursor = i; this.syncRowSelection(); this.scroller.focus({ preventScroll: true });
     });
     this.rowsEl.addEventListener('dragstart', (e) => {
       const i = idx(e); if (i < 0) return;
@@ -508,7 +548,7 @@ export class LibraryUI {
     this.rowsEl.addEventListener('dragend', clearMark);
     this.rowsEl.addEventListener('contextmenu', (e) => {
       e.preventDefault(); const i = idx(e); if (i < 0) return;
-      const id = this.rows[i].id; if (!this.selected.has(id)) { this.selected = new Set([id]); this.cursor = i; this.renderRows(true); }
+      const id = this.rows[i].id; if (!this.selected.has(id)) { this.selected = new Set([id]); this.cursor = i; this.syncRowSelection(); }
       this.contextMenu(e.clientX, e.clientY);
     });
   }
@@ -517,7 +557,7 @@ export class LibraryUI {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); this.moveSelection(e.key === 'ArrowDown' ? 1 : -1); }
     else if (e.key === 'Enter' && this.cursor >= 0) this.loadToFreeDeck(this.rows[this.cursor].id);
     else if (e.key === 'Delete' && this.view.kind === 'playlist') this.removeFromPlaylist();
-    else if ((e.ctrlKey || e.metaKey) && e.key === 'a') { e.preventDefault(); this.selected = new Set(this.rows.map((t) => t.id)); this.renderRows(true); }
+    else if ((e.ctrlKey || e.metaKey) && e.key === 'a') { e.preventDefault(); this.selected = new Set(this.rows.map((t) => t.id)); this.syncRowSelection(); }
   }
   moveSelection(d) {
     if (!this.rows.length) return;
@@ -526,7 +566,8 @@ export class LibraryUI {
     const top = this.cursor * ROW_H, H = this.scroller.clientHeight;
     if (top < this.scroller.scrollTop) this.scroller.scrollTop = top;
     else if (top + ROW_H > this.scroller.scrollTop + H) this.scroller.scrollTop = top + ROW_H - H;
-    this.renderRows(true);
+    this.renderRows(false);
+    this.syncRowSelection();
   }
   loadSelected(deck) { const t = this.rows[this.cursor]; if (t) this.app.loadTrack(deck, t.id).catch(() => {}); }
   loadToFreeDeck(id) {
@@ -750,7 +791,7 @@ export class LibraryUI {
       { label: 'Download all for offline use', action: () => this.download(p.trackIds.filter((i) => { const t = this.tracks.get(i); return t?.sourceType === 'remote' && !t.localPath; })) },
       { label: 'Export as M3U8', action: () => { const a = el('a', { href: api.m3uUrl(p.id), download: '' }); document.body.append(a); a.click(); a.remove(); } }, // no navigation: beforeunload would ask while decks play
       ...(unavailable('usbExport') ? [] : [{ label: 'Export to USB / folder…', action: () => this.app.dialogs.exportUsb([p.id]) }]),
-      ...(unavailable('cdj') ? [] : [{ label: 'Export to CDJ USB (rekordbox)…', action: () => openCdjExport(this.app, [p.id]) }]),
+      ...(unavailable('cdj') ? [] : [{ label: 'Export to CDJ USB (rekordbox)…', action: async () => (await import('../cdj/export-dialog.js')).openCdjExport(this.app, [p.id]) }]),
       ...(unavailable('stems') ? [] : [{ label: 'Prepare AI stems for playlist', action: () => this.app.stems?.enqueue(p.trackIds).catch((e) => this.app.toast(e.message)) }]),
     ];
     if (p.smart) {

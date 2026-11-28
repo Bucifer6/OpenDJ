@@ -102,8 +102,8 @@ export class TimecodeDecoder {
       this.Pre += re; this.Pim += im; this.Mag += Math.sqrt(m2 * (pl * pl + pr * pr)); this.E += m2;
       this.Sll += l * l; this.Srr += raw * raw; this.Slr += l * raw;
       this.pl = l; this.pr = r;
-      // cycle counting + bits (only on a usable signal)
-      if (this._sigHold > 0 && m2 > gateSq && (re !== 0 || im !== 0)) {
+      // cycle counting + bits (only needed when an absolute LFSR table is loaded)
+      if (this.table && this._sigHold > 0 && m2 > gateSq && (re !== 0 || im !== 0)) {
         // Unwrap the measured carrier phase itself: capture can start anywhere
         // in a cycle, and channel calibration can change its phase later.
         // Integrating only phase differences from zero splits amplitude bits
@@ -154,18 +154,25 @@ export class TimecodeDecoder {
     const fast = (over !== 0 && over === this._over) || dev > 5 * thr || !present;
     this._over = over;
     if (present && !over) this.jitter += (dev - this.jitter) * 0.02;
-    const tau = fast ? 0.0015 : 0.012;
-    this.speed += (target - this.speed) * (1 - Math.exp(-this.blockDur / tau));
+    if (this._kDur !== this.blockDur) {
+      this._kDur = this.blockDur;
+      this._kFast = 1 - Math.exp(-this.blockDur / 0.0015);
+      this._kSlow = 1 - Math.exp(-this.blockDur / 0.012);
+      this._kPitch = 1 - Math.exp(-this.blockDur / 0.15);
+      this._kQual = 1 - Math.exp(-this.blockDur / 0.05);
+      this._kTrim = 1 - Math.exp(-this.blockDur / 0.25);
+    }
+    this.speed += (target - this.speed) * (fast ? this._kFast : this._kSlow);
     if (!this.signal && Math.abs(this.speed) < 1e-3) this.speed = 0;
-    if (present && Math.abs(this.speed) > 0.05) this.pitch += (this.speed - this.pitch) * (1 - Math.exp(-this.blockDur / 0.15));
+    if (present && Math.abs(this.speed) > 0.05) this.pitch += (this.speed - this.pitch) * this._kPitch;
     const qInst = present ? Math.max(0, Math.min(1, (coh - 0.6) / 0.38)) : 0;
-    this.quality += (qInst - this.quality) * (1 - Math.exp(-this.blockDur / 0.05));
+    this.quality += (qInst - this.quality) * this._kQual;
     if (wasSignal && !this.signal) { this._idx = -1; this.env = 0; this.ampSum = 0; this.ampN = 0; } // needle lifted: the slicer re-learns the level
     // automatic channel-balance / quadrature trim (interfaces, cartridges and preamps are never perfectly matched)
     if (this.autoTrim && present && Math.abs(raw) > 0.2) {
       // running mean until the window is full, then a 0.25 s moving average (short blocks see partial cycles,
       // so a single block is a biased estimate; only the average is meaningful)
-      const a = Math.max(1 - Math.exp(-this.blockDur / 0.25), 1 / ++this._trimN);
+      const a = Math.max(this._kTrim, 1 / ++this._trimN);
       this.eLL += (this.Sll / cnt - this.eLL) * a; this.eRR += (this.Srr / cnt - this.eRR) * a; this.eLR += (this.Slr / cnt - this.eLR) * a;
       if (this._trimN >= 60 && this.eRR > 1e-12) {
         this.gR = Math.sqrt(this.eLL / this.eRR);

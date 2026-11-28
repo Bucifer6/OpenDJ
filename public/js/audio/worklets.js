@@ -4,6 +4,7 @@ import { readStemMix, stemCoefficients, smoothGains, isUnity, isSilent } from '.
 import { StereoPhaseVocoder } from './phase-vocoder.js';
 
 const GRAIN = 2048; // key-lock grain size (source frames)
+const LN3 = Math.log(3);
 const SPIN_FLICK = 0.06; // backspin: time for the hand to throw the record from play speed to full reverse (s)
 const VEL_KNEE = 0.3; // below this speed (resampled playback) the level follows the platter speed, like a cartridge
 const HAND_K = 0.02; // velocity-mode hand smoothing per sample at the default jog weight (about a 1 ms time constant)
@@ -49,6 +50,10 @@ class DeckProcessor extends AudioWorkletProcessor {
     this.coast = null;        // a released record coasting to a stop { T, v0 }
     this.handK = HAND_K;      // velocity-mode hand smoothing (jog weight)
     this.tau = handTau(0.5);  // position-mode tracker time constants (jog weight)
+    this._velK = 1 - Math.exp(-1 / (this.tau.vel * sampleRate));
+    this._posK = 1 - Math.exp(-1 / (this.tau.pos * sampleRate));
+    this._hx = 0; this._hv = 0; // reusable handAt() output (zero per-sample array allocations)
+    this._motorStopB = 0;
     this.hand = null;         // position-mode hand { anchor, pts: [[t, pos]...], lag, vs, creep }
     this.rateRamp = null;     // sample-accurate tempo glide { t0, t1, r0, r1 } (audio-clock seconds)
     this.armed = null;        // active loop waiting for the play head { start, end } (frames)
@@ -110,7 +115,9 @@ class DeckProcessor extends AudioWorkletProcessor {
         this.pos = this.shadow = 0; this.playing = false; this.curRate = 0; this.loop = null; this.brake = 0; this.spin = null;
         this.scratch = null; this.dir = 1; this.slip = false; this.endedSent = false; this.stems = null; this.ghost.n = 0; this.ghost2.n = 0; this.fin = 1;
         this.hand = null; this.coast = null; this.rateRamp = null; this.armed = null; this.alt = null; this.swap = null; this.fout = 0; this.slipStop = false; this.motorRamp = this.releaseRamp = false;
-        this.rollSchedule = null; this.pvFade = 0; this.pv?.reset(); this.pvSend?.reset(); this._idleReported = false;
+        this.rollSchedule = null; this.pvFade = 0;
+        if (this.keyLock && !this.pv) this.pv = new StereoPhaseVocoder();
+        this.pv?.reset(); this.pvSend?.reset(); this._idleReported = false;
         break;
       case 'unload': this.L = this.R = null; this.len = 0; this.playing = false; this.scratch = null; this.dir = 1; this.slip = false; this.stems = null; this.spin = null; this.ghost.n = 0; this.ghost2.n = 0;
         this.hand = null; this.coast = null; this.rateRamp = null; this.armed = null; this.alt = null; this.swap = null; this.fout = 0; this.rollSchedule = null; this.pvFade = 0; this.pv = null; this.pvSend = null; this._idleReported = false; break;
@@ -156,7 +163,7 @@ class DeckProcessor extends AudioWorkletProcessor {
         this.pos = f; if (!this.slip) this.shadow = this.pos; this.resetGrains(); this._idleReported = false; break;
       }
       // (no grain reset: jumping the grains to the play head mid-grain clicked; a mode change is cross-faded in process())
-      case 'keylock': this.keyLock = m.value; break;
+      case 'keylock': this.keyLock = m.value; if (this.keyLock && this.L && !this.pv) this.pv = new StereoPhaseVocoder(); break;
       case 'pitch': this.pitch = m.value; break;
       case 'reverse': this.dir = m.value ? -1 : 1; if (!m.value && this.slip) this.endSlip(); break;
       case 'slip': this.slip = m.value; if (m.value) this.shadow = this.pos; else this.endSlip(true); break;
@@ -165,7 +172,11 @@ class DeckProcessor extends AudioWorkletProcessor {
       // position-following scratch (T3; controller plan §4.7): pos = the hand's travel in source frames since the
       // touch ({ type: 'scratch', value: { pos: true } }), t = the input event's audio-clock time
       case 'scratchPos': this.handPoint(m.pos, m.t); break;
-      case 'jogWeight': this.handK = handCoef(m.value); this.tau = handTau(m.value); break;
+      case 'jogWeight':
+        this.handK = handCoef(m.value); this.tau = handTau(m.value);
+        this._velK = 1 - Math.exp(-1 / (this.tau.vel * sampleRate));
+        this._posK = 1 - Math.exp(-1 / (this.tau.pos * sampleRate));
+        break;
       case 'armLoop': this.armed = m.value && m.value.end > m.value.start ? { start: m.value.start, end: m.value.end } : null; break;
       // sample-accurate loop-roll step-down schedule (automix loop-roll build / loop exit): [{ at (audio s), start, end }]
       case 'rollSchedule': this.rollSchedule = Array.isArray(m.steps) && m.steps.length ? { steps: m.steps, i: 0 } : null; break;
@@ -174,16 +185,17 @@ class DeckProcessor extends AudioWorkletProcessor {
       case 'altReturn': if (this.alt || (this.swap && this.swap.kind === 'in')) { this.swap = { kind: 'out', frame: m.frame }; this.fout = this.L && this.curRate !== 0 ? this.FADE : 0; } break;
       case 'brake': // m.value = 1 / (stop time * sampleRate), as before; m.slip: resume at the shadow afterwards
         this.brake = m.value > 0 ? m.value : 0;
-        if (this.brake) { const T = 1 / (this.brake * sampleRate); this.bB = Math.log(3) / T; this.bA = this.bB / 2; this.coast = null; } // v(T) = 0
+        if (this.brake) { const T = 1 / (this.brake * sampleRate); this.bB = LN3 / T; this.bA = this.bB / 2; this.coast = null; } // v(T) = 0
         this.slipStop = !!(this.brake && m.slip);
         break;
       case 'backspin': // throw the record backwards, then let it spin down and stop
-        if (this.L) { this.spin = { t: 0, T: Math.max(0.2, m.seconds || 1), v0: Math.abs(m.speed || 4.5), from: this.curRate }; this.brake = 0; this.coast = null; this.slipStop = !!m.slip; }
+        if (this.L) { const T = Math.max(0.2, m.seconds || 1); this.spin = { t: 0, T, b: LN3 / T, v0: Math.abs(m.speed || 4.5), from: this.curRate }; this.brake = 0; this.coast = null; this.slipStop = !!m.slip; }
         break;
       // motor: a number = start time (the original hook), or { start, stop, inertia, slipmat } (any subset)
       case 'motor': {
         const v = typeof m.value === 'number' ? { start: m.value } : m.value || {};
         for (const k of ['start', 'stop', 'inertia', 'slipmat']) if (Number.isFinite(v[k]) && v[k] >= 0) this.motor[k] = k === 'slipmat' ? Math.min(1, v[k]) : Math.min(10, v[k]);
+        this._motorStopB = this.motor.stop > 0 ? LN3 / this.motor.stop : 0;
         break;
       }
     }
@@ -196,7 +208,7 @@ class DeckProcessor extends AudioWorkletProcessor {
     const toward0 = target === 0 || Math.sign(target) !== Math.sign(v) && v !== 0;
     if (toward0) { // pause, or reverse: brake through zero first
       if (m.stop > 0) {
-        const b = Math.log(3) / m.stop, a = Math.abs(v), s = Math.sign(v), nv = a - (b / 2 + b * a) / sr;
+        const b = this._motorStopB || (LN3 / m.stop), a = Math.abs(v), s = Math.sign(v), nv = a - (b / 2 + b * a) / sr;
         v = nv <= 0.001 ? 0 : s * nv;
       } else v = 0;
       if (v === 0 && target === 0) this.releaseRamp = false;
@@ -261,7 +273,7 @@ class DeckProcessor extends AudioWorkletProcessor {
     if (!was) return;
     if (this.slip) this.endSlip();
     // let go: a stopped deck's record coasts (inertia); a playing deck's motor brings it back to speed (start time)
-    if (!this.playing && this.motor.inertia > 0 && Math.abs(this.curRate) > 0.05) this.coast = { T: this.motor.inertia, v0: Math.abs(this.curRate) };
+    if (!this.playing && this.motor.inertia > 0 && Math.abs(this.curRate) > 0.05) this.coast = { T: this.motor.inertia, b: LN3 / this.motor.inertia, v0: Math.abs(this.curRate) };
     else if (this.playing && this.motor.start > 0) this.releaseRamp = true;
   }
   /** Position mode: one hand sample (travel in frames since the touch, at audio time t). */
@@ -282,37 +294,40 @@ class DeckProcessor extends AudioWorkletProcessor {
     h.lagTarget = Math.min(0.1, h.delay + LAG_GAP * h.gap);
     if (pts.length <= 2) h.lag = h.lagTarget; // (followHand slews it after that: no time jumps, no speed spikes)
   }
-  /** Position mode: the hand's position (frames from the anchor) and speed (frames per second) at audio time t. */
+  /** Position mode: compute hand position and speed at audio time t into this._hx / this._hv (zero allocations). */
   handAt(t) {
     const pts = this.hand.pts, n = pts.length;
-    if (!n) return [0, 0];
-    if (t <= pts[0][0]) return [pts[0][1], 0];
+    if (!n) { this._hx = 0; this._hv = 0; return; }
+    if (t <= pts[0][0]) { this._hx = pts[0][1]; this._hv = 0; return; }
     for (let i = n - 1; i > 0; i--) {
       const a = pts[i - 1], b = pts[i];
       if (t >= a[0]) {
         const v = (b[1] - a[1]) / (b[0] - a[0]);
-        if (t <= b[0]) return [a[1] + v * (t - a[0]), v];
+        if (t <= b[0]) { this._hx = a[1] + v * (t - a[0]); this._hv = v; return; }
         // past the newest sample (late input, or the hand stopped and sends nothing): carry on with the last speed
         // and ease back onto the newest sample within EXTRAPOLATE, so a stopped hand leaves the record where it stopped
         const s = t - b[0];
-        if (s >= EXTRAPOLATE) return [b[1], 0];
+        if (s >= EXTRAPOLATE) { this._hx = b[1]; this._hv = 0; return; }
         const k = 1 - s / EXTRAPOLATE;
-        return [b[1] + v * s * k * k, v * k * (1 - 3 * s / EXTRAPOLATE)];
+        this._hx = b[1] + v * s * k * k;
+        this._hv = v * k * (1 - 3 * s / EXTRAPOLATE);
+        return;
       }
     }
-    return [pts[n - 1][1], 0];
+    this._hx = pts[n - 1][1]; this._hv = 0;
   }
   /** Position mode, per sample: drive the platter so the play head follows the hand (velocity feed-forward + position correction). */
   followHand(t) {
     const h = this.hand, sr = sampleRate;
     const dl = h.lagTarget - h.lag, maxd = LAG_SLEW / sr; // render-delay changes warp time by at most LAG_SLEW
     h.lag += dl > maxd ? maxd : dl < -maxd ? -maxd : dl;
-    const [x, v] = this.handAt(t - h.lag);
+    this.handAt(t - h.lag);
+    const x = this._hx, v = this._hv;
     // slip-mat: a still hand lets a running platter drag the record along a little
     if (this.playing && this.motor.slipmat > 0) h.creep += this.motor.slipmat * 0.03 * this.rate * this.dir * this.step;
     const target = h.anchor + x + h.creep;
-    h.vs += (v / sr - h.vs) * (1 - Math.exp(-1 / (this.tau.vel * sr)));
-    let speed = h.vs + (target - this.pos) * (1 - Math.exp(-1 / (this.tau.pos * sr)));
+    h.vs += (v / sr - h.vs) * this._velK;
+    let speed = h.vs + (target - this.pos) * this._posK;
     const lim = MAX_HAND * this.step;
     if (speed > lim) speed = lim; else if (speed < -lim) speed = -lim;
     // a last ~1 ms smoothing of the platter speed: a late hand sample that bends the path must not step the speed
@@ -408,7 +423,7 @@ class DeckProcessor extends AudioWorkletProcessor {
         const sp = this.spin; sp.t += 1 / sampleRate;
         if (sp.t < SPIN_FLICK) { const k = 0.5 - 0.5 * Math.cos(Math.PI * sp.t / SPIN_FLICK); this.curRate = sp.from + (-sp.v0 - sp.from) * k; }
         else { // friction spin-down (same model as the brake), reaches 0 after sp.T
-          const b = Math.log(3) / sp.T, v = -this.curRate - (b / 2 + b * -this.curRate / sp.v0) * sp.v0 / sampleRate;
+          const b = sp.b || (LN3 / sp.T), v = -this.curRate - (b / 2 + b * -this.curRate / sp.v0) * sp.v0 / sampleRate;
           if (v <= 0.001) { this.curRate = 0; this.spin = null; this.stopDone(); }
           else this.curRate = -v;
         }
@@ -420,7 +435,7 @@ class DeckProcessor extends AudioWorkletProcessor {
         if (this.scratch.pos) this.followHand(tNow); // position mode: the play head follows the hand
         else this.curRate += (target - this.curRate) * this.handK; // smooth hand movement (jog weight)
       } else if (this.coast) { // released record coasting (deck stopped): friction + drag, stops after coast.T
-        const c = this.coast, b = Math.log(3) / c.T, s = Math.sign(this.curRate), a = Math.abs(this.curRate);
+        const c = this.coast, b = c.b || (LN3 / c.T), s = Math.sign(this.curRate), a = Math.abs(this.curRate);
         const v = a - (b / 2 + b * a / c.v0) * c.v0 / sampleRate;
         if (v <= 0.001 || s === 0 || this.playing) { this.coast = null; if (!this.playing) this.curRate = 0; }
         else this.curRate = s * v;
@@ -551,12 +566,7 @@ class DeckProcessor extends AudioWorkletProcessor {
     }
     if ((this.counter += frames) >= 1024) {
       this.counter = 0;
-      const idle = !this.playing && !this.scratch && !this.coast && this.curRate === 0;
-      const sig = `${this.pos}|${this.shadow}|${this.curRate}|${this.playing}|${this.alt ? 1 : 0}|${this.rate}|${this.seekSeq}`;
-      if (!idle || sig !== this._lastPosSig) {
-        this._lastPosSig = sig;
-        this.port.postMessage({ type: 'pos', frame: this.pos, shadow: this.shadow, rate: this.curRate, playing: this.playing, time: currentTime + frames / sampleRate, alt: !!this.alt, tempo: this.rate, seekSeq: this.seekSeq });
-      }
+      this.port.postMessage({ type: 'pos', frame: this.pos, shadow: this.shadow, rate: this.curRate, playing: this.playing, time: currentTime + frames / sampleRate, alt: !!this.alt, tempo: this.rate, seekSeq: this.seekSeq });
     }
     return true;
   }

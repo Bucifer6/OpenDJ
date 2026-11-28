@@ -118,24 +118,43 @@ export class LightingEngine {
   }
 
   _stream(frame, now, testing) {
+    let previewMsg = null;
+    let previewStatusMsg = null;
+    const dmxCache = new Map();
     for (const s of this.subs) {
+      if (s.res.destroyed || s.res.writableEnded || s.res.writableLength > 262144) {
+        this.subs.delete(s);
+        try { s.res.destroy(); } catch { /* */ }
+        continue;
+      }
       if (s.preview && now - s.tp >= PREVIEW_MS) {
         s.tp = now;
-        const px = {};
-        for (const [id, p] of frame.pixels) { // downsample strips to <= 48 cells for the preview
-          const n = p.length / 3, k = Math.min(48, n), cells = [];
-          for (let i = 0; i < k; i++) { const j = Math.floor((i + 0.5) * n / k) * 3; cells.push(((p[j] << 16) | (p[j + 1] << 8) | p[j + 2]).toString(16).padStart(6, '0')); }
-          px[id] = cells.join('');
+        const needStatus = now - (s.ts || 0) > 1000;
+        if (needStatus) s.ts = now;
+        if (needStatus ? !previewStatusMsg : !previewMsg) {
+          const px = {};
+          for (const [id, p] of frame.pixels) { // downsample strips to <= 48 cells for the preview
+            const n = p.length / 3, k = Math.min(48, n), cells = [];
+            for (let i = 0; i < k; i++) { const j = Math.floor((i + 0.5) * n / k) * 3; cells.push(((p[j] << 16) | (p[j + 1] << 8) | p[j + 2]).toString(16).padStart(6, '0')); }
+            px[id] = cells.join('');
+          }
+          const m = frame.music;
+          const base = { l: frame.looks, px, effect: frame.effect, playing: m.playing, bpm: Math.round(m.bpm * 10) / 10, beat: m.barBeat, phrase: m.phrase, live: this.live };
+          if (needStatus) previewStatusMsg = `event: preview\ndata: ${JSON.stringify({ ...base, status: this.status() })}\n\n`;
+          else previewMsg = `event: preview\ndata: ${JSON.stringify(base)}\n\n`;
         }
-        const m = frame.music;
-        s.res.write(`event: preview\ndata: ${JSON.stringify({ l: frame.looks, px, effect: frame.effect, playing: m.playing, bpm: Math.round(m.bpm * 10) / 10, beat: m.barBeat, phrase: m.phrase, live: this.live, status: now - (s.ts || 0) > 1000 ? (s.ts = now, this.status()) : undefined })}\n\n`);
+        s.res.write(needStatus ? previewStatusMsg : previewMsg);
       }
       if (s.dmx && (this.config.enabled || testing) && this.config.outputs.usbdmx.enabled) {
         const data = frame.universes.get(s.dmx) || new Uint8Array(512);
         const changed = !s.last || data.some((v, i) => v !== s.last[i]);
         if (changed || now - s.td > 1000) {
-          s.td = now; s.last = Uint8Array.from(data);
-          s.res.write(`event: dmx\ndata: ${Buffer.from(data.buffer, data.byteOffset, 512).toString('base64')}\n\n`);
+          s.td = now;
+          if (!s.last) s.last = new Uint8Array(512);
+          s.last.set(data);
+          let b64 = dmxCache.get(s.dmx);
+          if (!b64) { b64 = `event: dmx\ndata: ${Buffer.from(data.buffer, data.byteOffset, 512).toString('base64')}\n\n`; dmxCache.set(s.dmx, b64); }
+          s.res.write(b64);
         }
       }
     }

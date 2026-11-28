@@ -25,7 +25,8 @@ async function req(method, url, body, raw = false) {
 // Ids go into URLs (and coverUrl into an html template / CSS url()): always encode them, quotes and parens too.
 const enc = (id) => encodeURIComponent(String(id)).replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 export const api = {
-  tracks: () => req('GET', '/api/tracks'),
+  tracks: () => req('GET', local.enabled ? '/api/tracks' : '/api/tracks?slim=1'),
+  trackAnalysis: (id) => (local.enabled ? Promise.resolve({}) : req('GET', `/api/tracks/${enc(id)}/analysis`).catch(() => ({}))),
   searchTracks: (q, limit = 500) => req('GET', `/api/tracks/search?q=${encodeURIComponent(String(q || ''))}&limit=${Math.max(1, Math.min(2000, Number(limit) || 500))}`),
   updateTrack: (id, patch) => req('PATCH', `/api/tracks/${enc(id)}`, patch),
   writeTags: (id) => req('POST', `/api/tracks/${enc(id)}/write-tags`),
@@ -140,11 +141,35 @@ export const api = {
   /** Mobile app / ?local=1 only: the on-device backend (null on the desktop and web app). */
   get local() { return local.enabled ? local : null; },
   events(handlers) {
-    const es = new EventSource('/api/events');
-    for (const [ev, fn] of Object.entries(handlers)) es.addEventListener(ev, (e) => fn(JSON.parse(e.data || '{}')));
-    return es;
+    if (!sharedEvents.es) sharedEvents.es = new EventSource('/api/events');
+    const es = sharedEvents.es;
+    sharedEvents.refs++;
+    const bound = [];
+    for (const [ev, fn] of Object.entries(handlers || {})) {
+      const wrap = (e) => fn(JSON.parse(e.data || '{}'));
+      es.addEventListener(ev, wrap);
+      bound.push([ev, wrap]);
+    }
+    let closed = false;
+    return {
+      close() {
+        if (closed) return;
+        closed = true;
+        for (const [ev, wrap] of bound) es.removeEventListener(ev, wrap);
+        if (--sharedEvents.refs <= 0) {
+          sharedEvents.refs = 0;
+          sharedEvents.es?.close();
+          sharedEvents.es = null;
+        }
+      },
+      addEventListener(ev, fn) {
+        es.addEventListener(ev, fn);
+        bound.push([ev, fn]);
+      },
+    };
   },
 };
+const sharedEvents = { es: null, refs: 0 };
 
 /**
  * Import into the on-device library (mobile app / ?local=1): a File / Blob from a file input or drag & drop, or a file

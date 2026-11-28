@@ -107,19 +107,34 @@ export function buildPreviewBox(app) {
     } }, 'Never play next'),
     tricks);
   const box = el('div', { class: 'am-preview' }, tl, verdict, tricksLine, nudges, plan, party);
+  let lastHeadX = null;
   const render = () => {
     const now = performance.now();
     energyLbl.textContent = ` ${(Number(a.opts.energyBias) || 0) > 0 ? '+' : ''}${Number(a.opts.energyBias) || 0} `;
     vibe.checked = !!a.opts.vibeLock; tricks.value = a.opts.tricks || 'subtle';
-    if (!a.enabled || a.transition) { if (lastKey !== 'off') { tl.replaceChildren(); verdict.textContent = a.transition ? 'Mixing now…' : ''; tricksLine.textContent = ''; plan.textContent = ''; lastKey = 'off'; } return; }
+    if (!a.enabled || a.transition) { if (lastKey !== 'off') { tl.replaceChildren(); verdict.textContent = a.transition ? 'Mixing now…' : ''; tricksLine.textContent = ''; plan.textContent = ''; lastKey = 'off'; lastHeadX = null; } return; }
     if (now - lastDraw < 400) return;
     lastDraw = now;
     const p = a.previewPlan();
-    if (!p) { tl.replaceChildren(); verdict.textContent = ''; return; }
-    tl.replaceChildren(timelineSvg(p));
+    if (!p) { if (lastKey !== '') { tl.replaceChildren(); verdict.textContent = ''; lastKey = ''; lastHeadX = null; } return; }
     const key = `${p.style}|${p.begin}|${p.len}|${JSON.stringify(p.nudge)}|${p.check?.issues?.join()}|${p.tricks.length}|${p.upcoming.map((t) => t.id).join()}`;
-    if (key === lastKey) return;
-    lastKey = key;
+    if (key === lastKey) {
+      // Plan unchanged: advance only the playhead <line> and countdown instead of rebuilding ~75 SVG DOM nodes
+      const head = tl.querySelector('.am-tl-head');
+      if (head && p.winEnd > p.winStart) {
+        const W = 320;
+        const hx = Math.round(Math.max(0, Math.min(W, ((p.pos - p.winStart) / (p.winEnd - p.winStart)) * W)) * 10) / 10;
+        if (hx !== lastHeadX) { lastHeadX = hx; head.setAttribute('x1', String(hx)); head.setAttribute('x2', String(hx)); }
+      }
+      const c = p.check;
+      const vTxt = `${STYLE_LABEL[p.style] || p.style}${p.doubleDrop ? ' (double drop)' : ''} in ${fmtTime(p.beginsIn).slice(0, 5)} · `
+        + (c ? (c.ok ? `check OK (level ±${Math.max(c.metrics.bumpLu, c.metrics.dipLu)} LU)` : `check: ${c.issues.join(', ')}`) : 'drop transition')
+        + (p.nudge ? ' · nudged' : '');
+      if (verdict.textContent !== vTxt) verdict.textContent = vTxt;
+      return;
+    }
+    lastKey = key; lastHeadX = null;
+    tl.replaceChildren(timelineSvg(p));
     const c = p.check;
     verdict.textContent = `${STYLE_LABEL[p.style] || p.style}${p.doubleDrop ? ' (double drop)' : ''} in ${fmtTime(p.beginsIn).slice(0, 5)} · `
       + (c ? (c.ok ? `check OK (level ±${Math.max(c.metrics.bumpLu, c.metrics.dipLu)} LU)` : `check: ${c.issues.join(', ')}`) : 'drop transition')

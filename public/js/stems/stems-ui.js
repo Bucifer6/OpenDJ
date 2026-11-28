@@ -82,14 +82,20 @@ export function setupStems(app) {
     if (d.track?.id && !d.track.stems?.ready) stems.prefetch([d.track.id], { front: true });
   });
   // background separation in this window waits (between chunks) while a mix transition runs or a deck loads, and for
-  // 4 s after, so it never competes with playback right then
-  let quietAt = 0;
-  setInterval(() => {
-    if (!stems.current && !stems.queue?.length && !stems.held) return;
+  // 4 s after, so it never competes with playback right then (demand-driven timer: 0 wakeups when stems are idle)
+  let quietAt = 0, holdT = null;
+  const syncHold = () => {
+    const active = !!(stems.current || stems.queue?.length || stems.held);
+    if (!active) {
+      if (holdT) { clearInterval(holdT); holdT = null; }
+      return;
+    }
     const busy = !!app.automix?.transition || (app.engine?.decks || []).some((d) => d.loading);
     if (busy) quietAt = Date.now() + 4000;
     stems.setHold(Date.now() < quietAt);
-  }, 400);
+    if (!holdT) holdT = setInterval(syncHold, 400);
+  };
+  stems.on('queue', syncHold);
   return stems;
 }
 
@@ -251,8 +257,8 @@ export function stemsSettingsPane(app) {
     bgInfo.textContent = !b ? '' : !b.enabled ? 'Off: stems are prepared only for loaded tracks, the next Automix tracks and the ones you pick.'
       : `${b.remaining ? `${b.remaining} track(s) left` : 'Every track has stems'}${b.done ? ` · ${b.done} prepared this session` : ''}${b.failed ? ` · ${b.failed} skipped` : ''}${b.cacheBytes != null ? ` · cache ${MB(b.cacheBytes)} of ${MB(b.capBytes)}` : ''}${b.full ? ' (full: raise the limit or delete stems)' : ''}`;
   };
-  stems.on('queue', bgRender); bgRender();
-  return el('div', { class: 'stems-settings' }, info,
+  const offQueue = stems.on('queue', bgRender); bgRender();
+  const pane = el('div', { class: 'stems-settings' }, info,
     el('label', { class: 'field' }, el('span', {}, 'Separate on'), where),
     el('label', { class: 'field' }, el('span', {}, 'Separation hardware'), sel),
     el('label', { class: 'field' }, el('span', {}, 'Quality'), quality),
@@ -261,6 +267,8 @@ export function stemsSettingsPane(app) {
     el('label', { class: 'check' }, bgBox, el('span', {}, 'Prepare stems for the whole library in the background, most played first (server engine; saved, done once per track)')),
     el('label', { class: 'field' }, el('span', {}, 'Stem cache limit (GB)'), cap),
     bgInfo);
+  pane.destroy = () => offQueue?.();
+  return pane;
 }
 
 export { stemsApi };
