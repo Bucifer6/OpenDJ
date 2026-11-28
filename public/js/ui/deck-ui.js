@@ -66,7 +66,7 @@ export function buildDeck(app, deck) {
   const bpmSub = el('div', { class: 'deck-bpm-sub' }, '');
   const elapsed = el('div', { class: 'deck-time' }, '00:00.0');
   const remain = el('div', { class: 'deck-time remain' }, '00:00.0');
-  const masterBadge = el('span', { class: 'badge master-badge' }, 'MASTER');
+  const masterBadge = el('span', { class: 'badge master-badge', hidden: true }, 'MASTER');
   const sampleBadge = el('span', { class: 'badge sample-badge', hidden: true }, 'SAMPLE');
   const scratchBtn = el('button', { class: 'btn xs scratch-view-btn', title: 'Scratch view: a big platter with a crossfader strip and scratch samples', 'aria-label': `Deck ${i + 1} scratch view`, onclick: (e) => { e.stopPropagation(); openScratchView(app, deck); } }, 'SCRATCH');
   const header = el('div', { class: 'deck-header' },
@@ -88,7 +88,7 @@ export function buildDeck(app, deck) {
     disabled: () => !app.mixNowState?.(i)?.available,
   }));
   const syncBtn = R(button('SYNC', { cls: 'btn-sync', click: () => deck.sync(), active: () => deck.syncOn }));
-  const masterBtn = R(button('MASTER', { cls: 'btn-master', click: () => deck.setMaster(), active: () => deck.isMaster }));
+  const masterBtn = R(button('MASTER', { cls: 'btn-master', click: () => deck.setMaster(), active: () => deck.isMaster, disabled: () => !deck.canBeMaster }));
   const toggles = el('div', { class: 'deck-toggles' },
     R(button(dual('KEY LOCK', 'KEY'), { cls: 'sm', click: () => deck.setKeyLock(!deck.keyLock), active: () => deck.keyLock, title: 'Master tempo: change tempo without changing pitch' })),
     (() => { const q = R(button(dual('QUANT', 'QNT'), { cls: 'sm', click: () => deck.setQuantize(!deck.quantize), active: () => deck.quantize, title: 'Snap cues, loops and jumps to the beat grid (hold: quantize division)' })); longPress(q, () => popupMenu(q, [0.125, 0.25, 0.5, 1, 4].map((v) => [fmtDiv(v), () => deck.setQuantizeDiv(v), deck.quantizeDiv === v]), 'Quantize to')); return q; })(),

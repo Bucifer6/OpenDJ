@@ -90,7 +90,10 @@ class App {
     if (!unavailable('dvs')) this.dvs.init().catch((e) => console.warn('DVS init failed', e));
     this.engine.setMasterVolume(0.8); this.engine.setHeadphoneVolume(0.8);
     if (this.engine.ctx.state !== 'running') this.showStartOverlay();
-    const frame = (now) => { this.frame(now); requestAnimationFrame(frame); };
+    const frame = (now) => {
+      requestAnimationFrame(frame);
+      this.frame(now);
+    };
     requestAnimationFrame(frame);
     document.getElementById('boot')?.remove();
     this.updates = setupUpdates(this); // "a new version is available" (checks after a short delay, never during a set)
